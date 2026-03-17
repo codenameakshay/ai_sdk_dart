@@ -32,7 +32,9 @@ void main() {
 }
 
 Map<String, dynamic> _readFixture(String name) {
-  final file = File('packages/ai_sdk_dart/test/fixtures/stream_conformance/$name');
+  final file = File(
+    'packages/ai_sdk_dart/test/fixtures/stream_conformance/$name',
+  );
   return (jsonDecode(file.readAsStringSync()) as Map).cast<String, dynamic>();
 }
 

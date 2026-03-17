@@ -1,3 +1,8 @@
+## 1.0.0+1
+
+- Improved pubspec descriptions for better pub.dev discoverability.
+- Added `example/example.md` with usage examples and links to runnable apps.
+
 ## 1.0.0
 
 First stable release. Defines the provider interface contract for all AI SDK Dart providers.

@@ -1,13 +1,13 @@
 # ai_sdk_mcp
 
-[Model Context Protocol (MCP)](https://modelcontextprotocol.io) client for [AI SDK Dart](https://pub.dev/packages/ai). Connects to MCP servers over HTTP SSE or stdio and exposes their tools as a typed `ToolSet`.
+[Model Context Protocol (MCP)](https://modelcontextprotocol.io) client for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart). Connects to MCP servers over HTTP SSE or stdio and exposes their tools as a typed `ToolSet`.
 
 ## Installation
 
 ```yaml
 dependencies:
-  ai: ^0.1.0
-  ai_sdk_mcp: ^0.1.0
+  ai_sdk_dart: ^1.0.0
+  ai_sdk_mcp: ^1.0.0
 ```
 
 ## Usage
@@ -15,7 +15,7 @@ dependencies:
 ### SSE transport (remote server)
 
 ```dart
-import 'package:ai/ai.dart';
+import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_mcp/ai_sdk_mcp.dart';
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 

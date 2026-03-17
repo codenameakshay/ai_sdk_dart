@@ -1,6 +1,6 @@
 name: ai_sdk_google
 description: Google Generative AI provider for the AI SDK Dart port.
-version: 1.0.0
+version: 1.0.0+1
 homepage: https://github.com/codenameakshay/ai_sdk_dart
 repository: https://github.com/codenameakshay/ai_sdk_dart
 resolution: workspace

@@ -1,13 +1,13 @@
 # ai_sdk_google
 
-Google Generative AI provider for [AI SDK Dart](https://pub.dev/packages/ai). Supports Gemini language models and text embeddings.
+Google Generative AI provider for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart). Supports Gemini language models and text embeddings.
 
 ## Installation
 
 ```yaml
 dependencies:
-  ai: ^0.1.0
-  ai_sdk_google: ^0.1.0
+  ai_sdk_dart: ^1.0.0
+  ai_sdk_google: ^1.0.0
 ```
 
 ## Usage
@@ -21,7 +21,7 @@ export GOOGLE_GENERATIVE_AI_API_KEY=AIza...
 ### Language model
 
 ```dart
-import 'package:ai/ai.dart';
+import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_google/ai_sdk_google.dart';
 
 final result = await generateText(

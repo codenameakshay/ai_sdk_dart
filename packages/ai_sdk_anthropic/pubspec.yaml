@@ -1,6 +1,6 @@
 name: ai_sdk_anthropic
-description: Anthropic provider for the AI SDK Dart port.
-version: 1.0.0
+description: Anthropic provider for AI SDK Dart. Use Claude models (claude-sonnet, claude-haiku, claude-opus) for text generation, streaming, tools, and structured output.
+version: 1.0.0+1
 homepage: https://github.com/codenameakshay/ai_sdk_dart
 repository: https://github.com/codenameakshay/ai_sdk_dart
 resolution: workspace

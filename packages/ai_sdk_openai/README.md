@@ -1,13 +1,13 @@
 # ai_sdk_openai
 
-OpenAI provider for [AI SDK Dart](https://pub.dev/packages/ai). Supports language models, embeddings, and image generation via the OpenAI API.
+OpenAI provider for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart). Supports language models, embeddings, and image generation via the OpenAI API.
 
 ## Installation
 
 ```yaml
 dependencies:
-  ai: ^0.1.0
-  ai_sdk_openai: ^0.1.0
+  ai_sdk_dart: ^1.0.0
+  ai_sdk_openai: ^1.0.0
 ```
 
 ## Usage
@@ -21,7 +21,7 @@ export OPENAI_API_KEY=sk-...
 ### Language model
 
 ```dart
-import 'package:ai/ai.dart';
+import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 
 final result = await generateText(
@@ -56,7 +56,7 @@ print(result.embedding); // List<double>
 ### Image generation
 
 ```dart
-import 'package:ai/ai.dart';
+import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 
 final result = await generateImage(

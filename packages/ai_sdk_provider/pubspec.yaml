@@ -3,7 +3,7 @@ description: >
   Provider interface specification for the AI SDK Dart port.
   Defines the LanguageModelV3, EmbeddingModelV2, and ImageModelV3 interfaces
   that all provider packages must implement.
-version: 1.0.0
+version: 1.0.0+1
 homepage: https://github.com/codenameakshay/ai_sdk_dart
 repository: https://github.com/codenameakshay/ai_sdk_dart
 resolution: workspace

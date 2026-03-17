@@ -1,13 +1,13 @@
 # ai_sdk_anthropic
 
-Anthropic provider for [AI SDK Dart](https://pub.dev/packages/ai). Supports Claude language models including extended thinking.
+Anthropic provider for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart). Supports Claude language models including extended thinking.
 
 ## Installation
 
 ```yaml
 dependencies:
-  ai: ^0.1.0
-  ai_sdk_anthropic: ^0.1.0
+  ai_sdk_dart: ^1.0.0
+  ai_sdk_anthropic: ^1.0.0
 ```
 
 ## Usage
@@ -21,7 +21,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ### Language model
 
 ```dart
-import 'package:ai/ai.dart';
+import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_anthropic/ai_sdk_anthropic.dart';
 
 final result = await generateText(
@@ -48,7 +48,7 @@ await for (final chunk in result.textStream) {
 Use `extractReasoningMiddleware` to surface `<think>` blocks from reasoning models:
 
 ```dart
-import 'package:ai/ai.dart';
+import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_anthropic/ai_sdk_anthropic.dart';
 
 final model = wrapLanguageModel(

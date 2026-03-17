@@ -1,0 +1,51 @@
+{
+  "version": "6.0",
+  "feature": "embed",
+  "description": "V6 contract for embed, embedMany, and cosineSimilarity",
+  "cases": [
+    {
+      "id": "embed-basic",
+      "description": "embed() returns {value, embedding, usage}",
+      "expected": {
+        "value": "hello",
+        "embedding.isNotEmpty": true,
+        "usage.tokens": 3
+      }
+    },
+    {
+      "id": "cosine-similarity-identical",
+      "description": "cosineSimilarity of identical vectors returns 1.0",
+      "vectorA": [1.0, 0.0, 0.0],
+      "vectorB": [1.0, 0.0, 0.0],
+      "expected": { "result": 1.0 }
+    },
+    {
+      "id": "cosine-similarity-orthogonal",
+      "description": "cosineSimilarity of orthogonal vectors returns 0.0",
+      "vectorA": [1.0, 0.0],
+      "vectorB": [0.0, 1.0],
+      "expected": { "result": 0.0 }
+    },
+    {
+      "id": "cosine-similarity-opposite",
+      "description": "cosineSimilarity of opposite vectors returns -1.0",
+      "vectorA": [1.0, 0.0],
+      "vectorB": [-1.0, 0.0],
+      "expected": { "result": -1.0 }
+    },
+    {
+      "id": "cosine-similarity-length-mismatch",
+      "description": "cosineSimilarity throws ArgumentError for mismatched lengths",
+      "vectorA": [1.0, 0.0],
+      "vectorB": [1.0, 0.0, 0.0],
+      "expected": { "throws": "ArgumentError" }
+    },
+    {
+      "id": "cosine-similarity-empty",
+      "description": "cosineSimilarity throws ArgumentError for empty vectors",
+      "vectorA": [],
+      "vectorB": [],
+      "expected": { "throws": "ArgumentError" }
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "events": [
+    {"type": "start"},
+    {"type": "start-step", "stepNumber": 0},
+    {"type": "text-start", "id": "text-0"},
+    {"type": "text-delta", "id": "text-0", "delta": "hi"},
+    {"type": "text-end", "id": "text-0"},
+    {"type": "source", "id": "src-1", "url": "https://example.com"},
+    {"type": "file", "mediaType": "application/pdf"},
+    {"type": "tool-input-start", "toolName": "weather"},
+    {"type": "tool-input-delta", "toolName": "weather", "delta": "{\"city\":\"Paris\"}"},
+    {"type": "tool-input-end", "toolName": "weather"},
+    {"type": "tool-result", "preliminary": false},
+    {"type": "finish-step", "stepNumber": 0},
+    {"type": "finish"}
+  ]
+}

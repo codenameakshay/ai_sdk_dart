@@ -1,0 +1,12 @@
+name: ai_sdk_basic_example
+description: Basic usage example for AI SDK Dart.
+version: 0.1.0
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ^3.11.1
+
+dependencies:
+  ai: ^0.2.0
+  ai_sdk_openai: ^0.2.0

@@ -1,0 +1,70 @@
+{
+  "version": "6.0",
+  "feature": "structuredOutput",
+  "description": "V6 contract for Output types: text, object, array, choice, json; error surface",
+  "cases": [
+    {
+      "id": "output-text",
+      "description": "Output.text() returns raw string passthrough",
+      "modelText": "Hello!",
+      "expected": { "output": "Hello!" }
+    },
+    {
+      "id": "output-object",
+      "description": "Output.object(schema) parses JSON into typed map",
+      "modelText": "{\"city\":\"Paris\",\"tempC\":21}",
+      "expected": {
+        "output.city": "Paris",
+        "output.tempC": 21
+      }
+    },
+    {
+      "id": "output-object-code-fence",
+      "description": "Output.object recovers from ```json ... ``` code fences",
+      "modelText": "```json\n{\"city\":\"Paris\",\"tempC\":21}\n```",
+      "expected": {
+        "output.city": "Paris"
+      }
+    },
+    {
+      "id": "output-array",
+      "description": "Output.array(element) parses JSON array into typed list",
+      "modelText": "[{\"name\":\"Alice\"},{\"name\":\"Bob\"}]",
+      "expected": {
+        "output.length": 2,
+        "output[0].name": "Alice"
+      }
+    },
+    {
+      "id": "output-choice-valid",
+      "description": "Output.choice(['a','b']) returns exactly one of the allowed values",
+      "modelText": "sunny",
+      "options": ["sunny", "rainy"],
+      "expected": { "output": "sunny" }
+    },
+    {
+      "id": "output-choice-invalid",
+      "description": "Output.choice throws AiInvalidToolInputError for disallowed values",
+      "modelText": "windy",
+      "options": ["sunny", "rainy"],
+      "expected": { "throws": "AiInvalidToolInputError" }
+    },
+    {
+      "id": "output-json",
+      "description": "Output.json() returns raw parsed JSON without schema validation",
+      "modelText": "{\"ok\":true,\"count\":2}",
+      "expected": {
+        "output.ok": true,
+        "output.count": 2
+      }
+    },
+    {
+      "id": "no-object-error-surface",
+      "description": "AiNoObjectGeneratedError exposes text, response, usage, cause; isInstance() returns true",
+      "expected": {
+        "error.isInstance": true,
+        "error.text.isNotEmpty": true
+      }
+    }
+  ]
+}

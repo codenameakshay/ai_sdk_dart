@@ -1,0 +1,82 @@
+{
+  "version": "6.0",
+  "feature": "middleware",
+  "description": "V6 contract for LanguageModelMiddleware system and built-in middleware implementations",
+  "cases": [
+    {
+      "id": "wrap-preserves-identity",
+      "description": "wrapLanguageModel preserves provider, modelId, and specificationVersion from inner model",
+      "expected": {
+        "provider": "fake",
+        "modelId": "fake-model",
+        "specificationVersion": "v3"
+      }
+    },
+    {
+      "id": "wrap-chains-left-to-right",
+      "description": "Multiple middleware applied left-to-right; first middleware is outermost",
+      "expected": {
+        "callOrder": ["outer", "inner"]
+      }
+    },
+    {
+      "id": "extract-reasoning-generate",
+      "description": "extractReasoningMiddleware strips <think>...</think> from text; adds ReasoningPart to content",
+      "input": "<think>reasoning</think>answer",
+      "expected": {
+        "reasoning": "reasoning",
+        "text": "answer"
+      }
+    },
+    {
+      "id": "extract-reasoning-stream",
+      "description": "extractReasoningMiddleware converts <think>...</think> text deltas to ReasoningDelta stream parts",
+      "input": "<think>reasoning</think>answer",
+      "expected": {
+        "stream.contains": "StreamPartReasoningDelta",
+        "reasoningDelta": "reasoning"
+      }
+    },
+    {
+      "id": "extract-json-strips-fences",
+      "description": "extractJsonMiddleware strips ```json ... ``` code fences from text output",
+      "input": "```json\n{\"ok\":true}\n```",
+      "expected": {
+        "text": "{\"ok\":true}"
+      }
+    },
+    {
+      "id": "simulate-streaming",
+      "description": "simulateStreamingMiddleware calls doGenerate and fans out result as stream parts",
+      "expected": {
+        "stream.contains": "StreamPartTextDelta",
+        "stream.contains": "StreamPartFinish"
+      }
+    },
+    {
+      "id": "default-settings-apply",
+      "description": "defaultSettingsMiddleware applies temperature/maxOutputTokens defaults when not set at call time",
+      "defaults": { "temperature": 0.5, "maxOutputTokens": 100 },
+      "expected": {
+        "options.temperature": 0.5,
+        "options.maxOutputTokens": 100
+      }
+    },
+    {
+      "id": "default-settings-override",
+      "description": "Call-time values take precedence over defaultSettingsMiddleware defaults",
+      "defaults": { "temperature": 0.5 },
+      "callTime": { "temperature": 0.9 },
+      "expected": {
+        "options.temperature": 0.9
+      }
+    },
+    {
+      "id": "add-tool-examples",
+      "description": "addToolInputExamplesMiddleware appends Examples section to tool description",
+      "expected": {
+        "tool.description.contains": "Examples:"
+      }
+    }
+  ]
+}

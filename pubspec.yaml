@@ -1,0 +1,39 @@
+name: ai_sdk_dart_workspace
+description: Workspace root for the AI SDK Dart monorepo
+publish_to: none
+
+environment:
+  sdk: ^3.11.1
+
+workspace:
+  - packages/ai_sdk_provider
+  - packages/ai
+  - packages/ai_sdk_openai
+  - packages/ai_sdk_anthropic
+  - packages/ai_sdk_google
+  - packages/ai_sdk_flutter
+  - packages/ai_sdk_mcp
+  - examples/basic
+
+melos:
+  repository: https://github.com/codenameakshay/ai_sdk_dart
+  command:
+    version:
+      updateGitTagRefs: true
+      linkToCommits: true
+  scripts:
+    analyze:
+      run: melos exec -- dart analyze .
+      description: Run dart analyze in all packages
+    format:
+      run: melos exec -- dart format .
+      description: Run dart format in all packages
+    test:
+      run: melos exec -- dart test
+      description: Run tests in all packages
+    build:
+      run: melos exec -- dart run build_runner build --delete-conflicting-outputs
+      description: Run build_runner in all packages
+    clean:
+      run: melos exec -- dart run build_runner clean
+      description: Clean build artifacts

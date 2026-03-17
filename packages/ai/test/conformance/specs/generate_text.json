@@ -1,0 +1,128 @@
+{
+  "version": "6.0",
+  "feature": "generateText",
+  "description": "V6 contract for generateText: covers all result fields, callbacks, multi-step, and stop conditions",
+  "cases": [
+    {
+      "id": "basic-text",
+      "description": "Returns text, finishReason, usage, steps from a simple model response",
+      "modelResponse": {
+        "text": "Hello, world!",
+        "finishReason": "stop",
+        "rawFinishReason": "stop",
+        "usage": { "inputTokens": 5, "outputTokens": 3 }
+      },
+      "expected": {
+        "text": "Hello, world!",
+        "finishReason": "stop",
+        "rawFinishReason": "stop",
+        "usage.inputTokens": 5,
+        "usage.outputTokens": 3,
+        "steps.length": 1,
+        "steps[0].stepNumber": 0,
+        "steps[0].text": "Hello, world!",
+        "steps[0].finishReason": "stop"
+      }
+    },
+    {
+      "id": "reasoning-text",
+      "description": "reasoning field contains ReasoningPart array; reasoningText contains concatenated text",
+      "modelResponse": {
+        "reasoning": "Let me think...",
+        "text": "Answer"
+      },
+      "expected": {
+        "reasoning.length": 1,
+        "reasoning[0].text": "Let me think...",
+        "reasoningText": "Let me think...",
+        "text": "Answer"
+      }
+    },
+    {
+      "id": "redacted-reasoning",
+      "description": "RedactedReasoningPart maps to '[REDACTED]' in reasoningText",
+      "expected": {
+        "reasoningText": "[REDACTED]"
+      }
+    },
+    {
+      "id": "multi-step-total-usage",
+      "description": "totalUsage aggregates usage across all steps",
+      "steps": 2,
+      "perStepUsage": { "inputTokens": 10, "outputTokens": 5 },
+      "expected": {
+        "totalUsage.inputTokens": 20,
+        "totalUsage.outputTokens": 10
+      }
+    },
+    {
+      "id": "warnings-propagated",
+      "description": "Provider warnings are exposed on the result",
+      "modelResponse": {
+        "warnings": ["deprecation: old-api"]
+      },
+      "expected": {
+        "warnings": ["deprecation: old-api"]
+      }
+    },
+    {
+      "id": "on-finish-callback",
+      "description": "onFinish called with text, output, steps, usage, totalUsage, finishReason, response",
+      "modelResponse": { "text": "done" },
+      "expected": {
+        "onFinish.text": "done",
+        "onFinish.steps.length": 1
+      }
+    },
+    {
+      "id": "on-step-finish-callback",
+      "description": "onStepFinish is called once per step with stepNumber, text, toolCalls, toolResults, finishReason, usage",
+      "modelResponse": { "text": "step done" },
+      "expected": {
+        "onStepFinish.calls": 1,
+        "onStepFinish[0].stepNumber": 0,
+        "onStepFinish[0].text": "step done"
+      }
+    },
+    {
+      "id": "experimental-on-start",
+      "description": "experimentalOnStart is called once before any steps with model, system, prompt, messages",
+      "expected": {
+        "experimentalOnStart.calls": 1
+      }
+    },
+    {
+      "id": "prepare-step-override-model",
+      "description": "prepareStep can replace the model for a specific step",
+      "expected": {
+        "text": "override-text"
+      }
+    },
+    {
+      "id": "stop-conditions",
+      "description": "stopConditions can terminate multi-step early based on step snapshot",
+      "maxSteps": 5,
+      "expected": {
+        "steps.length": 1
+      }
+    },
+    {
+      "id": "sources-exposed",
+      "description": "sources from provider response are exposed on result",
+      "modelResponse": {
+        "sources": [{ "id": "s1", "url": "https://example.com", "title": "Example" }]
+      },
+      "expected": {
+        "sources.length": 1,
+        "sources[0].url": "https://example.com"
+      }
+    },
+    {
+      "id": "provider-metadata",
+      "description": "providerMetadata from model is passed through to result",
+      "expected": {
+        "providerMetadata": "non-null"
+      }
+    }
+  ]
+}

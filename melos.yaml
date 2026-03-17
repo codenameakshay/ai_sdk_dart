@@ -1,0 +1,40 @@
+name: ai_sdk_dart
+repository: https://github.com/codenameakshay/ai_sdk_dart
+
+packages:
+  - packages/*
+  - examples/*
+
+command:
+  version:
+    updateGitTagRefs: true
+    linkToCommits: true
+
+scripts:
+  analyze:
+    run: melos exec -- dart analyze .
+    description: Run dart analyze in all packages
+
+  format:
+    run: melos exec -- dart format .
+    description: Run dart format in all packages
+
+  test:
+    run: melos exec -- dart test
+    description: Run tests in all packages
+
+  build:
+    run: melos exec -- dart run build_runner build --delete-conflicting-outputs
+    description: Run build_runner in all packages
+
+  clean:
+    run: melos exec -- dart run build_runner clean
+    description: Clean build artifacts
+
+  get:
+    run: melos exec -- dart pub get
+    description: Run pub get in all packages
+
+  publish:
+    run: melos publish
+    description: Publish all packages

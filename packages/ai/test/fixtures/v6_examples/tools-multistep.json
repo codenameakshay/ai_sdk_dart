@@ -1,0 +1,24 @@
+{
+  "name": "v6-tools-multistep",
+  "description": "Representative multi-step tool loop result",
+  "input": {
+    "prompt": "What is the weather in San Francisco?",
+    "maxSteps": 3,
+    "toolChoice": "auto"
+  },
+  "expected": {
+    "steps": [
+      {
+        "stepNumber": 0,
+        "toolCalls": ["weather"],
+        "toolResults": ["weather"]
+      },
+      {
+        "stepNumber": 1,
+        "toolCalls": [],
+        "toolResults": []
+      }
+    ],
+    "finalTextContains": "tool"
+  }
+}

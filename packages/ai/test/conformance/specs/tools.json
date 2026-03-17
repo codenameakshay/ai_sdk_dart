@@ -1,0 +1,87 @@
+{
+  "version": "6.0",
+  "feature": "tools",
+  "description": "V6 contract for Tool system: definition, execution, toolChoice, multi-step, approval, errors",
+  "cases": [
+    {
+      "id": "tool-execute",
+      "description": "Tool.execute receives parsed INPUT and ToolExecutionOptions; result is in toolResults",
+      "expected": {
+        "toolResults.length": 1,
+        "toolResults[0].isError": false
+      }
+    },
+    {
+      "id": "dynamic-tool",
+      "description": "dynamicTool accepts any Object? input without schema parsing",
+      "expected": {
+        "toolResults.length": 1
+      }
+    },
+    {
+      "id": "tool-choice-none",
+      "description": "toolChoice ToolChoiceNone: model must not return tool calls; throws AiApiCallError if it does",
+      "expected": {
+        "noToolCalls": true
+      }
+    },
+    {
+      "id": "tool-choice-required",
+      "description": "toolChoice ToolChoiceRequired: model must return at least one tool call",
+      "expected": {
+        "toolCalls.length >= 1": true
+      }
+    },
+    {
+      "id": "tool-choice-specific",
+      "description": "toolChoice ToolChoiceSpecific('myTool'): only that tool is exposed and called",
+      "expected": {
+        "toolCalls[0].toolName": "myTool"
+      }
+    },
+    {
+      "id": "multi-step-tool-loop",
+      "description": "Tool results feed into next step until model returns text; up to maxSteps",
+      "maxSteps": 3,
+      "expected": {
+        "steps.length >= 2": true,
+        "text": "Final answer"
+      }
+    },
+    {
+      "id": "tool-no-such-tool",
+      "description": "AiNoSuchToolError is thrown when model calls a tool not in the ToolSet",
+      "expected": {
+        "throws": "AiNoSuchToolError"
+      }
+    },
+    {
+      "id": "tool-invalid-input",
+      "description": "AiInvalidToolInputError when raw input fails schema fromJson",
+      "expected": {
+        "toolResults[0].isError": true
+      }
+    },
+    {
+      "id": "tool-approval-request",
+      "description": "needsApproval tool returns approval request; execution pauses until response provided",
+      "expected": {
+        "toolApprovalRequests.length": 1
+      }
+    },
+    {
+      "id": "tool-input-examples",
+      "description": "inputExamples on Tool are forwarded to provider in inputExamples field",
+      "expected": {
+        "providerTools[0].inputExamples.length": 1
+      }
+    },
+    {
+      "id": "tool-stream-output",
+      "description": "Tool executor can return Stream; last emitted value becomes tool result",
+      "expected": {
+        "toolResults[0].output": "final-value"
+      }
+    }
+  ]
+}

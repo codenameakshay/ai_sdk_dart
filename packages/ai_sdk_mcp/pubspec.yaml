@@ -1,0 +1,17 @@
+name: ai_sdk_mcp
+description: MCP client for the AI SDK Dart port.
+version: 0.2.0
+homepage: https://github.com/codenameakshay/ai_sdk_dart
+repository: https://github.com/codenameakshay/ai_sdk_dart
+resolution: workspace
+
+environment:
+  sdk: ^3.11.1
+
+dependencies:
+  ai: ^0.2.0
+  http: ^1.2.0
+
+dev_dependencies:
+  lints: ^5.0.0
+  test: ^1.25.0

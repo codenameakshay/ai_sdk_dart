@@ -1,0 +1,14 @@
+{
+  "name": "v6-structured-output",
+  "description": "Representative Output.object/array behavior",
+  "input": {
+    "prompt": "Return JSON weather data",
+    "output": "object"
+  },
+  "expected": {
+    "object": {
+      "city": "Paris",
+      "tempC": 21
+    }
+  }
+}

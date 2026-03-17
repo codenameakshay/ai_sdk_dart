@@ -1,0 +1,95 @@
+{
+  "version": "6.0",
+  "feature": "streamText",
+  "description": "V6 contract for streamText: event taxonomy, text/reasoning/tool streams, transforms, and multi-step",
+  "cases": [
+    {
+      "id": "basic-text-stream",
+      "description": "textStream emits only text delta strings; text future resolves to full joined text",
+      "streamParts": [
+        { "type": "text-start", "id": "t1" },
+        { "type": "text-delta", "id": "t1", "delta": "Hello" },
+        { "type": "text-delta", "id": "t1", "delta": " world" },
+        { "type": "text-end", "id": "t1" },
+        { "type": "finish", "finishReason": "stop" }
+      ],
+      "expected": {
+        "textStream.values": ["Hello", " world"],
+        "text": "Hello world",
+        "finishReason": "stop"
+      }
+    },
+    {
+      "id": "full-stream-event-order",
+      "description": "fullStream emits start → start-step → text events → finish-step → finish in order",
+      "expected": {
+        "events[0]": "StreamTextStartEvent",
+        "events[1]": "StreamTextStartStepEvent",
+        "last-non-raw": "StreamTextFinishEvent"
+      }
+    },
+    {
+      "id": "reasoning-stream",
+      "description": "StreamPartReasoningDelta emits StreamTextReasoningDeltaEvent in fullStream",
+      "streamParts": [
+        { "type": "reasoning-delta", "delta": "thinking..." },
+        { "type": "finish", "finishReason": "stop" }
+      ],
+      "expected": {
+        "fullStream.contains": "StreamTextReasoningDeltaEvent"
+      }
+    },
+    {
+      "id": "smooth-stream-transform",
+      "description": "experimentalTransform is applied to text deltas; splits into smaller chunks",
+      "transform": "smoothStream(chunkSize: 2)",
+      "input": "Hello",
+      "expected": {
+        "deltas": ["He", "ll", "o"]
+      }
+    },
+    {
+      "id": "on-chunk-callback",
+      "description": "onChunk receives StreamTextTextChunk for each text delta",
+      "expected": {
+        "onChunk.types.contains": "StreamTextTextChunk"
+      }
+    },
+    {
+      "id": "on-error-callback",
+      "description": "onError is called (not thrown) for stream errors; stream continues to complete",
+      "expected": {
+        "onError.called": true,
+        "stream.completes": true
+      }
+    },
+    {
+      "id": "multi-step-step-events",
+      "description": "Multi-step streams emit start-step and finish-step for each step",
+      "maxSteps": 2,
+      "expected": {
+        "startStepEvents.count": 2,
+        "finishStepEvents.count": 2
+      }
+    },
+    {
+      "id": "usage-future",
+      "description": "usage future resolves to the usage from the final step finish part",
+      "streamParts": [
+        { "type": "finish", "finishReason": "stop", "usage": { "inputTokens": 10, "outputTokens": 5, "totalTokens": 15 } }
+      ],
+      "expected": {
+        "usage.inputTokens": 10,
+        "usage.outputTokens": 5
+      }
+    },
+    {
+      "id": "tool-input-events",
+      "description": "Tool call stream parts emit StreamTextToolInputStartEvent, delta, end events",
+      "expected": {
+        "fullStream.contains": "StreamTextToolInputStartEvent",
+        "fullStream.contains": "StreamTextToolInputEndEvent"
+      }
+    }
+  ]
+}

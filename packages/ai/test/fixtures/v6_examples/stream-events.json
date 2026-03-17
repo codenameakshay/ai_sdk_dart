@@ -1,0 +1,25 @@
+{
+  "name": "v6-stream-events",
+  "description": "Representative fullStream taxonomy ordering",
+  "expectedSequence": [
+    "start",
+    "start-step",
+    "text-start",
+    "text-delta",
+    "text-end",
+    "reasoning-start",
+    "reasoning-delta",
+    "reasoning-end",
+    "tool-input-start",
+    "tool-input-delta",
+    "tool-input-end",
+    "tool-result",
+    "finish-step",
+    "start-step",
+    "text-start",
+    "text-delta",
+    "text-end",
+    "finish-step",
+    "finish"
+  ]
+}

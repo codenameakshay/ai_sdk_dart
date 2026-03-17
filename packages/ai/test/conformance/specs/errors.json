@@ -1,0 +1,64 @@
+{
+  "version": "6.0",
+  "feature": "errors",
+  "description": "V6 contract for AiSdkError hierarchy: all subtypes, their fields, and isInstance checks",
+  "cases": [
+    {
+      "id": "all-errors-extend-AiSdkError",
+      "description": "Every AiSdkError subtype is an instance of AiSdkError",
+      "types": [
+        "AiApiCallError",
+        "AiNoSuchToolError",
+        "AiInvalidToolInputError",
+        "AiNoContentGeneratedError",
+        "AiNoObjectGeneratedError"
+      ]
+    },
+    {
+      "id": "api-call-error",
+      "description": "AiApiCallError has descriptive message",
+      "expected": {
+        "message.isNotEmpty": true,
+        "isInstanceOf": "AiSdkError"
+      }
+    },
+    {
+      "id": "no-such-tool-error",
+      "description": "AiNoSuchToolError has message containing the tool name",
+      "toolName": "unknownTool",
+      "expected": {
+        "message.contains": "unknownTool"
+      }
+    },
+    {
+      "id": "invalid-tool-input-error",
+      "description": "AiInvalidToolInputError has descriptive message",
+      "expected": {
+        "message.isNotEmpty": true
+      }
+    },
+    {
+      "id": "no-content-generated-error",
+      "description": "AiNoContentGeneratedError has descriptive message",
+      "expected": {
+        "message.isNotEmpty": true
+      }
+    },
+    {
+      "id": "no-object-generated-error-fields",
+      "description": "AiNoObjectGeneratedError has text, response, usage, cause fields; isInstance() works",
+      "expected": {
+        "text.type": "String",
+        "isInstance": true,
+        "isInstance.works-on-non-error": false
+      }
+    },
+    {
+      "id": "error-to-string",
+      "description": "toString() on AiSdkError includes runtimeType and message",
+      "expected": {
+        "toString.contains": "AiApiCallError"
+      }
+    }
+  ]
+}

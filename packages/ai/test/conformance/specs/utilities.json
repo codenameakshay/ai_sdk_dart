@@ -1,0 +1,55 @@
+{
+  "version": "6.0",
+  "feature": "utilities",
+  "description": "V6 contract for generateId, createIdGenerator, and simulateReadableStream",
+  "cases": [
+    {
+      "id": "generate-id-unique",
+      "description": "generateId() returns unique strings across consecutive calls",
+      "expected": {
+        "uniqueIds": true
+      }
+    },
+    {
+      "id": "generate-id-default-prefix",
+      "description": "generateId() with no args starts with 'id-'",
+      "expected": {
+        "startsWith": "id-"
+      }
+    },
+    {
+      "id": "generate-id-custom-prefix",
+      "description": "generateId('msg') returns string starting with 'msg-'",
+      "prefix": "msg",
+      "expected": {
+        "startsWith": "msg-"
+      }
+    },
+    {
+      "id": "create-id-generator",
+      "description": "createIdGenerator(prefix: 'x') returns a function that generates unique 'x-...' IDs",
+      "prefix": "x",
+      "expected": {
+        "startsWith": "x-",
+        "uniqueIds": true
+      }
+    },
+    {
+      "id": "simulate-readable-stream",
+      "description": "simulateReadableStream emits all parts in order",
+      "parts": ["text-start", "text-delta", "text-end", "finish"],
+      "expected": {
+        "emitted.count": 4,
+        "order": "preserved"
+      }
+    },
+    {
+      "id": "simulate-readable-stream-delay",
+      "description": "simulateReadableStream with delay > Duration.zero adds delay between parts",
+      "delay": "10ms",
+      "expected": {
+        "duration >= delay * parts.count": true
+      }
+    }
+  ]
+}

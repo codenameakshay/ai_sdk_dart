@@ -1,6 +1,6 @@
-import 'package:ai/ai.dart';
+import 'package:ai_sdk/ai_sdk.dart';
 import 'package:ai_sdk_anthropic/ai_sdk_anthropic.dart';
-import 'package:ai_sdk_flutter/ai_sdk_flutter.dart';
+import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 import 'package:ai_sdk_google/ai_sdk_google.dart';
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 import 'package:flutter/material.dart';
@@ -35,8 +35,7 @@ class _ProviderChatPageState extends State<ProviderChatPage> {
     super.initState();
     _registry = createProviderRegistry({
       'openai': RegistrableProvider(
-        languageModelFactory: (id) =>
-            OpenAIProvider(apiKey: openAiApiKey)(id),
+        languageModelFactory: (id) => OpenAIProvider(apiKey: openAiApiKey)(id),
         embeddingModelFactory: (id) =>
             OpenAIProvider(apiKey: openAiApiKey).embedding(id),
       ),
@@ -117,7 +116,8 @@ class _ProviderChatPageState extends State<ProviderChatPage> {
                 .toList(),
             onChanged: _chat.status == ChatStatus.streaming
                 ? null
-                : (v) => setState(() => _selectedModelId = v ?? _modelIds.first),
+                : (v) =>
+                      setState(() => _selectedModelId = v ?? _modelIds.first),
           ),
           IconButton(
             icon: const Icon(Icons.delete_outline),

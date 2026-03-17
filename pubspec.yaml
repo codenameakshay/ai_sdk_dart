@@ -7,11 +7,11 @@ environment:
 
 workspace:
   - packages/ai_sdk_provider
-  - packages/ai
+  - packages/ai_sdk
   - packages/ai_sdk_openai
   - packages/ai_sdk_anthropic
   - packages/ai_sdk_google
-  - packages/ai_sdk_flutter
+  - packages/ai_sdk_flutter_ui
   - packages/ai_sdk_mcp
   - examples/basic
   - examples/flutter_chat

@@ -66,9 +66,7 @@ class _ShellState extends State<_Shell> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_navItems[_selectedIndex].label),
-      ),
+      appBar: AppBar(title: Text(_navItems[_selectedIndex].label)),
       drawer: Drawer(
         child: ListView(
           padding: EdgeInsets.zero,

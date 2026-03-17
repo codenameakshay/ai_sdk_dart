@@ -18,7 +18,7 @@
 ///
 import 'dart:io';
 
-import 'package:ai/ai.dart';
+import 'package:ai_sdk/ai_sdk.dart';
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -104,10 +104,10 @@ Future<void> demo4Tools() async {
 
   // Fake weather database.
   Map<String, String> fakeWeather(String city) => switch (city.toLowerCase()) {
-        'london' => {'condition': 'Rainy', 'tempC': '12'},
-        'tokyo' => {'condition': 'Sunny', 'tempC': '22'},
-        _ => {'condition': 'Unknown', 'tempC': '?'},
-      };
+    'london' => {'condition': 'Rainy', 'tempC': '12'},
+    'tokyo' => {'condition': 'Sunny', 'tempC': '22'},
+    _ => {'condition': 'Unknown', 'tempC': '?'},
+  };
 
   final result = await generateText(
     model: openai('gpt-4.1-mini'),
@@ -166,8 +166,10 @@ Future<void> demo5Embeddings() async {
   );
 
   final catDog = cosineSimilarity(catResult.embedding, dogResult.embedding);
-  final catFriend =
-      cosineSimilarity(catResult.embedding, catFriendResult.embedding);
+  final catFriend = cosineSimilarity(
+    catResult.embedding,
+    catFriendResult.embedding,
+  );
 
   print('cat ↔ dog       similarity: ${catDog.toStringAsFixed(4)}');
   print('cat ↔ cat-friend similarity: ${catFriend.toStringAsFixed(4)}');
@@ -182,13 +184,10 @@ Future<void> demo6Middleware() async {
   // defaultSettingsMiddleware injects a low temperature.
   // extractReasoningMiddleware strips <think>…</think> blocks emitted by
   // reasoning-capable models (e.g. claude-3-7-sonnet, o1).
-  final model = wrapLanguageModel(
-    openai('gpt-4.1-mini'),
-    [
-      defaultSettingsMiddleware(temperature: 0.2),
-      extractReasoningMiddleware(tagName: 'think'),
-    ],
-  );
+  final model = wrapLanguageModel(openai('gpt-4.1-mini'), [
+    defaultSettingsMiddleware(temperature: 0.2),
+    extractReasoningMiddleware(tagName: 'think'),
+  ]);
 
   final result = await generateText(
     model: model,

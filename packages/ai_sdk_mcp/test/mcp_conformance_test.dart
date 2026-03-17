@@ -82,8 +82,9 @@ class _MockMCPServer {
 // Helpers
 // ---------------------------------------------------------------------------
 
-MCPClient _client(_MockMCPServer mock) =>
-    MCPClient(transport: SseClientTransport(url: mock.uri, postUrl: mock.uri));
+MCPClient _client(_MockMCPServer mock) => MCPClient(
+  transport: SseClientTransport(url: mock.uri, postUrl: mock.uri),
+);
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -94,64 +95,74 @@ void main() {
     // ── initialize() ────────────────────────────────────────────────────────
 
     group('initialize()', () {
-      test('sends protocol version "2024-11-05" and tools capability', () async {
-        final mock = await _MockMCPServer.start();
-        addTearDown(mock.close);
-        mock.enqueueInitialize();
+      test(
+        'sends protocol version "2024-11-05" and tools capability',
+        () async {
+          final mock = await _MockMCPServer.start();
+          addTearDown(mock.close);
+          mock.enqueueInitialize();
 
-        final client = _client(mock);
-        addTearDown(client.close);
+          final client = _client(mock);
+          addTearDown(client.close);
 
-        await client.initialize();
+          await client.initialize();
 
-        expect(mock.requestLog, isNotEmpty);
-        final initReq = mock.requestLog.first;
-        expect(initReq['method'], 'initialize');
-        final params = initReq['params'] as Map<String, dynamic>;
-        expect(params['protocolVersion'], '2024-11-05');
-        final caps = params['capabilities'] as Map<String, dynamic>;
-        expect(caps.keys, contains('tools'));
-      });
+          expect(mock.requestLog, isNotEmpty);
+          final initReq = mock.requestLog.first;
+          expect(initReq['method'], 'initialize');
+          final params = initReq['params'] as Map<String, dynamic>;
+          expect(params['protocolVersion'], '2024-11-05');
+          final caps = params['capabilities'] as Map<String, dynamic>;
+          expect(caps.keys, contains('tools'));
+        },
+      );
 
-      test('is idempotent — second call does not send another initialize', () async {
-        final mock = await _MockMCPServer.start();
-        addTearDown(mock.close);
-        mock.enqueueInitialize();
+      test(
+        'is idempotent — second call does not send another initialize',
+        () async {
+          final mock = await _MockMCPServer.start();
+          addTearDown(mock.close);
+          mock.enqueueInitialize();
 
-        final client = _client(mock);
-        addTearDown(client.close);
+          final client = _client(mock);
+          addTearDown(client.close);
 
-        await client.initialize();
-        await client.initialize(); // no-op
+          await client.initialize();
+          await client.initialize(); // no-op
 
-        final initCount =
-            mock.requestLog.where((r) => r['method'] == 'initialize').length;
-        expect(initCount, 1);
-      });
+          final initCount = mock.requestLog
+              .where((r) => r['method'] == 'initialize')
+              .length;
+          expect(initCount, 1);
+        },
+      );
 
-      test('throws MCPException when server returns a JSON-RPC error', () async {
-        final mock = await _MockMCPServer.start();
-        addTearDown(mock.close);
+      test(
+        'throws MCPException when server returns a JSON-RPC error',
+        () async {
+          final mock = await _MockMCPServer.start();
+          addTearDown(mock.close);
 
-        mock.enqueue({
-          'jsonrpc': '2.0',
-          'error': {'code': -32600, 'message': 'Invalid Request'},
-        });
+          mock.enqueue({
+            'jsonrpc': '2.0',
+            'error': {'code': -32600, 'message': 'Invalid Request'},
+          });
 
-        final client = _client(mock);
-        addTearDown(client.close);
+          final client = _client(mock);
+          addTearDown(client.close);
 
-        await expectLater(
-          client.initialize(),
-          throwsA(
-            isA<MCPException>().having(
-              (e) => e.message,
-              'message',
-              contains('Initialize failed'),
+          await expectLater(
+            client.initialize(),
+            throwsA(
+              isA<MCPException>().having(
+                (e) => e.message,
+                'message',
+                contains('Initialize failed'),
+              ),
             ),
-          ),
-        );
-      });
+          );
+        },
+      );
     });
 
     // ── tools() ─────────────────────────────────────────────────────────────
@@ -170,7 +181,9 @@ void main() {
                 'description': 'Get current weather',
                 'inputSchema': {
                   'type': 'object',
-                  'properties': {'city': {'type': 'string'}},
+                  'properties': {
+                    'city': {'type': 'string'},
+                  },
                 },
               },
               {
@@ -267,7 +280,9 @@ void main() {
         mock.enqueue({
           'jsonrpc': '2.0',
           'result': {
-            'content': [{'type': 'text', 'text': '42'}],
+            'content': [
+              {'type': 'text', 'text': '42'},
+            ],
             'isError': false,
           },
         });
@@ -281,10 +296,7 @@ void main() {
           (r) => r['method'] == 'tools/call',
         );
         expect(callReq['params']['name'], 'calculate');
-        expect(
-          (callReq['params']['arguments'] as Map)['expression'],
-          '6*7',
-        );
+        expect((callReq['params']['arguments'] as Map)['expression'], '6*7');
       });
     });
 
@@ -328,10 +340,11 @@ void main() {
           args: ['-y', '@modelcontextprotocol/server-filesystem', '/tmp'],
         );
         expect(t.command, 'npx');
-        expect(
-          t.args,
-          ['-y', '@modelcontextprotocol/server-filesystem', '/tmp'],
-        );
+        expect(t.args, [
+          '-y',
+          '@modelcontextprotocol/server-filesystem',
+          '/tmp',
+        ]);
       });
     });
   });

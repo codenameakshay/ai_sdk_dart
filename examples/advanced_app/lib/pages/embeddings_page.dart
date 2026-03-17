@@ -1,4 +1,4 @@
-import 'package:ai/ai.dart';
+import 'package:ai_sdk/ai_sdk.dart';
 import 'package:ai_sdk_google/ai_sdk_google.dart';
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 import 'package:flutter/material.dart';
@@ -16,7 +16,9 @@ class EmbeddingsPage extends StatefulWidget {
 
 class _EmbeddingsPageState extends State<EmbeddingsPage> {
   final _text1Controller = TextEditingController(text: 'A cat sits on a mat.');
-  final _text2Controller = TextEditingController(text: 'A kitten rests on a rug.');
+  final _text2Controller = TextEditingController(
+    text: 'A kitten rests on a rug.',
+  );
   bool _loading = false;
   double? _similarity;
   String? _error;
@@ -46,13 +48,15 @@ class _EmbeddingsPageState extends State<EmbeddingsPage> {
     try {
       if (useOpenAi) {
         final e1 = await embed(
-          model: OpenAIProvider(apiKey: openAiApiKey)
-              .embedding('text-embedding-3-small'),
+          model: OpenAIProvider(
+            apiKey: openAiApiKey,
+          ).embedding('text-embedding-3-small'),
           value: text1,
         );
         final e2 = await embed(
-          model: OpenAIProvider(apiKey: openAiApiKey)
-              .embedding('text-embedding-3-small'),
+          model: OpenAIProvider(
+            apiKey: openAiApiKey,
+          ).embedding('text-embedding-3-small'),
           value: text2,
         );
         setState(() {
@@ -61,13 +65,15 @@ class _EmbeddingsPageState extends State<EmbeddingsPage> {
         });
       } else {
         final e1 = await embed(
-          model: GoogleGenerativeAIProvider(apiKey: googleApiKey)
-              .embedding('text-embedding-004'),
+          model: GoogleGenerativeAIProvider(
+            apiKey: googleApiKey,
+          ).embedding('text-embedding-004'),
           value: text1,
         );
         final e2 = await embed(
-          model: GoogleGenerativeAIProvider(apiKey: googleApiKey)
-              .embedding('text-embedding-004'),
+          model: GoogleGenerativeAIProvider(
+            apiKey: googleApiKey,
+          ).embedding('text-embedding-004'),
           value: text2,
         );
         setState(() {
@@ -96,9 +102,7 @@ class _EmbeddingsPageState extends State<EmbeddingsPage> {
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Embeddings'),
-      ),
+      appBar: AppBar(title: const Text('Embeddings')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(

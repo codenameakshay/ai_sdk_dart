@@ -1,5 +1,5 @@
-import 'package:ai/ai.dart';
-import 'package:ai_sdk_flutter/ai_sdk_flutter.dart';
+import 'package:ai_sdk/ai_sdk.dart';
+import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 import 'package:flutter/material.dart';
 
@@ -22,7 +22,9 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
   static final _weatherSchema = Schema<Map<String, dynamic>>(
     jsonSchema: const {
       'type': 'object',
-      'properties': {'city': {'type': 'string'}},
+      'properties': {
+        'city': {'type': 'string'},
+      },
       'required': ['city'],
     },
     fromJson: (j) => j,
@@ -31,7 +33,9 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
   static final _calcSchema = Schema<Map<String, dynamic>>(
     jsonSchema: const {
       'type': 'object',
-      'properties': {'expression': {'type': 'string'}},
+      'properties': {
+        'expression': {'type': 'string'},
+      },
       'required': ['expression'],
     },
     fromJson: (j) => j,
@@ -116,7 +120,8 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
       return (r.$1, r.$2 + 2);
     }
     var i = 0;
-    while (i < s.length && (s[i].codeUnitAt(0) >= 48 && s[i].codeUnitAt(0) <= 57 || s[i] == '.')) {
+    while (i < s.length &&
+        (s[i].codeUnitAt(0) >= 48 && s[i].codeUnitAt(0) <= 57 || s[i] == '.')) {
       i++;
     }
     if (i == 0) return (0, 0);

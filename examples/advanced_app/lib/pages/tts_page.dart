@@ -1,4 +1,4 @@
-import 'package:ai/ai.dart';
+import 'package:ai_sdk/ai_sdk.dart';
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
@@ -43,9 +43,7 @@ class _TtsPageState extends State<TtsPage> {
       );
 
       await _player.stop();
-      await _player.play(
-        BytesSource(result.audio, mimeType: result.mediaType),
-      );
+      await _player.play(BytesSource(result.audio, mimeType: result.mediaType));
       setState(() => _loading = false);
     } catch (e) {
       setState(() {
@@ -72,9 +70,7 @@ class _TtsPageState extends State<TtsPage> {
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Text-to-Speech'),
-      ),
+      appBar: AppBar(title: const Text('Text-to-Speech')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(

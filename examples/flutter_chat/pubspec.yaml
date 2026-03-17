@@ -12,9 +12,9 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
-  ai: ^0.2.0
+  ai_sdk: ^0.2.0
   ai_sdk_openai: ^0.2.0
-  ai_sdk_flutter: ^0.2.0
+  ai_sdk_flutter_ui: ^0.2.0
 
 dev_dependencies:
   flutter_test:

@@ -1,5 +1,5 @@
-import 'package:ai/ai.dart';
-import 'package:ai_sdk_flutter/ai_sdk_flutter.dart';
+import 'package:ai_sdk/ai_sdk.dart';
+import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 import 'package:flutter/material.dart';
 

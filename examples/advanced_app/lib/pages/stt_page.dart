@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:ai/ai.dart';
+import 'package:ai_sdk/ai_sdk.dart';
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 import 'package:flutter/material.dart';
 import 'package:record/record.dart';
@@ -41,8 +41,9 @@ class _SttPageState extends State<SttPage> {
       try {
         final bytes = await _readFile(path);
         final result = await transcribe(
-          model: OpenAIProvider(apiKey: openAiApiKey)
-              .transcription('whisper-1'),
+          model: OpenAIProvider(
+            apiKey: openAiApiKey,
+          ).transcription('whisper-1'),
           audio: bytes,
         );
         setState(() {
@@ -58,7 +59,8 @@ class _SttPageState extends State<SttPage> {
     } else {
       if (await _recorder.hasPermission()) {
         final tempDir = Directory.systemTemp;
-        final path = '${tempDir.path}/recording_${DateTime.now().millisecondsSinceEpoch}.m4a';
+        final path =
+            '${tempDir.path}/recording_${DateTime.now().millisecondsSinceEpoch}.m4a';
         await _recorder.start(const RecordConfig(), path: path);
         setState(() {
           _recording = true;
@@ -87,9 +89,7 @@ class _SttPageState extends State<SttPage> {
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Speech-to-Text'),
-      ),
+      appBar: AppBar(title: const Text('Speech-to-Text')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -108,18 +108,18 @@ class _SttPageState extends State<SttPage> {
                 icon: _recording
                     ? const Icon(Icons.stop)
                     : _loading
-                        ? const SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.mic),
+                    ? const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.mic),
                 label: Text(
                   _recording
                       ? 'Stop & Transcribe'
                       : _loading
-                          ? 'Transcribing…'
-                          : 'Start Recording',
+                      ? 'Transcribing…'
+                      : 'Start Recording',
                 ),
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(

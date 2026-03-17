@@ -2,7 +2,7 @@
 
 **A Dart/Flutter port of [Vercel AI SDK v6](https://sdk.vercel.ai) — provider-agnostic APIs for text generation, streaming, structured output, tool use, embeddings, image generation, speech, and more.**
 
-[![ai pub.dev](https://img.shields.io/pub/v/ai.svg?label=ai)](https://pub.dev/packages/ai)
+[![ai pub.dev](https://img.shields.io/pub/v/ai.svg?label=ai_sdk)](https://pub.dev/packages/ai)
 [![ai_sdk_openai pub.dev](https://img.shields.io/pub/v/ai_sdk_openai.svg?label=ai_sdk_openai)](https://pub.dev/packages/ai_sdk_openai)
 [![ai_sdk_anthropic pub.dev](https://img.shields.io/pub/v/ai_sdk_anthropic.svg?label=ai_sdk_anthropic)](https://pub.dev/packages/ai_sdk_anthropic)
 [![ai_sdk_google pub.dev](https://img.shields.io/pub/v/ai_sdk_google.svg?label=ai_sdk_google)](https://pub.dev/packages/ai_sdk_google)
@@ -137,11 +137,11 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
 
 | Package | pub.dev | What it gives you |
 |---------|---------|-------------------|
-| [`ai`](https://pub.dev/packages/ai) | `dart pub add ai` | `generateText`, `streamText`, tools, middleware, embeddings, registry |
+| [`ai_sdk`](https://pub.dev/packages/ai_sdk) | `dart pub add ai` | `generateText`, `streamText`, tools, middleware, embeddings, registry |
 | [`ai_sdk_openai`](https://pub.dev/packages/ai_sdk_openai) | `dart pub add ai_sdk_openai` | `openai('gpt-4.1-mini')`, embeddings, image gen, speech, transcription |
 | [`ai_sdk_anthropic`](https://pub.dev/packages/ai_sdk_anthropic) | `dart pub add ai_sdk_anthropic` | `anthropic('claude-sonnet-4-5')`, extended thinking |
 | [`ai_sdk_google`](https://pub.dev/packages/ai_sdk_google) | `dart pub add ai_sdk_google` | `google('gemini-2.0-flash')`, embeddings |
-| [`ai_sdk_flutter`](https://pub.dev/packages/ai_sdk_flutter) | `dart pub add ai_sdk_flutter` | `ChatController`, `CompletionController`, `ObjectStreamController` |
+| [`ai_sdk_flutter_ui`](https://pub.dev/packages/ai_sdk_flutter_ui) | `dart pub add ai_sdk_flutter_ui` | `ChatController`, `CompletionController`, `ObjectStreamController` |
 | [`ai_sdk_mcp`](https://pub.dev/packages/ai_sdk_mcp) | `dart pub add ai_sdk_mcp` | `MCPClient`, `SseClientTransport`, `StdioMCPTransport` |
 | [`ai_sdk_provider`](https://pub.dev/packages/ai_sdk_provider) | *(transitive)* | Provider interfaces for building custom providers |
 
@@ -154,12 +154,12 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
 ### Dart CLI
 
 ```sh
-dart pub add ai ai_sdk_openai
+dart pub add ai_sdk ai_sdk_openai
 export OPENAI_API_KEY=sk-...
 ```
 
 ```dart
-import 'package:ai/ai.dart';
+import 'package:ai_sdk/ai_sdk.dart';
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 
 void main() async {
@@ -233,11 +233,11 @@ print(result.text);
 ### Flutter Chat UI
 
 ```sh
-dart pub add ai ai_sdk_openai ai_sdk_flutter
+dart pub add ai_sdk ai_sdk_openai ai_sdk_flutter
 ```
 
 ```dart
-import 'package:ai_sdk_flutter/ai_sdk_flutter.dart';
+import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 
 final chat = ChatController(model: openai('gpt-4.1-mini'));
 
@@ -267,7 +267,7 @@ print(chat.messages.last.content);
 
 ## 🛠️ Flutter UI Controllers
 
-The `ai_sdk_flutter` package provides three reactive controllers that integrate with any Flutter state management approach.
+The `ai_sdk_flutter_ui` package provides three reactive controllers that integrate with any Flutter state management approach.
 
 ### ChatController — Multi-turn streaming chat
 

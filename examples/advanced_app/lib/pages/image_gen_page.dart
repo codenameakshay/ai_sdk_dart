@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import 'package:ai/ai.dart';
+import 'package:ai_sdk/ai_sdk.dart';
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 import 'package:flutter/material.dart';
 
@@ -66,9 +66,7 @@ class _ImageGenPageState extends State<ImageGenPage> {
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Image Generation'),
-      ),
+      appBar: AppBar(title: const Text('Image Generation')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -111,10 +109,7 @@ class _ImageGenPageState extends State<ImageGenPage> {
               const SizedBox(height: 8),
               ClipRRect(
                 borderRadius: BorderRadius.circular(12),
-                child: Image.memory(
-                  _imageBytes!,
-                  fit: BoxFit.contain,
-                ),
+                child: Image.memory(_imageBytes!, fit: BoxFit.contain),
               ),
             ],
             if (_error != null) ...[

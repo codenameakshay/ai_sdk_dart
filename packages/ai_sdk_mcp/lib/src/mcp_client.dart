@@ -2,27 +2,23 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:ai/ai.dart';
+import 'package:ai_sdk/ai_sdk.dart';
 import 'package:http/http.dart' as http;
 
 /// JSON-RPC 2.0 request.
 class _JsonRpcRequest {
-  _JsonRpcRequest({
-    required this.method,
-    required this.id,
-    this.params,
-  });
+  _JsonRpcRequest({required this.method, required this.id, this.params});
 
   final String method;
   final int id;
   final Map<String, dynamic>? params;
 
   Map<String, dynamic> toJson() => {
-        'jsonrpc': '2.0',
-        'id': id,
-        'method': method,
-        if (params != null) 'params': params,
-      };
+    'jsonrpc': '2.0',
+    'id': id,
+    'method': method,
+    if (params != null) 'params': params,
+  };
 }
 
 /// JSON-RPC 2.0 response.
@@ -72,11 +68,8 @@ abstract class MCPTransport {
 ///
 /// Sends requests via POST to [postUrl] and receives events via SSE at [url].
 class SseClientTransport implements MCPTransport {
-  SseClientTransport({
-    required this.url,
-    Uri? postUrl,
-    this.headers,
-  }) : postUrl = postUrl ?? url;
+  SseClientTransport({required this.url, Uri? postUrl, this.headers})
+    : postUrl = postUrl ?? url;
 
   final Uri url;
   final Uri postUrl;
@@ -97,9 +90,7 @@ class SseClientTransport implements MCPTransport {
       body: jsonEncode(request.toJson()),
     );
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw MCPException(
-        'HTTP ${response.statusCode}: ${response.body}',
-      );
+      throw MCPException('HTTP ${response.statusCode}: ${response.body}');
     }
     final body = jsonDecode(response.body);
     if (body is! Map) {
@@ -224,9 +215,7 @@ class MCPClient {
       ),
     );
     if (response.isError) {
-      throw MCPException(
-        'Initialize failed: ${response.error}',
-      );
+      throw MCPException('Initialize failed: ${response.error}');
     }
     // Send initialized notification (fire-and-forget, no response expected).
     try {
@@ -290,9 +279,7 @@ class MCPClient {
       ),
     );
     if (response.isError) {
-      throw MCPException(
-        'tools/call "$name" failed: ${response.error}',
-      );
+      throw MCPException('tools/call "$name" failed: ${response.error}');
     }
     final result = response.result;
     if (result is! Map) return result;

@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import 'package:ai/ai.dart';
+import 'package:ai_sdk/ai_sdk.dart';
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:flutter/material.dart';
@@ -121,9 +121,7 @@ class _MultimodalPageState extends State<MultimodalPage> {
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Multimodal'),
-      ),
+      appBar: AppBar(title: const Text('Multimodal')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(

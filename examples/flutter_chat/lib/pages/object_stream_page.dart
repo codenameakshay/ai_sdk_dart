@@ -1,5 +1,5 @@
-import 'package:ai/ai.dart';
-import 'package:ai_sdk_flutter/ai_sdk_flutter.dart';
+import 'package:ai_sdk/ai_sdk.dart';
+import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 import 'package:flutter/material.dart';
 
@@ -73,15 +73,12 @@ class _ObjectStreamPageState extends State<ObjectStreamPage> {
     );
 
     await _objectController.bind(
-      streamResult.partialOutputStream
-          .map((v) => v as Map<String, dynamic>),
+      streamResult.partialOutputStream.map((v) => v as Map<String, dynamic>),
     );
   }
 
   void _showSnackBar(String msg) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   @override
@@ -138,8 +135,9 @@ class _ObjectStreamPageState extends State<ObjectStreamPage> {
                     ),
                     const SizedBox(width: 12),
                     FilledButton.icon(
-                      onPressed:
-                          _objectController.isStreaming ? null : _generate,
+                      onPressed: _objectController.isStreaming
+                          ? null
+                          : _generate,
                       icon: _objectController.isLoading
                           ? const SizedBox(
                               width: 16,
@@ -218,10 +216,14 @@ class _ProfileCard extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
 
     final rows = [
-      if (data['country'] != null) ('Country', '${data['country']}', Icons.flag_outlined),
-      if (data['capital'] != null) ('Capital', '${data['capital']}', Icons.location_city_outlined),
-      if (data['population'] != null) ('Population', '${data['population']}', Icons.people_outline),
-      if (data['currency'] != null) ('Currency', '${data['currency']}', Icons.payments_outlined),
+      if (data['country'] != null)
+        ('Country', '${data['country']}', Icons.flag_outlined),
+      if (data['capital'] != null)
+        ('Capital', '${data['capital']}', Icons.location_city_outlined),
+      if (data['population'] != null)
+        ('Population', '${data['population']}', Icons.people_outline),
+      if (data['currency'] != null)
+        ('Currency', '${data['currency']}', Icons.payments_outlined),
     ];
 
     final languages = data['languages'];
@@ -248,12 +250,7 @@ class _ProfileCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        row.$2,
-                        style: textTheme.bodyMedium,
-                      ),
-                    ),
+                    Expanded(child: Text(row.$2, style: textTheme.bodyMedium)),
                   ],
                 ),
               ),

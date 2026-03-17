@@ -826,11 +826,7 @@ class _ToolStreamState {
 }
 
 class _OpenAISpeechModel implements SpeechModelV1 {
-  const _OpenAISpeechModel({
-    required this.modelId,
-    this.apiKey,
-    this.baseUrl,
-  });
+  const _OpenAISpeechModel({required this.modelId, this.apiKey, this.baseUrl});
 
   @override
   final String modelId;
@@ -865,8 +861,7 @@ class _OpenAISpeechModel implements SpeechModelV1 {
         headers: options.headers,
       ),
     );
-    final contentType =
-        response.headers.value('content-type') ?? 'audio/mpeg';
+    final contentType = response.headers.value('content-type') ?? 'audio/mpeg';
     final mediaType = contentType.split(';').first.trim();
     return SpeechModelV1GenerateResult(
       audio: response.data ?? Uint8List(0),
@@ -903,9 +898,7 @@ class _OpenAITranscriptionModel implements TranscriptionModelV1 {
       'file': MultipartFile.fromBytes(
         options.audio,
         filename: 'audio.${_audioExtension(options.audioMediaType)}',
-        contentType: DioMediaType.parse(
-          options.audioMediaType ?? 'audio/mpeg',
-        ),
+        contentType: DioMediaType.parse(options.audioMediaType ?? 'audio/mpeg'),
       ),
       'response_format': 'json',
       if (options.language != null) 'language': options.language,

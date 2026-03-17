@@ -15,6 +15,7 @@ workspace:
   - packages/ai_sdk_mcp
   - examples/basic
   - examples/flutter_chat
+  - examples/advanced_app
 
 melos:
   repository: https://github.com/codenameakshay/ai_sdk_dart

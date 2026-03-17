@@ -156,17 +156,25 @@ See [docs/v6-parity-matrix.md](docs/v6-parity-matrix.md) for a feature-by-featur
 
 ## Runnable examples
 
-### Dart CLI (`examples/basic`)
+Set API keys before running (or use `--dart-define`):
 
 ```sh
-cd examples/basic
 export OPENAI_API_KEY=sk-...
-dart run lib/main.dart
+export ANTHROPIC_API_KEY=sk-ant-...   # for advanced app
+export GOOGLE_API_KEY=AIza...         # for advanced app
 ```
+
+### 1. Dart CLI (`examples/basic`)
 
 Demonstrates: `generateText`, `streamText`, structured output, tools, embeddings, middleware, and the provider registry.
 
-### Flutter chat app (`examples/flutter_chat`)
+```sh
+make run-basic
+# or manually:
+cd examples/basic && dart run lib/main.dart
+```
+
+### 2. Flutter chat app (`examples/flutter_chat`)
 
 The Flutter example showcases all three `ai_sdk_flutter` controllers with a Material 3 UI: **Chat** (multi-turn streaming), **Completion** (single-turn with presets), and **Object** (streaming structured JSON).
 
@@ -192,14 +200,51 @@ The Flutter example showcases all three `ai_sdk_flutter` controllers with a Mate
 |------|-------|--------|
 | ![Object home](docs/screenshots/05_object_home.png) | ![Object Japan](docs/screenshots/09_object_japan_result.png) | ![Object France](docs/screenshots/10_object_france_result.png) |
 
-Run the app (API key via `--dart-define`):
-
 ```sh
-cd examples/flutter_chat
-fvm flutter run --dart-define=OPENAI_API_KEY=sk-...
+make run              # default device
+make run-web          # Chrome
+# or manually:
+cd examples/flutter_chat && fvm flutter run --dart-define=OPENAI_API_KEY=sk-...
 ```
 
 See [examples/flutter_chat/README.md](examples/flutter_chat/README.md) for structure and patterns.
+
+### 3. Advanced app (`examples/advanced_app`)
+
+Comprehensive demo of all AI SDK features: **Provider switcher** (OpenAI, Anthropic, Google), **Tools** (weather, calculator), **Image generation** (DALL-E 3), **Multimodal** (image + text), **Embeddings** (similarity), **Text-to-speech**, **Speech-to-text**, plus Chat, Completion, and Object stream.
+
+```sh
+make run-advanced       # default device
+make run-advanced-web   # Chrome
+# or manually:
+cd examples/advanced_app && fvm flutter run --dart-define=OPENAI_API_KEY=sk-...
+```
+
+See [examples/advanced_app/README.md](examples/advanced_app/README.md) for features and API keys.
+
+**Advanced app screenshots**
+
+| Provider Chat | Tools Chat | Image Gen | Multimodal | Embeddings |
+|---------------|------------|-----------|------------|------------|
+| ![Provider Chat](docs/screenshots/adv_01_provider_chat.png) | ![Tools Chat](docs/screenshots/adv_02_tools_chat.png) | ![Image Gen](docs/screenshots/adv_03_image_gen.png) | ![Multimodal](docs/screenshots/adv_04_multimodal.png) | ![Embeddings](docs/screenshots/adv_05_embeddings.png) |
+
+| Text-to-Speech | Speech-to-Text | Completion | Object Stream |
+|----------------|----------------|------------|---------------|
+| ![TTS](docs/screenshots/adv_06_tts.png) | ![STT](docs/screenshots/adv_07_stt.png) | ![Completion](docs/screenshots/adv_08_completion.png) | ![Object Stream](docs/screenshots/adv_09_object_stream.png) |
+
+### Makefile summary
+
+| Command | Description |
+|---------|-------------|
+| `make get` | Install all workspace dependencies |
+| `make run` | Run Flutter chat app on default device |
+| `make run-web` | Run Flutter chat app on Chrome |
+| `make run-advanced` | Run advanced app on default device |
+| `make run-advanced-web` | Run advanced app on Chrome |
+| `make run-basic` | Run Dart CLI example |
+| `make test` | Run all package tests |
+| `make analyze` | Run dart analyze across all packages |
+| `make format` | Format all Dart source files |
 
 ---
 

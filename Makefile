@@ -12,6 +12,8 @@
 #   make get           # install all workspace dependencies
 #   make run           # run the Flutter chat example on the default device
 #   make run-web       # run on Chrome
+#   make run-advanced  # run the advanced app on the default device
+#   make run-advanced-web  # run the advanced app on Chrome
 #   make run-basic     # run the Dart CLI example
 #   make test          # run all package tests
 #   make analyze       # dart analyze across all packages
@@ -22,6 +24,7 @@ FLUTTER   := fvm flutter
 DART      := fvm dart
 
 FLUTTER_APP := examples/flutter_chat
+ADVANCED_APP := examples/advanced_app
 DART_APP    := examples/basic
 
 # Build --dart-define flags from env vars (only included when the var is set)
@@ -36,7 +39,7 @@ ifdef GOOGLE_API_KEY
   DART_DEFINES += --dart-define=GOOGLE_API_KEY=$(GOOGLE_API_KEY)
 endif
 
-.PHONY: all get run run-web run-basic test analyze format clean help
+.PHONY: all get run run-web run-advanced run-advanced-web run-basic test analyze format clean help
 
 all: help
 
@@ -50,11 +53,19 @@ get:
 
 ## Run the Flutter chat example on the default connected device
 run:
-	$(FLUTTER) run $(DART_DEFINES) -C $(FLUTTER_APP)
+	cd $(FLUTTER_APP) && $(FLUTTER) run $(DART_DEFINES)
 
 ## Run the Flutter chat example on Chrome (web)
 run-web:
-	$(FLUTTER) run $(DART_DEFINES) -d chrome -C $(FLUTTER_APP)
+	cd $(FLUTTER_APP) && $(FLUTTER) run $(DART_DEFINES) -d chrome
+
+## Run the advanced Flutter app on the default connected device
+run-advanced:
+	cd $(ADVANCED_APP) && $(FLUTTER) run $(DART_DEFINES)
+
+## Run the advanced Flutter app on Chrome (web)
+run-advanced-web:
+	cd $(ADVANCED_APP) && $(FLUTTER) run $(DART_DEFINES) -d chrome
 
 ## Run the Dart CLI example (uses OPENAI_API_KEY from env directly)
 run-basic:
@@ -74,6 +85,7 @@ test:
 	$(DART) test packages/ai_sdk_anthropic/test/
 	$(DART) test packages/ai_sdk_google/test/
 	$(FLUTTER) test $(FLUTTER_APP)/
+	$(FLUTTER) test $(ADVANCED_APP)/
 
 ## Run dart analyze across all packages
 analyze:
@@ -84,6 +96,7 @@ analyze:
 	$(DART) analyze packages/ai_sdk_google/
 	$(DART) analyze packages/ai_sdk_mcp/
 	$(FLUTTER) analyze $(FLUTTER_APP)/
+	$(FLUTTER) analyze $(ADVANCED_APP)/
 	$(FLUTTER) analyze packages/ai_sdk_flutter/
 
 ## Format all Dart source files
@@ -111,6 +124,8 @@ help:
 	@echo "  make get          Install all workspace dependencies"
 	@echo "  make run          Run Flutter chat app on default device"
 	@echo "  make run-web      Run Flutter chat app on Chrome"
+	@echo "  make run-advanced Run advanced app on default device"
+	@echo "  make run-advanced-web  Run advanced app on Chrome"
 	@echo "  make run-basic    Run Dart CLI example"
 	@echo "  make test         Run all package tests"
 	@echo "  make analyze      Run dart analyze across all packages"

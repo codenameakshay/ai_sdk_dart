@@ -10,22 +10,30 @@ sealed class AiSdkError implements Exception {
   String toString() => '$runtimeType: $message';
 }
 
+/// Thrown when a provider API call fails.
 class AiApiCallError extends AiSdkError {
   const AiApiCallError(super.message);
 }
 
+/// Thrown when a requested tool is not found.
 class AiNoSuchToolError extends AiSdkError {
   const AiNoSuchToolError(super.message);
 }
 
+/// Thrown when tool input fails validation.
 class AiInvalidToolInputError extends AiSdkError {
   const AiInvalidToolInputError(super.message);
 }
 
+/// Thrown when the model produces no content.
 class AiNoContentGeneratedError extends AiSdkError {
   const AiNoContentGeneratedError(super.message);
 }
 
+/// Thrown when structured object generation fails.
+///
+/// Contains [text], [response], [usage], and [cause].
+/// Use [isInstance] to check if an error is this type.
 class AiNoObjectGeneratedError extends AiSdkError {
   const AiNoObjectGeneratedError({
     required String message,

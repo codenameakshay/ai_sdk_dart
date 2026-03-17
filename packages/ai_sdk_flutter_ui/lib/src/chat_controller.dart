@@ -4,7 +4,20 @@ import 'package:flutter/foundation.dart';
 
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 
-enum ChatStatus { ready, submitted, streaming, error }
+/// Status of the chat controller.
+enum ChatStatus {
+  /// Idle; no generation in progress.
+  ready,
+
+  /// Request submitted; waiting for first token.
+  submitted,
+
+  /// Actively streaming response.
+  streaming,
+
+  /// An error occurred.
+  error,
+}
 
 /// Flutter controller for chat interfaces — mirrors the JS `useChat` hook.
 ///

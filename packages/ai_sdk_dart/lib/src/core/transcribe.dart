@@ -2,7 +2,9 @@ import 'dart:typed_data';
 
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
-/// Result from `transcribe`.
+/// Result returned by [transcribe].
+///
+/// Contains the transcribed [text].
 class TranscribeResult {
   const TranscribeResult({required this.text});
 

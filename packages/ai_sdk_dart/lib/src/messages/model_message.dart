@@ -1,9 +1,12 @@
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
-/// User-facing model message role.
+/// Message role for [ModelMessage].
 enum ModelMessageRole { system, user, assistant, tool }
 
-/// User-facing model message used by `generateText` and `streamText`.
+/// User-facing message for [generateText] and [streamText].
+///
+/// Use [content] for simple text or [parts] for multimodal content
+/// (images, tool calls, etc.).
 class ModelMessage {
   const ModelMessage({required this.role, required String this.content})
     : parts = null;
@@ -18,7 +21,7 @@ class ModelMessage {
   final List<LanguageModelV3ContentPart>? parts;
 }
 
-/// A tool approval request in a message (emitted when a tool needs approval).
+/// Tool approval request emitted when a tool requires user approval.
 class ToolApprovalRequestContent {
   const ToolApprovalRequestContent({
     required this.approvalId,
@@ -33,7 +36,7 @@ class ToolApprovalRequestContent {
   final Object input;
 }
 
-/// A tool approval response in a message (user approved or denied).
+/// User's approval or denial response for a tool call.
 class ToolApprovalResponseContent {
   const ToolApprovalResponseContent({
     required this.approvalId,

@@ -8,7 +8,20 @@ import '../messages/model_message.dart';
 import '../stop_conditions/stop_conditions.dart';
 import '../tools/tool.dart';
 
-/// Class-based multi-step agent API, mirroring AI SDK ToolLoopAgent.
+/// Agent that runs tools in a loop to accomplish tasks.
+///
+/// Mirrors `ToolLoopAgent` from the JS AI SDK v6. Handles the tool-call loop,
+/// context management, and stop conditions. Use [generate] or [stream].
+///
+/// Example:
+/// ```dart
+/// final agent = ToolLoopAgent(
+///   model: model,
+///   tools: {...},
+///   maxSteps: 5,
+/// );
+/// final result = await agent.generate(prompt: 'What is the weather?');
+/// ```
 class ToolLoopAgent {
   ToolLoopAgent({
     required this.model,
@@ -24,6 +37,7 @@ class ToolLoopAgent {
   final int maxSteps;
   final List<StopCondition> stopConditions;
 
+  /// Runs the agent in non-streaming mode.
   Future<GenerateTextResult> generate({
     String? prompt,
     List<ModelMessage>? messages,
@@ -113,6 +127,7 @@ class ToolLoopAgent {
     );
   }
 
+  /// Runs the agent in streaming mode.
   Future<StreamTextResult> stream({
     String? prompt,
     List<ModelMessage>? messages,

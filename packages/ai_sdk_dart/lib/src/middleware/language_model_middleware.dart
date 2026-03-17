@@ -105,8 +105,10 @@ abstract class LanguageModelMiddlewareBase implements LanguageModelMiddleware {
   }) => doStream(options);
 }
 
-/// Middleware that extracts reasoning enclosed in XML-style tags from
-/// text deltas, routing it to [StreamPartReasoningDelta] parts.
+/// Extracts reasoning enclosed in XML-style tags from text deltas.
+///
+/// Routes extracted content to [StreamPartReasoningDelta] parts.
+/// Mirrors `extractReasoningMiddleware` from the JS AI SDK v6.
 ///
 /// Usage: `extractReasoningMiddleware(tagName: 'think')`
 LanguageModelMiddleware extractReasoningMiddleware({String tagName = 'think'}) {
@@ -268,8 +270,10 @@ class _ExtractReasoningMiddleware extends LanguageModelMiddlewareBase {
   return (reasoning: null, text: text);
 }
 
-/// Middleware that strips markdown code fences (``` blocks) from text output,
-/// useful when a model wraps JSON in ```json ... ``` blocks.
+/// Strips markdown code fences (``` blocks) from text output.
+///
+/// Useful when a model wraps JSON in ```json ... ``` blocks.
+/// Mirrors `extractJsonMiddleware` from the JS AI SDK v6.
 LanguageModelMiddleware extractJsonMiddleware() => _ExtractJsonMiddleware();
 
 class _ExtractJsonMiddleware extends LanguageModelMiddlewareBase {
@@ -310,10 +314,11 @@ class _ExtractJsonMiddleware extends LanguageModelMiddlewareBase {
   }
 }
 
-/// Middleware that wraps a non-streaming model to simulate streaming.
+/// Wraps a non-streaming model to simulate streaming.
 ///
-/// Useful for models that only support `doGenerate` — this middleware
-/// fans out the result as a sequence of stream parts.
+/// Useful for models that only support `doGenerate` — fans out the
+/// result as a sequence of stream parts.
+/// Mirrors `simulateStreamingMiddleware` from the JS AI SDK v6.
 LanguageModelMiddleware simulateStreamingMiddleware() =>
     _SimulateStreamingMiddleware();
 
@@ -390,9 +395,10 @@ class _SimulateStreamingMiddleware extends LanguageModelMiddlewareBase {
   }
 }
 
-/// Middleware that applies default call option overrides to every call.
+/// Applies default call option overrides to every call.
 ///
-/// Settings provided at call time take precedence over [defaults].
+/// Settings provided at call time take precedence over these defaults.
+/// Mirrors `defaultSettingsMiddleware` from the JS AI SDK v6.
 LanguageModelMiddleware defaultSettingsMiddleware({
   int? maxOutputTokens,
   double? temperature,
@@ -462,11 +468,10 @@ class _DefaultSettingsMiddleware extends LanguageModelMiddlewareBase {
   }) => doStream(_applyDefaults(options));
 }
 
-/// Middleware that enriches tool descriptions with their [inputExamples],
-/// formatting them as JSON snippets appended to the description.
+/// Enriches tool descriptions with [inputExamples] as JSON snippets.
 ///
-/// This helps models that don't natively support `inputExamples` to still
-/// benefit from example-driven prompting.
+/// Helps models that don't natively support input examples.
+/// Mirrors `addToolInputExamplesMiddleware` from the JS AI SDK v6.
 LanguageModelMiddleware addToolInputExamplesMiddleware() =>
     _AddToolInputExamplesMiddleware();
 

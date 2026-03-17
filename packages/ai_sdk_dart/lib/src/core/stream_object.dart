@@ -7,6 +7,10 @@ import '../errors/ai_errors.dart';
 import '../messages/model_message.dart';
 import '../tools/tool.dart';
 
+/// A JSON Patch-style operation for incremental object updates.
+///
+/// Used by [StreamObjectResult.patchStream] to represent changes between
+/// partial object snapshots.
 class StreamObjectPatchOperation {
   const StreamObjectPatchOperation({
     required this.op,
@@ -19,6 +23,11 @@ class StreamObjectPatchOperation {
   final Object? value;
 }
 
+/// Result returned by [streamObject].
+///
+/// Provides [stream] for completed objects, [partialObjectStream] for
+/// incremental snapshots, [patchStream] for JSON Patch operations,
+/// [rawStream] and [textStream] for raw data, and [object] future.
 class StreamObjectResult<T> {
   const StreamObjectResult({
     required this.stream,
@@ -37,6 +46,23 @@ class StreamObjectResult<T> {
   final Future<T> object;
 }
 
+/// Streams a structured object as it is generated.
+///
+/// Dart convenience API for streaming object-only generation. For combined
+/// text + tools or structured output in [streamText], use [Output.object]
+/// with [StreamTextResult.partialOutputStream] or [StreamTextResult.elementStream].
+///
+/// Example:
+/// ```dart
+/// final result = await streamObject(
+///   model: model,
+///   schema: mySchema,
+///   prompt: 'Generate a recipe.',
+/// );
+/// await for (final partial in result.partialObjectStream) {
+///   print(partial);
+/// }
+/// ```
 Future<StreamObjectResult<T>> streamObject<T>({
   required LanguageModelV3 model,
   required Schema<T> schema,

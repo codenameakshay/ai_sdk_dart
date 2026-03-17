@@ -27,6 +27,8 @@ class RerankDocument {
 }
 
 /// Provider contract for reranking models.
+///
+/// Used by [rerank] from ai_sdk_dart.
 abstract interface class RerankModelV1 {
   String get specificationVersion;
   String get provider;

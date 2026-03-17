@@ -3,7 +3,7 @@ import 'language_model_v3_content.dart';
 /// Message roles supported by language model prompts.
 enum LanguageModelV3Role { system, user, assistant, tool }
 
-/// A single prompt message in language-model-native format.
+/// A single prompt message in provider-native format.
 class LanguageModelV3Message {
   const LanguageModelV3Message({required this.role, required this.content});
 
@@ -11,7 +11,9 @@ class LanguageModelV3Message {
   final List<LanguageModelV3ContentPart> content;
 }
 
-/// A normalized prompt for LanguageModelV3 calls.
+/// Normalized prompt for [LanguageModelV3] calls.
+///
+/// Contains optional [system] instruction and [messages].
 class LanguageModelV3Prompt {
   const LanguageModelV3Prompt({this.system, required this.messages});
 

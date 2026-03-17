@@ -31,6 +31,7 @@ class ObjectStreamController<T> extends ChangeNotifier {
 
   StreamSubscription<T>? _subscription;
 
+  /// Attach to [stream]; emits partial values as they arrive.
   Future<void> bind(Stream<T> stream) async {
     await _subscription?.cancel();
     _value = null;

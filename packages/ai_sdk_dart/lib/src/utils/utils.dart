@@ -6,6 +6,7 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 ///
 /// Returns a value in [-1, 1] where 1 means identical direction,
 /// 0 means orthogonal, and -1 means opposite.
+/// Mirrors `cosineSimilarity` from the JS AI SDK v6.
 ///
 /// Throws [ArgumentError] if the vectors have different lengths or are empty.
 double cosineSimilarity(List<double> a, List<double> b) {
@@ -38,7 +39,8 @@ final _random = Random.secure();
 
 /// Generates a unique random ID string with the given [prefix].
 ///
-/// Format: `{prefix}-{timestamp}{random}`
+/// Format: `{prefix}-{timestamp}{random}`.
+/// Mirrors `generateId` from the JS AI SDK v6.
 String generateId([String prefix = 'id']) {
   final ts = DateTime.now().microsecondsSinceEpoch;
   final rand = _random.nextInt(0xFFFFFF).toRadixString(16).padLeft(6, '0');
@@ -46,6 +48,8 @@ String generateId([String prefix = 'id']) {
 }
 
 /// Creates an ID generator function with a fixed [prefix].
+///
+/// Mirrors `createIdGenerator` from the JS AI SDK v6.
 ///
 /// ```dart
 /// final nextId = createIdGenerator(prefix: 'msg');
@@ -59,10 +63,10 @@ String Function() createIdGenerator({String prefix = 'id'}) {
 // Stream simulation
 // ---------------------------------------------------------------------------
 
-/// Simulates a [Stream] from a list of [parts], optionally with a [delay]
-/// between each part.
+/// Simulates a [Stream] from a list of [parts], optionally with [delay].
 ///
 /// Useful for testing streaming logic without a real provider.
+/// Mirrors `simulateReadableStream` from the JS AI SDK v6.
 ///
 /// ```dart
 /// final stream = simulateReadableStream(

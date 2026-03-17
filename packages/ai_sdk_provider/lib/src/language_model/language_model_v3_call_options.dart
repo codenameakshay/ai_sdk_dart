@@ -3,7 +3,10 @@ import 'language_model_v3_prompt.dart';
 import 'language_model_v3_tool.dart';
 import 'language_model_v3_tool_choice.dart';
 
-/// Provider-agnostic call options for language model generation.
+/// Call options for [LanguageModelV3] generation.
+///
+/// Contains [prompt], [tools], [toolChoice], [maxOutputTokens], [temperature],
+/// and other provider-agnostic settings.
 class LanguageModelV3CallOptions {
   const LanguageModelV3CallOptions({
     required this.prompt,

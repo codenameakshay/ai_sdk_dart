@@ -13,7 +13,9 @@ class SpeechModelV1GenerateResult {
   final String mediaType;
 }
 
-/// Provider contract for speech models.
+/// Provider contract for speech (text-to-speech) models.
+///
+/// Used by [generateSpeech] from ai_sdk_dart.
 abstract interface class SpeechModelV1 {
   String get specificationVersion;
   String get provider;

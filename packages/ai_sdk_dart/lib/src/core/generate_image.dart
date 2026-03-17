@@ -3,7 +3,9 @@ import 'dart:typed_data';
 
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
-/// Image generation result in AI core format.
+/// Result returned by [generateImage].
+///
+/// Contains [images] and optional [usage]. Use [image] for the first result.
 class GenerateImageResult {
   const GenerateImageResult({required this.images, this.usage});
 
@@ -13,6 +15,18 @@ class GenerateImageResult {
   GeneratedImage get image => images.first;
 }
 
+/// Generates images from a text prompt.
+///
+/// Mirrors `generateImage` from the JS AI SDK v6.
+///
+/// Example:
+/// ```dart
+/// final result = await generateImage(
+///   model: imageModel,
+///   prompt: 'A sunset over the ocean',
+/// );
+/// print(result.image);
+/// ```
 Future<GenerateImageResult> generateImage({
   required ImageModelV3 model,
   required String prompt,
@@ -34,6 +48,7 @@ Future<GenerateImageResult> generateImage({
   return GenerateImageResult(images: result.images, usage: result.usage);
 }
 
+/// Decodes a base64-encoded image string to raw bytes.
 Uint8List decodeBase64Image(String base64) {
   return Uint8List.fromList(const Base64Decoder().convert(base64));
 }

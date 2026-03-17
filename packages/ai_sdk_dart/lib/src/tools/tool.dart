@@ -7,7 +7,9 @@ typedef ToolExecutor<INPUT, OUTPUT> =
 typedef UntypedToolExecutor =
     Future<Object?> Function(Object? input, ToolExecutionOptions options);
 
-/// Tool execution context passed to tool executors.
+/// Context passed to tool executors during execution.
+///
+/// Provides [toolCallId], [messages], [abortSignal], and [experimentalContext].
 class ToolExecutionOptions {
   const ToolExecutionOptions({
     this.toolCallId,
@@ -27,6 +29,7 @@ typedef ToolNeedsApproval<INPUT> =
 typedef UntypedToolNeedsApproval =
     FutureOr<bool> Function(Object? input, ToolExecutionOptions options);
 
+/// Example input for a tool; helps the model understand expected usage.
 class ToolInputExample {
   const ToolInputExample({required this.input});
 
@@ -44,7 +47,10 @@ class Schema<T> {
   final T Function(Map<String, dynamic>) fromJson;
 }
 
-/// Core typed tool definition.
+/// Core typed tool definition for [generateText] and [streamText].
+///
+/// Defines [inputSchema], [description], [execute], [strict], [inputExamples],
+/// and [needsApproval]. Mirrors the tool API from the JS AI SDK v6.
 class Tool<INPUT, OUTPUT> {
   const Tool({
     required this.inputSchema,
@@ -71,9 +77,19 @@ class Tool<INPUT, OUTPUT> {
   final bool dynamic;
 }
 
+/// Map of tool names to tools; used by [generateText] and [streamText].
 typedef ToolSet = Map<String, Tool<dynamic, dynamic>>;
 
-/// Helper to define tools with better type inference.
+/// Helper to define typed tools with better type inference.
+///
+/// Example:
+/// ```dart
+/// final weatherTool = tool(
+///   inputSchema: Schema(jsonSchema: {...}, fromJson: ...),
+///   description: 'Get the weather',
+///   execute: (input, options) async => {...},
+/// );
+/// ```
 Tool<INPUT, OUTPUT> tool<INPUT, OUTPUT>({
   required Schema<INPUT> inputSchema,
   String? description,
@@ -99,6 +115,10 @@ Tool<INPUT, OUTPUT> tool<INPUT, OUTPUT>({
   );
 }
 
+/// Defines a tool with runtime-unknown input (accepts any JSON object).
+///
+/// Use when the tool input structure is not known at compile time.
+/// Mirrors `dynamicTool` from the JS AI SDK v6.
 Tool<Object?, OUTPUT> dynamicTool<OUTPUT>({
   String? description,
   ToolExecutor<Object?, OUTPUT>? execute,

@@ -5,19 +5,34 @@ import 'dart:typed_data';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
 
+/// Google Generative AI provider for Gemini and embedding models.
+///
+/// Use [call] for language models, [embedding] for embeddings.
+///
+/// Example:
+/// ```dart
+/// final model = google('gemini-1.5-flash');
+/// final result = await generateText(model: model, prompt: 'Hello');
+/// ```
 class GoogleGenerativeAIProvider {
   const GoogleGenerativeAIProvider({this.apiKey, this.baseUrl});
 
+  /// API key (defaults to `GOOGLE_GENERATIVE_AI_API_KEY` environment variable).
   final String? apiKey;
+
+  /// Base URL for the API.
   final String? baseUrl;
 
+  /// Returns a language model for the given [modelId].
   LanguageModelV3 call(String modelId) =>
       _GoogleLanguageModel(modelId: modelId, apiKey: apiKey, baseUrl: baseUrl);
 
+  /// Returns an embedding model for the given [modelId].
   EmbeddingModelV2<String> embedding(String modelId) =>
       _GoogleEmbeddingModel(modelId: modelId, apiKey: apiKey, baseUrl: baseUrl);
 }
 
+/// Default Google Generative AI provider instance.
 const google = GoogleGenerativeAIProvider();
 
 class _GoogleLanguageModel implements LanguageModelV3 {

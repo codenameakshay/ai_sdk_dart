@@ -2,7 +2,9 @@ import 'dart:typed_data';
 
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
-/// Result from `generateSpeech`.
+/// Result returned by [generateSpeech].
+///
+/// Contains [audio] bytes and [mediaType] (e.g. `audio/mpeg`).
 class GenerateSpeechResult {
   const GenerateSpeechResult({required this.audio, required this.mediaType});
 

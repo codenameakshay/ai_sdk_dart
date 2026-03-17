@@ -7,7 +7,9 @@ class TranscriptionModelV1GenerateResult {
   final String text;
 }
 
-/// Provider contract for transcription models.
+/// Provider contract for transcription (speech-to-text) models.
+///
+/// Used by [transcribe] from ai_sdk_dart.
 abstract interface class TranscriptionModelV1 {
   String get specificationVersion;
   String get provider;

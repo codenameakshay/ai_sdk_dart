@@ -42,7 +42,7 @@ class _JsonRpcResponse {
   }
 }
 
-/// MCP tool descriptor returned by `tools/list`.
+/// MCP tool descriptor returned by [MCPClient.tools].
 class MCPToolInfo {
   const MCPToolInfo({
     required this.name,
@@ -55,7 +55,7 @@ class MCPToolInfo {
   final Map<String, dynamic> inputSchema;
 }
 
-/// Abstract MCP transport.
+/// Abstract transport for MCP JSON-RPC communication.
 abstract class MCPTransport {
   /// Send a JSON-RPC request and receive the response.
   Future<_JsonRpcResponse> send(_JsonRpcRequest request);
@@ -64,9 +64,9 @@ abstract class MCPTransport {
   Future<void> close();
 }
 
-/// SSE (HTTP) transport — connects to an MCP server over HTTP SSE.
+/// SSE (HTTP) transport for MCP over HTTP.
 ///
-/// Sends requests via POST to [postUrl] and receives events via SSE at [url].
+/// Sends requests via POST to [postUrl]; receives responses as JSON.
 class SseClientTransport implements MCPTransport {
   SseClientTransport({required this.url, Uri? postUrl, this.headers})
     : postUrl = postUrl ?? url;
@@ -105,7 +105,7 @@ class SseClientTransport implements MCPTransport {
   }
 }
 
-/// Stdio transport — spawns a process and communicates via stdin/stdout.
+/// Stdio transport for MCP — spawns [command] and communicates via stdin/stdout.
 class StdioMCPTransport implements MCPTransport {
   StdioMCPTransport({required this.command, this.args = const []});
 
@@ -170,7 +170,7 @@ class StdioMCPTransport implements MCPTransport {
   }
 }
 
-/// Exception thrown by the MCP client.
+/// Exception thrown when an MCP operation fails.
 class MCPException implements Exception {
   const MCPException(this.message);
   final String message;

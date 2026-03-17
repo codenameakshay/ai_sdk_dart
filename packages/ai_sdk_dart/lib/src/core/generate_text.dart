@@ -9,23 +9,40 @@ import '../output/output.dart';
 import '../stop_conditions/stop_conditions.dart';
 import '../tools/tool.dart';
 
+/// Callback invoked after each step finishes in multi-step generation.
 typedef GenerateTextOnStepFinish =
     void Function(GenerateTextStepFinishEvent event);
+
+/// Callback invoked when the full generation is complete.
 typedef GenerateTextOnFinish<TOutput> =
     void Function(GenerateTextFinishEvent<TOutput> event);
+
+/// Callback to prepare each step; can override model, tools, messages, etc.
 typedef GenerateTextPrepareStep =
     FutureOr<GenerateTextPrepareStepResult?> Function(
       GenerateTextPrepareStepContext context,
     );
+
+/// Experimental callback invoked once when generation starts.
 typedef GenerateTextExperimentalOnStart =
     void Function(GenerateTextExperimentalStartEvent event);
+
+/// Experimental callback invoked before each step starts.
 typedef GenerateTextExperimentalOnStepStart =
     void Function(GenerateTextExperimentalStepStartEvent event);
+
+/// Experimental callback invoked right before a tool's execute runs.
 typedef GenerateTextExperimentalOnToolCallStart =
     void Function(GenerateTextExperimentalToolCallStartEvent event);
+
+/// Experimental callback invoked right after a tool's execute completes.
 typedef GenerateTextExperimentalOnToolCallFinish =
     void Function(GenerateTextExperimentalToolCallFinishEvent event);
 
+/// Context passed to [GenerateTextPrepareStep] for step-level overrides.
+///
+/// Use this to change the model, tool choice, active tools, messages, or
+/// provider options for the upcoming step.
 class GenerateTextPrepareStepContext {
   const GenerateTextPrepareStepContext({
     required this.model,
@@ -44,6 +61,10 @@ class GenerateTextPrepareStepContext {
   final Object? experimentalContext;
 }
 
+/// Result from [GenerateTextPrepareStep]; overrides for the upcoming step.
+///
+/// Return non-null values to override model, tool choice, active tools,
+/// messages, or provider options for the next generation step.
 class GenerateTextPrepareStepResult {
   const GenerateTextPrepareStepResult({
     this.model,
@@ -60,6 +81,7 @@ class GenerateTextPrepareStepResult {
   final ProviderOptions? providerOptions;
 }
 
+/// Event passed to [GenerateTextOnStepFinish] when a step completes.
 class GenerateTextStepFinishEvent {
   const GenerateTextStepFinishEvent({
     required this.stepNumber,
@@ -78,6 +100,7 @@ class GenerateTextStepFinishEvent {
   final LanguageModelV3Usage? usage;
 }
 
+/// Event passed to [GenerateTextOnFinish] when generation completes.
 class GenerateTextFinishEvent<TOutput> {
   const GenerateTextFinishEvent({
     required this.text,
@@ -98,6 +121,7 @@ class GenerateTextFinishEvent<TOutput> {
   final GenerateTextResponse response;
 }
 
+/// Request envelope for the generation call.
 class GenerateTextRequest {
   const GenerateTextRequest({
     required this.system,
@@ -110,6 +134,7 @@ class GenerateTextRequest {
   final Object? body;
 }
 
+/// Response envelope with messages, body, and metadata.
 class GenerateTextResponse {
   const GenerateTextResponse({
     required this.messages,
@@ -122,6 +147,7 @@ class GenerateTextResponse {
   final LanguageModelV3ResponseMetadata? metadata;
 }
 
+/// Event emitted when generation starts (experimental_onStart).
 class GenerateTextExperimentalStartEvent {
   const GenerateTextExperimentalStartEvent({
     required this.model,
@@ -138,6 +164,7 @@ class GenerateTextExperimentalStartEvent {
   final Object? experimentalContext;
 }
 
+/// Event emitted before each step starts (experimental_onStepStart).
 class GenerateTextExperimentalStepStartEvent {
   const GenerateTextExperimentalStepStartEvent({
     required this.stepNumber,
@@ -152,6 +179,7 @@ class GenerateTextExperimentalStepStartEvent {
   final List<GenerateTextStep> steps;
 }
 
+/// Event emitted before a tool executes (experimental_onToolCallStart).
 class GenerateTextExperimentalToolCallStartEvent {
   const GenerateTextExperimentalToolCallStartEvent({
     required this.toolCall,
@@ -164,6 +192,7 @@ class GenerateTextExperimentalToolCallStartEvent {
   final ToolExecutionOptions options;
 }
 
+/// Event emitted after a tool executes (experimental_onToolCallFinish).
 class GenerateTextExperimentalToolCallFinishEvent {
   const GenerateTextExperimentalToolCallFinishEvent({
     required this.toolCall,
@@ -180,7 +209,10 @@ class GenerateTextExperimentalToolCallFinishEvent {
   final Object? error;
 }
 
-/// Per-step details from `generateText` multi-step execution.
+/// Per-step details from [generateText] multi-step execution.
+///
+/// Each step contains the content, tool calls, tool results, response,
+/// text, finish reason, and usage for that generation step.
 class GenerateTextStep {
   const GenerateTextStep({
     required this.stepNumber,
@@ -205,7 +237,11 @@ class GenerateTextStep {
   final LanguageModelV3Usage? usage;
 }
 
-/// Result for `generateText`.
+/// Result returned by [generateText].
+///
+/// Contains the generated text, parsed output, steps, tool calls/results,
+/// usage, finish reason, request/response envelopes, and provider metadata.
+/// Mirrors the result object from the JS AI SDK v6.
 class GenerateTextResult<TOutput> {
   const GenerateTextResult({
     required this.text,
@@ -256,7 +292,42 @@ class GenerateTextResult<TOutput> {
   final ProviderMetadata? providerMetadata;
 }
 
-/// Provider-agnostic text generation with output/tool support.
+/// Generates text for non-interactive use cases and agents with tools.
+///
+/// Mirrors `generateText` from the JS AI SDK v6. Supports structured output
+/// via [Output], tool calling, multi-step generation, and lifecycle callbacks.
+///
+/// Example:
+/// ```dart
+/// final result = await generateText(
+///   model: model,
+///   prompt: 'Write a vegetarian lasagna recipe for 4 people.',
+/// );
+/// print(result.text);
+/// ```
+///
+/// With structured output:
+/// ```dart
+/// final result = await generateText(
+///   model: model,
+///   output: Output.object(schema: mySchema),
+///   prompt: 'Generate a recipe.',
+/// );
+/// print(result.output);
+/// ```
+///
+/// Parameters:
+/// - [model] – The language model to use.
+/// - [system] – Optional system instruction.
+/// - [prompt] – User prompt (or use [messages] for multi-turn).
+/// - [messages] – Conversation messages for multi-turn.
+/// - [output] – Structured output spec (default: [Output.text]).
+/// - [tools] – Tools the model can call.
+/// - [maxSteps] – Max tool-call steps (default: 1).
+/// - [stopConditions] – When to stop the loop.
+/// - [prepareStep] – Per-step overrides.
+/// - [onStepFinish] – Called after each step.
+/// - [onFinish] – Called when generation completes.
 Future<GenerateTextResult<TOutput>> generateText<TOutput>({
   required LanguageModelV3 model,
   String? system,

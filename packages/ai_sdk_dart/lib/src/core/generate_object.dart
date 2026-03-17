@@ -6,6 +6,10 @@ import '../errors/ai_errors.dart';
 import '../messages/model_message.dart';
 import '../tools/tool.dart';
 
+/// Result returned by [generateObject].
+///
+/// Contains the parsed [object], the raw [response], and [rawJson].
+/// Throws [AiNoObjectGeneratedError] when the model output cannot be parsed.
 class GenerateObjectResult<T> {
   const GenerateObjectResult({
     required this.object,
@@ -18,6 +22,23 @@ class GenerateObjectResult<T> {
   final Map<String, dynamic> rawJson;
 }
 
+/// Generates a structured JSON object from a schema.
+///
+/// Dart convenience API for object-only generation. For combined text + tools
+/// or structured output in [generateText]/[streamText], use [Output.object]
+/// instead. Mirrors the deprecated `generateObject` from the JS AI SDK v6.
+///
+/// Throws [AiNoObjectGeneratedError] when the model output cannot be parsed.
+///
+/// Example:
+/// ```dart
+/// final result = await generateObject(
+///   model: model,
+///   schema: mySchema,
+///   prompt: 'Generate a recipe.',
+/// );
+/// print(result.object);
+/// ```
 Future<GenerateObjectResult<T>> generateObject<T>({
   required LanguageModelV3 model,
   required Schema<T> schema,

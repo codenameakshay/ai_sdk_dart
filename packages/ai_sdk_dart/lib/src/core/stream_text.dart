@@ -10,18 +10,44 @@ import '../stop_conditions/stop_conditions.dart';
 import '../tools/tool.dart';
 import 'generate_text.dart';
 
+/// Callback invoked for each stream chunk.
 typedef StreamTextOnChunk = void Function(StreamTextChunk chunk);
+
+/// Callback invoked when a stream error occurs.
 typedef StreamTextOnError = void Function(Object error);
+
+/// Callback invoked when streaming completes.
 typedef StreamTextOnFinish<TOutput> =
     void Function(StreamTextFinishEvent<TOutput> event);
+
+/// Callback invoked when a tool input stream starts.
 typedef StreamTextOnInputStart =
     void Function(StreamTextToolInputStartEvent event);
+
+/// Callback invoked for each tool input delta.
 typedef StreamTextOnInputDelta =
     void Function(StreamTextToolInputDeltaEvent event);
+
+/// Callback invoked when tool input is fully available.
 typedef StreamTextOnInputAvailable =
     void Function(StreamTextToolInputEndEvent event);
+
+/// Transform that splits text deltas into smaller chunks.
 typedef StreamTextTransform = Iterable<String> Function(String delta);
 
+/// Returns a transform that yields text deltas in chunks of [chunkSize].
+///
+/// Use with [streamText]'s [StreamTextTransform] to smooth token-by-token
+/// streaming for display. Mirrors `smoothStream` from the JS AI SDK v6.
+///
+/// Example:
+/// ```dart
+/// final result = await streamText(
+///   model: model,
+///   prompt: 'Hello',
+///   experimentalTransform: smoothStream(chunkSize: 12),
+/// );
+/// ```
 StreamTextTransform smoothStream({int chunkSize = 12}) {
   if (chunkSize <= 0) {
     return (delta) sync* {
@@ -39,10 +65,12 @@ StreamTextTransform smoothStream({int chunkSize = 12}) {
   };
 }
 
+/// Base type for chunks emitted to [StreamTextOnChunk].
 sealed class StreamTextChunk {
   const StreamTextChunk();
 }
 
+/// Text delta chunk.
 class StreamTextTextChunk extends StreamTextChunk {
   const StreamTextTextChunk({required this.id, required this.text});
 
@@ -50,18 +78,21 @@ class StreamTextTextChunk extends StreamTextChunk {
   final String text;
 }
 
+/// Reasoning/thinking delta chunk (for models that emit reasoning).
 class StreamTextReasoningChunk extends StreamTextChunk {
   const StreamTextReasoningChunk({required this.delta});
 
   final String delta;
 }
 
+/// Tool call chunk.
 class StreamTextToolCallChunk extends StreamTextChunk {
   const StreamTextToolCallChunk({required this.toolCall});
 
   final LanguageModelV3ToolCallPart toolCall;
 }
 
+/// Tool result chunk; [preliminary] is true for streaming tool outputs.
 class StreamTextToolResultChunk extends StreamTextChunk {
   const StreamTextToolResultChunk({
     required this.toolResult,
@@ -72,24 +103,28 @@ class StreamTextToolResultChunk extends StreamTextChunk {
   final bool preliminary;
 }
 
+/// Raw provider stream part (passthrough).
 class StreamTextRawChunk extends StreamTextChunk {
   const StreamTextRawChunk({required this.part});
 
   final LanguageModelV3StreamPart part;
 }
 
+/// Source/citation chunk from the model.
 class StreamTextSourceChunk extends StreamTextChunk {
   const StreamTextSourceChunk({required this.source});
 
   final LanguageModelV3SourcePart source;
 }
 
+/// Generated file chunk.
 class StreamTextFileChunk extends StreamTextChunk {
   const StreamTextFileChunk({required this.file});
 
   final LanguageModelV3FilePart file;
 }
 
+/// Tool input stream start chunk.
 class StreamTextToolInputStartChunk extends StreamTextChunk {
   const StreamTextToolInputStartChunk({
     required this.toolCallId,
@@ -100,6 +135,7 @@ class StreamTextToolInputStartChunk extends StreamTextChunk {
   final String toolName;
 }
 
+/// Tool input delta chunk.
 class StreamTextToolInputDeltaChunk extends StreamTextChunk {
   const StreamTextToolInputDeltaChunk({
     required this.toolCallId,
@@ -114,31 +150,37 @@ class StreamTextToolInputDeltaChunk extends StreamTextChunk {
   final String inputBuffer;
 }
 
+/// Mid-stream usage metadata chunk.
 class StreamTextUsageChunk extends StreamTextChunk {
   const StreamTextUsageChunk({required this.usage});
   final LanguageModelV3Usage usage;
 }
 
+/// Base type for events in [StreamTextResult.fullStream].
 sealed class StreamTextEvent {
   const StreamTextEvent();
 }
 
+/// Stream started.
 class StreamTextStartEvent extends StreamTextEvent {
   const StreamTextStartEvent();
 }
 
+/// A new step started (multi-step generation).
 class StreamTextStartStepEvent extends StreamTextEvent {
   const StreamTextStartStepEvent({required this.stepNumber});
 
   final int stepNumber;
 }
 
+/// Text part started.
 class StreamTextTextStartEvent extends StreamTextEvent {
   const StreamTextTextStartEvent({required this.id});
 
   final String id;
 }
 
+/// Text delta.
 class StreamTextTextDeltaEvent extends StreamTextEvent {
   const StreamTextTextDeltaEvent({required this.id, required this.delta});
 
@@ -146,18 +188,21 @@ class StreamTextTextDeltaEvent extends StreamTextEvent {
   final String delta;
 }
 
+/// Text part ended.
 class StreamTextTextEndEvent extends StreamTextEvent {
   const StreamTextTextEndEvent({required this.id});
 
   final String id;
 }
 
+/// Reasoning part started.
 class StreamTextReasoningStartEvent extends StreamTextEvent {
   const StreamTextReasoningStartEvent({required this.id});
 
   final String id;
 }
 
+/// Reasoning delta.
 class StreamTextReasoningDeltaEvent extends StreamTextEvent {
   const StreamTextReasoningDeltaEvent({required this.id, required this.delta});
 
@@ -165,24 +210,28 @@ class StreamTextReasoningDeltaEvent extends StreamTextEvent {
   final String delta;
 }
 
+/// Reasoning part ended.
 class StreamTextReasoningEndEvent extends StreamTextEvent {
   const StreamTextReasoningEndEvent({required this.id});
 
   final String id;
 }
 
+/// Source/citation event.
 class StreamTextSourceEvent extends StreamTextEvent {
   const StreamTextSourceEvent({required this.source});
 
   final LanguageModelV3SourcePart source;
 }
 
+/// Generated file event.
 class StreamTextFileEvent extends StreamTextEvent {
   const StreamTextFileEvent({required this.file});
 
   final LanguageModelV3FilePart file;
 }
 
+/// Tool input stream started.
 class StreamTextToolInputStartEvent extends StreamTextEvent {
   const StreamTextToolInputStartEvent({
     required this.toolCallId,
@@ -193,6 +242,7 @@ class StreamTextToolInputStartEvent extends StreamTextEvent {
   final String toolName;
 }
 
+/// Tool input delta.
 class StreamTextToolInputDeltaEvent extends StreamTextEvent {
   const StreamTextToolInputDeltaEvent({
     required this.toolCallId,
@@ -207,6 +257,7 @@ class StreamTextToolInputDeltaEvent extends StreamTextEvent {
   final String inputBuffer;
 }
 
+/// Tool input fully available.
 class StreamTextToolInputEndEvent extends StreamTextEvent {
   const StreamTextToolInputEndEvent({
     required this.toolCallId,
@@ -221,6 +272,7 @@ class StreamTextToolInputEndEvent extends StreamTextEvent {
   final String inputBuffer;
 }
 
+/// Tool result event; [preliminary] is true for streaming tool outputs.
 class StreamTextToolResultEvent extends StreamTextEvent {
   const StreamTextToolResultEvent({
     required this.toolResult,
@@ -231,6 +283,7 @@ class StreamTextToolResultEvent extends StreamTextEvent {
   final bool preliminary;
 }
 
+/// Tool execution error event.
 class StreamTextToolErrorEvent extends StreamTextEvent {
   const StreamTextToolErrorEvent({
     required this.toolCallId,
@@ -243,18 +296,21 @@ class StreamTextToolErrorEvent extends StreamTextEvent {
   final Object error;
 }
 
+/// Raw provider stream part event.
 class StreamTextRawEvent extends StreamTextEvent {
   const StreamTextRawEvent({required this.part});
 
   final LanguageModelV3StreamPart part;
 }
 
+/// Stream error event.
 class StreamTextErrorEvent extends StreamTextEvent {
   const StreamTextErrorEvent({required this.error});
 
   final Object error;
 }
 
+/// Step finished (multi-step generation).
 class StreamTextFinishStepEvent extends StreamTextEvent {
   const StreamTextFinishStepEvent({required this.step});
 
@@ -267,6 +323,7 @@ class StreamTextUsageEvent extends StreamTextEvent {
   final LanguageModelV3Usage usage;
 }
 
+/// Emitted when streaming completes; contains full result.
 class StreamTextFinishEvent<TOutput> extends StreamTextEvent {
   const StreamTextFinishEvent({
     required this.text,
@@ -305,7 +362,12 @@ class StreamTextFinishEvent<TOutput> extends StreamTextEvent {
   final List<String> warnings;
 }
 
-/// Result wrapper for `streamText`.
+/// Result returned by [streamText].
+///
+/// Provides [textStream] for text deltas, [fullStream] for the full event
+/// taxonomy, [partialOutputStream] and [elementStream] for structured output,
+/// and futures for [text], [output], [usage], etc. after completion.
+/// Mirrors the result object from the JS AI SDK v6.
 class StreamTextResult<TOutput> {
   const StreamTextResult({
     required this.stream,
@@ -376,7 +438,22 @@ class StreamTextResult<TOutput> {
   final Future<StreamPartFinish?> finish;
 }
 
-/// Provider-agnostic streaming text generation.
+/// Streams text from a given prompt and model.
+///
+/// Mirrors `streamText` from the JS AI SDK v6. Ideal for interactive use cases
+/// (chatbots, real-time apps) where users expect immediate responses.
+/// Supports [Output], tools, multi-step generation, and lifecycle callbacks.
+///
+/// Example:
+/// ```dart
+/// final result = await streamText(
+///   model: model,
+///   prompt: 'Invent a new holiday and describe its traditions.',
+/// );
+/// await for (final chunk in result.textStream) {
+///   print(chunk);
+/// }
+/// ```
 Future<StreamTextResult<TOutput>> streamText<TOutput>({
   required LanguageModelV3 model,
   String? system,

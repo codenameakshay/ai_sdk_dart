@@ -36,6 +36,7 @@ class CompletionController extends ChangeNotifier {
 
   StreamSubscription<String>? _activeSubscription;
 
+  /// Submit [prompt] and stream the completion.
   Future<void> complete(String prompt) async {
     _completion = '';
     _error = null;

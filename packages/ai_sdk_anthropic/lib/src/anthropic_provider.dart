@@ -5,12 +5,25 @@ import 'dart:typed_data';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
 
+/// Anthropic provider for Claude language models.
+///
+/// Use [call] to get a language model for the given [modelId].
+///
+/// Example:
+/// ```dart
+/// final model = anthropic('claude-3-5-sonnet-20241022');
+/// final result = await generateText(model: model, prompt: 'Hello');
+/// ```
 class AnthropicProvider {
   const AnthropicProvider({this.apiKey, this.baseUrl});
 
+  /// API key (defaults to `ANTHROPIC_API_KEY` environment variable).
   final String? apiKey;
+
+  /// Base URL for the API.
   final String? baseUrl;
 
+  /// Returns a language model for the given [modelId].
   LanguageModelV3 call(String modelId) => _AnthropicLanguageModel(
     modelId: modelId,
     apiKey: apiKey,
@@ -18,6 +31,7 @@ class AnthropicProvider {
   );
 }
 
+/// Default Anthropic provider instance.
 const anthropic = AnthropicProvider();
 
 class _AnthropicLanguageModel implements LanguageModelV3 {

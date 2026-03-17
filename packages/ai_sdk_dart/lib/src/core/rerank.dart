@@ -1,6 +1,9 @@
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
-/// Result from `rerank`.
+/// Result returned by [rerank].
+///
+/// [documents] are in ranked order (highest relevance first).
+/// Use [document] for the top result.
 class RerankResult {
   const RerankResult({required this.documents});
 
@@ -11,7 +14,10 @@ class RerankResult {
   RankedDocument get document => documents.first;
 }
 
-/// A single document with its relevance score.
+/// A document with its relevance score from [rerank].
+///
+/// [index] is the original position in the input list.
+/// [relevanceScore] is in the range [0, 1].
 class RankedDocument {
   const RankedDocument({
     required this.index,

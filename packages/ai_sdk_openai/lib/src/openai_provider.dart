@@ -5,24 +5,42 @@ import 'dart:typed_data';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
 
+/// OpenAI provider for language models, embeddings, images, speech, and transcription.
+///
+/// Use [call] for language models, [embedding] for embeddings, [image] for image
+/// generation, [speech] for text-to-speech, [transcription] for speech-to-text.
+///
+/// Example:
+/// ```dart
+/// final model = openai('gpt-4o');
+/// final result = await generateText(model: model, prompt: 'Hello');
+/// ```
 class OpenAIProvider {
   const OpenAIProvider({this.apiKey, this.baseUrl});
 
+  /// API key (defaults to `OPENAI_API_KEY` environment variable).
   final String? apiKey;
+
+  /// Base URL (defaults to `https://api.openai.com/v1`).
   final String? baseUrl;
 
+  /// Returns a language model for the given [modelId].
   LanguageModelV3 call(String modelId) =>
       _OpenAILanguageModel(modelId: modelId, apiKey: apiKey, baseUrl: baseUrl);
 
+  /// Returns an embedding model for the given [modelId].
   EmbeddingModelV2<String> embedding(String modelId) =>
       _OpenAIEmbeddingModel(modelId: modelId, apiKey: apiKey, baseUrl: baseUrl);
 
+  /// Returns an image generation model for the given [modelId].
   ImageModelV3 image(String modelId) =>
       _OpenAIImageModel(modelId: modelId, apiKey: apiKey, baseUrl: baseUrl);
 
+  /// Returns a speech (text-to-speech) model for the given [modelId].
   SpeechModelV1 speech(String modelId) =>
       _OpenAISpeechModel(modelId: modelId, apiKey: apiKey, baseUrl: baseUrl);
 
+  /// Returns a transcription (speech-to-text) model for the given [modelId].
   TranscriptionModelV1 transcription(String modelId) =>
       _OpenAITranscriptionModel(
         modelId: modelId,
@@ -31,6 +49,9 @@ class OpenAIProvider {
       );
 }
 
+/// Default OpenAI provider instance.
+///
+/// Uses `OPENAI_API_KEY` from the environment when [apiKey] is not set.
 const openai = OpenAIProvider();
 
 class _OpenAILanguageModel implements LanguageModelV3 {

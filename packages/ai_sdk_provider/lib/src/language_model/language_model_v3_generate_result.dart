@@ -4,6 +4,8 @@ import 'language_model_v3_finish_reason.dart';
 import 'language_model_v3_usage.dart';
 
 /// Response metadata from the underlying provider.
+///
+/// Contains [id], [modelId], [timestamp], [headers], [body], [requestBody].
 class LanguageModelV3ResponseMetadata {
   const LanguageModelV3ResponseMetadata({
     this.id,
@@ -22,7 +24,9 @@ class LanguageModelV3ResponseMetadata {
   final Object? requestBody;
 }
 
-/// Non-streaming generation result from a LanguageModelV3 provider.
+/// Non-streaming generation result from a [LanguageModelV3] provider.
+///
+/// Contains [content], [finishReason], [usage], [warnings], [response].
 class LanguageModelV3GenerateResult {
   const LanguageModelV3GenerateResult({
     this.content = const [],

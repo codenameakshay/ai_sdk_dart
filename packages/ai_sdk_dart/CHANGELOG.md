@@ -33,6 +33,14 @@
 
 - **`pruneMessages`** — removed duplicate messages that were incorrectly appended in multi-step loops when `messages` was pre-populated; semantics now match Vercel AI SDK v6.
 
+### New Provider Packages
+
+- **`ai_sdk_azure`** — Azure OpenAI provider (`AzureOpenAIProvider`). Language models and embeddings via Azure-hosted deployments; configurable `endpoint`, `apiKey`, and `apiVersion`.
+- **`ai_sdk_cohere`** — Cohere provider (`cohere`). Language models, text embeddings, and reranking (Command R, Command R+, embed-english-v3.0, rerank-english-v3.0).
+- **`ai_sdk_groq`** — Groq provider (`groq`). Ultra-low latency inference for Llama, Mixtral, Gemma, and other Groq-hosted models.
+- **`ai_sdk_mistral`** — Mistral AI provider (`mistral`). Language models and embeddings (Mistral Large, Mistral Small, Codestral, mistral-embed).
+- **`ai_sdk_ollama`** — Ollama provider (`ollama`). Local inference for any model pulled via Ollama; no API key required.
+
 ### Test Count
 
 - 562+ tests covering all public APIs, conformance cases, and new features.

@@ -300,6 +300,386 @@ void main() {
       });
     });
 
+    // ── listPrompts() ────────────────────────────────────────────────────────
+
+    group('listPrompts()', () {
+      test('returns prompt list from server', () async {
+        final mock = await _MockMCPServer.start();
+        addTearDown(mock.close);
+        mock.enqueueInitialize();
+        mock.enqueue({
+          'jsonrpc': '2.0',
+          'result': {
+            'prompts': [
+              {
+                'name': 'summarize',
+                'description': 'Summarizes a document',
+                'arguments': [
+                  {'name': 'document', 'required': true},
+                  {'name': 'length', 'description': 'Target length'},
+                ],
+              },
+              {'name': 'translate', 'description': 'Translate text'},
+            ],
+          },
+        });
+
+        final client = _client(mock);
+        addTearDown(client.close);
+
+        final prompts = await client.listPrompts();
+        expect(prompts.length, 2);
+        expect(prompts.first.name, 'summarize');
+        expect(prompts.first.description, 'Summarizes a document');
+        expect(prompts.first.arguments.length, 2);
+        expect(prompts.first.arguments.first.name, 'document');
+        expect(prompts.first.arguments.first.required, isTrue);
+        expect(prompts[1].name, 'translate');
+      });
+
+      test('returns empty list when server has no prompts', () async {
+        final mock = await _MockMCPServer.start();
+        addTearDown(mock.close);
+        mock.enqueueInitialize();
+        mock.enqueue({
+          'jsonrpc': '2.0',
+          'result': {'prompts': []},
+        });
+
+        final client = _client(mock);
+        addTearDown(client.close);
+
+        final prompts = await client.listPrompts();
+        expect(prompts, isEmpty);
+      });
+
+      test('sends prompts/list method', () async {
+        final mock = await _MockMCPServer.start();
+        addTearDown(mock.close);
+        mock.enqueueInitialize();
+        mock.enqueue({
+          'jsonrpc': '2.0',
+          'result': {'prompts': []},
+        });
+
+        final client = _client(mock);
+        addTearDown(client.close);
+
+        await client.listPrompts();
+
+        expect(
+          mock.requestLog.any((r) => r['method'] == 'prompts/list'),
+          isTrue,
+        );
+      });
+    });
+
+    // ── getPrompt() ───────────────────────────────────────────────────────────
+
+    group('getPrompt()', () {
+      test('returns rendered prompt messages', () async {
+        final mock = await _MockMCPServer.start();
+        addTearDown(mock.close);
+        mock.enqueueInitialize();
+        mock.enqueue({
+          'jsonrpc': '2.0',
+          'result': {
+            'description': 'Summarize this',
+            'messages': [
+              {
+                'role': 'user',
+                'content': {'type': 'text', 'text': 'Summarize: Hello world'},
+              },
+            ],
+          },
+        });
+
+        final client = _client(mock);
+        addTearDown(client.close);
+
+        final result = await client.getPrompt(
+          'summarize',
+          arguments: {'document': 'Hello world'},
+        );
+        expect(result.description, 'Summarize this');
+        expect(result.messages.length, 1);
+        expect(result.messages.first.role, 'user');
+        expect(result.messages.first.content, 'Summarize: Hello world');
+      });
+
+      test('sends prompts/get with name and arguments', () async {
+        final mock = await _MockMCPServer.start();
+        addTearDown(mock.close);
+        mock.enqueueInitialize();
+        mock.enqueue({
+          'jsonrpc': '2.0',
+          'result': {'messages': []},
+        });
+
+        final client = _client(mock);
+        addTearDown(client.close);
+
+        await client.getPrompt('summarize', arguments: {'doc': 'test'});
+
+        final req = mock.requestLog.firstWhere(
+          (r) => r['method'] == 'prompts/get',
+        );
+        expect(req['params']['name'], 'summarize');
+        expect((req['params']['arguments'] as Map)['doc'], 'test');
+      });
+
+      test('throws MCPException on server error', () async {
+        final mock = await _MockMCPServer.start();
+        addTearDown(mock.close);
+        mock.enqueueInitialize();
+        mock.enqueue({
+          'jsonrpc': '2.0',
+          'error': {'code': -32601, 'message': 'Prompt not found'},
+        });
+
+        final client = _client(mock);
+        addTearDown(client.close);
+
+        await expectLater(
+          client.getPrompt('unknown'),
+          throwsA(isA<MCPException>()),
+        );
+      });
+    });
+
+    // ── listResources() ───────────────────────────────────────────────────────
+
+    group('listResources()', () {
+      test('returns resource list from server', () async {
+        final mock = await _MockMCPServer.start();
+        addTearDown(mock.close);
+        mock.enqueueInitialize();
+        mock.enqueue({
+          'jsonrpc': '2.0',
+          'result': {
+            'resources': [
+              {
+                'uri': 'file:///data/config.json',
+                'name': 'config.json',
+                'description': 'App configuration',
+                'mimeType': 'application/json',
+              },
+              {'uri': 'file:///data/log.txt', 'name': 'log.txt'},
+            ],
+          },
+        });
+
+        final client = _client(mock);
+        addTearDown(client.close);
+
+        final resources = await client.listResources();
+        expect(resources.length, 2);
+        expect(resources.first.uri, 'file:///data/config.json');
+        expect(resources.first.name, 'config.json');
+        expect(resources.first.mimeType, 'application/json');
+        expect(resources[1].description, isNull);
+      });
+
+      test('returns empty list when server has no resources', () async {
+        final mock = await _MockMCPServer.start();
+        addTearDown(mock.close);
+        mock.enqueueInitialize();
+        mock.enqueue({
+          'jsonrpc': '2.0',
+          'result': {'resources': []},
+        });
+
+        final client = _client(mock);
+        addTearDown(client.close);
+
+        final resources = await client.listResources();
+        expect(resources, isEmpty);
+      });
+    });
+
+    // ── readResource() ────────────────────────────────────────────────────────
+
+    group('readResource()', () {
+      test('returns resource content', () async {
+        final mock = await _MockMCPServer.start();
+        addTearDown(mock.close);
+        mock.enqueueInitialize();
+        mock.enqueue({
+          'jsonrpc': '2.0',
+          'result': {
+            'contents': [
+              {
+                'uri': 'file:///data/config.json',
+                'mimeType': 'application/json',
+                'text': '{"debug": true}',
+              },
+            ],
+          },
+        });
+
+        final client = _client(mock);
+        addTearDown(client.close);
+
+        final content = await client.readResource('file:///data/config.json');
+        expect(content.uri, 'file:///data/config.json');
+        expect(content.mimeType, 'application/json');
+        expect(content.text, '{"debug": true}');
+      });
+
+      test('sends resources/read with correct uri', () async {
+        final mock = await _MockMCPServer.start();
+        addTearDown(mock.close);
+        mock.enqueueInitialize();
+        mock.enqueue({
+          'jsonrpc': '2.0',
+          'result': {
+            'contents': [
+              {'uri': 'file:///x', 'mimeType': 'text/plain', 'text': 'hello'},
+            ],
+          },
+        });
+
+        final client = _client(mock);
+        addTearDown(client.close);
+
+        await client.readResource('file:///x');
+
+        final req = mock.requestLog.firstWhere(
+          (r) => r['method'] == 'resources/read',
+        );
+        expect(req['params']['uri'], 'file:///x');
+      });
+
+      test('throws MCPException on server error', () async {
+        final mock = await _MockMCPServer.start();
+        addTearDown(mock.close);
+        mock.enqueueInitialize();
+        mock.enqueue({
+          'jsonrpc': '2.0',
+          'error': {'code': -32601, 'message': 'Resource not found'},
+        });
+
+        final client = _client(mock);
+        addTearDown(client.close);
+
+        await expectLater(
+          client.readResource('file:///missing'),
+          throwsA(isA<MCPException>()),
+        );
+      });
+    });
+
+    // ── subscribeResource / notifyResourceUpdated ─────────────────────────────
+
+    group('resource subscriptions', () {
+      test('subscribeResource returns a stream', () async {
+        final mock = await _MockMCPServer.start();
+        addTearDown(mock.close);
+        mock.enqueueInitialize();
+        // Server accepts subscribe silently
+        mock.enqueue({'jsonrpc': '2.0', 'result': {}});
+
+        final client = _client(mock);
+        addTearDown(client.close);
+
+        final stream = client.subscribeResource('file:///data/log.txt');
+        expect(stream, isA<Stream<MCPResourceContent>>());
+      });
+
+      test('notifyResourceUpdated pushes to subscribers', () async {
+        final mock = await _MockMCPServer.start();
+        addTearDown(mock.close);
+        mock.enqueueInitialize();
+        mock.enqueue({'jsonrpc': '2.0', 'result': {}});
+
+        final client = _client(mock);
+        addTearDown(client.close);
+
+        final updates = <MCPResourceContent>[];
+        final subscription =
+            client.subscribeResource('file:///data/log.txt').listen(
+              updates.add,
+            );
+        addTearDown(subscription.cancel);
+
+        await Future<void>.delayed(Duration.zero); // let subscribe settle
+
+        client.notifyResourceUpdated(
+          'file:///data/log.txt',
+          const MCPResourceContent(
+            uri: 'file:///data/log.txt',
+            mimeType: 'text/plain',
+            text: 'new content',
+          ),
+        );
+
+        await Future<void>.delayed(Duration.zero);
+        expect(updates.length, 1);
+        expect(updates.first.text, 'new content');
+      });
+    });
+
+    // ── MCPReconnectPolicy ────────────────────────────────────────────────────
+
+    group('MCPReconnectPolicy', () {
+      test('delayFor returns increasing delays', () {
+        const policy = MCPReconnectPolicy(
+          initialDelayMs: 100,
+          backoffFactor: 2.0,
+          maxDelayMs: 5000,
+        );
+        final d0 = policy.delayFor(0);
+        final d1 = policy.delayFor(1);
+        final d2 = policy.delayFor(2);
+        expect(d1.inMilliseconds, greaterThanOrEqualTo(d0.inMilliseconds));
+        expect(d2.inMilliseconds, greaterThanOrEqualTo(d1.inMilliseconds));
+      });
+
+      test('delayFor caps at maxDelayMs', () {
+        const policy = MCPReconnectPolicy(
+          initialDelayMs: 1000,
+          backoffFactor: 10.0,
+          maxDelayMs: 3000,
+        );
+        final delay = policy.delayFor(10);
+        expect(delay.inMilliseconds, lessThanOrEqualTo(3000));
+      });
+
+      test('MCPClient accepts reconnectPolicy constructor param', () {
+        final mock_transport = SseClientTransport(
+          url: Uri.parse('http://localhost:9999/mcp'),
+        );
+        final client = MCPClient(
+          transport: mock_transport,
+          reconnectPolicy: const MCPReconnectPolicy(maxAttempts: 3),
+        );
+        expect(client.reconnectPolicy?.maxAttempts, 3);
+        client.close();
+      });
+    });
+
+    // ── capabilities advertised in initialize() ───────────────────────────────
+
+    group('capabilities', () {
+      test('initialize advertises prompts and resources capabilities', () async {
+        final mock = await _MockMCPServer.start();
+        addTearDown(mock.close);
+        mock.enqueueInitialize();
+
+        final client = _client(mock);
+        addTearDown(client.close);
+
+        await client.initialize();
+
+        final initReq = mock.requestLog.first;
+        final caps =
+            (initReq['params'] as Map)['capabilities'] as Map<String, dynamic>;
+        expect(caps.keys, contains('prompts'));
+        expect(caps.keys, contains('resources'));
+        expect((caps['resources'] as Map)['subscribe'], isTrue);
+      });
+    });
+
     // ── MCPException ─────────────────────────────────────────────────────────
 
     group('MCPException', () {

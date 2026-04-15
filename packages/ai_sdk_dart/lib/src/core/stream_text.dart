@@ -472,6 +472,14 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   int? maxOutputTokens,
   double? temperature,
   double? topP,
+  int? topK,
+  double? presencePenalty,
+  double? frequencyPenalty,
+  List<String> stopSequences = const [],
+  int? seed,
+  Map<String, String>? headers,
+  int maxRetries = 2,
+  List<String> activeToolNames = const [],
   StreamTextOnChunk? onChunk,
   StreamTextOnError? onError,
   StreamTextOnFinish<TOutput>? onFinish,
@@ -602,7 +610,8 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
               prepareResult?.providerOptions ?? providerOptions;
           final activeTools = _selectActiveTools(
             tools,
-            prepareResult?.activeTools,
+            prepareResult?.activeTools ??
+                (activeToolNames.isNotEmpty ? activeToolNames : null),
           );
           final toolSelection = _resolveToolSelection(
             tools: activeTools,
@@ -620,32 +629,40 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
             ),
           );
 
-          final response = await stepModel.doStream(
-            LanguageModelV3CallOptions(
-              prompt: LanguageModelV3Prompt(
-                system: systemInstruction,
-                messages: stepMessages,
-              ),
-              tools: toolSelection.exposedTools.entries
-                  .map(
-                    (entry) => LanguageModelV3FunctionTool(
-                      name: entry.key,
-                      description: entry.value.description,
-                      inputSchema: entry.value.inputSchema.jsonSchema,
-                      strict: entry.value.strict,
-                      inputExamples: entry.value.inputExamples
-                          .map((example) => example.input)
-                          .toList(),
-                    ),
-                  )
-                  .toList(),
-              providerDefinedTools: providerDefinedTools,
-              toolChoice: toolSelection.toolChoice,
-              maxOutputTokens: maxOutputTokens,
-              temperature: temperature,
-              topP: topP,
-              providerOptions: stepProviderOptions,
+          final streamCallOptions = LanguageModelV3CallOptions(
+            prompt: LanguageModelV3Prompt(
+              system: systemInstruction,
+              messages: stepMessages,
             ),
+            tools: toolSelection.exposedTools.entries
+                .map(
+                  (entry) => LanguageModelV3FunctionTool(
+                    name: entry.key,
+                    description: entry.value.description,
+                    inputSchema: entry.value.inputSchema.jsonSchema,
+                    strict: entry.value.strict,
+                    inputExamples: entry.value.inputExamples
+                        .map((example) => example.input)
+                        .toList(),
+                  ),
+                )
+                .toList(),
+            providerDefinedTools: providerDefinedTools,
+            toolChoice: toolSelection.toolChoice,
+            maxOutputTokens: maxOutputTokens,
+            temperature: temperature,
+            topP: topP,
+            topK: topK,
+            presencePenalty: presencePenalty,
+            frequencyPenalty: frequencyPenalty,
+            stopSequences: stopSequences,
+            seed: seed,
+            headers: headers,
+            providerOptions: stepProviderOptions,
+          );
+          final response = await _withRetry(
+            maxRetries: maxRetries,
+            fn: () => stepModel.doStream(streamCallOptions),
           );
           if (response.rawResponse is Map) {
             rawEnvelope = (response.rawResponse as Map)
@@ -1717,6 +1734,23 @@ void _safeInvoke(void Function() action) {
   try {
     action();
   } catch (_) {}
+}
+
+/// Retries [fn] up to [maxRetries] times on exception.
+/// If all attempts fail, the last exception is rethrown.
+Future<T> _withRetry<T>({
+  required int maxRetries,
+  required Future<T> Function() fn,
+}) async {
+  var attempts = 0;
+  while (true) {
+    try {
+      return await fn();
+    } catch (e) {
+      attempts++;
+      if (attempts > maxRetries) rethrow;
+    }
+  }
 }
 
 String _buildOutputSystemInstruction<T>(String? system, Output<T> output) {

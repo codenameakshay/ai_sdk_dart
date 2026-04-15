@@ -115,6 +115,18 @@ Tool<INPUT, OUTPUT> tool<INPUT, OUTPUT>({
   );
 }
 
+/// Creates a [Schema] from a JSON schema map without deserialization.
+///
+/// Use when you need to pass a schema to [generateText]/[streamText] output
+/// or [tool] but don't need typed deserialization — the raw JSON map is returned.
+/// Mirrors `jsonSchema()` from the JS AI SDK v6.
+Schema<Map<String, dynamic>> jsonSchema(Map<String, dynamic> schema) {
+  return Schema<Map<String, dynamic>>(
+    jsonSchema: schema,
+    fromJson: (json) => json,
+  );
+}
+
 /// Defines a tool with runtime-unknown input (accepts any JSON object).
 ///
 /// Use when the tool input structure is not known at compile time.

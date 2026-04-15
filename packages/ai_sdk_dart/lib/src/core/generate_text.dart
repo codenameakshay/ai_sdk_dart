@@ -336,6 +336,14 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
   int? maxOutputTokens,
   double? temperature,
   double? topP,
+  int? topK,
+  double? presencePenalty,
+  double? frequencyPenalty,
+  List<String> stopSequences = const [],
+  int? seed,
+  Map<String, String>? headers,
+  int maxRetries = 2,
+  List<String> activeToolNames = const [],
   ProviderOptions? providerOptions,
   Output<TOutput>? output,
   ToolSet tools = const {},
@@ -407,7 +415,11 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
     firstRequestMessages ??= List<LanguageModelV3Message>.from(stepMessages);
     final stepProviderOptions =
         prepareResult?.providerOptions ?? providerOptions;
-    final activeTools = _selectActiveTools(tools, prepareResult?.activeTools);
+    final activeTools = _selectActiveTools(
+      tools,
+      prepareResult?.activeTools ??
+          (activeToolNames.isNotEmpty ? activeToolNames : null),
+    );
     final toolSelection = _resolveToolSelection(
       tools: activeTools,
       toolChoice: stepToolChoice,
@@ -424,32 +436,40 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
       ),
     );
 
-    final response = await stepModel.doGenerate(
-      LanguageModelV3CallOptions(
-        prompt: LanguageModelV3Prompt(
-          system: systemInstruction,
-          messages: stepMessages,
-        ),
-        tools: toolSelection.exposedTools.entries
-            .map(
-              (entry) => LanguageModelV3FunctionTool(
-                name: entry.key,
-                description: entry.value.description,
-                inputSchema: entry.value.inputSchema.jsonSchema,
-                strict: entry.value.strict,
-                inputExamples: entry.value.inputExamples
-                    .map((example) => example.input)
-                    .toList(),
-              ),
-            )
-            .toList(),
-        providerDefinedTools: providerDefinedTools,
-        toolChoice: toolSelection.toolChoice,
-        maxOutputTokens: maxOutputTokens,
-        temperature: temperature,
-        topP: topP,
-        providerOptions: stepProviderOptions,
+    final callOptions = LanguageModelV3CallOptions(
+      prompt: LanguageModelV3Prompt(
+        system: systemInstruction,
+        messages: stepMessages,
       ),
+      tools: toolSelection.exposedTools.entries
+          .map(
+            (entry) => LanguageModelV3FunctionTool(
+              name: entry.key,
+              description: entry.value.description,
+              inputSchema: entry.value.inputSchema.jsonSchema,
+              strict: entry.value.strict,
+              inputExamples: entry.value.inputExamples
+                  .map((example) => example.input)
+                  .toList(),
+            ),
+          )
+          .toList(),
+      providerDefinedTools: providerDefinedTools,
+      toolChoice: toolSelection.toolChoice,
+      maxOutputTokens: maxOutputTokens,
+      temperature: temperature,
+      topP: topP,
+      topK: topK,
+      presencePenalty: presencePenalty,
+      frequencyPenalty: frequencyPenalty,
+      stopSequences: stopSequences,
+      seed: seed,
+      headers: headers,
+      providerOptions: stepProviderOptions,
+    );
+    final response = await _withRetry(
+      maxRetries: maxRetries,
+      fn: () => stepModel.doGenerate(callOptions),
     );
 
     _validateToolChoiceInResponse(
@@ -928,6 +948,23 @@ void _safeInvoke(void Function() action) {
   try {
     action();
   } catch (_) {}
+}
+
+/// Retries [fn] up to [maxRetries] times on exception.
+/// If all attempts fail, the last exception is rethrown.
+Future<T> _withRetry<T>({
+  required int maxRetries,
+  required Future<T> Function() fn,
+}) async {
+  var attempts = 0;
+  while (true) {
+    try {
+      return await fn();
+    } catch (e) {
+      attempts++;
+      if (attempts > maxRetries) rethrow;
+    }
+  }
 }
 
 String _contentToText(List<LanguageModelV3ContentPart> content) {

@@ -1,3 +1,16 @@
+## 1.1.0
+
+### New Features
+
+- **`AnthropicThinkingOptions`** — typed options for Claude's extended thinking (reasoning) API.
+  - `budgetTokens` — maximum tokens to allocate for the thinking block.
+  - `enabled` — whether thinking is active (default `true`).
+  - `speed: 'fast'` — convenience shorthand that disables the thinking block for lower-latency responses.
+  - Use via `providerOptions: {'anthropic': AnthropicThinkingOptions(budgetTokens: 5000).toMap()}`.
+- **`AnthropicLanguageModelOptions`** — top-level wrapper for Anthropic provider options; currently wraps `AnthropicThinkingOptions`.
+
+---
+
 ## 1.0.0+1
 
 - Improved pubspec descriptions for better pub.dev discoverability.

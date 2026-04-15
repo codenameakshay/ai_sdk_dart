@@ -1,6 +1,6 @@
 name: ai_sdk_dart
 description: Core AI SDK for Dart with provider-agnostic model APIs.
-version: 1.0.0+1
+version: 1.1.0
 homepage: https://github.com/codenameakshay/ai_sdk_dart
 repository: https://github.com/codenameakshay/ai_sdk_dart
 resolution: workspace
@@ -9,7 +9,7 @@ environment:
   sdk: ^3.11.1
 
 dependencies:
-  ai_sdk_provider: ^1.0.0
+  ai_sdk_provider: ^1.1.0
   collection: ^1.19.1
   dio: ^5.9.0
   meta: ^1.16.0
@@ -17,9 +17,9 @@ dependencies:
   freezed_annotation: ^3.1.0
 
 dev_dependencies:
-  ai_sdk_anthropic: ^1.0.0
+  ai_sdk_anthropic: ^1.1.0
   ai_sdk_google: ^1.0.0
-  ai_sdk_openai: ^1.0.0
+  ai_sdk_openai: ^1.1.0
   build_runner: ^2.5.4
   freezed: ^3.2.3
   json_serializable: ^6.11.1

@@ -72,9 +72,10 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
 ### 🗣️ Text Generation & Streaming
 - `generateText` — single-turn or multi-step text generation with full result envelope
 - `streamText` — real-time token streaming with typed event taxonomy
-- `smoothStream` transform — configurable chunk-size smoothing for UX
+- `smoothStream` transform — configurable chunk-size smoothing; `delayInMs` option adds per-chunk delay for UX pacing
 - Multi-step agentic loops with `maxSteps`, `prepareStep`, and `stopConditions`
-- Callbacks: `onFinish`, `onStepFinish`, `onChunk`, `onError`, `experimentalOnStart`
+- `timeout` parameter on all core functions — apply `Duration` deadlines to any model call
+- Callbacks: `onFinish`, `onStepFinish`, `onChunk`, `onError`, `experimentalOnStart`, `onAbort`
 
 ### 🧩 Structured Output
 - `Output.object(schema)` — parse model output into a typed Dart object
@@ -99,8 +100,9 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
 
 ### 🧮 Embeddings & Cosine Similarity
 - `embed()` — single value embedding with usage tracking
-- `embedMany()` — batch embedding for multiple values
+- `embedMany()` — batch embedding for multiple values with configurable chunk size
 - `cosineSimilarity()` — built-in similarity computation
+- `wrapEmbeddingModel()` — composable middleware pipeline for embedding models
 
 ### 🧱 Middleware System
 - `wrapLanguageModel(model, middlewares)` — composable middleware pipeline
@@ -112,7 +114,9 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
 
 ### 🌐 Provider Registry
 - `createProviderRegistry` — map provider aliases to model factories
+- `customProvider()` — lightweight on-the-fly provider construction without a full registry
 - Resolve models by `'provider:modelId'` string at runtime
+- Supports 6 model categories: language, embedding, image, speech, transcription, rerank
 - Mix providers in a single registry for multi-provider apps
 
 ### 📱 Flutter UI Controllers
@@ -127,9 +131,10 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
 - Discovered tools are directly compatible with `generateText`/`streamText`
 
 ### 🧪 Conformance Suite
-- 178+ tests covering every public API
+- 562+ tests covering every public API
 - Spec-driven JSON fixtures as the source of truth
 - Provider wire-format conformance tests for OpenAI, Anthropic, and Google
+- `MockEmbeddingModelV3` testing utility for embedding model conformance
 
 ---
 
@@ -255,12 +260,14 @@ print(chat.messages.last.content);
 | Text generation | ✅ | ✅ | ✅ |
 | Streaming | ✅ | ✅ | ✅ |
 | Structured output | ✅ | ✅ | ✅ |
+| Native JSON schema output | ✅ | — | — |
 | Tool use | ✅ | ✅ | ✅ |
 | Embeddings | ✅ | — | ✅ |
 | Image generation | ✅ | — | — |
 | Speech synthesis | ✅ | — | — |
 | Transcription | ✅ | — | — |
 | Extended thinking | — | ✅ | — |
+| Reasoning options (`effort`, `summary`) | ✅ | — | — |
 | Multimodal (image input) | ✅ | ✅ | ✅ |
 
 ---
@@ -358,26 +365,27 @@ final client = MCPClient(
 ### ✅ Implemented
 
 - ✅ `generateText` — full result envelope (text, steps, usage, reasoning, sources, files)
-- ✅ `streamText` — complete event taxonomy (22 typed event types)
-- ✅ `generateObject` / structured output (object, array, choice, json)
-- ✅ `embed` / `embedMany` + `cosineSimilarity`
-- ✅ `generateImage` (OpenAI DALL-E 3)
+- ✅ `streamText` — complete event taxonomy (22 typed event types), `onAbort` callback
+- ✅ `generateObject` / structured output (object, array, choice, json) with native JSON schema
+- ✅ `embed` / `embedMany` + `cosineSimilarity`, `wrapEmbeddingModel`
+- ✅ `generateImage` (OpenAI DALL-E 3), `generateVideo`
 - ✅ `generateSpeech` (OpenAI TTS)
 - ✅ `transcribe` (OpenAI Whisper)
 - ✅ `rerank`
+- ✅ `timeout` parameter on all core functions
+- ✅ `customProvider()` for lightweight on-the-fly provider construction
 - ✅ Middleware system with 5 built-in middlewares
-- ✅ Provider registry (`createProviderRegistry`)
+- ✅ Provider registry (`createProviderRegistry`) — 6 model categories
 - ✅ Multi-step agentic loops with tool approval
 - ✅ Flutter UI controllers (Chat, Completion, ObjectStream)
-- ✅ MCP client (SSE + stdio transports)
-- ✅ OpenAI, Anthropic, Google providers
-- ✅ 178+ conformance tests
+- ✅ MCP client (SSE + stdio transports, reconnection, prompts, resources)
+- ✅ OpenAI (with reasoning options), Anthropic (with thinking options), Google providers
+- ✅ Cohere, Mistral, Groq, Ollama, Azure OpenAI providers
+- ✅ 562+ conformance tests
 
 ### 🔜 Planned
 
-- 🔜 Video generation support
-- 🔜 Streaming MCP tool outputs + automatic reconnection
-- 🔜 Cohere / Vertex AI / Mistral / Ollama providers
+- 🔜 Streaming MCP tool outputs
 - 🔜 Additional Flutter widgets (file picker, reasoning display, citation cards)
 - 🔜 Dart Edge / Cloudflare Workers support
 - 🔜 WebSocket transport for MCP

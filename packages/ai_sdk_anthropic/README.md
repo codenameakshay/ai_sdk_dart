@@ -64,6 +64,37 @@ print('Answer   : ${result.text}');
 print('Reasoning: ${result.reasoning.map((r) => r.text).join()}');
 ```
 
+### Thinking options (`AnthropicThinkingOptions`)
+
+For Claude models that support the native `thinking` API block:
+
+```dart
+import 'package:ai_sdk_dart/ai_sdk_dart.dart';
+import 'package:ai_sdk_anthropic/ai_sdk_anthropic.dart';
+
+// Enable thinking with a 5000-token budget
+final result = await generateText(
+  model: anthropic('claude-opus-4-5'),
+  prompt: 'Prove that √2 is irrational.',
+  providerOptions: {
+    'anthropic': AnthropicThinkingOptions(
+      budgetTokens: 5000,
+    ).toMap(),
+  },
+);
+print(result.text);
+
+// Disable thinking for fast, low-latency responses
+final fast = await generateText(
+  model: anthropic('claude-sonnet-4-5'),
+  prompt: 'What is 2 + 2?',
+  providerOptions: {
+    'anthropic': AnthropicThinkingOptions(speed: 'fast').toMap(),
+  },
+);
+print(fast.text);
+```
+
 ### Custom API key
 
 ```dart

@@ -11,27 +11,33 @@
       }
     },
     {
-      "id": "generate-id-default-prefix",
-      "description": "generateId() with no args starts with 'id-'",
+      "id": "generate-id-default-length",
+      "description": "generateId() with no args returns a 7-char nanoid-style string",
       "expected": {
-        "startsWith": "id-"
+        "length": 7
       }
     },
     {
-      "id": "generate-id-custom-prefix",
-      "description": "generateId('msg') returns string starting with 'msg-'",
-      "prefix": "msg",
+      "id": "generate-id-custom-size",
+      "description": "generateId(size: 16) returns a 16-char string",
+      "size": 16,
       "expected": {
-        "startsWith": "msg-"
+        "length": 16
       }
     },
     {
       "id": "create-id-generator",
-      "description": "createIdGenerator(prefix: 'x') returns a function that generates unique 'x-...' IDs",
-      "prefix": "x",
+      "description": "createIdGenerator() returns a function that generates unique IDs",
       "expected": {
-        "startsWith": "x-",
         "uniqueIds": true
+      }
+    },
+    {
+      "id": "create-id-generator-size",
+      "description": "createIdGenerator(size: 12) returns a function producing 12-char IDs",
+      "size": 12,
+      "expected": {
+        "length": 12
       }
     },
     {
@@ -44,11 +50,19 @@
       }
     },
     {
-      "id": "simulate-readable-stream-delay",
-      "description": "simulateReadableStream with delay > Duration.zero adds delay between parts",
-      "delay": "10ms",
+      "id": "simulate-readable-stream-initial-delay",
+      "description": "simulateReadableStream with initialDelayInMs delays only the first chunk",
+      "initialDelayInMs": 20,
       "expected": {
-        "duration >= delay * parts.count": true
+        "firstChunkDelayed": true
+      }
+    },
+    {
+      "id": "simulate-readable-stream-chunk-delay",
+      "description": "simulateReadableStream with chunkDelayInMs adds delay between chunks",
+      "chunkDelayInMs": 10,
+      "expected": {
+        "duration >= chunkDelay * (parts.count - 1)": true
       }
     }
   ]

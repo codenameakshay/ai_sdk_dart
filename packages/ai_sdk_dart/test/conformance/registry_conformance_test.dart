@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
@@ -122,6 +124,87 @@ void main() {
       });
     });
 
+    // ── extended model types ──────────────────────────────────────────────
+
+    group('extended model types (image, speech, transcription, video)', () {
+      late ProviderRegistry registry;
+
+      setUp(() {
+        registry = createProviderRegistry({
+          'fake': RegistrableProvider(
+            languageModelFactory: (id) => FakeTextModel('hi', modelId: id),
+            embeddingModelFactory: (id) => FakeEmbeddingModel([0.1], modelId: id),
+            imageModelFactory: (id) => _FakeImageModel(id),
+            speechModelFactory: (id) => FakeSpeechModel(
+              audio: Uint8List(0),
+              mediaType: 'audio/mpeg',
+              modelId: id,
+            ),
+            transcriptionModelFactory: (id) =>
+                FakeTranscriptionModel('hello', modelId: id),
+            videoModelFactory: (id) => _FakeVideoModel(id),
+          ),
+          'no-extras': RegistrableProvider(
+            languageModelFactory: (id) => FakeTextModel('hi'),
+            embeddingModelFactory: (id) => FakeEmbeddingModel([0.1]),
+          ),
+        });
+      });
+
+      test('resolves image model by provider:modelId', () {
+        final model = registry.imageModel('fake:dall-e-3');
+        expect(model, isA<ImageModelV3>());
+        expect(model.modelId, 'dall-e-3');
+      });
+
+      test('resolves speech model by provider:modelId', () {
+        final model = registry.speechModel('fake:tts-1');
+        expect(model, isA<SpeechModelV1>());
+        expect(model.modelId, 'tts-1');
+      });
+
+      test('resolves transcription model by provider:modelId', () {
+        final model = registry.transcriptionModel('fake:whisper-1');
+        expect(model, isA<TranscriptionModelV1>());
+        expect(model.modelId, 'whisper-1');
+      });
+
+      test('resolves video model by provider:modelId', () {
+        final model = registry.videoModel('fake:video-gen');
+        expect(model, isA<VideoModelV1>());
+        expect(model.modelId, 'video-gen');
+      });
+
+      test('throws UnsupportedError when imageModelFactory not registered', () {
+        expect(
+          () => registry.imageModel('no-extras:dall-e-3'),
+          throwsA(isA<UnsupportedError>()),
+        );
+      });
+
+      test('throws UnsupportedError when speechModelFactory not registered', () {
+        expect(
+          () => registry.speechModel('no-extras:tts-1'),
+          throwsA(isA<UnsupportedError>()),
+        );
+      });
+
+      test('throws UnsupportedError when transcriptionModelFactory not set',
+          () {
+        expect(
+          () => registry.transcriptionModel('no-extras:whisper-1'),
+          throwsA(isA<UnsupportedError>()),
+        );
+      });
+
+      test('throws UnsupportedError when videoModelFactory not registered', () {
+        expect(
+          () => registry.videoModel('no-extras:vgen'),
+          throwsA(isA<UnsupportedError>()),
+        );
+      });
+    });
+
     // ── RegistrableProvider ───────────────────────────────────────────────
 
     group('RegistrableProvider', () {
@@ -137,6 +220,47 @@ void main() {
           isA<EmbeddingModelV2<String>>(),
         );
       });
+
+      test('optional model factories default to null', () {
+        final provider = RegistrableProvider(
+          languageModelFactory: (id) => FakeTextModel('hi'),
+          embeddingModelFactory: (id) => FakeEmbeddingModel([0.1]),
+        );
+        expect(provider.imageModelFactory, isNull);
+        expect(provider.speechModelFactory, isNull);
+        expect(provider.transcriptionModelFactory, isNull);
+        expect(provider.videoModelFactory, isNull);
+      });
     });
   });
+}
+
+class _FakeImageModel implements ImageModelV3 {
+  _FakeImageModel(this.modelId);
+  @override
+  final String modelId;
+  @override
+  String get provider => 'fake';
+  @override
+  String get specificationVersion => 'v3';
+  @override
+  Future<ImageModelV3GenerateResult> doGenerate(
+    ImageModelV3CallOptions options,
+  ) async =>
+      const ImageModelV3GenerateResult(images: []);
+}
+
+class _FakeVideoModel implements VideoModelV1 {
+  _FakeVideoModel(this.modelId);
+  @override
+  final String modelId;
+  @override
+  String get provider => 'fake';
+  @override
+  String get specificationVersion => 'v1';
+  @override
+  Future<VideoModelV1GenerateResult> doGenerate(
+    VideoModelV1CallOptions options,
+  ) async =>
+      const VideoModelV1GenerateResult(videos: []);
 }

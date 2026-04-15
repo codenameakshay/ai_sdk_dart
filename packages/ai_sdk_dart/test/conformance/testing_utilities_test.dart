@@ -133,6 +133,64 @@ void main() {
       });
     });
 
+    // ── MockEmbeddingModelV3 ─────────────────────────────────────────────
+
+    group('MockEmbeddingModelV3', () {
+      test('returns configured embedding vector via embed()', () async {
+        final model = MockEmbeddingModelV3<String>(
+          embedding: [0.4, 0.5, 0.6],
+        );
+        final result = await embed(model: model, value: 'hello');
+        expect(result.embedding, [0.4, 0.5, 0.6]);
+      });
+
+      test('specificationVersion is v2 (underlying spec)', () {
+        final model = MockEmbeddingModelV3<String>(embedding: [0.1]);
+        expect(model.specificationVersion, 'v2');
+      });
+
+      test('records calls in embedCalls list', () async {
+        final model = MockEmbeddingModelV3<String>(embedding: [0.1, 0.2]);
+        await embed(model: model, value: 'first');
+        await embed(model: model, value: 'second');
+        expect(model.embedCalls.length, 2);
+      });
+
+      test('throws doEmbedError when configured', () {
+        final model = MockEmbeddingModelV3<String>(
+          embedding: [],
+          doEmbedError: Exception('v3 embed error'),
+        );
+        expect(
+          () => embed(model: model, value: 'hi'),
+          throwsA(isA<Exception>()),
+        );
+      });
+
+      test('returns same vector for all inputs via doEmbed', () async {
+        final model = MockEmbeddingModelV3<String>(embedding: [9.0, 8.0]);
+        final raw = await model.doEmbed(
+          const EmbeddingModelV2CallOptions(values: ['x', 'y']),
+        );
+        expect(raw.embeddings.length, 2);
+        for (final e in raw.embeddings) {
+          expect(e.embedding, [9.0, 8.0]);
+        }
+      });
+
+      test('works with embedMany()', () async {
+        final model = MockEmbeddingModelV3<String>(embedding: [0.7, 0.8]);
+        final result = await embedMany(
+          model: model,
+          values: ['a', 'b', 'c'],
+        );
+        expect(result.embeddings, hasLength(3));
+        for (final e in result.embeddings) {
+          expect(e.embedding, [0.7, 0.8]);
+        }
+      });
+    });
+
     // ── MockImageModelV3 ─────────────────────────────────────────────────
 
     group('MockImageModelV3', () {

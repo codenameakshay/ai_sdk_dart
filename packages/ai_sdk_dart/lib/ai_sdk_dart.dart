@@ -18,5 +18,6 @@ export 'src/middleware/language_model_middleware.dart';
 export 'src/output/output.dart';
 export 'src/registry/provider_registry.dart';
 export 'src/stop_conditions/stop_conditions.dart';
+export 'src/telemetry/telemetry.dart';
 export 'src/tools/tool.dart';
 export 'src/utils/utils.dart';

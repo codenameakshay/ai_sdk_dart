@@ -7,6 +7,7 @@ import '../errors/ai_errors.dart';
 import '../messages/model_message.dart';
 import '../output/output.dart';
 import '../stop_conditions/stop_conditions.dart';
+import '../telemetry/telemetry.dart';
 import '../tools/tool.dart';
 
 /// Callback invoked after each step finishes in multi-step generation.
@@ -361,7 +362,19 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
   GenerateTextExperimentalOnStepStart? experimentalOnStepStart,
   GenerateTextExperimentalOnToolCallStart? experimentalOnToolCallStart,
   GenerateTextExperimentalOnToolCallFinish? experimentalOnToolCallFinish,
+  TelemetrySettings? experimentalTelemetry,
 }) async {
+  final telemetrySpan = startTelemetrySpan(
+    experimentalTelemetry,
+    spanName: 'ai.generateText',
+    attributes: {
+      'ai.model.provider': model.provider,
+      'ai.model.id': model.modelId,
+      if (prompt != null) 'ai.prompt': prompt,
+    },
+  );
+
+  try {
   final outputSpec = output ?? (Output.text() as Output<TOutput>);
   var normalizedMessages = <LanguageModelV3Message>[
     if (prompt != null)
@@ -646,7 +659,22 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
     ),
   );
 
+  telemetrySpan
+    ..setAttribute('ai.usage.promptTokens', result.totalUsage?.inputTokens ?? 0)
+    ..setAttribute(
+      'ai.usage.completionTokens',
+      result.totalUsage?.outputTokens ?? 0,
+    )
+    ..setAttribute('ai.finishReason', result.finishReason?.name ?? 'unknown')
+    ..end();
+
   return result;
+  } catch (e, st) {
+    telemetrySpan
+      ..recordException(e, stackTrace: st)
+      ..end(error: e);
+    rethrow;
+  }
 }
 
 class _ToolSelection {

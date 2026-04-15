@@ -7,6 +7,7 @@ import '../errors/ai_errors.dart';
 import '../messages/model_message.dart';
 import '../output/output.dart';
 import '../stop_conditions/stop_conditions.dart';
+import '../telemetry/telemetry.dart';
 import '../tools/tool.dart';
 import 'generate_text.dart';
 
@@ -493,7 +494,18 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   GenerateTextExperimentalOnStepStart? experimentalOnStepStart,
   GenerateTextExperimentalOnToolCallStart? experimentalOnToolCallStart,
   GenerateTextExperimentalOnToolCallFinish? experimentalOnToolCallFinish,
+  TelemetrySettings? experimentalTelemetry,
 }) async {
+  final telemetrySpan = startTelemetrySpan(
+    experimentalTelemetry,
+    spanName: 'ai.streamText',
+    attributes: {
+      'ai.model.provider': model.provider,
+      'ai.model.id': model.modelId,
+      if (prompt != null) 'ai.prompt': prompt,
+    },
+  );
+
   final outputSpec = output ?? (Output.text() as Output<TOutput>);
   var normalizedMessages = <LanguageModelV3Message>[
     if (prompt != null)
@@ -1264,6 +1276,20 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
       }
     }),
   );
+
+  // End the telemetry span when the stream fully finishes.
+  finishCompleter.future.then((_) {
+    totalUsageCompleter.future.then((usage) {
+      telemetrySpan
+        ..setAttribute('ai.usage.promptTokens', usage?.inputTokens ?? 0)
+        ..setAttribute('ai.usage.completionTokens', usage?.outputTokens ?? 0)
+        ..end();
+    }, onError: (_) => telemetrySpan.end());
+  }, onError: (Object e, StackTrace st) {
+    telemetrySpan
+      ..recordException(e, stackTrace: st)
+      ..end(error: e);
+  });
 
   return StreamTextResult<TOutput>(
     stream: rawController.stream,

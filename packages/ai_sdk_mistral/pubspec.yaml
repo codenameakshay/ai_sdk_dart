@@ -1,0 +1,17 @@
+name: ai_sdk_mistral
+description: Mistral AI provider for AI SDK Dart. Use Mistral models for text generation and embeddings.
+version: 1.0.0
+homepage: https://github.com/codenameakshay/ai_sdk_dart
+repository: https://github.com/codenameakshay/ai_sdk_dart
+resolution: workspace
+
+environment:
+  sdk: ^3.11.1
+
+dependencies:
+  ai_sdk_provider: ^1.0.0
+  dio: ^5.9.0
+
+dev_dependencies:
+  lints: ^6.1.0
+  test: ^1.25.0

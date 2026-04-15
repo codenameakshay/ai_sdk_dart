@@ -15,4 +15,5 @@ library ai_sdk_dart_test;
 export 'src/testing/mock_language_model_v3.dart';
 export 'src/testing/mock_embedding_model_v2.dart';
 export 'src/testing/mock_image_model_v3.dart';
+export 'src/testing/mock_video_model_v1.dart';
 export 'src/testing/mock_values.dart';

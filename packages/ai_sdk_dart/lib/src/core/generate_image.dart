@@ -34,8 +34,9 @@ Future<GenerateImageResult> generateImage({
   String? size,
   String? aspectRatio,
   int? seed,
+  Duration? timeout,
 }) async {
-  final result = await model.doGenerate(
+  final call = model.doGenerate(
     ImageModelV3CallOptions(
       prompt: prompt,
       n: n,
@@ -44,6 +45,7 @@ Future<GenerateImageResult> generateImage({
       seed: seed,
     ),
   );
+  final result = await (timeout != null ? call.timeout(timeout) : call);
 
   return GenerateImageResult(images: result.images, usage: result.usage);
 }

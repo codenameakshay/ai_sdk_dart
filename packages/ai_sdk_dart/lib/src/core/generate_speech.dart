@@ -26,8 +26,9 @@ Future<GenerateSpeechResult> generateSpeech({
   double? speed,
   Map<String, String>? headers,
   ProviderOptions? providerOptions,
+  Duration? timeout,
 }) async {
-  final result = await model.doGenerate(
+  final call = model.doGenerate(
     SpeechModelV1CallOptions(
       text: text,
       voice: voice,
@@ -37,5 +38,6 @@ Future<GenerateSpeechResult> generateSpeech({
       providerOptions: providerOptions,
     ),
   );
+  final result = await (timeout != null ? call.timeout(timeout) : call);
   return GenerateSpeechResult(audio: result.audio, mediaType: result.mediaType);
 }

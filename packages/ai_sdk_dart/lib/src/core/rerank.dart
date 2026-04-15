@@ -54,8 +54,9 @@ Future<RerankResult> rerank({
   int? topN,
   Map<String, String>? headers,
   ProviderOptions? providerOptions,
+  Duration? timeout,
 }) async {
-  final result = await model.doRerank(
+  final call = model.doRerank(
     RerankModelV1CallOptions(
       query: query,
       documents: documents,
@@ -64,6 +65,7 @@ Future<RerankResult> rerank({
       providerOptions: providerOptions,
     ),
   );
+  final result = await (timeout != null ? call.timeout(timeout) : call);
 
   return RerankResult(
     documents: result.documents

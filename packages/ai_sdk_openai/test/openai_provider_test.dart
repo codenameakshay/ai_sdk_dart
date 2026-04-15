@@ -461,6 +461,263 @@ void main() {
       );
     });
 
+    // ── OpenAILanguageModelOptions / reasoning ────────────────────────────
+
+    group('OpenAILanguageModelOptions', () {
+      test('toMap serialises reasoning_effort and reasoning_summary', () {
+        final opts = const OpenAILanguageModelOptions(
+          reasoningEffort: 'high',
+          reasoningSummary: 'concise',
+        );
+        final map = opts.toMap();
+        expect(map['reasoning_effort'], 'high');
+        expect(map['reasoning_summary'], 'concise');
+      });
+
+      test('toMap omits null fields', () {
+        final opts = const OpenAILanguageModelOptions(reasoningEffort: 'low');
+        final map = opts.toMap();
+        expect(map.containsKey('reasoning_summary'), isFalse);
+      });
+
+      test('doGenerate sends reasoning_effort from snake_case providerOptions',
+          () async {
+        late Map<String, dynamic> captured;
+        final server = await _TestServer.start((request) async {
+          final body = await utf8.decoder.bind(request).join();
+          captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'choices': [
+                {'finish_reason': 'stop', 'message': {'content': 'ok'}},
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = OpenAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('o3-mini');
+        await model.doGenerate(
+          LanguageModelV3CallOptions(
+            prompt: LanguageModelV3Prompt(
+              messages: [
+                LanguageModelV3Message(
+                  role: LanguageModelV3Role.user,
+                  content: [LanguageModelV3TextPart(text: 'hi')],
+                ),
+              ],
+            ),
+            providerOptions: const {
+              'openai': {'reasoning_effort': 'high'},
+            },
+          ),
+        );
+
+        expect(captured['reasoning_effort'], 'high');
+      });
+
+      test('doGenerate sends reasoning_effort from typed options class',
+          () async {
+        late Map<String, dynamic> captured;
+        final server = await _TestServer.start((request) async {
+          final body = await utf8.decoder.bind(request).join();
+          captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'choices': [
+                {'finish_reason': 'stop', 'message': {'content': 'ok'}},
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = OpenAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('o3-mini');
+        await model.doGenerate(
+          LanguageModelV3CallOptions(
+            prompt: LanguageModelV3Prompt(
+              messages: [
+                LanguageModelV3Message(
+                  role: LanguageModelV3Role.user,
+                  content: [LanguageModelV3TextPart(text: 'hi')],
+                ),
+              ],
+            ),
+            providerOptions: {
+              'openai': const OpenAILanguageModelOptions(
+                reasoningEffort: 'medium',
+                reasoningSummary: 'auto',
+              ).toMap(),
+            },
+          ),
+        );
+
+        expect(captured['reasoning_effort'], 'medium');
+        expect(captured['reasoning_summary'], 'auto');
+        // camelCase keys must NOT appear in the request
+        expect(captured.containsKey('reasoningEffort'), isFalse);
+      });
+
+      test('doGenerate converts camelCase reasoningEffort to snake_case',
+          () async {
+        late Map<String, dynamic> captured;
+        final server = await _TestServer.start((request) async {
+          final body = await utf8.decoder.bind(request).join();
+          captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'choices': [
+                {'finish_reason': 'stop', 'message': {'content': 'ok'}},
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = OpenAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('o3-mini');
+        await model.doGenerate(
+          LanguageModelV3CallOptions(
+            prompt: LanguageModelV3Prompt(
+              messages: [
+                LanguageModelV3Message(
+                  role: LanguageModelV3Role.user,
+                  content: [LanguageModelV3TextPart(text: 'hi')],
+                ),
+              ],
+            ),
+            providerOptions: const {
+              'openai': {'reasoningEffort': 'low'},
+            },
+          ),
+        );
+
+        expect(captured['reasoning_effort'], 'low');
+        expect(captured.containsKey('reasoningEffort'), isFalse);
+      });
+    });
+
+    // ── outputSchema / response_format: json_schema ──────────────────────
+
+    group('outputSchema (native structured output)', () {
+      test('doGenerate sends response_format json_schema when outputSchema set',
+          () async {
+        late Map<String, dynamic> captured;
+        final server = await _TestServer.start((request) async {
+          final body = await utf8.decoder.bind(request).join();
+          captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'choices': [
+                {
+                  'finish_reason': 'stop',
+                  'message': {
+                    'content': '{"city":"Paris","tempC":21}',
+                  },
+                },
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = OpenAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('gpt-4o-mini');
+        await model.doGenerate(
+          LanguageModelV3CallOptions(
+            prompt: LanguageModelV3Prompt(
+              messages: [
+                LanguageModelV3Message(
+                  role: LanguageModelV3Role.user,
+                  content: [LanguageModelV3TextPart(text: 'weather in Paris')],
+                ),
+              ],
+            ),
+            outputSchema: const {
+              'type': 'object',
+              'properties': {
+                'city': {'type': 'string'},
+                'tempC': {'type': 'number'},
+              },
+              'required': ['city', 'tempC'],
+            },
+          ),
+        );
+
+        final responseFormat =
+            captured['response_format'] as Map<String, dynamic>?;
+        expect(responseFormat, isNotNull);
+        expect(responseFormat!['type'], 'json_schema');
+        final jsonSchema =
+            responseFormat['json_schema'] as Map<String, dynamic>?;
+        expect(jsonSchema, isNotNull);
+        expect(jsonSchema!['name'], 'response');
+        expect(jsonSchema['strict'], isTrue);
+        expect(jsonSchema['schema'], isA<Map>());
+      });
+
+      test('doGenerate does NOT send response_format when outputSchema is null',
+          () async {
+        late Map<String, dynamic> captured;
+        final server = await _TestServer.start((request) async {
+          final body = await utf8.decoder.bind(request).join();
+          captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'choices': [
+                {'finish_reason': 'stop', 'message': {'content': 'ok'}},
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = OpenAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('gpt-4o-mini');
+        await model.doGenerate(
+          LanguageModelV3CallOptions(
+            prompt: LanguageModelV3Prompt(
+              messages: [
+                LanguageModelV3Message(
+                  role: LanguageModelV3Role.user,
+                  content: [LanguageModelV3TextPart(text: 'hi')],
+                ),
+              ],
+            ),
+          ),
+        );
+
+        expect(captured.containsKey('response_format'), isFalse);
+      });
+    });
+
     test('maps multimodal content and tool result messages', () async {
       final imageB64 = base64Encode(utf8.encode('img'));
       final audioB64 = base64Encode(utf8.encode('audio'));

@@ -6,8 +6,8 @@ OpenAI provider for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart). Support
 
 ```yaml
 dependencies:
-  ai_sdk_dart: ^1.0.0
-  ai_sdk_openai: ^1.0.0
+  ai_sdk_dart: ^1.1.0
+  ai_sdk_openai: ^1.1.0
 ```
 
 ## Usage
@@ -63,6 +63,49 @@ final result = await generateImage(
   model: openai.image('dall-e-3'),
   prompt: 'A futuristic city at sunset.',
 );
+```
+
+### Reasoning models (o1, o3, o4-mini)
+
+```dart
+import 'package:ai_sdk_dart/ai_sdk_dart.dart';
+import 'package:ai_sdk_openai/ai_sdk_openai.dart';
+
+final result = await generateText(
+  model: openai('o4-mini'),
+  prompt: 'Solve the Tower of Hanoi for 4 disks.',
+  providerOptions: {
+    'openai': OpenAILanguageModelOptions(
+      reasoningEffort: 'high',
+      reasoningSummary: 'detailed',
+    ).toMap(),
+  },
+);
+print(result.text);
+```
+
+### Native structured output
+
+When using `generateObject` or `Output.object()` with `generateText`, the OpenAI provider
+automatically uses `response_format: json_schema` for schema-validated responses:
+
+```dart
+final result = await generateObject(
+  model: openai('gpt-4.1-mini'),
+  schema: Schema<Map<String, dynamic>>(
+    jsonSchema: const {
+      'type': 'object',
+      'properties': {
+        'city': {'type': 'string'},
+        'country': {'type': 'string'},
+      },
+      'required': ['city', 'country'],
+    },
+    fromJson: (json) => json,
+  ),
+  prompt: 'Capital of France?',
+);
+print(result.object); // {city: Paris, country: France}
 ```
 
 ### Custom API key / base URL

@@ -6,8 +6,8 @@ Google Generative AI provider for [AI SDK Dart](https://pub.dev/packages/ai_sdk_
 
 ```yaml
 dependencies:
-  ai_sdk_dart: ^1.0.0
-  ai_sdk_google: ^1.0.0
+  ai_sdk_dart: ^1.1.0
+  ai_sdk_google: ^1.1.0
 ```
 
 ## Usage

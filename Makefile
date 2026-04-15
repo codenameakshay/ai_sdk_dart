@@ -9,23 +9,24 @@
 #   export ANTHROPIC_API_KEY=sk-ant-...
 #   export GOOGLE_API_KEY=AIza...
 #
-#   make get           # install all workspace dependencies
-#   make run           # run the Flutter chat example on the default device
-#   make run-web       # run on Chrome
-#   make run-advanced  # run the advanced app on the default device
+#   make get               # install all workspace dependencies
+#   make run               # run the Flutter chat example on the default device
+#   make run-web           # run on Chrome
+#   make run-advanced      # run the advanced app on the default device
 #   make run-advanced-web  # run the advanced app on Chrome
-#   make run-basic     # run the Dart CLI example
-#   make test          # run all package tests
-#   make analyze       # dart analyze across all packages
-#   make format        # dart format across all packages
+#   make run-basic         # run the Dart CLI example
+#   make test              # run all package tests
+#   make analyze           # dart analyze across all packages
+#   make format            # dart format across all packages
+#   make dry-run           # pub publish --dry-run for all packages
 # ──────────────────────────────────────────────────────────────────────────────
 
 FLUTTER   := fvm flutter
 DART      := fvm dart
 
-FLUTTER_APP := examples/flutter_chat
+FLUTTER_APP  := examples/flutter_chat
 ADVANCED_APP := examples/advanced_app
-DART_APP    := examples/basic
+DART_APP     := examples/basic
 
 # Build --dart-define flags from env vars (only included when the var is set)
 DART_DEFINES :=
@@ -39,7 +40,8 @@ ifdef GOOGLE_API_KEY
   DART_DEFINES += --dart-define=GOOGLE_API_KEY=$(GOOGLE_API_KEY)
 endif
 
-.PHONY: all get run run-web run-advanced run-advanced-web run-basic test analyze format clean help
+.PHONY: all get run run-web run-advanced run-advanced-web run-basic \
+        test analyze format dry-run publish clean help
 
 all: help
 
@@ -49,7 +51,7 @@ all: help
 get:
 	$(FLUTTER) pub get
 
-# ── Run ──────────────────────────────────────────────────────────────────────
+# ── Run ───────────────────────────────────────────────────────────────────────
 
 ## Run the Flutter chat example on the default connected device
 run:
@@ -80,57 +82,90 @@ run-basic:
 
 ## Run tests across all packages
 test:
-	$(DART) test packages/ai/test/
+	$(DART) test packages/ai_sdk_dart/test/
+	$(DART) test packages/ai_sdk_provider/test/
 	$(DART) test packages/ai_sdk_openai/test/
 	$(DART) test packages/ai_sdk_anthropic/test/
 	$(DART) test packages/ai_sdk_google/test/
+	$(DART) test packages/ai_sdk_azure/test/
+	$(DART) test packages/ai_sdk_cohere/test/
+	$(DART) test packages/ai_sdk_groq/test/
+	$(DART) test packages/ai_sdk_mistral/test/
+	$(DART) test packages/ai_sdk_ollama/test/
+	$(DART) test packages/ai_sdk_mcp/test/
 	$(FLUTTER) test $(FLUTTER_APP)/
 	$(FLUTTER) test $(ADVANCED_APP)/
 
 ## Run dart analyze across all packages
 analyze:
-	$(DART) analyze packages/ai/
+	$(DART) analyze packages/ai_sdk_dart/
 	$(DART) analyze packages/ai_sdk_provider/
 	$(DART) analyze packages/ai_sdk_openai/
 	$(DART) analyze packages/ai_sdk_anthropic/
 	$(DART) analyze packages/ai_sdk_google/
+	$(DART) analyze packages/ai_sdk_azure/
+	$(DART) analyze packages/ai_sdk_cohere/
+	$(DART) analyze packages/ai_sdk_groq/
+	$(DART) analyze packages/ai_sdk_mistral/
+	$(DART) analyze packages/ai_sdk_ollama/
 	$(DART) analyze packages/ai_sdk_mcp/
+	$(FLUTTER) analyze packages/ai_sdk_flutter_ui/
 	$(FLUTTER) analyze $(FLUTTER_APP)/
 	$(FLUTTER) analyze $(ADVANCED_APP)/
-	$(FLUTTER) analyze packages/ai_sdk_flutter/
 
 ## Format all Dart source files
 format:
 	$(DART) format packages/ examples/
 
-# ── Publish dry-runs ─────────────────────────────────────────────────────────
+# ── Publish ───────────────────────────────────────────────────────────────────
 
 ## Dry-run publish for all packages (checks pub.dev readiness)
 dry-run:
 	$(DART) pub publish --dry-run -C packages/ai_sdk_provider
-	$(DART) pub publish --dry-run -C packages/ai
+	$(DART) pub publish --dry-run -C packages/ai_sdk_dart
 	$(DART) pub publish --dry-run -C packages/ai_sdk_openai
 	$(DART) pub publish --dry-run -C packages/ai_sdk_anthropic
 	$(DART) pub publish --dry-run -C packages/ai_sdk_google
+	$(DART) pub publish --dry-run -C packages/ai_sdk_azure
+	$(DART) pub publish --dry-run -C packages/ai_sdk_cohere
+	$(DART) pub publish --dry-run -C packages/ai_sdk_groq
+	$(DART) pub publish --dry-run -C packages/ai_sdk_mistral
+	$(DART) pub publish --dry-run -C packages/ai_sdk_ollama
 	$(DART) pub publish --dry-run -C packages/ai_sdk_mcp
-	$(FLUTTER) pub publish --dry-run -C packages/ai_sdk_flutter
+	$(FLUTTER) pub publish --dry-run -C packages/ai_sdk_flutter_ui
 
-# ── Help ─────────────────────────────────────────────────────────────────────
+## Publish all packages to pub.dev (run dry-run first to verify)
+publish:
+	$(DART) pub publish -C packages/ai_sdk_provider
+	$(DART) pub publish -C packages/ai_sdk_dart
+	$(DART) pub publish -C packages/ai_sdk_openai
+	$(DART) pub publish -C packages/ai_sdk_anthropic
+	$(DART) pub publish -C packages/ai_sdk_google
+	$(DART) pub publish -C packages/ai_sdk_azure
+	$(DART) pub publish -C packages/ai_sdk_cohere
+	$(DART) pub publish -C packages/ai_sdk_groq
+	$(DART) pub publish -C packages/ai_sdk_mistral
+	$(DART) pub publish -C packages/ai_sdk_ollama
+	$(DART) pub publish -C packages/ai_sdk_mcp
+	$(FLUTTER) pub publish -C packages/ai_sdk_flutter_ui
+
+# ── Help ──────────────────────────────────────────────────────────────────────
 
 help:
 	@echo ""
 	@echo "AI SDK Dart — available targets:"
 	@echo ""
-	@echo "  make get          Install all workspace dependencies"
-	@echo "  make run          Run Flutter chat app on default device"
-	@echo "  make run-web      Run Flutter chat app on Chrome"
-	@echo "  make run-advanced Run advanced app on default device"
+	@echo "  make get               Install all workspace dependencies"
+	@echo "  make run               Run Flutter chat app on default device"
+	@echo "  make run-web           Run Flutter chat app on Chrome"
+	@echo "  make run-advanced      Run advanced app on default device"
 	@echo "  make run-advanced-web  Run advanced app on Chrome"
-	@echo "  make run-basic    Run Dart CLI example"
-	@echo "  make test         Run all package tests"
-	@echo "  make analyze      Run dart analyze across all packages"
-	@echo "  make format       Format all Dart source files"
-	@echo "  make dry-run      pub publish --dry-run for all packages"
+	@echo "  make run-basic         Run Dart CLI example"
+	@echo "  make test              Run all package tests"
+	@echo "  make analyze           Run dart analyze across all packages"
+	@echo "  make format            Format all Dart source files"
+	@echo "  make dry-run           pub publish --dry-run for all packages"
+	@echo "  make publish           pub publish for all packages (run dry-run first)"
 	@echo ""
 	@echo "  Required env vars (set before running):"
 	@echo "    OPENAI_API_KEY       OpenAI API key"

@@ -2,10 +2,15 @@
 
 **A Dart/Flutter port of [Vercel AI SDK v6](https://sdk.vercel.ai) — provider-agnostic APIs for text generation, streaming, structured output, tool use, embeddings, image generation, speech, and more.**
 
-[![ai_sdk_dart pub.dev](https://img.shields.io/pub/v/ai_sdk_dart.svg?label=ai_sdk_dart)](https://pub.dev/packages/ai)
+[![ai_sdk_dart pub.dev](https://img.shields.io/pub/v/ai_sdk_dart.svg?label=ai_sdk_dart)](https://pub.dev/packages/ai_sdk_dart)
 [![ai_sdk_openai pub.dev](https://img.shields.io/pub/v/ai_sdk_openai.svg?label=ai_sdk_openai)](https://pub.dev/packages/ai_sdk_openai)
 [![ai_sdk_anthropic pub.dev](https://img.shields.io/pub/v/ai_sdk_anthropic.svg?label=ai_sdk_anthropic)](https://pub.dev/packages/ai_sdk_anthropic)
 [![ai_sdk_google pub.dev](https://img.shields.io/pub/v/ai_sdk_google.svg?label=ai_sdk_google)](https://pub.dev/packages/ai_sdk_google)
+[![ai_sdk_azure pub.dev](https://img.shields.io/pub/v/ai_sdk_azure.svg?label=ai_sdk_azure)](https://pub.dev/packages/ai_sdk_azure)
+[![ai_sdk_cohere pub.dev](https://img.shields.io/pub/v/ai_sdk_cohere.svg?label=ai_sdk_cohere)](https://pub.dev/packages/ai_sdk_cohere)
+[![ai_sdk_groq pub.dev](https://img.shields.io/pub/v/ai_sdk_groq.svg?label=ai_sdk_groq)](https://pub.dev/packages/ai_sdk_groq)
+[![ai_sdk_mistral pub.dev](https://img.shields.io/pub/v/ai_sdk_mistral.svg?label=ai_sdk_mistral)](https://pub.dev/packages/ai_sdk_mistral)
+[![ai_sdk_ollama pub.dev](https://img.shields.io/pub/v/ai_sdk_ollama.svg?label=ai_sdk_ollama)](https://pub.dev/packages/ai_sdk_ollama)
 [![ai_sdk_flutter_ui pub.dev](https://img.shields.io/pub/v/ai_sdk_flutter_ui.svg?label=ai_sdk_flutter_ui)](https://pub.dev/packages/ai_sdk_flutter_ui)
 [![ai_sdk_mcp pub.dev](https://img.shields.io/pub/v/ai_sdk_mcp.svg?label=ai_sdk_mcp)](https://pub.dev/packages/ai_sdk_mcp)
 [![ai_sdk_provider pub.dev](https://img.shields.io/pub/v/ai_sdk_provider.svg?label=ai_sdk_provider)](https://pub.dev/packages/ai_sdk_provider)
@@ -72,9 +77,10 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
 ### 🗣️ Text Generation & Streaming
 - `generateText` — single-turn or multi-step text generation with full result envelope
 - `streamText` — real-time token streaming with typed event taxonomy
-- `smoothStream` transform — configurable chunk-size smoothing for UX
+- `smoothStream` transform — configurable chunk-size smoothing; `delayInMs` option adds per-chunk delay for UX pacing
 - Multi-step agentic loops with `maxSteps`, `prepareStep`, and `stopConditions`
-- Callbacks: `onFinish`, `onStepFinish`, `onChunk`, `onError`, `experimentalOnStart`
+- `timeout` parameter on all core functions — apply `Duration` deadlines to any model call
+- Callbacks: `onFinish`, `onStepFinish`, `onChunk`, `onError`, `experimentalOnStart`, `onAbort`
 
 ### 🧩 Structured Output
 - `Output.object(schema)` — parse model output into a typed Dart object
@@ -99,8 +105,9 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
 
 ### 🧮 Embeddings & Cosine Similarity
 - `embed()` — single value embedding with usage tracking
-- `embedMany()` — batch embedding for multiple values
+- `embedMany()` — batch embedding for multiple values with configurable chunk size
 - `cosineSimilarity()` — built-in similarity computation
+- `wrapEmbeddingModel()` — composable middleware pipeline for embedding models
 
 ### 🧱 Middleware System
 - `wrapLanguageModel(model, middlewares)` — composable middleware pipeline
@@ -112,7 +119,9 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
 
 ### 🌐 Provider Registry
 - `createProviderRegistry` — map provider aliases to model factories
+- `customProvider()` — lightweight on-the-fly provider construction without a full registry
 - Resolve models by `'provider:modelId'` string at runtime
+- Supports 6 model categories: language, embedding, image, speech, transcription, rerank
 - Mix providers in a single registry for multi-provider apps
 
 ### 📱 Flutter UI Controllers
@@ -127,9 +136,10 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
 - Discovered tools are directly compatible with `generateText`/`streamText`
 
 ### 🧪 Conformance Suite
-- 178+ tests covering every public API
+- 562+ tests covering every public API
 - Spec-driven JSON fixtures as the source of truth
 - Provider wire-format conformance tests for OpenAI, Anthropic, and Google
+- `MockEmbeddingModelV3` testing utility for embedding model conformance
 
 ---
 
@@ -137,10 +147,15 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
 
 | Package | pub.dev | What it gives you |
 |---------|---------|-------------------|
-| [`ai_sdk_dart`](https://pub.dev/packages/ai_sdk_dart) | `dart pub add ai` | `generateText`, `streamText`, tools, middleware, embeddings, registry |
-| [`ai_sdk_openai`](https://pub.dev/packages/ai_sdk_openai) | `dart pub add ai_sdk_openai` | `openai('gpt-4.1-mini')`, embeddings, image gen, speech, transcription |
-| [`ai_sdk_anthropic`](https://pub.dev/packages/ai_sdk_anthropic) | `dart pub add ai_sdk_anthropic` | `anthropic('claude-sonnet-4-5')`, extended thinking |
+| [`ai_sdk_dart`](https://pub.dev/packages/ai_sdk_dart) | `dart pub add ai_sdk_dart` | `generateText`, `streamText`, tools, middleware, embeddings, registry |
+| [`ai_sdk_openai`](https://pub.dev/packages/ai_sdk_openai) | `dart pub add ai_sdk_openai` | `openai('gpt-4.1-mini')`, embeddings, image gen, speech, transcription, reasoning options |
+| [`ai_sdk_anthropic`](https://pub.dev/packages/ai_sdk_anthropic) | `dart pub add ai_sdk_anthropic` | `anthropic('claude-sonnet-4-5')`, extended thinking, speed options |
 | [`ai_sdk_google`](https://pub.dev/packages/ai_sdk_google) | `dart pub add ai_sdk_google` | `google('gemini-2.0-flash')`, embeddings |
+| [`ai_sdk_azure`](https://pub.dev/packages/ai_sdk_azure) | `dart pub add ai_sdk_azure` | `AzureOpenAIProvider(endpoint, apiKey)`, language models, embeddings |
+| [`ai_sdk_cohere`](https://pub.dev/packages/ai_sdk_cohere) | `dart pub add ai_sdk_cohere` | `cohere('command-r-plus')`, embeddings, reranking |
+| [`ai_sdk_groq`](https://pub.dev/packages/ai_sdk_groq) | `dart pub add ai_sdk_groq` | `groq('llama3-8b-8192')`, ultra-low latency inference |
+| [`ai_sdk_mistral`](https://pub.dev/packages/ai_sdk_mistral) | `dart pub add ai_sdk_mistral` | `mistral('mistral-large-latest')`, embeddings |
+| [`ai_sdk_ollama`](https://pub.dev/packages/ai_sdk_ollama) | `dart pub add ai_sdk_ollama` | `ollama('llama3')`, local inference, embeddings |
 | [`ai_sdk_flutter_ui`](https://pub.dev/packages/ai_sdk_flutter_ui) | `dart pub add ai_sdk_flutter_ui` | `ChatController`, `CompletionController`, `ObjectStreamController` |
 | [`ai_sdk_mcp`](https://pub.dev/packages/ai_sdk_mcp) | `dart pub add ai_sdk_mcp` | `MCPClient`, `SseClientTransport`, `StdioMCPTransport` |
 | [`ai_sdk_provider`](https://pub.dev/packages/ai_sdk_provider) | *(transitive)* | Provider interfaces for building custom providers |
@@ -233,7 +248,7 @@ print(result.text);
 ### Flutter Chat UI
 
 ```sh
-dart pub add ai_sdk_dart ai_sdk_openai ai_sdk_flutter
+dart pub add ai_sdk_dart ai_sdk_openai ai_sdk_flutter_ui
 ```
 
 ```dart
@@ -250,18 +265,21 @@ print(chat.messages.last.content);
 
 ## 🤖 Providers
 
-| Capability | OpenAI | Anthropic | Google |
-|---|:---:|:---:|:---:|
-| Text generation | ✅ | ✅ | ✅ |
-| Streaming | ✅ | ✅ | ✅ |
-| Structured output | ✅ | ✅ | ✅ |
-| Tool use | ✅ | ✅ | ✅ |
-| Embeddings | ✅ | — | ✅ |
-| Image generation | ✅ | — | — |
-| Speech synthesis | ✅ | — | — |
-| Transcription | ✅ | — | — |
-| Extended thinking | — | ✅ | — |
-| Multimodal (image input) | ✅ | ✅ | ✅ |
+| Capability | OpenAI | Anthropic | Google | Azure | Cohere | Groq | Mistral | Ollama |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| Text generation | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Streaming | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Structured output | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Native JSON schema output | ✅ | — | — | ✅ | — | — | — | — |
+| Tool use | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Embeddings | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | ✅ |
+| Reranking | — | — | — | — | ✅ | — | — | — |
+| Image generation | ✅ | — | — | — | — | — | — | — |
+| Speech synthesis | ✅ | — | — | — | — | — | — | — |
+| Transcription | ✅ | — | — | — | — | — | — | — |
+| Extended thinking | — | ✅ | — | — | — | — | — | — |
+| Reasoning options | ✅ | — | — | — | — | — | — | — |
+| Multimodal (image input) | ✅ | ✅ | ✅ | ✅ | — | — | — | — |
 
 ---
 
@@ -358,26 +376,27 @@ final client = MCPClient(
 ### ✅ Implemented
 
 - ✅ `generateText` — full result envelope (text, steps, usage, reasoning, sources, files)
-- ✅ `streamText` — complete event taxonomy (22 typed event types)
-- ✅ `generateObject` / structured output (object, array, choice, json)
-- ✅ `embed` / `embedMany` + `cosineSimilarity`
-- ✅ `generateImage` (OpenAI DALL-E 3)
+- ✅ `streamText` — complete event taxonomy (22 typed event types), `onAbort` callback
+- ✅ `generateObject` / structured output (object, array, choice, json) with native JSON schema
+- ✅ `embed` / `embedMany` + `cosineSimilarity`, `wrapEmbeddingModel`
+- ✅ `generateImage` (OpenAI DALL-E 3), `generateVideo`
 - ✅ `generateSpeech` (OpenAI TTS)
 - ✅ `transcribe` (OpenAI Whisper)
 - ✅ `rerank`
+- ✅ `timeout` parameter on all core functions
+- ✅ `customProvider()` for lightweight on-the-fly provider construction
 - ✅ Middleware system with 5 built-in middlewares
-- ✅ Provider registry (`createProviderRegistry`)
+- ✅ Provider registry (`createProviderRegistry`) — 6 model categories
 - ✅ Multi-step agentic loops with tool approval
 - ✅ Flutter UI controllers (Chat, Completion, ObjectStream)
-- ✅ MCP client (SSE + stdio transports)
-- ✅ OpenAI, Anthropic, Google providers
-- ✅ 178+ conformance tests
+- ✅ MCP client (SSE + stdio transports, reconnection, prompts, resources)
+- ✅ OpenAI (with reasoning options), Anthropic (with thinking options), Google providers
+- ✅ Cohere, Mistral, Groq, Ollama, Azure OpenAI providers
+- ✅ 562+ conformance tests
 
 ### 🔜 Planned
 
-- 🔜 Video generation support
-- 🔜 Streaming MCP tool outputs + automatic reconnection
-- 🔜 Cohere / Vertex AI / Mistral / Ollama providers
+- 🔜 Streaming MCP tool outputs
 - 🔜 Additional Flutter widgets (file picker, reasoning display, citation cards)
 - 🔜 Dart Edge / Cloudflare Workers support
 - 🔜 WebSocket transport for MCP

@@ -23,8 +23,9 @@ Future<TranscribeResult> transcribe({
   String? prompt,
   Map<String, String>? headers,
   ProviderOptions? providerOptions,
+  Duration? timeout,
 }) async {
-  final result = await model.doGenerate(
+  final call = model.doGenerate(
     TranscriptionModelV1CallOptions(
       audio: audio,
       audioMediaType: audioMediaType,
@@ -34,5 +35,6 @@ Future<TranscribeResult> transcribe({
       providerOptions: providerOptions,
     ),
   );
+  final result = await (timeout != null ? call.timeout(timeout) : call);
   return TranscribeResult(text: result.text);
 }

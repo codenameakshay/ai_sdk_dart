@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
@@ -11,25 +13,25 @@ void main() {
     group('wrapLanguageModel() identity', () {
       test('preserves provider from inner model', () {
         final inner = FakeTextModel('hi', provider: 'test-provider');
-        final wrapped = wrapLanguageModel(inner, []);
+        final wrapped = wrapLanguageModel(model: inner, middleware: <LanguageModelMiddleware>[]);
         expect(wrapped.provider, 'test-provider');
       });
 
       test('preserves modelId from inner model', () {
         final inner = FakeTextModel('hi', modelId: 'gpt-4o');
-        final wrapped = wrapLanguageModel(inner, []);
+        final wrapped = wrapLanguageModel(model: inner, middleware: <LanguageModelMiddleware>[]);
         expect(wrapped.modelId, 'gpt-4o');
       });
 
       test('preserves specificationVersion from inner model', () {
         final inner = FakeTextModel('hi');
-        final wrapped = wrapLanguageModel(inner, []);
+        final wrapped = wrapLanguageModel(model: inner, middleware: <LanguageModelMiddleware>[]);
         expect(wrapped.specificationVersion, 'v3');
       });
 
       test('empty middleware list returns model with same behavior', () async {
         final inner = FakeTextModel('hello from inner');
-        final wrapped = wrapLanguageModel(inner, []);
+        final wrapped = wrapLanguageModel(model: inner, middleware: <LanguageModelMiddleware>[]);
         final result = await wrapped.doGenerate(
           LanguageModelV3CallOptions(
             prompt: const LanguageModelV3Prompt(messages: []),
@@ -37,6 +39,62 @@ void main() {
         );
         final text = result.content.whereType<LanguageModelV3TextPart>().first;
         expect(text.text, 'hello from inner');
+      });
+    });
+
+    // ── transformParams hook ──────────────────────────────────────────────
+
+    group('transformParams', () {
+      test('transformParams can modify temperature before doGenerate', () async {
+        final capturingModel = FakeCapturingModel();
+        final mw = _TransformParamsMiddleware(temperature: 0.42);
+        final wrapped = wrapLanguageModel(model: capturingModel, middleware: mw);
+        await wrapped.doGenerate(
+          LanguageModelV3CallOptions(
+            prompt: const LanguageModelV3Prompt(messages: []),
+            temperature: 0.9,
+          ),
+        );
+        expect(capturingModel.capturedOptions.first.temperature, 0.42);
+      });
+
+      test('transformParams can modify temperature before doStream', () async {
+        final capturingModel = FakeCapturingModel();
+        final mw = _TransformParamsMiddleware(temperature: 0.1);
+        final wrapped = wrapLanguageModel(model: capturingModel, middleware: mw);
+        await wrapped.doStream(
+          LanguageModelV3CallOptions(
+            prompt: const LanguageModelV3Prompt(messages: []),
+            temperature: 0.9,
+          ),
+        );
+        expect(capturingModel.capturedOptions.first.temperature, 0.1);
+      });
+
+      test('transformParams runs before wrapGenerate', () async {
+        final log = <String>[];
+        final mw = _LoggingTransformMiddleware(log);
+        final model = FakeTextModel('hi');
+        final wrapped = wrapLanguageModel(model: model, middleware: mw);
+        await wrapped.doGenerate(
+          LanguageModelV3CallOptions(
+            prompt: const LanguageModelV3Prompt(messages: []),
+          ),
+        );
+        expect(log, ['transformParams', 'wrapGenerate']);
+      });
+
+      test('default transformParams is a no-op', () async {
+        final capturingModel = FakeCapturingModel();
+        final mw = _NoOpMiddleware();
+        final wrapped = wrapLanguageModel(model: capturingModel, middleware: mw);
+        await wrapped.doGenerate(
+          LanguageModelV3CallOptions(
+            prompt: const LanguageModelV3Prompt(messages: []),
+            temperature: 0.7,
+          ),
+        );
+        expect(capturingModel.capturedOptions.first.temperature, 0.7);
       });
     });
 
@@ -50,7 +108,7 @@ void main() {
         final innerMw = _TrackingMiddleware('inner', callOrder);
 
         final model = FakeTextModel('result');
-        final wrapped = wrapLanguageModel(model, [outerMw, innerMw]);
+        final wrapped = wrapLanguageModel(model: model, middleware: [outerMw, innerMw]);
 
         await wrapped.doGenerate(
           LanguageModelV3CallOptions(
@@ -70,9 +128,10 @@ void main() {
         'strips <think>...</think> and creates ReasoningPart in generate',
         () async {
           final inner = FakeTextModel('<think>reasoning</think>answer');
-          final wrapped = wrapLanguageModel(inner, [
-            extractReasoningMiddleware(tagName: 'think'),
-          ]);
+          final wrapped = wrapLanguageModel(
+            model: inner,
+            middleware: extractReasoningMiddleware(tagName: 'think'),
+          );
 
           final result = await wrapped.doGenerate(
             LanguageModelV3CallOptions(
@@ -96,9 +155,10 @@ void main() {
 
       test('custom tagName is respected', () async {
         final inner = FakeTextModel('<reasoning>think here</reasoning>output');
-        final wrapped = wrapLanguageModel(inner, [
-          extractReasoningMiddleware(tagName: 'reasoning'),
-        ]);
+        final wrapped = wrapLanguageModel(
+          model: inner,
+          middleware: extractReasoningMiddleware(tagName: 'reasoning'),
+        );
 
         final result = await wrapped.doGenerate(
           LanguageModelV3CallOptions(
@@ -127,9 +187,10 @@ void main() {
             StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
           ]);
 
-          final wrapped = wrapLanguageModel(inner, [
-            extractReasoningMiddleware(tagName: 'think'),
-          ]);
+          final wrapped = wrapLanguageModel(
+            model: inner,
+            middleware: extractReasoningMiddleware(tagName: 'think'),
+          );
 
           final streamResult = await wrapped.doStream(
             LanguageModelV3CallOptions(
@@ -148,9 +209,10 @@ void main() {
 
       test('text without tags passes through unchanged', () async {
         final inner = FakeTextModel('plain text without tags');
-        final wrapped = wrapLanguageModel(inner, [
-          extractReasoningMiddleware(),
-        ]);
+        final wrapped = wrapLanguageModel(
+          model: inner,
+          middleware: extractReasoningMiddleware(),
+        );
 
         final result = await wrapped.doGenerate(
           LanguageModelV3CallOptions(
@@ -175,7 +237,7 @@ void main() {
     group('extractJsonMiddleware', () {
       test('strips ```json ... ``` code fences from generate output', () async {
         final inner = FakeTextModel('```json\n{"ok":true}\n```');
-        final wrapped = wrapLanguageModel(inner, [extractJsonMiddleware()]);
+        final wrapped = wrapLanguageModel(model: inner, middleware: extractJsonMiddleware());
 
         final result = await wrapped.doGenerate(
           LanguageModelV3CallOptions(
@@ -192,7 +254,7 @@ void main() {
 
       test('passes through text without code fences unchanged', () async {
         final inner = FakeTextModel('{"already":"clean"}');
-        final wrapped = wrapLanguageModel(inner, [extractJsonMiddleware()]);
+        final wrapped = wrapLanguageModel(model: inner, middleware: extractJsonMiddleware());
 
         final result = await wrapped.doGenerate(
           LanguageModelV3CallOptions(
@@ -215,9 +277,10 @@ void main() {
           'streamed text',
           finishReason: LanguageModelV3FinishReason.stop,
         );
-        final wrapped = wrapLanguageModel(inner, [
-          simulateStreamingMiddleware(),
-        ]);
+        final wrapped = wrapLanguageModel(
+          model: inner,
+          middleware: simulateStreamingMiddleware(),
+        );
 
         final streamResult = await wrapped.doStream(
           LanguageModelV3CallOptions(
@@ -241,9 +304,10 @@ void main() {
           'done',
           finishReason: LanguageModelV3FinishReason.stop,
         );
-        final wrapped = wrapLanguageModel(inner, [
-          simulateStreamingMiddleware(),
-        ]);
+        final wrapped = wrapLanguageModel(
+          model: inner,
+          middleware: simulateStreamingMiddleware(),
+        );
 
         final streamResult = await wrapped.doStream(
           LanguageModelV3CallOptions(
@@ -262,9 +326,10 @@ void main() {
     group('defaultSettingsMiddleware', () {
       test('applies temperature default when not set at call time', () async {
         final capturingModel = FakeCapturingModel();
-        final wrapped = wrapLanguageModel(capturingModel, [
-          defaultSettingsMiddleware(temperature: 0.5),
-        ]);
+        final wrapped = wrapLanguageModel(
+          model: capturingModel,
+          middleware: defaultSettingsMiddleware(temperature: 0.5),
+        );
 
         await wrapped.doGenerate(
           LanguageModelV3CallOptions(
@@ -277,9 +342,10 @@ void main() {
 
       test('call-time temperature overrides the default', () async {
         final capturingModel = FakeCapturingModel();
-        final wrapped = wrapLanguageModel(capturingModel, [
-          defaultSettingsMiddleware(temperature: 0.5),
-        ]);
+        final wrapped = wrapLanguageModel(
+          model: capturingModel,
+          middleware: defaultSettingsMiddleware(temperature: 0.5),
+        );
 
         await wrapped.doGenerate(
           LanguageModelV3CallOptions(
@@ -293,9 +359,10 @@ void main() {
 
       test('applies maxOutputTokens default', () async {
         final capturingModel = FakeCapturingModel();
-        final wrapped = wrapLanguageModel(capturingModel, [
-          defaultSettingsMiddleware(maxOutputTokens: 200),
-        ]);
+        final wrapped = wrapLanguageModel(
+          model: capturingModel,
+          middleware: defaultSettingsMiddleware(maxOutputTokens: 200),
+        );
 
         await wrapped.doGenerate(
           LanguageModelV3CallOptions(
@@ -308,9 +375,10 @@ void main() {
 
       test('applies topP default when not overridden', () async {
         final capturingModel = FakeCapturingModel();
-        final wrapped = wrapLanguageModel(capturingModel, [
-          defaultSettingsMiddleware(topP: 0.95),
-        ]);
+        final wrapped = wrapLanguageModel(
+          model: capturingModel,
+          middleware: defaultSettingsMiddleware(topP: 0.95),
+        );
 
         await wrapped.doGenerate(
           LanguageModelV3CallOptions(
@@ -327,9 +395,10 @@ void main() {
     group('addToolInputExamplesMiddleware', () {
       test('appends Examples section to tool description', () async {
         final capturingModel = FakeCapturingModel();
-        final wrapped = wrapLanguageModel(capturingModel, [
-          addToolInputExamplesMiddleware(),
-        ]);
+        final wrapped = wrapLanguageModel(
+          model: capturingModel,
+          middleware: addToolInputExamplesMiddleware(),
+        );
 
         await wrapped.doGenerate(
           LanguageModelV3CallOptions(
@@ -354,9 +423,10 @@ void main() {
 
       test('tools without inputExamples are left unchanged', () async {
         final capturingModel = FakeCapturingModel();
-        final wrapped = wrapLanguageModel(capturingModel, [
-          addToolInputExamplesMiddleware(),
-        ]);
+        final wrapped = wrapLanguageModel(
+          model: capturingModel,
+          middleware: addToolInputExamplesMiddleware(),
+        );
 
         await wrapped.doGenerate(
           LanguageModelV3CallOptions(
@@ -377,6 +447,65 @@ void main() {
     });
   });
 }
+
+/// Middleware that overrides temperature via transformParams.
+class _TransformParamsMiddleware extends LanguageModelMiddlewareBase {
+  _TransformParamsMiddleware({required this.temperature});
+  final double temperature;
+
+  @override
+  FutureOr<LanguageModelV3CallOptions> transformParams({
+    required LanguageModelV3CallOptions options,
+    required LanguageModelV3 model,
+  }) {
+    return LanguageModelV3CallOptions(
+      prompt: options.prompt,
+      tools: options.tools,
+      toolChoice: options.toolChoice,
+      maxOutputTokens: options.maxOutputTokens,
+      temperature: temperature,
+      topP: options.topP,
+      topK: options.topK,
+      presencePenalty: options.presencePenalty,
+      frequencyPenalty: options.frequencyPenalty,
+      stopSequences: options.stopSequences,
+      seed: options.seed,
+      headers: options.headers,
+      providerOptions: options.providerOptions,
+    );
+  }
+}
+
+/// Middleware that logs transformParams and wrapGenerate call order.
+class _LoggingTransformMiddleware extends LanguageModelMiddlewareBase {
+  _LoggingTransformMiddleware(this.log);
+  final List<String> log;
+
+  @override
+  FutureOr<LanguageModelV3CallOptions> transformParams({
+    required LanguageModelV3CallOptions options,
+    required LanguageModelV3 model,
+  }) {
+    log.add('transformParams');
+    return options;
+  }
+
+  @override
+  Future<LanguageModelV3GenerateResult> wrapGenerate({
+    required Future<LanguageModelV3GenerateResult> Function(
+      LanguageModelV3CallOptions,
+    )
+    doGenerate,
+    required LanguageModelV3CallOptions options,
+    required LanguageModelV3 model,
+  }) async {
+    log.add('wrapGenerate');
+    return doGenerate(options);
+  }
+}
+
+/// Middleware that does nothing (inherits all pass-through defaults).
+class _NoOpMiddleware extends LanguageModelMiddlewareBase {}
 
 /// A middleware that records its name in a shared list when invoked.
 class _TrackingMiddleware extends LanguageModelMiddlewareBase {

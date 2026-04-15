@@ -1,6 +1,6 @@
 name: ai_sdk_flutter_ui
 description: Flutter UI hooks for the AI SDK Dart port.
-version: 1.0.0+1
+version: 1.1.0
 homepage: https://github.com/codenameakshay/ai_sdk_dart
 repository: https://github.com/codenameakshay/ai_sdk_dart
 resolution: workspace
@@ -12,7 +12,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  ai_sdk_dart: ^1.0.0
+  ai_sdk_dart: ^1.1.0
+  ai_sdk_provider: ^1.1.0
 
 dev_dependencies:
   flutter_test:

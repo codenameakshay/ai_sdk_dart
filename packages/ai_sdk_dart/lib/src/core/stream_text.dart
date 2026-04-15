@@ -7,6 +7,7 @@ import '../errors/ai_errors.dart';
 import '../messages/model_message.dart';
 import '../output/output.dart';
 import '../stop_conditions/stop_conditions.dart';
+import '../telemetry/telemetry.dart';
 import '../tools/tool.dart';
 import 'generate_text.dart';
 
@@ -19,6 +20,9 @@ typedef StreamTextOnError = void Function(Object error);
 /// Callback invoked when streaming completes.
 typedef StreamTextOnFinish<TOutput> =
     void Function(StreamTextFinishEvent<TOutput> event);
+
+/// Callback invoked when the stream is aborted via [CancellationToken].
+typedef StreamTextOnAbort = void Function();
 
 /// Callback invoked when a tool input stream starts.
 typedef StreamTextOnInputStart =
@@ -33,34 +37,46 @@ typedef StreamTextOnInputAvailable =
     void Function(StreamTextToolInputEndEvent event);
 
 /// Transform that splits text deltas into smaller chunks.
-typedef StreamTextTransform = Iterable<String> Function(String delta);
-
-/// Returns a transform that yields text deltas in chunks of [chunkSize].
+/// Transform applied to each text delta in [streamText].
 ///
-/// Use with [streamText]'s [StreamTextTransform] to smooth token-by-token
-/// streaming for display. Mirrors `smoothStream` from the JS AI SDK v6.
+/// Returns a [Stream<String>] so implementations can introduce delays
+/// between sub-chunks (e.g., [smoothStream] with [delayInMs]).
+typedef StreamTextTransform = Stream<String> Function(String delta);
+
+/// Returns a transform that yields text deltas in chunks of [chunkSize],
+/// optionally inserting an inter-chunk delay for smoother display.
+///
+/// Use with [streamText]'s [experimentalTransform] parameter.
+/// Mirrors `smoothStream` from the JS AI SDK v6.
+///
+/// - [chunkSize] — maximum characters per emitted chunk (default: 12).
+///   Pass ≤ 0 to forward the full delta unchanged.
+/// - [delayInMs] — milliseconds to wait between emitting consecutive sub-chunks
+///   within a single provider delta (default: 0 = no delay).
 ///
 /// Example:
 /// ```dart
 /// final result = await streamText(
 ///   model: model,
 ///   prompt: 'Hello',
-///   experimentalTransform: smoothStream(chunkSize: 12),
+///   experimentalTransform: smoothStream(chunkSize: 12, delayInMs: 10),
 /// );
 /// ```
-StreamTextTransform smoothStream({int chunkSize = 12}) {
+StreamTextTransform smoothStream({int chunkSize = 12, int delayInMs = 0}) {
   if (chunkSize <= 0) {
-    return (delta) sync* {
-      yield delta;
-    };
+    return (delta) => Stream.value(delta);
   }
-  return (delta) sync* {
-    if (delta.isEmpty) {
-      return;
-    }
+  return (delta) async* {
+    if (delta.isEmpty) return;
+    var first = true;
     for (var i = 0; i < delta.length; i += chunkSize) {
-      final end = (i + chunkSize) > delta.length ? delta.length : i + chunkSize;
+      if (!first && delayInMs > 0) {
+        await Future<void>.delayed(Duration(milliseconds: delayInMs));
+      }
+      final end =
+          (i + chunkSize) > delta.length ? delta.length : i + chunkSize;
       yield delta.substring(i, end);
+      first = false;
     }
   };
 }
@@ -466,14 +482,24 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   LanguageModelV3ToolChoice? toolChoice,
   int maxSteps = 1,
   List<StopCondition> stopConditions = const [],
+  Object? stopWhen, // StopCondition | List<StopCondition>
   List<LanguageModelV3ToolApprovalResponse> toolApprovalResponses = const [],
-  Object? abortSignal,
-  Object? experimentalContext,
+  CancellationToken? abortSignal,
+  Map<String, Object?>? experimentalContext,
   int? maxOutputTokens,
   double? temperature,
   double? topP,
+  int? topK,
+  double? presencePenalty,
+  double? frequencyPenalty,
+  List<String> stopSequences = const [],
+  int? seed,
+  Map<String, String>? headers,
+  int maxRetries = 2,
+  List<String> activeToolNames = const [],
   StreamTextOnChunk? onChunk,
   StreamTextOnError? onError,
+  StreamTextOnAbort? onAbort,
   StreamTextOnFinish<TOutput>? onFinish,
   GenerateTextOnStepFinish? onStepFinish,
   GenerateTextPrepareStep? prepareStep,
@@ -481,11 +507,23 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   StreamTextOnInputDelta? onInputDelta,
   StreamTextOnInputAvailable? onInputAvailable,
   StreamTextTransform? experimentalTransform,
+  Duration? timeout,
   GenerateTextExperimentalOnStart? experimentalOnStart,
   GenerateTextExperimentalOnStepStart? experimentalOnStepStart,
   GenerateTextExperimentalOnToolCallStart? experimentalOnToolCallStart,
   GenerateTextExperimentalOnToolCallFinish? experimentalOnToolCallFinish,
+  TelemetrySettings? experimentalTelemetry,
 }) async {
+  final telemetrySpan = startTelemetrySpan(
+    experimentalTelemetry,
+    spanName: 'ai.streamText',
+    attributes: {
+      'ai.model.provider': model.provider,
+      'ai.model.id': model.modelId,
+      if (prompt != null) 'ai.prompt': prompt,
+    },
+  );
+
   final outputSpec = output ?? (Output.text() as Output<TOutput>);
   var normalizedMessages = <LanguageModelV3Message>[
     if (prompt != null)
@@ -526,6 +564,15 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   final requestCompleter = Completer<GenerateTextRequest>();
   final responseCompleter = Completer<GenerateTextResponse>();
   final providerMetadataCompleter = Completer<ProviderMetadata?>();
+
+  // Wire onAbort: fire when the caller cancels via abortSignal.
+  if (abortSignal != null && onAbort != null) {
+    unawaited(
+      abortSignal.onCancelled.then((_) {
+        _safeInvoke(onAbort);
+      }),
+    );
+  }
 
   unawaited(
     Future<void>(() async {
@@ -578,6 +625,16 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
 
       try {
         fullController.add(const StreamTextStartEvent());
+
+        // Merge stopWhen + stopConditions.
+        final _stopWhenList = switch (stopWhen) {
+          null => <StopCondition>[],
+          final StopCondition fn => [fn],
+          final List<Object?> lst => lst.whereType<StopCondition>().toList(),
+          _ => <StopCondition>[],
+        };
+        final _allStopConditions = [..._stopWhenList, ...stopConditions];
+
         final totalSteps = tools.isEmpty ? 1 : (maxSteps < 1 ? 1 : maxSteps);
         for (var stepNumber = 0; stepNumber < totalSteps; stepNumber++) {
           fullController.add(StreamTextStartStepEvent(stepNumber: stepNumber));
@@ -589,7 +646,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                 stepNumber: stepNumber,
                 steps: List.unmodifiable(steps),
                 messages: List.unmodifiable(normalizedMessages),
-                stopConditions: stopConditions,
+                stopConditions: _allStopConditions,
                 experimentalContext: experimentalContext,
               ),
             ),
@@ -602,7 +659,8 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
               prepareResult?.providerOptions ?? providerOptions;
           final activeTools = _selectActiveTools(
             tools,
-            prepareResult?.activeTools,
+            prepareResult?.activeTools ??
+                (activeToolNames.isNotEmpty ? activeToolNames : null),
           );
           final toolSelection = _resolveToolSelection(
             tools: activeTools,
@@ -620,32 +678,43 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
             ),
           );
 
-          final response = await stepModel.doStream(
-            LanguageModelV3CallOptions(
-              prompt: LanguageModelV3Prompt(
-                system: systemInstruction,
-                messages: stepMessages,
-              ),
-              tools: toolSelection.exposedTools.entries
-                  .map(
-                    (entry) => LanguageModelV3FunctionTool(
-                      name: entry.key,
-                      description: entry.value.description,
-                      inputSchema: entry.value.inputSchema.jsonSchema,
-                      strict: entry.value.strict,
-                      inputExamples: entry.value.inputExamples
-                          .map((example) => example.input)
-                          .toList(),
-                    ),
-                  )
-                  .toList(),
-              providerDefinedTools: providerDefinedTools,
-              toolChoice: toolSelection.toolChoice,
-              maxOutputTokens: maxOutputTokens,
-              temperature: temperature,
-              topP: topP,
-              providerOptions: stepProviderOptions,
+          final streamCallOptions = LanguageModelV3CallOptions(
+            prompt: LanguageModelV3Prompt(
+              system: systemInstruction,
+              messages: stepMessages,
             ),
+            tools: toolSelection.exposedTools.entries
+                .map(
+                  (entry) => LanguageModelV3FunctionTool(
+                    name: entry.key,
+                    description: entry.value.description,
+                    inputSchema: entry.value.inputSchema.jsonSchema,
+                    strict: entry.value.strict,
+                    inputExamples: entry.value.inputExamples
+                        .map((example) => example.input)
+                        .toList(),
+                  ),
+                )
+                .toList(),
+            providerDefinedTools: providerDefinedTools,
+            toolChoice: toolSelection.toolChoice,
+            maxOutputTokens: maxOutputTokens,
+            temperature: temperature,
+            topP: topP,
+            topK: topK,
+            presencePenalty: presencePenalty,
+            frequencyPenalty: frequencyPenalty,
+            stopSequences: stopSequences,
+            seed: seed,
+            headers: headers,
+            providerOptions: stepProviderOptions,
+          );
+          final response = await _withRetry(
+            maxRetries: maxRetries,
+            fn: () {
+              final call = stepModel.doStream(streamCallOptions);
+              return timeout != null ? call.timeout(timeout) : call;
+            },
           );
           if (response.rawResponse is Map) {
             rawEnvelope = (response.rawResponse as Map)
@@ -688,9 +757,9 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                 stepTextById[id] = StringBuffer();
                 fullController.add(StreamTextTextStartEvent(id: id));
               case StreamPartTextDelta(:final id, :final delta):
-                final transformedDeltas =
-                    experimentalTransform?.call(delta) ?? [delta];
-                for (final transformedDelta in transformedDeltas) {
+                final transformedStream =
+                    experimentalTransform?.call(delta) ?? Stream.value(delta);
+                await for (final transformedDelta in transformedStream) {
                   final textBuffer = stepTextById.putIfAbsent(
                     id,
                     StringBuffer.new,
@@ -964,13 +1033,14 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
           final shouldStop =
               stepToolResults.isEmpty ||
               stepApprovalRequests.isNotEmpty ||
-              stopConditions.any(
+              _allStopConditions.any(
                 (condition) => condition(
                   StepSnapshot(
                     stepCount: stepNumber + 1,
                     toolCallNames: stepToolCalls
                         .map((call) => call.toolName)
                         .toList(),
+                    finishReason: stepFinish.finishReason,
                   ),
                 ),
               );
@@ -1248,6 +1318,20 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
     }),
   );
 
+  // End the telemetry span when the stream fully finishes.
+  finishCompleter.future.then((_) {
+    totalUsageCompleter.future.then((usage) {
+      telemetrySpan
+        ..setAttribute('ai.usage.promptTokens', usage?.inputTokens ?? 0)
+        ..setAttribute('ai.usage.completionTokens', usage?.outputTokens ?? 0)
+        ..end();
+    }, onError: (_) => telemetrySpan.end());
+  }, onError: (Object e, StackTrace st) {
+    telemetrySpan
+      ..recordException(e, stackTrace: st)
+      ..end(error: e);
+  });
+
   return StreamTextResult<TOutput>(
     stream: rawController.stream,
     fullStream: fullController.stream,
@@ -1385,8 +1469,8 @@ Future<_ToolExecutionResult> _executeToolCall({
   required List<LanguageModelV3Message> messages,
   required Map<String, LanguageModelV3ToolApprovalResponse> approvalById,
   required void Function(Object? value) onPreliminaryResult,
-  Object? abortSignal,
-  Object? experimentalContext,
+  CancellationToken? abortSignal,
+  Map<String, Object?>? experimentalContext,
   GenerateTextExperimentalOnToolCallStart? onToolCallStart,
   GenerateTextExperimentalOnToolCallFinish? onToolCallFinish,
 }) async {
@@ -1717,6 +1801,23 @@ void _safeInvoke(void Function() action) {
   try {
     action();
   } catch (_) {}
+}
+
+/// Retries [fn] up to [maxRetries] times on exception.
+/// If all attempts fail, the last exception is rethrown.
+Future<T> _withRetry<T>({
+  required int maxRetries,
+  required Future<T> Function() fn,
+}) async {
+  var attempts = 0;
+  while (true) {
+    try {
+      return await fn();
+    } catch (e) {
+      attempts++;
+      if (attempts > maxRetries) rethrow;
+    }
+  }
 }
 
 String _buildOutputSystemInstruction<T>(String? system, Output<T> output) {

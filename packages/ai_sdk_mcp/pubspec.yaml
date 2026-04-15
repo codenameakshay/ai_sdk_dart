@@ -1,6 +1,6 @@
 name: ai_sdk_mcp
 description: MCP (Model Context Protocol) client for AI SDK Dart. Connect to MCP servers via SSE or stdio, discover tools, and use them with any LLM provider.
-version: 1.0.0+1
+version: 1.1.0
 homepage: https://github.com/codenameakshay/ai_sdk_dart
 repository: https://github.com/codenameakshay/ai_sdk_dart
 resolution: workspace
@@ -9,7 +9,7 @@ environment:
   sdk: ^3.11.1
 
 dependencies:
-  ai_sdk_dart: ^1.0.0
+  ai_sdk_dart: ^1.1.0
   http: ^1.2.0
 
 dev_dependencies:

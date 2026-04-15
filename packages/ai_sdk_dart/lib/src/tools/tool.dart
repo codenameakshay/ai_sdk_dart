@@ -7,9 +7,46 @@ typedef ToolExecutor<INPUT, OUTPUT> =
 typedef UntypedToolExecutor =
     Future<Object?> Function(Object? input, ToolExecutionOptions options);
 
+/// A token that signals cancellation of an in-progress operation.
+///
+/// Passed to tool executors via [ToolExecutionOptions.abortSignal].
+/// Long-running tools should check [isCancelled] periodically and exit early
+/// when it returns `true`.  The [onCancelled] future completes when the
+/// cancellation is requested.
+///
+/// Mirrors the JS `AbortSignal` concept for the Dart/Flutter world.
+class CancellationToken {
+  CancellationToken() {
+    _completer = Completer<void>();
+  }
+
+  late final Completer<void> _completer;
+  bool _isCancelled = false;
+
+  /// Whether this token has been cancelled.
+  bool get isCancelled => _isCancelled;
+
+  /// A future that completes when cancellation is requested.
+  Future<void> get onCancelled => _completer.future;
+
+  /// Cancel the operation.  Idempotent — safe to call multiple times.
+  void cancel() {
+    if (!_isCancelled) {
+      _isCancelled = true;
+      if (!_completer.isCompleted) _completer.complete();
+    }
+  }
+}
+
 /// Context passed to tool executors during execution.
 ///
-/// Provides [toolCallId], [messages], [abortSignal], and [experimentalContext].
+/// - [toolCallId] — unique ID for this specific tool invocation.
+/// - [messages] — conversation history at the point of the tool call
+///   (provider-level messages; typed as [LanguageModelV3Message]).
+/// - [abortSignal] — [CancellationToken] that fires if the generation is
+///   cancelled; check [CancellationToken.isCancelled] in long-running tools.
+/// - [experimentalContext] — arbitrary key/value context map threaded from
+///   the `experimentalContext` parameter of [generateText]/[streamText].
 class ToolExecutionOptions {
   const ToolExecutionOptions({
     this.toolCallId,
@@ -20,8 +57,12 @@ class ToolExecutionOptions {
 
   final String? toolCallId;
   final List<LanguageModelV3Message>? messages;
-  final Object? abortSignal;
-  final Object? experimentalContext;
+
+  /// Cancellation token — non-null when the caller provided an abort signal.
+  final CancellationToken? abortSignal;
+
+  /// Caller-supplied context; strongly typed as a string-keyed map.
+  final Map<String, Object?>? experimentalContext;
 }
 
 typedef ToolNeedsApproval<INPUT> =
@@ -112,6 +153,18 @@ Tool<INPUT, OUTPUT> tool<INPUT, OUTPUT>({
         ? null
         : (input, options) => needsApproval(input as INPUT, options),
     requiresApproval: needsApproval != null,
+  );
+}
+
+/// Creates a [Schema] from a JSON schema map without deserialization.
+///
+/// Use when you need to pass a schema to [generateText]/[streamText] output
+/// or [tool] but don't need typed deserialization — the raw JSON map is returned.
+/// Mirrors `jsonSchema()` from the JS AI SDK v6.
+Schema<Map<String, dynamic>> jsonSchema(Map<String, dynamic> schema) {
+  return Schema<Map<String, dynamic>>(
+    jsonSchema: schema,
+    fromJson: (json) => json,
   );
 }
 

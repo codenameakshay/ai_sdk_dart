@@ -12,26 +12,31 @@ void main() {
         expect(id, isNotEmpty);
       });
 
-      test('with no arguments starts with "id-"', () {
+      test('default size is 7 characters (nanoid-style, JS SDK parity)', () {
         final id = generateId();
-        expect(id, startsWith('id-'));
+        expect(id.length, 7);
       });
 
-      test('with custom prefix starts with that prefix followed by "-"', () {
-        expect(generateId('msg'), startsWith('msg-'));
-        expect(generateId('user'), startsWith('user-'));
-        expect(generateId('tool'), startsWith('tool-'));
+      test('custom size is respected', () {
+        expect(generateId(size: 12).length, 12);
+        expect(generateId(size: 16).length, 16);
+        expect(generateId(size: 1).length, 1);
+      });
+
+      test('contains only characters from the nanoid alphabet', () {
+        const alphabet =
+            'useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict';
+        for (var i = 0; i < 200; i++) {
+          final id = generateId();
+          for (final char in id.split('')) {
+            expect(alphabet.contains(char), isTrue, reason: 'char "$char"');
+          }
+        }
       });
 
       test('consecutive calls return unique IDs', () {
-        final ids = List.generate(100, (_) => generateId());
+        final ids = List.generate(200, (_) => generateId());
         expect(ids.toSet().length, ids.length);
-      });
-
-      test('IDs from different prefixes are still unique', () {
-        final a = generateId('a');
-        final b = generateId('b');
-        expect(a, isNot(b));
       });
     });
 
@@ -39,35 +44,33 @@ void main() {
 
     group('createIdGenerator()', () {
       test('returns a function', () {
-        final gen = createIdGenerator(prefix: 'x');
+        final gen = createIdGenerator();
         expect(gen, isA<Function>());
       });
 
-      test('generated IDs start with the given prefix + "-"', () {
-        final gen = createIdGenerator(prefix: 'msg');
-        expect(gen(), startsWith('msg-'));
-        expect(gen(), startsWith('msg-'));
+      test('default size produces 7-char IDs', () {
+        final gen = createIdGenerator();
+        expect(gen().length, 7);
+        expect(gen().length, 7);
       });
 
-      test('default prefix is "id"', () {
-        final gen = createIdGenerator();
-        expect(gen(), startsWith('id-'));
+      test('custom size is respected', () {
+        final gen = createIdGenerator(size: 12);
+        expect(gen().length, 12);
+        expect(gen().length, 12);
       });
 
       test('consecutive calls return unique IDs', () {
-        final gen = createIdGenerator(prefix: 'test');
+        final gen = createIdGenerator();
         final ids = List.generate(50, (_) => gen());
         expect(ids.toSet().length, ids.length);
       });
 
-      test('two generators with same prefix produce independent sequences', () {
-        final gen1 = createIdGenerator(prefix: 'x');
-        final gen2 = createIdGenerator(prefix: 'x');
+      test('two independent generators produce unique IDs', () {
+        final gen1 = createIdGenerator();
+        final gen2 = createIdGenerator();
         final id1 = gen1();
         final id2 = gen2();
-        // Both start with 'x-' but are generated at different times, so unique
-        expect(id1, startsWith('x-'));
-        expect(id2, startsWith('x-'));
         expect(id1, isNot(id2));
       });
     });
@@ -118,11 +121,44 @@ void main() {
         );
         await simulateReadableStream(parts: parts).toList();
         stopwatch.stop();
-        // Should complete well within 1 second (no delays)
         expect(stopwatch.elapsedMilliseconds, lessThan(1000));
       });
 
-      test('with delay, each part is delayed', () async {
+      test('initialDelayInMs delays only the first chunk', () async {
+        final parts = [
+          const StreamPartTextStart(id: 't1'),
+          const StreamPartTextDelta(id: 't1', delta: 'hi'),
+        ];
+
+        final stopwatch = Stopwatch()..start();
+        await simulateReadableStream(
+          parts: parts,
+          initialDelayInMs: 50,
+        ).toList();
+        stopwatch.stop();
+        // Should wait at least ~50ms for the first chunk only
+        expect(stopwatch.elapsedMilliseconds, greaterThanOrEqualTo(40));
+      });
+
+      test('chunkDelayInMs delays between chunks (not before first)', () async {
+        final parts = [
+          const StreamPartTextStart(id: 't1'),
+          const StreamPartTextDelta(id: 't1', delta: 'a'),
+          const StreamPartTextDelta(id: 't1', delta: 'b'),
+          const StreamPartTextEnd(id: 't1'),
+        ];
+
+        final stopwatch = Stopwatch()..start();
+        await simulateReadableStream(
+          parts: parts,
+          chunkDelayInMs: 20,
+        ).toList();
+        stopwatch.stop();
+        // 3 gaps × 20ms = at least 60ms
+        expect(stopwatch.elapsedMilliseconds, greaterThanOrEqualTo(40));
+      });
+
+      test('legacy delay parameter still works', () async {
         final parts = [
           const StreamPartTextStart(id: 't1'),
           const StreamPartTextDelta(id: 't1', delta: 'hi'),
@@ -135,9 +171,7 @@ void main() {
           delay: const Duration(milliseconds: 20),
         ).toList();
         stopwatch.stop();
-
-        // 3 parts × 20ms = at least 60ms
-        expect(stopwatch.elapsedMilliseconds, greaterThanOrEqualTo(40));
+        expect(stopwatch.elapsedMilliseconds, greaterThanOrEqualTo(30));
       });
 
       test('preserves stream part data through emission', () async {
@@ -146,6 +180,184 @@ void main() {
         final emittedDelta = emitted[0] as StreamPartTextDelta;
         expect(emittedDelta.id, 'myId');
         expect(emittedDelta.delta, 'specific text');
+      });
+    });
+
+    // ── convertToModelMessages() ──────────────────────────────────────────
+
+    group('convertToModelMessages()', () {
+      test('converts single text user message', () {
+        final messages = [
+          LanguageModelV3Message(
+            role: LanguageModelV3Role.user,
+            content: [const LanguageModelV3TextPart(text: 'hello')],
+          ),
+        ];
+        final result = convertToModelMessages(messages);
+        expect(result.length, 1);
+        expect(result[0].role, ModelMessageRole.user);
+        expect(result[0].content, 'hello');
+      });
+
+      test('converts assistant message', () {
+        final messages = [
+          LanguageModelV3Message(
+            role: LanguageModelV3Role.assistant,
+            content: [const LanguageModelV3TextPart(text: 'world')],
+          ),
+        ];
+        final result = convertToModelMessages(messages);
+        expect(result[0].role, ModelMessageRole.assistant);
+        expect(result[0].content, 'world');
+      });
+
+      test('converts system message', () {
+        final messages = [
+          LanguageModelV3Message(
+            role: LanguageModelV3Role.system,
+            content: [const LanguageModelV3TextPart(text: 'be helpful')],
+          ),
+        ];
+        final result = convertToModelMessages(messages);
+        expect(result[0].role, ModelMessageRole.system);
+        expect(result[0].content, 'be helpful');
+      });
+
+      test('converts multi-part message to ModelMessage.parts', () {
+        final messages = [
+          LanguageModelV3Message(
+            role: LanguageModelV3Role.user,
+            content: [
+              const LanguageModelV3TextPart(text: 'look at this'),
+              LanguageModelV3ImagePart(
+                mediaType: 'image/png',
+                image: DataContentUrl(Uri.parse('https://example.com/img.png')),
+              ),
+            ],
+          ),
+        ];
+        final result = convertToModelMessages(messages);
+        expect(result[0].parts, isNotNull);
+        expect(result[0].parts!.length, 2);
+      });
+
+      test('converts empty list', () {
+        expect(convertToModelMessages([]), isEmpty);
+      });
+
+      test('round-trips single-text messages', () {
+        const original = ModelMessage(role: ModelMessageRole.user, content: 'hi');
+        final messages = [
+          LanguageModelV3Message(
+            role: LanguageModelV3Role.user,
+            content: [const LanguageModelV3TextPart(text: 'hi')],
+          ),
+        ];
+        final result = convertToModelMessages(messages);
+        expect(result[0].content, original.content);
+        expect(result[0].role, original.role);
+      });
+    });
+
+    // ── pruneMessages() ───────────────────────────────────────────────────
+
+    group('pruneMessages()', () {
+      // Without maxMessages the list is returned unchanged.
+      test('no maxMessages returns list unchanged', () {
+        final messages = [
+          const ModelMessage(role: ModelMessageRole.system, content: 'sys'),
+          const ModelMessage(role: ModelMessageRole.user, content: 'hi'),
+          const ModelMessage(role: ModelMessageRole.assistant, content: 'hello'),
+        ];
+        final result = pruneMessages(messages);
+        expect(result, hasLength(3));
+        expect(result[0].role, ModelMessageRole.system);
+      });
+
+      test('returns empty list for empty input', () {
+        expect(pruneMessages([]), isEmpty);
+      });
+
+      test('no maxMessages, no system messages — unchanged', () {
+        final messages = [
+          const ModelMessage(role: ModelMessageRole.user, content: 'a'),
+          const ModelMessage(role: ModelMessageRole.user, content: 'b'),
+        ];
+        final result = pruneMessages(messages);
+        expect(result, hasLength(2));
+      });
+
+      // maxMessages trimming.
+      test('trims to maxMessages most-recent non-system messages', () {
+        final sys = const ModelMessage(
+          role: ModelMessageRole.system,
+          content: 'sys',
+        );
+        final u1 = const ModelMessage(role: ModelMessageRole.user, content: 'u1');
+        final a1 = const ModelMessage(
+          role: ModelMessageRole.assistant,
+          content: 'a1',
+        );
+        final u2 = const ModelMessage(role: ModelMessageRole.user, content: 'u2');
+        final a2 = const ModelMessage(
+          role: ModelMessageRole.assistant,
+          content: 'a2',
+        );
+        final messages = [sys, u1, a1, u2, a2];
+        final result = pruneMessages(messages, maxMessages: 2);
+        expect(result, hasLength(3)); // sys + last 2
+        expect(result[0].role, ModelMessageRole.system);
+        expect(result[1].content, 'u2');
+        expect(result[2].content, 'a2');
+      });
+
+      test('system message is always kept and not counted against maxMessages',
+          () {
+        final sys = const ModelMessage(
+          role: ModelMessageRole.system,
+          content: 'instructions',
+        );
+        final messages = [
+          sys,
+          const ModelMessage(role: ModelMessageRole.user, content: 'old1'),
+          const ModelMessage(role: ModelMessageRole.user, content: 'old2'),
+          const ModelMessage(role: ModelMessageRole.user, content: 'new'),
+        ];
+        final result = pruneMessages(messages, maxMessages: 1);
+        expect(result, hasLength(2)); // sys + newest
+        expect(result[0].role, ModelMessageRole.system);
+        expect(result[1].content, 'new');
+      });
+
+      test('no trimming when list length <= maxMessages', () {
+        final messages = [
+          const ModelMessage(role: ModelMessageRole.user, content: 'a'),
+          const ModelMessage(role: ModelMessageRole.user, content: 'b'),
+        ];
+        final result = pruneMessages(messages, maxMessages: 5);
+        expect(result, hasLength(2));
+      });
+
+      test('no leading system: trims from beginning', () {
+        final messages = [
+          const ModelMessage(role: ModelMessageRole.user, content: 'old'),
+          const ModelMessage(role: ModelMessageRole.assistant, content: 'resp'),
+          const ModelMessage(role: ModelMessageRole.user, content: 'new'),
+        ];
+        final result = pruneMessages(messages, maxMessages: 2);
+        expect(result, hasLength(2));
+        expect(result[0].content, 'resp');
+        expect(result[1].content, 'new');
+      });
+
+      test('maxMessages=0 drops all non-system messages', () {
+        final messages = [
+          const ModelMessage(role: ModelMessageRole.system, content: 'sys'),
+          const ModelMessage(role: ModelMessageRole.user, content: 'u1'),
+        ];
+        final result = pruneMessages(messages, maxMessages: 0);
+        expect(result, hasLength(1));
+        expect(result[0].role, ModelMessageRole.system);
       });
     });
   });

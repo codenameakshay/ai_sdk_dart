@@ -28,10 +28,10 @@ class EmbedResult<VALUE> {
 Future<EmbedResult<VALUE>> embed<VALUE>({
   required EmbeddingModelV2<VALUE> model,
   required VALUE value,
+  Duration? timeout,
 }) async {
-  final result = await model.doEmbed(
-    EmbeddingModelV2CallOptions(values: [value]),
-  );
+  final call = model.doEmbed(EmbeddingModelV2CallOptions(values: [value]));
+  final result = await (timeout != null ? call.timeout(timeout) : call);
 
   final first = result.embeddings.first;
   return EmbedResult<VALUE>(

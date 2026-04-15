@@ -28,6 +28,11 @@ export 'src/image_model/image_model_v3.dart';
 export 'src/image_model/image_model_v3_call_options.dart';
 export 'src/image_model/image_model_v3_generate_result.dart';
 
+// Video model interfaces
+export 'src/video_model/video_model_v1.dart';
+export 'src/video_model/video_model_v1_call_options.dart';
+export 'src/video_model/video_model_v1_generate_result.dart';
+
 // Speech model interfaces
 export 'src/speech_model/speech_model_v1.dart';
 export 'src/speech_model/speech_model_v1_call_options.dart';

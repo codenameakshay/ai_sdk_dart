@@ -13,6 +13,11 @@ workspace:
   - packages/ai_sdk_google
   - packages/ai_sdk_flutter_ui
   - packages/ai_sdk_mcp
+  - packages/ai_sdk_cohere
+  - packages/ai_sdk_azure
+  - packages/ai_sdk_mistral
+  - packages/ai_sdk_groq
+  - packages/ai_sdk_ollama
   - examples/basic
   - examples/flutter_chat
   - examples/advanced_app

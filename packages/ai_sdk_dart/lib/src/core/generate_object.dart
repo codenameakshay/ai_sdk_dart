@@ -48,6 +48,7 @@ Future<GenerateObjectResult<T>> generateObject<T>({
   int? maxOutputTokens,
   double? temperature,
   double? topP,
+  Duration? timeout,
 }) async {
   final normalizedMessages = <LanguageModelV3Message>[
     if (prompt != null)
@@ -75,7 +76,7 @@ Future<GenerateObjectResult<T>> generateObject<T>({
     'Do not include markdown fences or extra text.',
   ].join('\n');
 
-  final response = await model.doGenerate(
+  final generateCall = model.doGenerate(
     LanguageModelV3CallOptions(
       prompt: LanguageModelV3Prompt(
         system: instruction,
@@ -84,8 +85,12 @@ Future<GenerateObjectResult<T>> generateObject<T>({
       maxOutputTokens: maxOutputTokens,
       temperature: temperature,
       topP: topP,
+      outputSchema: schema.jsonSchema,
     ),
   );
+  final response = await (timeout != null
+      ? generateCall.timeout(timeout)
+      : generateCall);
 
   final text = response.content
       .whereType<LanguageModelV3TextPart>()

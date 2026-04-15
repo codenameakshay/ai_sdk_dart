@@ -1,3 +1,9 @@
+## 1.1.0
+
+- **`LanguageModelV3CallOptions.outputSchema`** — new optional `Map<String, dynamic>?` field. When non-null, providers that support native structured output (e.g. OpenAI `response_format: json_schema`) should use it to request schema-validated responses directly from the model API.
+
+---
+
 ## 1.0.0+1
 
 - Improved pubspec descriptions for better pub.dev discoverability.

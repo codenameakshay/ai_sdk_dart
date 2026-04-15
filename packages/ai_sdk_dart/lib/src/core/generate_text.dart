@@ -7,6 +7,7 @@ import '../errors/ai_errors.dart';
 import '../messages/model_message.dart';
 import '../output/output.dart';
 import '../stop_conditions/stop_conditions.dart';
+import '../telemetry/telemetry.dart';
 import '../tools/tool.dart';
 
 /// Callback invoked after each step finishes in multi-step generation.
@@ -58,7 +59,7 @@ class GenerateTextPrepareStepContext {
   final List<GenerateTextStep> steps;
   final List<LanguageModelV3Message> messages;
   final List<StopCondition> stopConditions;
-  final Object? experimentalContext;
+  final Map<String, Object?>? experimentalContext;
 }
 
 /// Result from [GenerateTextPrepareStep]; overrides for the upcoming step.
@@ -161,7 +162,7 @@ class GenerateTextExperimentalStartEvent {
   final String? system;
   final String? prompt;
   final List<LanguageModelV3Message> messages;
-  final Object? experimentalContext;
+  final Map<String, Object?>? experimentalContext;
 }
 
 /// Event emitted before each step starts (experimental_onStepStart).
@@ -323,8 +324,11 @@ class GenerateTextResult<TOutput> {
 /// - [messages] – Conversation messages for multi-turn.
 /// - [output] – Structured output spec (default: [Output.text]).
 /// - [tools] – Tools the model can call.
-/// - [maxSteps] – Max tool-call steps (default: 1).
-/// - [stopConditions] – When to stop the loop.
+/// - [stopWhen] – Primary stop condition (or list). When absent, [maxSteps]
+///   and [stopConditions] govern stopping.
+/// - [maxSteps] – Max tool-call steps (default: 1). Ignored when [stopWhen]
+///   fully controls stopping.
+/// - [stopConditions] – Additional stop conditions merged with [stopWhen].
 /// - [prepareStep] – Per-step overrides.
 /// - [onStepFinish] – Called after each step.
 /// - [onFinish] – Called when generation completes.
@@ -336,16 +340,26 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
   int? maxOutputTokens,
   double? temperature,
   double? topP,
+  int? topK,
+  double? presencePenalty,
+  double? frequencyPenalty,
+  List<String> stopSequences = const [],
+  int? seed,
+  Map<String, String>? headers,
+  int maxRetries = 2,
+  List<String> activeToolNames = const [],
   ProviderOptions? providerOptions,
   Output<TOutput>? output,
   ToolSet tools = const {},
   List<LanguageModelV3ProviderDefinedTool> providerDefinedTools = const [],
   int maxSteps = 1,
   List<StopCondition> stopConditions = const [],
+  Object? stopWhen, // StopCondition | List<StopCondition>
   LanguageModelV3ToolChoice? toolChoice,
   List<LanguageModelV3ToolApprovalResponse> toolApprovalResponses = const [],
-  Object? abortSignal,
-  Object? experimentalContext,
+  CancellationToken? abortSignal,
+  Duration? timeout,
+  Map<String, Object?>? experimentalContext,
   GenerateTextOnStepFinish? onStepFinish,
   GenerateTextOnFinish<TOutput>? onFinish,
   GenerateTextPrepareStep? prepareStep,
@@ -353,7 +367,19 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
   GenerateTextExperimentalOnStepStart? experimentalOnStepStart,
   GenerateTextExperimentalOnToolCallStart? experimentalOnToolCallStart,
   GenerateTextExperimentalOnToolCallFinish? experimentalOnToolCallFinish,
+  TelemetrySettings? experimentalTelemetry,
 }) async {
+  final telemetrySpan = startTelemetrySpan(
+    experimentalTelemetry,
+    spanName: 'ai.generateText',
+    attributes: {
+      'ai.model.provider': model.provider,
+      'ai.model.id': model.modelId,
+      if (prompt != null) 'ai.prompt': prompt,
+    },
+  );
+
+  try {
   final outputSpec = output ?? (Output.text() as Output<TOutput>);
   var normalizedMessages = <LanguageModelV3Message>[
     if (prompt != null)
@@ -386,7 +412,22 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
   List<LanguageModelV3Message>? firstRequestMessages;
   LanguageModelV3GenerateResult? lastResponse;
 
-  final totalSteps = tools.isEmpty ? 1 : (maxSteps < 1 ? 1 : maxSteps);
+  // Merge stopWhen + stopConditions into a single effective conditions list.
+  final _stopWhenList = switch (stopWhen) {
+    null => <StopCondition>[],
+    final StopCondition fn => [fn],
+    final List<Object?> lst => lst.whereType<StopCondition>().toList(),
+    _ => <StopCondition>[],
+  };
+  final _allStopConditions = [..._stopWhenList, ...stopConditions];
+
+  // When no stopWhen is supplied, treat maxSteps as the primary limit.
+  final totalSteps = tools.isEmpty
+      ? 1
+      : (_stopWhenList.isEmpty
+          ? (maxSteps < 1 ? 1 : maxSteps)
+          : (maxSteps < 1 ? 1 : maxSteps));
+
   for (var stepNumber = 0; stepNumber < totalSteps; stepNumber++) {
     final prepareResult = await Future.value(
       prepareStep?.call(
@@ -395,7 +436,7 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
           stepNumber: stepNumber,
           steps: List.unmodifiable(steps),
           messages: List.unmodifiable(normalizedMessages),
-          stopConditions: stopConditions,
+          stopConditions: _allStopConditions,
           experimentalContext: experimentalContext,
         ),
       ),
@@ -407,7 +448,11 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
     firstRequestMessages ??= List<LanguageModelV3Message>.from(stepMessages);
     final stepProviderOptions =
         prepareResult?.providerOptions ?? providerOptions;
-    final activeTools = _selectActiveTools(tools, prepareResult?.activeTools);
+    final activeTools = _selectActiveTools(
+      tools,
+      prepareResult?.activeTools ??
+          (activeToolNames.isNotEmpty ? activeToolNames : null),
+    );
     final toolSelection = _resolveToolSelection(
       tools: activeTools,
       toolChoice: stepToolChoice,
@@ -424,32 +469,43 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
       ),
     );
 
-    final response = await stepModel.doGenerate(
-      LanguageModelV3CallOptions(
-        prompt: LanguageModelV3Prompt(
-          system: systemInstruction,
-          messages: stepMessages,
-        ),
-        tools: toolSelection.exposedTools.entries
-            .map(
-              (entry) => LanguageModelV3FunctionTool(
-                name: entry.key,
-                description: entry.value.description,
-                inputSchema: entry.value.inputSchema.jsonSchema,
-                strict: entry.value.strict,
-                inputExamples: entry.value.inputExamples
-                    .map((example) => example.input)
-                    .toList(),
-              ),
-            )
-            .toList(),
-        providerDefinedTools: providerDefinedTools,
-        toolChoice: toolSelection.toolChoice,
-        maxOutputTokens: maxOutputTokens,
-        temperature: temperature,
-        topP: topP,
-        providerOptions: stepProviderOptions,
+    final callOptions = LanguageModelV3CallOptions(
+      prompt: LanguageModelV3Prompt(
+        system: systemInstruction,
+        messages: stepMessages,
       ),
+      tools: toolSelection.exposedTools.entries
+          .map(
+            (entry) => LanguageModelV3FunctionTool(
+              name: entry.key,
+              description: entry.value.description,
+              inputSchema: entry.value.inputSchema.jsonSchema,
+              strict: entry.value.strict,
+              inputExamples: entry.value.inputExamples
+                  .map((example) => example.input)
+                  .toList(),
+            ),
+          )
+          .toList(),
+      providerDefinedTools: providerDefinedTools,
+      toolChoice: toolSelection.toolChoice,
+      maxOutputTokens: maxOutputTokens,
+      temperature: temperature,
+      topP: topP,
+      topK: topK,
+      presencePenalty: presencePenalty,
+      frequencyPenalty: frequencyPenalty,
+      stopSequences: stopSequences,
+      seed: seed,
+      headers: headers,
+      providerOptions: stepProviderOptions,
+    );
+    final response = await _withRetry(
+      maxRetries: maxRetries,
+      fn: () {
+        final call = stepModel.doGenerate(callOptions);
+        return timeout != null ? call.timeout(timeout) : call;
+      },
     );
 
     _validateToolChoiceInResponse(
@@ -536,11 +592,12 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
     final snapshot = StepSnapshot(
       stepCount: stepNumber + 1,
       toolCallNames: toolCalls.map((call) => call.toolName).toList(),
+      finishReason: response.finishReason,
     );
     final shouldStop =
         toolResults.isEmpty ||
         approvalRequests.isNotEmpty ||
-        stopConditions.any((condition) => condition(snapshot));
+        _allStopConditions.any((condition) => condition(snapshot));
     if (shouldStop) {
       break;
     }
@@ -626,7 +683,22 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
     ),
   );
 
+  telemetrySpan
+    ..setAttribute('ai.usage.promptTokens', result.totalUsage?.inputTokens ?? 0)
+    ..setAttribute(
+      'ai.usage.completionTokens',
+      result.totalUsage?.outputTokens ?? 0,
+    )
+    ..setAttribute('ai.finishReason', result.finishReason?.name ?? 'unknown')
+    ..end();
+
   return result;
+  } catch (e, st) {
+    telemetrySpan
+      ..recordException(e, stackTrace: st)
+      ..end(error: e);
+    rethrow;
+  }
 }
 
 class _ToolSelection {
@@ -739,8 +811,8 @@ Future<_ToolExecutionResult> _executeToolCall({
   required LanguageModelV3ToolCallPart call,
   required List<LanguageModelV3Message> messages,
   required Map<String, LanguageModelV3ToolApprovalResponse> approvalById,
-  Object? abortSignal,
-  Object? experimentalContext,
+  CancellationToken? abortSignal,
+  Map<String, Object?>? experimentalContext,
   GenerateTextExperimentalOnToolCallStart? onToolCallStart,
   GenerateTextExperimentalOnToolCallFinish? onToolCallFinish,
 }) async {
@@ -928,6 +1000,23 @@ void _safeInvoke(void Function() action) {
   try {
     action();
   } catch (_) {}
+}
+
+/// Retries [fn] up to [maxRetries] times on exception.
+/// If all attempts fail, the last exception is rethrown.
+Future<T> _withRetry<T>({
+  required int maxRetries,
+  required Future<T> Function() fn,
+}) async {
+  var attempts = 0;
+  while (true) {
+    try {
+      return await fn();
+    } catch (e) {
+      attempts++;
+      if (attempts > maxRetries) rethrow;
+    }
+  }
 }
 
 String _contentToText(List<LanguageModelV3ContentPart> content) {

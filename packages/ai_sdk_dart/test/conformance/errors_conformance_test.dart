@@ -251,6 +251,252 @@ void main() {
       });
     });
 
+    // ── AiToolCallRepairError ─────────────────────────────────────────────
+
+    group('AiToolCallRepairError', () {
+      test('is an AiSdkError', () {
+        final err = AiToolCallRepairError(
+          message: 'repair failed',
+          toolName: 'myTool',
+          cause: Exception('bad json'),
+        );
+        expect(err, isA<AiSdkError>());
+      });
+
+      test('exposes toolName', () {
+        final err = AiToolCallRepairError(
+          message: 'repair failed',
+          toolName: 'calculator',
+          cause: Exception('parse error'),
+        );
+        expect(err.toolName, 'calculator');
+      });
+
+      test('repairAttempts defaults to 0', () {
+        final err = AiToolCallRepairError(
+          message: 'repair failed',
+          toolName: 'tool',
+          cause: Exception('err'),
+        );
+        expect(err.repairAttempts, 0);
+      });
+
+      test('repairAttempts can be set', () {
+        final err = AiToolCallRepairError(
+          message: 'repair failed',
+          toolName: 'tool',
+          cause: Exception('err'),
+          repairAttempts: 3,
+        );
+        expect(err.repairAttempts, 3);
+      });
+
+      test('isInstance returns true', () {
+        final err = AiToolCallRepairError(
+          message: 'fail',
+          toolName: 'tool',
+          cause: Exception(),
+        );
+        expect(AiToolCallRepairError.isInstance(err), isTrue);
+      });
+
+      test('isInstance returns false for other errors', () {
+        expect(
+          AiToolCallRepairError.isInstance(const AiApiCallError('http')),
+          isFalse,
+        );
+      });
+    });
+
+    // ── AiNoImageGeneratedError ───────────────────────────────────────────
+
+    group('AiNoImageGeneratedError', () {
+      test('is an AiSdkError', () {
+        final err = AiNoImageGeneratedError(message: 'no image');
+        expect(err, isA<AiSdkError>());
+      });
+
+      test('cause is optional', () {
+        final err = AiNoImageGeneratedError(message: 'no image');
+        expect(err.cause, isNull);
+      });
+
+      test('cause can be set', () {
+        final cause = Exception('provider error');
+        final err = AiNoImageGeneratedError(message: 'no image', cause: cause);
+        expect(err.cause, same(cause));
+      });
+
+      test('isInstance returns true', () {
+        expect(
+          AiNoImageGeneratedError.isInstance(
+            AiNoImageGeneratedError(message: 'no image'),
+          ),
+          isTrue,
+        );
+      });
+
+      test('isInstance returns false for other errors', () {
+        expect(
+          AiNoImageGeneratedError.isInstance(const AiApiCallError('x')),
+          isFalse,
+        );
+      });
+    });
+
+    // ── AiNoVideoGeneratedError ───────────────────────────────────────────
+
+    group('AiNoVideoGeneratedError', () {
+      test('is an AiSdkError', () {
+        final err = AiNoVideoGeneratedError(message: 'no video');
+        expect(err, isA<AiSdkError>());
+      });
+
+      test('cause is optional', () {
+        final err = AiNoVideoGeneratedError(message: 'no video');
+        expect(err.cause, isNull);
+      });
+
+      test('isInstance returns true', () {
+        expect(
+          AiNoVideoGeneratedError.isInstance(
+            AiNoVideoGeneratedError(message: 'no video'),
+          ),
+          isTrue,
+        );
+      });
+    });
+
+    // ── AiNoSpeechGeneratedError ──────────────────────────────────────────
+
+    group('AiNoSpeechGeneratedError', () {
+      test('is an AiSdkError', () {
+        final err = AiNoSpeechGeneratedError(message: 'no speech');
+        expect(err, isA<AiSdkError>());
+      });
+
+      test('isInstance returns true', () {
+        expect(
+          AiNoSpeechGeneratedError.isInstance(
+            AiNoSpeechGeneratedError(message: 'no speech'),
+          ),
+          isTrue,
+        );
+      });
+    });
+
+    // ── AiNoTranscriptGeneratedError ──────────────────────────────────────
+
+    group('AiNoTranscriptGeneratedError', () {
+      test('is an AiSdkError', () {
+        final err = AiNoTranscriptGeneratedError(message: 'no transcript');
+        expect(err, isA<AiSdkError>());
+      });
+
+      test('isInstance returns true', () {
+        expect(
+          AiNoTranscriptGeneratedError.isInstance(
+            AiNoTranscriptGeneratedError(message: 'no transcript'),
+          ),
+          isTrue,
+        );
+      });
+    });
+
+    // ── AiRetryError ──────────────────────────────────────────────────────
+
+    group('AiRetryError', () {
+      test('is an AiSdkError', () {
+        final err = AiRetryError(
+          message: 'max retries exceeded',
+          attempts: 3,
+          lastError: Exception('timeout'),
+        );
+        expect(err, isA<AiSdkError>());
+      });
+
+      test('exposes attempts and lastError', () {
+        final last = Exception('timeout');
+        final err = AiRetryError(
+          message: 'max retries exceeded',
+          attempts: 5,
+          lastError: last,
+        );
+        expect(err.attempts, 5);
+        expect(err.lastError, same(last));
+      });
+
+      test('isInstance returns true', () {
+        expect(
+          AiRetryError.isInstance(
+            AiRetryError(
+              message: 'fail',
+              attempts: 1,
+              lastError: Exception(),
+            ),
+          ),
+          isTrue,
+        );
+      });
+
+      test('isInstance returns false for other errors', () {
+        expect(
+          AiRetryError.isInstance(const AiApiCallError('x')),
+          isFalse,
+        );
+      });
+    });
+
+    // ── AiDownloadError ───────────────────────────────────────────────────
+
+    group('AiDownloadError', () {
+      test('is an AiSdkError', () {
+        final err = AiDownloadError(message: 'download failed', url: 'https://example.com/audio.mp3');
+        expect(err, isA<AiSdkError>());
+      });
+
+      test('exposes url', () {
+        final err = AiDownloadError(
+          message: 'download failed',
+          url: 'https://example.com/audio.mp3',
+        );
+        expect(err.url, 'https://example.com/audio.mp3');
+      });
+
+      test('statusCode is optional', () {
+        final err = AiDownloadError(
+          message: 'download failed',
+          url: 'https://example.com/audio.mp3',
+        );
+        expect(err.statusCode, isNull);
+      });
+
+      test('statusCode can be set', () {
+        final err = AiDownloadError(
+          message: 'download failed',
+          url: 'https://example.com/audio.mp3',
+          statusCode: 403,
+        );
+        expect(err.statusCode, 403);
+      });
+
+      test('isInstance returns true', () {
+        expect(
+          AiDownloadError.isInstance(
+            AiDownloadError(message: 'fail', url: 'https://x.com'),
+          ),
+          isTrue,
+        );
+      });
+
+      test('isInstance returns false for other errors', () {
+        expect(
+          AiDownloadError.isInstance(const AiApiCallError('x')),
+          isFalse,
+        );
+      });
+    });
+
     // ── Exception interface ───────────────────────────────────────────────
 
     group('Exception interface', () {
@@ -266,6 +512,26 @@ void main() {
             response: null,
             usage: null,
           ),
+          isA<Exception>(),
+        );
+        expect(
+          AiToolCallRepairError(
+            message: 'e',
+            toolName: 'tool',
+            cause: Exception(),
+          ),
+          isA<Exception>(),
+        );
+        expect(AiNoImageGeneratedError(message: 'e'), isA<Exception>());
+        expect(AiNoVideoGeneratedError(message: 'e'), isA<Exception>());
+        expect(AiNoSpeechGeneratedError(message: 'e'), isA<Exception>());
+        expect(AiNoTranscriptGeneratedError(message: 'e'), isA<Exception>());
+        expect(
+          AiRetryError(message: 'e', attempts: 1, lastError: Exception()),
+          isA<Exception>(),
+        );
+        expect(
+          AiDownloadError(message: 'e', url: 'https://x.com'),
           isA<Exception>(),
         );
       });

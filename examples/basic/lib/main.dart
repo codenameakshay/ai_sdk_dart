@@ -184,10 +184,13 @@ Future<void> demo6Middleware() async {
   // defaultSettingsMiddleware injects a low temperature.
   // extractReasoningMiddleware strips <think>…</think> blocks emitted by
   // reasoning-capable models (e.g. claude-3-7-sonnet, o1).
-  final model = wrapLanguageModel(openai('gpt-4.1-mini'), [
-    defaultSettingsMiddleware(temperature: 0.2),
-    extractReasoningMiddleware(tagName: 'think'),
-  ]);
+  final model = wrapLanguageModel(
+    model: openai('gpt-4.1-mini'),
+    middleware: [
+      defaultSettingsMiddleware(temperature: 0.2),
+      extractReasoningMiddleware(tagName: 'think'),
+    ],
+  );
 
   final result = await generateText(
     model: model,

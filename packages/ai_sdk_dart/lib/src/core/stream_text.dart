@@ -467,6 +467,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   LanguageModelV3ToolChoice? toolChoice,
   int maxSteps = 1,
   List<StopCondition> stopConditions = const [],
+  Object? stopWhen, // StopCondition | List<StopCondition>
   List<LanguageModelV3ToolApprovalResponse> toolApprovalResponses = const [],
   CancellationToken? abortSignal,
   Map<String, Object?>? experimentalContext,
@@ -598,6 +599,16 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
 
       try {
         fullController.add(const StreamTextStartEvent());
+
+        // Merge stopWhen + stopConditions.
+        final _stopWhenList = switch (stopWhen) {
+          null => <StopCondition>[],
+          final StopCondition fn => [fn],
+          final List<Object?> lst => lst.whereType<StopCondition>().toList(),
+          _ => <StopCondition>[],
+        };
+        final _allStopConditions = [..._stopWhenList, ...stopConditions];
+
         final totalSteps = tools.isEmpty ? 1 : (maxSteps < 1 ? 1 : maxSteps);
         for (var stepNumber = 0; stepNumber < totalSteps; stepNumber++) {
           fullController.add(StreamTextStartStepEvent(stepNumber: stepNumber));
@@ -609,7 +620,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                 stepNumber: stepNumber,
                 steps: List.unmodifiable(steps),
                 messages: List.unmodifiable(normalizedMessages),
-                stopConditions: stopConditions,
+                stopConditions: _allStopConditions,
                 experimentalContext: experimentalContext,
               ),
             ),
@@ -993,13 +1004,14 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
           final shouldStop =
               stepToolResults.isEmpty ||
               stepApprovalRequests.isNotEmpty ||
-              stopConditions.any(
+              _allStopConditions.any(
                 (condition) => condition(
                   StepSnapshot(
                     stepCount: stepNumber + 1,
                     toolCallNames: stepToolCalls
                         .map((call) => call.toolName)
                         .toList(),
+                    finishReason: stepFinish.finishReason,
                   ),
                 ),
               );

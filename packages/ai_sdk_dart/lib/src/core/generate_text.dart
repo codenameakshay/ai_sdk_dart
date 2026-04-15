@@ -324,8 +324,11 @@ class GenerateTextResult<TOutput> {
 /// - [messages] – Conversation messages for multi-turn.
 /// - [output] – Structured output spec (default: [Output.text]).
 /// - [tools] – Tools the model can call.
-/// - [maxSteps] – Max tool-call steps (default: 1).
-/// - [stopConditions] – When to stop the loop.
+/// - [stopWhen] – Primary stop condition (or list). When absent, [maxSteps]
+///   and [stopConditions] govern stopping.
+/// - [maxSteps] – Max tool-call steps (default: 1). Ignored when [stopWhen]
+///   fully controls stopping.
+/// - [stopConditions] – Additional stop conditions merged with [stopWhen].
 /// - [prepareStep] – Per-step overrides.
 /// - [onStepFinish] – Called after each step.
 /// - [onFinish] – Called when generation completes.
@@ -351,6 +354,7 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
   List<LanguageModelV3ProviderDefinedTool> providerDefinedTools = const [],
   int maxSteps = 1,
   List<StopCondition> stopConditions = const [],
+  Object? stopWhen, // StopCondition | List<StopCondition>
   LanguageModelV3ToolChoice? toolChoice,
   List<LanguageModelV3ToolApprovalResponse> toolApprovalResponses = const [],
   CancellationToken? abortSignal,
@@ -407,7 +411,22 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
   List<LanguageModelV3Message>? firstRequestMessages;
   LanguageModelV3GenerateResult? lastResponse;
 
-  final totalSteps = tools.isEmpty ? 1 : (maxSteps < 1 ? 1 : maxSteps);
+  // Merge stopWhen + stopConditions into a single effective conditions list.
+  final _stopWhenList = switch (stopWhen) {
+    null => <StopCondition>[],
+    final StopCondition fn => [fn],
+    final List<Object?> lst => lst.whereType<StopCondition>().toList(),
+    _ => <StopCondition>[],
+  };
+  final _allStopConditions = [..._stopWhenList, ...stopConditions];
+
+  // When no stopWhen is supplied, treat maxSteps as the primary limit.
+  final totalSteps = tools.isEmpty
+      ? 1
+      : (_stopWhenList.isEmpty
+          ? (maxSteps < 1 ? 1 : maxSteps)
+          : (maxSteps < 1 ? 1 : maxSteps));
+
   for (var stepNumber = 0; stepNumber < totalSteps; stepNumber++) {
     final prepareResult = await Future.value(
       prepareStep?.call(
@@ -416,7 +435,7 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
           stepNumber: stepNumber,
           steps: List.unmodifiable(steps),
           messages: List.unmodifiable(normalizedMessages),
-          stopConditions: stopConditions,
+          stopConditions: _allStopConditions,
           experimentalContext: experimentalContext,
         ),
       ),
@@ -569,11 +588,12 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
     final snapshot = StepSnapshot(
       stepCount: stepNumber + 1,
       toolCallNames: toolCalls.map((call) => call.toolName).toList(),
+      finishReason: response.finishReason,
     );
     final shouldStop =
         toolResults.isEmpty ||
         approvalRequests.isNotEmpty ||
-        stopConditions.any((condition) => condition(snapshot));
+        _allStopConditions.any((condition) => condition(snapshot));
     if (shouldStop) {
       break;
     }

@@ -4,7 +4,25 @@ import 'dart:convert';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
 /// A middleware function that can intercept and transform language model calls.
+///
+/// Three hook points (all optional via [LanguageModelMiddlewareBase]):
+///
+/// - [transformParams] — modify call options **before** any generate/stream
+///   call.  Runs first; result is forwarded to the inner model.
+/// - [wrapGenerate] — intercept the synchronous doGenerate call.
+/// - [wrapStream]   — intercept the streaming doStream call.
+///
+/// Mirrors the JS AI SDK v6 middleware interface.
 abstract interface class LanguageModelMiddleware {
+  /// Transform [LanguageModelV3CallOptions] before the call reaches the model.
+  ///
+  /// Return modified options (or the same instance if no change is needed).
+  /// Runs before both [wrapGenerate] and [wrapStream].
+  FutureOr<LanguageModelV3CallOptions> transformParams({
+    required LanguageModelV3CallOptions options,
+    required LanguageModelV3 model,
+  });
+
   /// Optionally wrap the doGenerate call.
   Future<LanguageModelV3GenerateResult> wrapGenerate({
     required Future<LanguageModelV3GenerateResult> Function(
@@ -28,13 +46,39 @@ abstract interface class LanguageModelMiddleware {
 
 /// Wraps a [LanguageModelV3] with one or more [LanguageModelMiddleware] layers.
 ///
-/// Middleware is applied left-to-right (first middleware is the outermost layer).
-LanguageModelV3 wrapLanguageModel(
-  LanguageModelV3 model,
-  List<LanguageModelMiddleware> middleware,
-) {
+/// Mirrors the JS AI SDK v6 signature:
+/// ```dart
+/// final wrapped = wrapLanguageModel(
+///   model: openai('gpt-4o'),
+///   middleware: extractReasoningMiddleware(),
+/// );
+/// // or with multiple middleware:
+/// final wrapped = wrapLanguageModel(
+///   model: openai('gpt-4o'),
+///   middleware: [mw1, mw2],
+/// );
+/// ```
+///
+/// When [middleware] is a single [LanguageModelMiddleware] it is treated as a
+/// one-element list. When it is a `List<LanguageModelMiddleware>` middleware is
+/// applied left-to-right (first entry is the outermost layer).
+LanguageModelV3 wrapLanguageModel({
+  required LanguageModelV3 model,
+  required Object middleware,
+}) {
+  final List<LanguageModelMiddleware> mwList;
+  if (middleware is LanguageModelMiddleware) {
+    mwList = [middleware];
+  } else if (middleware is List<LanguageModelMiddleware>) {
+    mwList = middleware;
+  } else {
+    throw ArgumentError(
+      'middleware must be a LanguageModelMiddleware or '
+      'List<LanguageModelMiddleware>',
+    );
+  }
   var wrapped = model;
-  for (final mw in middleware.reversed) {
+  for (final mw in mwList.reversed) {
     wrapped = _WrappedLanguageModel(inner: wrapped, middleware: mw);
   }
   return wrapped;
@@ -58,10 +102,14 @@ class _WrappedLanguageModel implements LanguageModelV3 {
   @override
   Future<LanguageModelV3GenerateResult> doGenerate(
     LanguageModelV3CallOptions options,
-  ) {
+  ) async {
+    final transformed = await middleware.transformParams(
+      options: options,
+      model: inner,
+    );
     return middleware.wrapGenerate(
       doGenerate: inner.doGenerate,
-      options: options,
+      options: transformed,
       model: inner,
     );
   }
@@ -69,10 +117,14 @@ class _WrappedLanguageModel implements LanguageModelV3 {
   @override
   Future<LanguageModelV3StreamResult> doStream(
     LanguageModelV3CallOptions options,
-  ) {
+  ) async {
+    final transformed = await middleware.transformParams(
+      options: options,
+      model: inner,
+    );
     return middleware.wrapStream(
       doStream: inner.doStream,
-      options: options,
+      options: transformed,
       model: inner,
     );
   }
@@ -83,6 +135,13 @@ class _WrappedLanguageModel implements LanguageModelV3 {
 /// Extend this and override only the methods you need.
 abstract class LanguageModelMiddlewareBase implements LanguageModelMiddleware {
   const LanguageModelMiddlewareBase();
+
+  /// Default implementation: returns [options] unchanged.
+  @override
+  FutureOr<LanguageModelV3CallOptions> transformParams({
+    required LanguageModelV3CallOptions options,
+    required LanguageModelV3 model,
+  }) => options;
 
   @override
   Future<LanguageModelV3GenerateResult> wrapGenerate({

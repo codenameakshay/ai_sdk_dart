@@ -167,8 +167,8 @@ Future<void> _middleware() async {
   print('── wrapLanguageModel + extractReasoningMiddleware ─────────');
 
   final model = wrapLanguageModel(
-    _FakeModel('<think>Let me think…</think>The answer is 42.'),
-    [extractReasoningMiddleware(tagName: 'think')],
+    model: _FakeModel('<think>Let me think…</think>The answer is 42.'),
+    middleware: extractReasoningMiddleware(tagName: 'think'),
   );
 
   final result = await generateText(model: model, prompt: 'What is 6 × 7?');

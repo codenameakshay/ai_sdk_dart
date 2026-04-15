@@ -262,63 +262,102 @@ void main() {
     // ── pruneMessages() ───────────────────────────────────────────────────
 
     group('pruneMessages()', () {
-      test('removes system messages', () {
+      // Without maxMessages the list is returned unchanged.
+      test('no maxMessages returns list unchanged', () {
         final messages = [
           const ModelMessage(role: ModelMessageRole.system, content: 'sys'),
           const ModelMessage(role: ModelMessageRole.user, content: 'hi'),
           const ModelMessage(role: ModelMessageRole.assistant, content: 'hello'),
         ];
         final result = pruneMessages(messages);
-        expect(result.length, 2);
-        expect(result.any((m) => m.role == ModelMessageRole.system), isFalse);
+        expect(result, hasLength(3));
+        expect(result[0].role, ModelMessageRole.system);
       });
 
-      test('preserves user messages', () {
+      test('returns empty list for empty input', () {
+        expect(pruneMessages([]), isEmpty);
+      });
+
+      test('no maxMessages, no system messages — unchanged', () {
         final messages = [
           const ModelMessage(role: ModelMessageRole.user, content: 'a'),
           const ModelMessage(role: ModelMessageRole.user, content: 'b'),
         ];
         final result = pruneMessages(messages);
-        expect(result.length, 2);
+        expect(result, hasLength(2));
       });
 
-      test('preserves assistant messages', () {
+      // maxMessages trimming.
+      test('trims to maxMessages most-recent non-system messages', () {
+        final sys = const ModelMessage(
+          role: ModelMessageRole.system,
+          content: 'sys',
+        );
+        final u1 = const ModelMessage(role: ModelMessageRole.user, content: 'u1');
+        final a1 = const ModelMessage(
+          role: ModelMessageRole.assistant,
+          content: 'a1',
+        );
+        final u2 = const ModelMessage(role: ModelMessageRole.user, content: 'u2');
+        final a2 = const ModelMessage(
+          role: ModelMessageRole.assistant,
+          content: 'a2',
+        );
+        final messages = [sys, u1, a1, u2, a2];
+        final result = pruneMessages(messages, maxMessages: 2);
+        expect(result, hasLength(3)); // sys + last 2
+        expect(result[0].role, ModelMessageRole.system);
+        expect(result[1].content, 'u2');
+        expect(result[2].content, 'a2');
+      });
+
+      test('system message is always kept and not counted against maxMessages',
+          () {
+        final sys = const ModelMessage(
+          role: ModelMessageRole.system,
+          content: 'instructions',
+        );
         final messages = [
-          const ModelMessage(role: ModelMessageRole.assistant, content: 'a'),
+          sys,
+          const ModelMessage(role: ModelMessageRole.user, content: 'old1'),
+          const ModelMessage(role: ModelMessageRole.user, content: 'old2'),
+          const ModelMessage(role: ModelMessageRole.user, content: 'new'),
         ];
-        final result = pruneMessages(messages);
-        expect(result.length, 1);
-        expect(result[0].role, ModelMessageRole.assistant);
+        final result = pruneMessages(messages, maxMessages: 1);
+        expect(result, hasLength(2)); // sys + newest
+        expect(result[0].role, ModelMessageRole.system);
+        expect(result[1].content, 'new');
       });
 
-      test('preserves tool messages', () {
+      test('no trimming when list length <= maxMessages', () {
         final messages = [
-          ModelMessage.parts(
-            role: ModelMessageRole.tool,
-            parts: [
-              LanguageModelV3ToolResultPart(
-                toolCallId: 'id',
-                toolName: 'fn',
-                output: const ToolResultOutputText('result'),
-              ),
-            ],
-          ),
+          const ModelMessage(role: ModelMessageRole.user, content: 'a'),
+          const ModelMessage(role: ModelMessageRole.user, content: 'b'),
         ];
-        final result = pruneMessages(messages);
-        expect(result.length, 1);
-        expect(result[0].role, ModelMessageRole.tool);
+        final result = pruneMessages(messages, maxMessages: 5);
+        expect(result, hasLength(2));
       });
 
-      test('returns empty list when all messages are system', () {
+      test('no leading system: trims from beginning', () {
         final messages = [
-          const ModelMessage(role: ModelMessageRole.system, content: 'a'),
-          const ModelMessage(role: ModelMessageRole.system, content: 'b'),
+          const ModelMessage(role: ModelMessageRole.user, content: 'old'),
+          const ModelMessage(role: ModelMessageRole.assistant, content: 'resp'),
+          const ModelMessage(role: ModelMessageRole.user, content: 'new'),
         ];
-        expect(pruneMessages(messages), isEmpty);
+        final result = pruneMessages(messages, maxMessages: 2);
+        expect(result, hasLength(2));
+        expect(result[0].content, 'resp');
+        expect(result[1].content, 'new');
       });
 
-      test('returns empty list for empty input', () {
-        expect(pruneMessages([]), isEmpty);
+      test('maxMessages=0 drops all non-system messages', () {
+        final messages = [
+          const ModelMessage(role: ModelMessageRole.system, content: 'sys'),
+          const ModelMessage(role: ModelMessageRole.user, content: 'u1'),
+        ];
+        final result = pruneMessages(messages, maxMessages: 0);
+        expect(result, hasLength(1));
+        expect(result[0].role, ModelMessageRole.system);
       });
     });
   });

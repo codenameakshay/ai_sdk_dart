@@ -162,12 +162,40 @@ List<ModelMessage> convertToModelMessages(
   }).toList();
 }
 
-/// Returns only the model-facing (non-system) messages from [messages].
+/// Trims a message list to at most [maxMessages] entries, keeping the most
+/// recent messages while always preserving the first system message (if any).
 ///
-/// Filters out [ModelMessageRole.system] messages, keeping user/assistant/tool
-/// turns. Mirrors `pruneMessages` from the JS AI SDK v6.
-List<ModelMessage> pruneMessages(List<ModelMessage> messages) {
-  return messages
-      .where((m) => m.role != ModelMessageRole.system)
-      .toList();
+/// Mirrors `pruneMessages` from the JS AI SDK v6. Useful for context-window
+/// management: when a conversation grows too long, drop the oldest non-system
+/// turns rather than the newest ones.
+///
+/// - If [maxMessages] is null (the default), the list is returned unchanged.
+/// - System messages at index 0 are always kept and do not count against
+///   [maxMessages].
+/// - If the list has ≤ [maxMessages] entries (excluding a leading system
+///   message), it is returned unchanged.
+///
+/// Example:
+/// ```dart
+/// final history = [systemMsg, userA, assistantA, userB, assistantB];
+/// pruneMessages(history, maxMessages: 2);
+/// // → [systemMsg, userB, assistantB]
+/// ```
+List<ModelMessage> pruneMessages(
+  List<ModelMessage> messages, {
+  int? maxMessages,
+}) {
+  if (maxMessages == null || messages.isEmpty) return List.of(messages);
+
+  // Split off a leading system message so it's always preserved.
+  final hasLeadingSystem =
+      messages.first.role == ModelMessageRole.system;
+  final systemPrefix = hasLeadingSystem ? [messages.first] : <ModelMessage>[];
+  final rest = hasLeadingSystem ? messages.sublist(1) : messages;
+
+  if (rest.length <= maxMessages) return List.of(messages);
+
+  // Keep the most recent maxMessages entries from the non-system portion.
+  final kept = rest.sublist(rest.length - maxMessages);
+  return [...systemPrefix, ...kept];
 }

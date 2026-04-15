@@ -12,6 +12,7 @@ export 'src/core/rerank.dart';
 export 'src/core/transcribe.dart';
 export 'src/errors/ai_errors.dart';
 export 'src/messages/model_message.dart';
+export 'src/middleware/image_model_middleware.dart';
 export 'src/middleware/language_model_middleware.dart';
 export 'src/output/output.dart';
 export 'src/registry/provider_registry.dart';

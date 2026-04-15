@@ -21,6 +21,9 @@ typedef StreamTextOnError = void Function(Object error);
 typedef StreamTextOnFinish<TOutput> =
     void Function(StreamTextFinishEvent<TOutput> event);
 
+/// Callback invoked when the stream is aborted via [CancellationToken].
+typedef StreamTextOnAbort = void Function();
+
 /// Callback invoked when a tool input stream starts.
 typedef StreamTextOnInputStart =
     void Function(StreamTextToolInputStartEvent event);
@@ -34,34 +37,46 @@ typedef StreamTextOnInputAvailable =
     void Function(StreamTextToolInputEndEvent event);
 
 /// Transform that splits text deltas into smaller chunks.
-typedef StreamTextTransform = Iterable<String> Function(String delta);
-
-/// Returns a transform that yields text deltas in chunks of [chunkSize].
+/// Transform applied to each text delta in [streamText].
 ///
-/// Use with [streamText]'s [StreamTextTransform] to smooth token-by-token
-/// streaming for display. Mirrors `smoothStream` from the JS AI SDK v6.
+/// Returns a [Stream<String>] so implementations can introduce delays
+/// between sub-chunks (e.g., [smoothStream] with [delayInMs]).
+typedef StreamTextTransform = Stream<String> Function(String delta);
+
+/// Returns a transform that yields text deltas in chunks of [chunkSize],
+/// optionally inserting an inter-chunk delay for smoother display.
+///
+/// Use with [streamText]'s [experimentalTransform] parameter.
+/// Mirrors `smoothStream` from the JS AI SDK v6.
+///
+/// - [chunkSize] — maximum characters per emitted chunk (default: 12).
+///   Pass ≤ 0 to forward the full delta unchanged.
+/// - [delayInMs] — milliseconds to wait between emitting consecutive sub-chunks
+///   within a single provider delta (default: 0 = no delay).
 ///
 /// Example:
 /// ```dart
 /// final result = await streamText(
 ///   model: model,
 ///   prompt: 'Hello',
-///   experimentalTransform: smoothStream(chunkSize: 12),
+///   experimentalTransform: smoothStream(chunkSize: 12, delayInMs: 10),
 /// );
 /// ```
-StreamTextTransform smoothStream({int chunkSize = 12}) {
+StreamTextTransform smoothStream({int chunkSize = 12, int delayInMs = 0}) {
   if (chunkSize <= 0) {
-    return (delta) sync* {
-      yield delta;
-    };
+    return (delta) => Stream.value(delta);
   }
-  return (delta) sync* {
-    if (delta.isEmpty) {
-      return;
-    }
+  return (delta) async* {
+    if (delta.isEmpty) return;
+    var first = true;
     for (var i = 0; i < delta.length; i += chunkSize) {
-      final end = (i + chunkSize) > delta.length ? delta.length : i + chunkSize;
+      if (!first && delayInMs > 0) {
+        await Future<void>.delayed(Duration(milliseconds: delayInMs));
+      }
+      final end =
+          (i + chunkSize) > delta.length ? delta.length : i + chunkSize;
       yield delta.substring(i, end);
+      first = false;
     }
   };
 }
@@ -484,6 +499,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   List<String> activeToolNames = const [],
   StreamTextOnChunk? onChunk,
   StreamTextOnError? onError,
+  StreamTextOnAbort? onAbort,
   StreamTextOnFinish<TOutput>? onFinish,
   GenerateTextOnStepFinish? onStepFinish,
   GenerateTextPrepareStep? prepareStep,
@@ -547,6 +563,15 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   final requestCompleter = Completer<GenerateTextRequest>();
   final responseCompleter = Completer<GenerateTextResponse>();
   final providerMetadataCompleter = Completer<ProviderMetadata?>();
+
+  // Wire onAbort: fire when the caller cancels via abortSignal.
+  if (abortSignal != null && onAbort != null) {
+    unawaited(
+      abortSignal.onCancelled.then((_) {
+        _safeInvoke(onAbort);
+      }),
+    );
+  }
 
   unawaited(
     Future<void>(() async {
@@ -728,9 +753,9 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                 stepTextById[id] = StringBuffer();
                 fullController.add(StreamTextTextStartEvent(id: id));
               case StreamPartTextDelta(:final id, :final delta):
-                final transformedDeltas =
-                    experimentalTransform?.call(delta) ?? [delta];
-                for (final transformedDelta in transformedDeltas) {
+                final transformedStream =
+                    experimentalTransform?.call(delta) ?? Stream.value(delta);
+                await for (final transformedDelta in transformedStream) {
                   final textBuffer = stepTextById.putIfAbsent(
                     id,
                     StringBuffer.new,

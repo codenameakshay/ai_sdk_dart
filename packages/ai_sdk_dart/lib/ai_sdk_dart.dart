@@ -18,6 +18,7 @@ export 'src/middleware/embedding_model_middleware.dart';
 export 'src/middleware/image_model_middleware.dart';
 export 'src/middleware/language_model_middleware.dart';
 export 'src/output/output.dart';
+export 'src/registry/custom_provider.dart';
 export 'src/registry/provider_registry.dart';
 export 'src/stop_conditions/stop_conditions.dart';
 export 'src/telemetry/telemetry.dart';

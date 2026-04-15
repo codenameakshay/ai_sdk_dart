@@ -58,7 +58,7 @@ class GenerateTextPrepareStepContext {
   final List<GenerateTextStep> steps;
   final List<LanguageModelV3Message> messages;
   final List<StopCondition> stopConditions;
-  final Object? experimentalContext;
+  final Map<String, Object?>? experimentalContext;
 }
 
 /// Result from [GenerateTextPrepareStep]; overrides for the upcoming step.
@@ -161,7 +161,7 @@ class GenerateTextExperimentalStartEvent {
   final String? system;
   final String? prompt;
   final List<LanguageModelV3Message> messages;
-  final Object? experimentalContext;
+  final Map<String, Object?>? experimentalContext;
 }
 
 /// Event emitted before each step starts (experimental_onStepStart).
@@ -352,8 +352,8 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
   List<StopCondition> stopConditions = const [],
   LanguageModelV3ToolChoice? toolChoice,
   List<LanguageModelV3ToolApprovalResponse> toolApprovalResponses = const [],
-  Object? abortSignal,
-  Object? experimentalContext,
+  CancellationToken? abortSignal,
+  Map<String, Object?>? experimentalContext,
   GenerateTextOnStepFinish? onStepFinish,
   GenerateTextOnFinish<TOutput>? onFinish,
   GenerateTextPrepareStep? prepareStep,
@@ -759,8 +759,8 @@ Future<_ToolExecutionResult> _executeToolCall({
   required LanguageModelV3ToolCallPart call,
   required List<LanguageModelV3Message> messages,
   required Map<String, LanguageModelV3ToolApprovalResponse> approvalById,
-  Object? abortSignal,
-  Object? experimentalContext,
+  CancellationToken? abortSignal,
+  Map<String, Object?>? experimentalContext,
   GenerateTextExperimentalOnToolCallStart? onToolCallStart,
   GenerateTextExperimentalOnToolCallFinish? onToolCallFinish,
 }) async {

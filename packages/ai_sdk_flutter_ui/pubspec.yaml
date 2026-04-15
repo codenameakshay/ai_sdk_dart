@@ -13,6 +13,7 @@ dependencies:
   flutter:
     sdk: flutter
   ai_sdk_dart: ^1.0.0
+  ai_sdk_provider: ^1.0.0
 
 dev_dependencies:
   flutter_test:

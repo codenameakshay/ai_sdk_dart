@@ -7,9 +7,18 @@ import 'package:flutter/foundation.dart';
 /// Provides:
 /// - [bind] — attach to an object stream (partial values emitted as they arrive)
 /// - [stop] — cancel the active stream
-/// - [reset] — clear current value and error
+/// - [clear] / [reset] — clear current value and error
+/// - [isLoading] — true while loading or streaming
 class ObjectStreamController<T> extends ChangeNotifier {
-  ObjectStreamController({this.onFinish, this.onError});
+  ObjectStreamController({
+    this.id,
+    T? initialValue,
+    this.onFinish,
+    this.onError,
+  }) : _value = initialValue;
+
+  /// Optional identifier for this controller.
+  final String? id;
 
   /// Called when the stream completes with the final value.
   final void Function(T? value)? onFinish;
@@ -71,13 +80,19 @@ class ObjectStreamController<T> extends ChangeNotifier {
     notifyListeners();
   }
 
-  void reset() {
+  /// Clear the current value and error.
+  ///
+  /// Mirrors the JS `experimental_useObject` `clear()` method.
+  void clear() {
     _value = null;
     _error = null;
     _isLoading = false;
     _isStreaming = false;
     notifyListeners();
   }
+
+  /// Alias for [clear] — kept for backward compatibility.
+  void reset() => clear();
 
   @override
   void dispose() {

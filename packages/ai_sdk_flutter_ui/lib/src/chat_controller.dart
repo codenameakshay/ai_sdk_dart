@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
+import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
 /// Status of the chat controller.
 enum ChatStatus {
@@ -24,12 +25,22 @@ enum ChatStatus {
 /// Provides:
 /// - [sendMessage] — submit a new user turn and stream the response
 /// - [append] — add a message without triggering a new generation
-/// - [reload] — re-run the last assistant turn with current messages
+/// - [reload] / [regenerate] — re-run the last assistant turn
 /// - [stop] — cancel the active stream
+/// - [clearError] — clear the current error state
+/// - [addToolApprovalResponse] — inject a tool approval decision mid-stream
 /// - Optimistic assistant message during streaming via [streamingContent]
+/// - [isLoading] — true while submitted or streaming
 class ChatController extends ChangeNotifier {
-  ChatController({this.initialMessages = const [], this.onFinish, this.onError})
-    : _messages = List<ModelMessage>.from(initialMessages);
+  ChatController({
+    this.id,
+    this.initialMessages = const [],
+    this.onFinish,
+    this.onError,
+  }) : _messages = List<ModelMessage>.from(initialMessages);
+
+  /// Optional identifier for this chat session.
+  final String? id;
 
   final List<ModelMessage> initialMessages;
 
@@ -46,6 +57,11 @@ class ChatController extends ChangeNotifier {
   ChatStatus _status = ChatStatus.ready;
   ChatStatus get status => _status;
 
+  /// True while the controller is submitted or actively streaming.
+  /// Mirrors the `isLoading` property of the JS `useChat` hook.
+  bool get isLoading =>
+      _status == ChatStatus.submitted || _status == ChatStatus.streaming;
+
   Object? _error;
   Object? get error => _error;
 
@@ -56,6 +72,9 @@ class ChatController extends ChangeNotifier {
   final StringBuffer _streamBuffer = StringBuffer();
   StreamSubscription<String>? _activeSubscription;
   ToolLoopAgent? _lastAgent;
+
+  // Pending tool-approval responses indexed by approvalId.
+  final Map<String, LanguageModelV3ToolApprovalResponse> _pendingApprovals = {};
 
   /// Submit [text] as a user message and stream the assistant response.
   Future<void> sendMessage({
@@ -77,6 +96,7 @@ class ChatController extends ChangeNotifier {
   ///
   /// Removes the last assistant message (if any) so the model produces a
   /// fresh response. Requires a prior call to [sendMessage].
+  /// Alias: [regenerate].
   Future<void> reload({ToolLoopAgent? agent}) async {
     final effectiveAgent = agent ?? _lastAgent;
     if (effectiveAgent == null) return;
@@ -91,6 +111,47 @@ class ChatController extends ChangeNotifier {
     await _runGeneration(effectiveAgent);
   }
 
+  /// Alias for [reload] — mirrors the JS `useChat` `regenerate()` method.
+  Future<void> regenerate({ToolLoopAgent? agent}) => reload(agent: agent);
+
+  /// Clear the current error and reset [status] to [ChatStatus.ready].
+  ///
+  /// Mirrors the JS `useChat` `clearError()` method.
+  void clearError() {
+    if (_status == ChatStatus.error) {
+      _error = null;
+      _status = ChatStatus.ready;
+      notifyListeners();
+    }
+  }
+
+  /// Inject a tool-approval response for an in-flight approval request.
+  ///
+  /// The [approvalId] must match the one emitted in the
+  /// [StreamTextToolApprovalRequestEvent].  [approved] controls whether the
+  /// tool call is executed; [reason] is optional context.
+  ///
+  /// Mirrors the JS `useChat` `addToolApprovalResponse()` method.
+  void addToolApprovalResponse({
+    required String approvalId,
+    required bool approved,
+    String? reason,
+  }) {
+    _pendingApprovals[approvalId] = LanguageModelV3ToolApprovalResponse(
+      approvalId: approvalId,
+      approved: approved,
+    );
+    notifyListeners();
+  }
+
+  /// Returns any pending tool-approval responses and clears the buffer.
+  List<LanguageModelV3ToolApprovalResponse> _consumeApprovals() {
+    if (_pendingApprovals.isEmpty) return const [];
+    final result = _pendingApprovals.values.toList();
+    _pendingApprovals.clear();
+    return result;
+  }
+
   Future<void> _runGeneration(ToolLoopAgent agent) async {
     _streamBuffer.clear();
     _status = ChatStatus.submitted;
@@ -98,7 +159,10 @@ class ChatController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final streamResult = await agent.stream(messages: messages);
+      final streamResult = await agent.stream(
+        messages: messages,
+        toolApprovalResponses: _consumeApprovals(),
+      );
       _status = ChatStatus.streaming;
       notifyListeners();
 
@@ -159,6 +223,7 @@ class ChatController extends ChangeNotifier {
       ..clear()
       ..addAll(initialMessages);
     _streamBuffer.clear();
+    _pendingApprovals.clear();
     _status = ChatStatus.ready;
     _error = null;
     notifyListeners();

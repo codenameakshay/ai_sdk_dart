@@ -128,9 +128,13 @@ class ToolLoopAgent {
   }
 
   /// Runs the agent in streaming mode.
+  ///
+  /// Pass [toolApprovalResponses] to supply pre-collected tool-approval
+  /// decisions (mirrors the JS SDK `addToolApprovalResponse` / `useChat` flow).
   Future<StreamTextResult> stream({
     String? prompt,
     List<ModelMessage>? messages,
+    List<LanguageModelV3ToolApprovalResponse> toolApprovalResponses = const [],
   }) {
     return streamText(
       model: model,
@@ -140,6 +144,7 @@ class ToolLoopAgent {
       tools: tools,
       maxSteps: maxSteps,
       stopConditions: stopConditions,
+      toolApprovalResponses: toolApprovalResponses,
     );
   }
 

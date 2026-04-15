@@ -85,6 +85,7 @@ Future<GenerateObjectResult<T>> generateObject<T>({
       maxOutputTokens: maxOutputTokens,
       temperature: temperature,
       topP: topP,
+      outputSchema: schema.jsonSchema,
     ),
   );
   final response = await (timeout != null

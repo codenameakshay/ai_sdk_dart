@@ -222,6 +222,41 @@ void main() {
       });
     });
 
+    // ── generateObject passes outputSchema to provider ────────────────────
+
+    group('generateObject outputSchema', () {
+      test('passes outputSchema to LanguageModelV3CallOptions', () async {
+        final model = FakeTextModel('{"name":"Alice"}');
+        final schema = Schema<Map<String, dynamic>>(
+          jsonSchema: const {
+            'type': 'object',
+            'properties': {'name': {'type': 'string'}},
+          },
+          fromJson: (j) => j,
+        );
+        await generateObject(model: model, schema: schema, prompt: 'hi');
+        expect(model.lastCallOptions?.outputSchema, schema.jsonSchema);
+      });
+
+      test('generateObject outputSchema matches schema.jsonSchema', () async {
+        final schema = Schema<Map<String, dynamic>>(
+          jsonSchema: const {
+            'type': 'object',
+            'properties': {
+              'city': {'type': 'string'},
+            },
+          },
+          fromJson: (j) => j,
+        );
+        final model = FakeTextModel('{"city":"Berlin"}');
+        await generateObject(model: model, schema: schema, prompt: 'test');
+        expect(
+          model.lastCallOptions?.outputSchema,
+          equals({'type': 'object', 'properties': {'city': {'type': 'string'}}}),
+        );
+      });
+    });
+
     // ── AiNoObjectGeneratedError.isInstance() ─────────────────────────────
 
     group('AiNoObjectGeneratedError.isInstance()', () {

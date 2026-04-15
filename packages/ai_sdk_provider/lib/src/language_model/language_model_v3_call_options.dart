@@ -23,6 +23,7 @@ class LanguageModelV3CallOptions {
     this.seed,
     this.headers,
     this.providerOptions,
+    this.outputSchema,
   });
 
   final LanguageModelV3Prompt prompt;
@@ -39,4 +40,12 @@ class LanguageModelV3CallOptions {
   final int? seed;
   final Map<String, String>? headers;
   final ProviderOptions? providerOptions;
+
+  /// JSON Schema for the expected response structure.
+  ///
+  /// When set, capable providers (e.g. OpenAI with `response_format:
+  /// json_schema`) use native structured-output APIs rather than relying solely
+  /// on prompt engineering. Providers that do not implement native structured
+  /// output safely ignore this field.
+  final Map<String, dynamic>? outputSchema;
 }

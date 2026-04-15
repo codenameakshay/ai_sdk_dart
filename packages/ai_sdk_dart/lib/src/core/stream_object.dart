@@ -103,6 +103,7 @@ Future<StreamObjectResult<T>> streamObject<T>({
         system: instruction,
         messages: normalizedMessages,
       ),
+      outputSchema: schema.jsonSchema,
     ),
   );
   final response = await (timeout != null

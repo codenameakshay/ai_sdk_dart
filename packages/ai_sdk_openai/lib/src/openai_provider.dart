@@ -113,6 +113,15 @@ class _OpenAILanguageModel implements LanguageModelV3 {
       if (options.seed != null) 'seed': options.seed,
       if (reasoningEffort != null) 'reasoning_effort': reasoningEffort,
       if (reasoningSummary != null) 'reasoning_summary': reasoningSummary,
+      if (options.outputSchema != null)
+        'response_format': {
+          'type': 'json_schema',
+          'json_schema': {
+            'name': 'response',
+            'schema': options.outputSchema,
+            'strict': true,
+          },
+        },
       ...?cleanedPo,
     };
     final response = await client.post<Map<String, dynamic>>(
@@ -249,6 +258,15 @@ class _OpenAILanguageModel implements LanguageModelV3 {
       if (options.topP != null) 'top_p': options.topP,
       if (reasoningEffort != null) 'reasoning_effort': reasoningEffort,
       if (reasoningSummary != null) 'reasoning_summary': reasoningSummary,
+      if (options.outputSchema != null)
+        'response_format': {
+          'type': 'json_schema',
+          'json_schema': {
+            'name': 'response',
+            'schema': options.outputSchema,
+            'strict': true,
+          },
+        },
       ...?cleanedPo,
     };
     final response = await client.post<ResponseBody>(

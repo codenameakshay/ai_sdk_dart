@@ -77,9 +77,11 @@ class _OpenAILanguageModel implements LanguageModelV3 {
     LanguageModelV3CallOptions options,
   ) async {
     final client = _openAiDio(apiKey: apiKey, baseUrl: baseUrl);
-    final providerOptions = options.providerOptions != null
+    final po = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
+    final (reasoningEffort, reasoningSummary, cleanedPo) =
+        _extractReasoningOptions(po);
     final requestBody = {
       'model': modelId,
       'messages': _toOpenAiMessages(options.prompt),
@@ -109,7 +111,9 @@ class _OpenAILanguageModel implements LanguageModelV3 {
         'frequency_penalty': options.frequencyPenalty,
       if (options.stopSequences.isNotEmpty) 'stop': options.stopSequences,
       if (options.seed != null) 'seed': options.seed,
-      ...?providerOptions,
+      if (reasoningEffort != null) 'reasoning_effort': reasoningEffort,
+      if (reasoningSummary != null) 'reasoning_summary': reasoningSummary,
+      ...?cleanedPo,
     };
     final response = await client.post<Map<String, dynamic>>(
       '/chat/completions',
@@ -213,9 +217,11 @@ class _OpenAILanguageModel implements LanguageModelV3 {
     LanguageModelV3CallOptions options,
   ) async {
     final client = _openAiDio(apiKey: apiKey, baseUrl: baseUrl);
-    final providerOptions = options.providerOptions != null
+    final po = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
+    final (reasoningEffort, reasoningSummary, cleanedPo) =
+        _extractReasoningOptions(po);
     final requestBody = {
       'model': modelId,
       'messages': _toOpenAiMessages(options.prompt),
@@ -241,7 +247,9 @@ class _OpenAILanguageModel implements LanguageModelV3 {
         'max_completion_tokens': options.maxOutputTokens,
       if (options.temperature != null) 'temperature': options.temperature,
       if (options.topP != null) 'top_p': options.topP,
-      ...?providerOptions,
+      if (reasoningEffort != null) 'reasoning_effort': reasoningEffort,
+      if (reasoningSummary != null) 'reasoning_summary': reasoningSummary,
+      ...?cleanedPo,
     };
     final response = await client.post<ResponseBody>(
       '/chat/completions',
@@ -947,6 +955,34 @@ class _OpenAITranscriptionModel implements TranscriptionModelV1 {
       _ => 'mp3',
     };
   }
+}
+
+/// Extracts [reasoningEffort] and [reasoningSummary] from raw [providerOptions],
+/// accepting both camelCase (typed class) and snake_case (raw map) keys.
+///
+/// Returns a record of the two typed values plus the cleaned map with the
+/// handled keys removed (so they are not double-written).
+(String?, String?, Map<String, dynamic>?) _extractReasoningOptions(
+  Map<String, dynamic>? po,
+) {
+  if (po == null) return (null, null, null);
+
+  final reasoningEffort =
+      po['reasoning_effort'] as String? ?? po['reasoningEffort'] as String?;
+  final reasoningSummary =
+      po['reasoning_summary'] as String? ?? po['reasoningSummary'] as String?;
+
+  final cleaned = Map<String, dynamic>.from(po)
+    ..remove('reasoning_effort')
+    ..remove('reasoningEffort')
+    ..remove('reasoning_summary')
+    ..remove('reasoningSummary');
+
+  return (
+    reasoningEffort,
+    reasoningSummary,
+    cleaned.isEmpty ? null : cleaned,
+  );
 }
 
 extension IterableX<T> on Iterable<T> {

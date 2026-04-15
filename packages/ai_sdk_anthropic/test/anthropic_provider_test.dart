@@ -542,6 +542,136 @@ void main() {
       );
     });
 
+    // ── AnthropicThinkingOptions / speed ─────────────────────────────────
+
+    group('AnthropicThinkingOptions', () {
+      test('toMap produces enabled thinking object with budget_tokens', () {
+        final opts = const AnthropicThinkingOptions(budgetTokens: 5000);
+        final map = opts.toMap();
+        expect(map['thinking'], {'type': 'enabled', 'budget_tokens': 5000});
+      });
+
+      test('toMap produces disabled when enabled = false', () {
+        final opts = const AnthropicThinkingOptions(enabled: false);
+        final map = opts.toMap();
+        expect(map['thinking'], {'type': 'disabled'});
+      });
+
+      test('toMap treats speed=fast as disabled', () {
+        final opts = const AnthropicThinkingOptions(speed: 'fast');
+        final map = opts.toMap();
+        expect(map['thinking'], {'type': 'disabled'});
+      });
+
+      test('toMap omits budget_tokens when disabled', () {
+        final opts = const AnthropicThinkingOptions(
+          enabled: false,
+          budgetTokens: 9999,
+        );
+        final map = opts.toMap();
+        expect((map['thinking'] as Map).containsKey('budget_tokens'), isFalse);
+      });
+
+      test('AnthropicLanguageModelOptions wraps thinking', () {
+        final langOpts = const AnthropicLanguageModelOptions(
+          thinking: AnthropicThinkingOptions(budgetTokens: 2000),
+        );
+        final map = langOpts.toMap();
+        expect(map['thinking'], {'type': 'enabled', 'budget_tokens': 2000});
+      });
+
+      test('doGenerate sends thinking object when passed via providerOptions',
+          () async {
+        late Map<String, dynamic> captured;
+        final server = await _TestServer.start((request) async {
+          final body = await utf8.decoder.bind(request).join();
+          captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'stop_reason': 'end_turn',
+              'content': [
+                {'type': 'text', 'text': 'ok'},
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = AnthropicProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('claude-3-7-sonnet-20250219');
+        await model.doGenerate(
+          LanguageModelV3CallOptions(
+            prompt: LanguageModelV3Prompt(
+              messages: [
+                LanguageModelV3Message(
+                  role: LanguageModelV3Role.user,
+                  content: [LanguageModelV3TextPart(text: 'think')],
+                ),
+              ],
+            ),
+            providerOptions: {
+              'anthropic': const AnthropicThinkingOptions(
+                budgetTokens: 4096,
+              ).toMap(),
+            },
+          ),
+        );
+
+        expect(captured['thinking'], {
+          'type': 'enabled',
+          'budget_tokens': 4096,
+        });
+      });
+
+      test('doGenerate sends disabled thinking when speed=fast', () async {
+        late Map<String, dynamic> captured;
+        final server = await _TestServer.start((request) async {
+          final body = await utf8.decoder.bind(request).join();
+          captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'stop_reason': 'end_turn',
+              'content': [
+                {'type': 'text', 'text': 'fast'},
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = AnthropicProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('claude-3-5-haiku-20241022');
+        await model.doGenerate(
+          LanguageModelV3CallOptions(
+            prompt: LanguageModelV3Prompt(
+              messages: [
+                LanguageModelV3Message(
+                  role: LanguageModelV3Role.user,
+                  content: [LanguageModelV3TextPart(text: 'quick')],
+                ),
+              ],
+            ),
+            providerOptions: const {
+              'anthropic': {'speed': 'fast'},
+            },
+          ),
+        );
+
+        expect(captured['thinking'], {'type': 'disabled'});
+        expect(captured.containsKey('speed'), isFalse);
+      });
+    });
+
     runProviderContractTests(
       providerName: 'anthropic',
       captureRequestBody: _captureAnthropicRequestBody,

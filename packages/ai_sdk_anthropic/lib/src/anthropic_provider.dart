@@ -57,9 +57,10 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
     LanguageModelV3CallOptions options,
   ) async {
     final client = _anthropicDio(apiKey: apiKey, baseUrl: baseUrl);
-    final providerOptions = options.providerOptions != null
+    final po = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
+    final (thinking, cleanedPo) = _extractThinkingOptions(po);
     final requestBody = {
       'model': modelId,
       'max_tokens': options.maxOutputTokens ?? 1024,
@@ -84,7 +85,8 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
             .toList(),
       if (options.toolChoice != null)
         'tool_choice': _toAnthropicToolChoice(options.toolChoice!),
-      ...?providerOptions,
+      if (thinking != null) 'thinking': thinking,
+      ...?cleanedPo,
     };
     final response = await client.post<Map<String, dynamic>>(
       '/messages',
@@ -184,9 +186,10 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
     LanguageModelV3CallOptions options,
   ) async {
     final client = _anthropicDio(apiKey: apiKey, baseUrl: baseUrl);
-    final providerOptions = options.providerOptions != null
+    final po = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
+    final (thinking, cleanedPo) = _extractThinkingOptions(po);
     final requestBody = {
       'model': modelId,
       'max_tokens': options.maxOutputTokens ?? 1024,
@@ -210,7 +213,8 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
             .toList(),
       if (options.toolChoice != null)
         'tool_choice': _toAnthropicToolChoice(options.toolChoice!),
-      ...?providerOptions,
+      if (thinking != null) 'thinking': thinking,
+      ...?cleanedPo,
     };
     final response = await client.post<ResponseBody>(
       '/messages',
@@ -626,4 +630,32 @@ class _ToolState {
   final String id;
   final String name;
   final StringBuffer argumentsBuffer = StringBuffer();
+}
+
+/// Extracts the `thinking` configuration from raw [providerOptions].
+///
+/// Handles the following sources (in order of precedence):
+/// 1. A `'thinking'` key whose value is already a Map (e.g. from
+///    [AnthropicThinkingOptions.toMap]).
+/// 2. A legacy `'speed'` key set to `'fast'` → `{type: disabled}`.
+///
+/// Returns the thinking map (or `null`) plus a cleaned copy of [po] with the
+/// handled keys removed.
+(Map<String, dynamic>?, Map<String, dynamic>?) _extractThinkingOptions(
+  Map<String, dynamic>? po,
+) {
+  if (po == null) return (null, null);
+
+  Map<String, dynamic>? thinking;
+  final cleaned = Map<String, dynamic>.from(po);
+
+  if (po['thinking'] is Map) {
+    thinking = (po['thinking'] as Map).cast<String, dynamic>();
+    cleaned.remove('thinking');
+  } else if (po['speed'] == 'fast') {
+    thinking = {'type': 'disabled'};
+    cleaned.remove('speed');
+  }
+
+  return (thinking, cleaned.isEmpty ? null : cleaned);
 }

@@ -2,10 +2,15 @@
 
 **A Dart/Flutter port of [Vercel AI SDK v6](https://sdk.vercel.ai) — provider-agnostic APIs for text generation, streaming, structured output, tool use, embeddings, image generation, speech, and more.**
 
-[![ai_sdk_dart pub.dev](https://img.shields.io/pub/v/ai_sdk_dart.svg?label=ai_sdk_dart)](https://pub.dev/packages/ai)
+[![ai_sdk_dart pub.dev](https://img.shields.io/pub/v/ai_sdk_dart.svg?label=ai_sdk_dart)](https://pub.dev/packages/ai_sdk_dart)
 [![ai_sdk_openai pub.dev](https://img.shields.io/pub/v/ai_sdk_openai.svg?label=ai_sdk_openai)](https://pub.dev/packages/ai_sdk_openai)
 [![ai_sdk_anthropic pub.dev](https://img.shields.io/pub/v/ai_sdk_anthropic.svg?label=ai_sdk_anthropic)](https://pub.dev/packages/ai_sdk_anthropic)
 [![ai_sdk_google pub.dev](https://img.shields.io/pub/v/ai_sdk_google.svg?label=ai_sdk_google)](https://pub.dev/packages/ai_sdk_google)
+[![ai_sdk_azure pub.dev](https://img.shields.io/pub/v/ai_sdk_azure.svg?label=ai_sdk_azure)](https://pub.dev/packages/ai_sdk_azure)
+[![ai_sdk_cohere pub.dev](https://img.shields.io/pub/v/ai_sdk_cohere.svg?label=ai_sdk_cohere)](https://pub.dev/packages/ai_sdk_cohere)
+[![ai_sdk_groq pub.dev](https://img.shields.io/pub/v/ai_sdk_groq.svg?label=ai_sdk_groq)](https://pub.dev/packages/ai_sdk_groq)
+[![ai_sdk_mistral pub.dev](https://img.shields.io/pub/v/ai_sdk_mistral.svg?label=ai_sdk_mistral)](https://pub.dev/packages/ai_sdk_mistral)
+[![ai_sdk_ollama pub.dev](https://img.shields.io/pub/v/ai_sdk_ollama.svg?label=ai_sdk_ollama)](https://pub.dev/packages/ai_sdk_ollama)
 [![ai_sdk_flutter_ui pub.dev](https://img.shields.io/pub/v/ai_sdk_flutter_ui.svg?label=ai_sdk_flutter_ui)](https://pub.dev/packages/ai_sdk_flutter_ui)
 [![ai_sdk_mcp pub.dev](https://img.shields.io/pub/v/ai_sdk_mcp.svg?label=ai_sdk_mcp)](https://pub.dev/packages/ai_sdk_mcp)
 [![ai_sdk_provider pub.dev](https://img.shields.io/pub/v/ai_sdk_provider.svg?label=ai_sdk_provider)](https://pub.dev/packages/ai_sdk_provider)
@@ -142,10 +147,15 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
 
 | Package | pub.dev | What it gives you |
 |---------|---------|-------------------|
-| [`ai_sdk_dart`](https://pub.dev/packages/ai_sdk_dart) | `dart pub add ai` | `generateText`, `streamText`, tools, middleware, embeddings, registry |
-| [`ai_sdk_openai`](https://pub.dev/packages/ai_sdk_openai) | `dart pub add ai_sdk_openai` | `openai('gpt-4.1-mini')`, embeddings, image gen, speech, transcription |
-| [`ai_sdk_anthropic`](https://pub.dev/packages/ai_sdk_anthropic) | `dart pub add ai_sdk_anthropic` | `anthropic('claude-sonnet-4-5')`, extended thinking |
+| [`ai_sdk_dart`](https://pub.dev/packages/ai_sdk_dart) | `dart pub add ai_sdk_dart` | `generateText`, `streamText`, tools, middleware, embeddings, registry |
+| [`ai_sdk_openai`](https://pub.dev/packages/ai_sdk_openai) | `dart pub add ai_sdk_openai` | `openai('gpt-4.1-mini')`, embeddings, image gen, speech, transcription, reasoning options |
+| [`ai_sdk_anthropic`](https://pub.dev/packages/ai_sdk_anthropic) | `dart pub add ai_sdk_anthropic` | `anthropic('claude-sonnet-4-5')`, extended thinking, speed options |
 | [`ai_sdk_google`](https://pub.dev/packages/ai_sdk_google) | `dart pub add ai_sdk_google` | `google('gemini-2.0-flash')`, embeddings |
+| [`ai_sdk_azure`](https://pub.dev/packages/ai_sdk_azure) | `dart pub add ai_sdk_azure` | `AzureOpenAIProvider(endpoint, apiKey)`, language models, embeddings |
+| [`ai_sdk_cohere`](https://pub.dev/packages/ai_sdk_cohere) | `dart pub add ai_sdk_cohere` | `cohere('command-r-plus')`, embeddings, reranking |
+| [`ai_sdk_groq`](https://pub.dev/packages/ai_sdk_groq) | `dart pub add ai_sdk_groq` | `groq('llama3-8b-8192')`, ultra-low latency inference |
+| [`ai_sdk_mistral`](https://pub.dev/packages/ai_sdk_mistral) | `dart pub add ai_sdk_mistral` | `mistral('mistral-large-latest')`, embeddings |
+| [`ai_sdk_ollama`](https://pub.dev/packages/ai_sdk_ollama) | `dart pub add ai_sdk_ollama` | `ollama('llama3')`, local inference, embeddings |
 | [`ai_sdk_flutter_ui`](https://pub.dev/packages/ai_sdk_flutter_ui) | `dart pub add ai_sdk_flutter_ui` | `ChatController`, `CompletionController`, `ObjectStreamController` |
 | [`ai_sdk_mcp`](https://pub.dev/packages/ai_sdk_mcp) | `dart pub add ai_sdk_mcp` | `MCPClient`, `SseClientTransport`, `StdioMCPTransport` |
 | [`ai_sdk_provider`](https://pub.dev/packages/ai_sdk_provider) | *(transitive)* | Provider interfaces for building custom providers |
@@ -238,7 +248,7 @@ print(result.text);
 ### Flutter Chat UI
 
 ```sh
-dart pub add ai_sdk_dart ai_sdk_openai ai_sdk_flutter
+dart pub add ai_sdk_dart ai_sdk_openai ai_sdk_flutter_ui
 ```
 
 ```dart
@@ -255,20 +265,21 @@ print(chat.messages.last.content);
 
 ## 🤖 Providers
 
-| Capability | OpenAI | Anthropic | Google |
-|---|:---:|:---:|:---:|
-| Text generation | ✅ | ✅ | ✅ |
-| Streaming | ✅ | ✅ | ✅ |
-| Structured output | ✅ | ✅ | ✅ |
-| Native JSON schema output | ✅ | — | — |
-| Tool use | ✅ | ✅ | ✅ |
-| Embeddings | ✅ | — | ✅ |
-| Image generation | ✅ | — | — |
-| Speech synthesis | ✅ | — | — |
-| Transcription | ✅ | — | — |
-| Extended thinking | — | ✅ | — |
-| Reasoning options (`effort`, `summary`) | ✅ | — | — |
-| Multimodal (image input) | ✅ | ✅ | ✅ |
+| Capability | OpenAI | Anthropic | Google | Azure | Cohere | Groq | Mistral | Ollama |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| Text generation | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Streaming | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Structured output | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Native JSON schema output | ✅ | — | — | ✅ | — | — | — | — |
+| Tool use | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Embeddings | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | ✅ |
+| Reranking | — | — | — | — | ✅ | — | — | — |
+| Image generation | ✅ | — | — | — | — | — | — | — |
+| Speech synthesis | ✅ | — | — | — | — | — | — | — |
+| Transcription | ✅ | — | — | — | — | — | — | — |
+| Extended thinking | — | ✅ | — | — | — | — | — | — |
+| Reasoning options | ✅ | — | — | — | — | — | — | — |
+| Multimodal (image input) | ✅ | ✅ | ✅ | ✅ | — | — | — | — |
 
 ---
 

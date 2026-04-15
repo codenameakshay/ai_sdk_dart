@@ -1,0 +1,17 @@
+name: ai_sdk_cohere
+description: Cohere provider for AI SDK Dart. Use Cohere models for text generation, embeddings, and reranking.
+version: 1.0.0
+homepage: https://github.com/codenameakshay/ai_sdk_dart
+repository: https://github.com/codenameakshay/ai_sdk_dart
+resolution: workspace
+
+environment:
+  sdk: ^3.11.1
+
+dependencies:
+  ai_sdk_provider: ^1.0.0
+  dio: ^5.9.0
+
+dev_dependencies:
+  lints: ^6.1.0
+  test: ^1.25.0

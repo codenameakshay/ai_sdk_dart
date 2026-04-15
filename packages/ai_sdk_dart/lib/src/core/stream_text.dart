@@ -507,6 +507,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   StreamTextOnInputDelta? onInputDelta,
   StreamTextOnInputAvailable? onInputAvailable,
   StreamTextTransform? experimentalTransform,
+  Duration? timeout,
   GenerateTextExperimentalOnStart? experimentalOnStart,
   GenerateTextExperimentalOnStepStart? experimentalOnStepStart,
   GenerateTextExperimentalOnToolCallStart? experimentalOnToolCallStart,
@@ -710,7 +711,10 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
           );
           final response = await _withRetry(
             maxRetries: maxRetries,
-            fn: () => stepModel.doStream(streamCallOptions),
+            fn: () {
+              final call = stepModel.doStream(streamCallOptions);
+              return timeout != null ? call.timeout(timeout) : call;
+            },
           );
           if (response.rawResponse is Map) {
             rawEnvelope = (response.rawResponse as Map)

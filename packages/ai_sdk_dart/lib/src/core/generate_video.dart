@@ -38,8 +38,9 @@ Future<GenerateVideoResult> experimentalGenerateVideo({
   int? seed,
   Map<String, String>? headers,
   ProviderOptions? providerOptions,
+  Duration? timeout,
 }) async {
-  final result = await model.doGenerate(
+  final call = model.doGenerate(
     VideoModelV1CallOptions(
       prompt: prompt,
       durationSeconds: durationSeconds,
@@ -50,6 +51,7 @@ Future<GenerateVideoResult> experimentalGenerateVideo({
       providerOptions: providerOptions,
     ),
   );
+  final result = await (timeout != null ? call.timeout(timeout) : call);
 
   return GenerateVideoResult(
     videos: result.videos,

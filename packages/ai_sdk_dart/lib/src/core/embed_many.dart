@@ -48,9 +48,17 @@ Future<EmbedManyResult<VALUE>> embedMany<VALUE>({
   required EmbeddingModelV2<VALUE> model,
   required List<VALUE> values,
   int? maxParallelCalls,
+  Duration? timeout,
 }) async {
   if (values.isEmpty) {
     return const EmbedManyResult(embeddings: [], usage: null);
+  }
+
+  Future<EmbeddingModelV2GenerateResult<VALUE>> doEmbed(
+    List<VALUE> chunk,
+  ) {
+    final call = model.doEmbed(EmbeddingModelV2CallOptions<VALUE>(values: chunk));
+    return timeout != null ? call.timeout(timeout) : call;
   }
 
   // If maxParallelCalls is null or >= values.length, send all at once.
@@ -60,9 +68,7 @@ Future<EmbedManyResult<VALUE>> embedMany<VALUE>({
 
   if (parallel == null) {
     // Single batch call.
-    final result = await model.doEmbed(
-      EmbeddingModelV2CallOptions<VALUE>(values: values),
-    );
+    final result = await doEmbed(values);
     return EmbedManyResult<VALUE>(
       embeddings: result.embeddings
           .map(
@@ -94,13 +100,7 @@ Future<EmbedManyResult<VALUE>> embedMany<VALUE>({
         : chunkStart + parallel;
     final batch = chunks.sublist(chunkStart, batchEnd);
 
-    final results = await Future.wait(
-      batch.map(
-        (chunk) => model.doEmbed(
-          EmbeddingModelV2CallOptions<VALUE>(values: chunk),
-        ),
-      ),
-    );
+    final results = await Future.wait(batch.map(doEmbed));
 
     for (final result in results) {
       for (final e in result.embeddings) {

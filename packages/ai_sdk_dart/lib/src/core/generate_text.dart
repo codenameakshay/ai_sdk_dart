@@ -358,6 +358,7 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
   LanguageModelV3ToolChoice? toolChoice,
   List<LanguageModelV3ToolApprovalResponse> toolApprovalResponses = const [],
   CancellationToken? abortSignal,
+  Duration? timeout,
   Map<String, Object?>? experimentalContext,
   GenerateTextOnStepFinish? onStepFinish,
   GenerateTextOnFinish<TOutput>? onFinish,
@@ -501,7 +502,10 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
     );
     final response = await _withRetry(
       maxRetries: maxRetries,
-      fn: () => stepModel.doGenerate(callOptions),
+      fn: () {
+        final call = stepModel.doGenerate(callOptions);
+        return timeout != null ? call.timeout(timeout) : call;
+      },
     );
 
     _validateToolChoiceInResponse(

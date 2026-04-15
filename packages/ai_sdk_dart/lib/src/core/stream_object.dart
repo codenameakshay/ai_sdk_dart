@@ -69,6 +69,7 @@ Future<StreamObjectResult<T>> streamObject<T>({
   String? system,
   String? prompt,
   List<ModelMessage>? messages,
+  Duration? timeout,
 }) async {
   final normalizedMessages = <LanguageModelV3Message>[
     if (prompt != null)
@@ -96,7 +97,7 @@ Future<StreamObjectResult<T>> streamObject<T>({
     'Do not include markdown fences or extra text.',
   ].join('\n');
 
-  final response = await model.doStream(
+  final streamCall = model.doStream(
     LanguageModelV3CallOptions(
       prompt: LanguageModelV3Prompt(
         system: instruction,
@@ -104,6 +105,9 @@ Future<StreamObjectResult<T>> streamObject<T>({
       ),
     ),
   );
+  final response = await (timeout != null
+      ? streamCall.timeout(timeout)
+      : streamCall);
   LanguageModelV3ResponseMetadata? responseMetadata;
   if (response.rawResponse is Map) {
     final raw = (response.rawResponse as Map).cast<Object?, Object?>();

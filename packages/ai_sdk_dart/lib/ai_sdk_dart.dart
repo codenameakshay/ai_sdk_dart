@@ -2,6 +2,7 @@ library ai_sdk_dart;
 
 export 'src/agent/tool_loop_agent.dart';
 export 'src/core/embed.dart';
+export 'src/core/embed_many.dart';
 export 'src/core/generate_image.dart';
 export 'src/core/generate_object.dart';
 export 'src/core/generate_video.dart';

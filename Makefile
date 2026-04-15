@@ -41,7 +41,7 @@ ifdef GOOGLE_API_KEY
 endif
 
 .PHONY: all get run run-web run-advanced run-advanced-web run-basic \
-        test analyze format dry-run clean help
+        test analyze format dry-run publish clean help
 
 all: help
 
@@ -117,7 +117,7 @@ analyze:
 format:
 	$(DART) format packages/ examples/
 
-# ── Publish dry-runs ──────────────────────────────────────────────────────────
+# ── Publish ───────────────────────────────────────────────────────────────────
 
 ## Dry-run publish for all packages (checks pub.dev readiness)
 dry-run:
@@ -133,6 +133,21 @@ dry-run:
 	$(DART) pub publish --dry-run -C packages/ai_sdk_ollama
 	$(DART) pub publish --dry-run -C packages/ai_sdk_mcp
 	$(FLUTTER) pub publish --dry-run -C packages/ai_sdk_flutter_ui
+
+## Publish all packages to pub.dev (run dry-run first to verify)
+publish:
+	$(DART) pub publish -C packages/ai_sdk_provider
+	$(DART) pub publish -C packages/ai_sdk_dart
+	$(DART) pub publish -C packages/ai_sdk_openai
+	$(DART) pub publish -C packages/ai_sdk_anthropic
+	$(DART) pub publish -C packages/ai_sdk_google
+	$(DART) pub publish -C packages/ai_sdk_azure
+	$(DART) pub publish -C packages/ai_sdk_cohere
+	$(DART) pub publish -C packages/ai_sdk_groq
+	$(DART) pub publish -C packages/ai_sdk_mistral
+	$(DART) pub publish -C packages/ai_sdk_ollama
+	$(DART) pub publish -C packages/ai_sdk_mcp
+	$(FLUTTER) pub publish -C packages/ai_sdk_flutter_ui
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 
@@ -150,6 +165,7 @@ help:
 	@echo "  make analyze           Run dart analyze across all packages"
 	@echo "  make format            Format all Dart source files"
 	@echo "  make dry-run           pub publish --dry-run for all packages"
+	@echo "  make publish           pub publish for all packages (run dry-run first)"
 	@echo ""
 	@echo "  Required env vars (set before running):"
 	@echo "    OPENAI_API_KEY       OpenAI API key"

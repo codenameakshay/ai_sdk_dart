@@ -6,8 +6,8 @@ Anthropic provider for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart). Supp
 
 ```yaml
 dependencies:
-  ai_sdk_dart: ^1.0.0
-  ai_sdk_anthropic: ^1.0.0
+  ai_sdk_dart: ^1.1.0
+  ai_sdk_anthropic: ^1.1.0
 ```
 
 ## Usage

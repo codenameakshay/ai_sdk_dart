@@ -6,9 +6,9 @@ Flutter UI controllers for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart) â
 
 ```yaml
 dependencies:
-  ai_sdk_dart: ^1.0.0
-  ai_sdk_flutter_ui: ^1.0.0
-  ai_sdk_openai: ^1.0.0   # or another provider
+  ai_sdk_dart: ^1.1.0
+  ai_sdk_flutter_ui: ^1.1.0
+  ai_sdk_openai: ^1.1.0   # or another provider
 ```
 
 ## Controllers

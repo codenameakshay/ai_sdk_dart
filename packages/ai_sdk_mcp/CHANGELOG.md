@@ -1,3 +1,10 @@
+## 1.1.0
+
+- Bumped `ai_sdk_dart` constraint to `^1.1.0`.
+- No MCP client behaviour changes; version aligned with the rest of the monorepo.
+
+---
+
 ## 1.0.0+1
 
 - Improved pubspec descriptions for better pub.dev discoverability.

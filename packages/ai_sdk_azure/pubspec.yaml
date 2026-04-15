@@ -1,6 +1,6 @@
 name: ai_sdk_azure
 description: Azure OpenAI provider for AI SDK Dart. Use Azure-hosted OpenAI models for text generation and embeddings.
-version: 1.0.0
+version: 1.1.0
 homepage: https://github.com/codenameakshay/ai_sdk_dart
 repository: https://github.com/codenameakshay/ai_sdk_dart
 resolution: workspace
@@ -9,7 +9,7 @@ environment:
   sdk: ^3.11.1
 
 dependencies:
-  ai_sdk_provider: ^1.0.0
+  ai_sdk_provider: ^1.1.0
   dio: ^5.9.0
 
 dev_dependencies:

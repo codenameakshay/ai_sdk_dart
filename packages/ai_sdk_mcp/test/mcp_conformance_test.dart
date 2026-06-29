@@ -3,6 +3,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:ai_sdk_mcp/ai_sdk_mcp.dart';
+// JsonRpcRequest is internal (not re-exported by the barrel); the failure-path
+// tests drive the transport directly, so import it from src.
+import 'package:ai_sdk_mcp/src/json_rpc.dart' show JsonRpcRequest;
 import 'package:test/test.dart';
 
 // ---------------------------------------------------------------------------
@@ -203,6 +206,88 @@ class _MockSseServer {
 MCPClient _client(_MockMCPServer mock) => MCPClient(
   transport: HttpClientTransport(url: mock.uri, postUrl: mock.uri),
 );
+
+/// Bind then immediately release a port, returning a port number that is now
+/// free — connecting to it yields "connection refused".
+Future<int> _refusedPort() async {
+  final socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+  final port = socket.port;
+  await socket.close();
+  return port;
+}
+
+/// A raw HTTP server for SSE failure-path tests. Handles the SSE `GET` with a
+/// configurable status (optionally opening the stream and emitting an
+/// `endpoint` event) and replies to client→server `POST`s with a configurable
+/// status.
+class _EdgeSseServer {
+  _EdgeSseServer._(
+    this._server,
+    this._sseStatus,
+    this._sendEndpoint,
+    this._postStatus,
+  );
+
+  final HttpServer _server;
+  final int _sseStatus;
+  final bool _sendEndpoint;
+  final int _postStatus;
+  HttpResponse? _sse;
+
+  static Future<_EdgeSseServer> start({
+    int sseStatus = 200,
+    bool sendEndpoint = false,
+    int postStatus = 500,
+  }) async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final mock = _EdgeSseServer._(server, sseStatus, sendEndpoint, postStatus);
+    unawaited(mock._serve());
+    return mock;
+  }
+
+  Future<void> _serve() async {
+    await for (final request in _server) {
+      if (request.method == 'GET' && request.uri.path == '/sse') {
+        request.response.statusCode = _sseStatus;
+        if (_sseStatus >= 200 && _sseStatus < 300) {
+          request.response.headers.set('Content-Type', 'text/event-stream');
+          request.response.headers.set('Cache-Control', 'no-cache');
+          request.response.bufferOutput = false;
+          _sse = request.response;
+          // Flush the response headers with an ignored SSE comment so the
+          // client's streaming GET "connects" even when no endpoint event is
+          // advertised (otherwise the GET would hang waiting for headers).
+          request.response.write(': connected\n\n');
+          if (_sendEndpoint) {
+            request.response.write('event: endpoint\ndata: /post\n\n');
+          }
+          // Keep the stream open; do not close it here.
+          continue;
+        }
+        await request.response.close();
+        continue;
+      }
+      // Any POST (to /post or the fallback /sse) drains the body and replies
+      // with the configured status.
+      await utf8.decoder.bind(request).drain<void>();
+      request.response.statusCode = _postStatus;
+      request.response.write('nope');
+      await request.response.close();
+    }
+  }
+
+  Uri get sseUri =>
+      Uri.parse('http://${_server.address.address}:${_server.port}/sse');
+  Uri get postUri =>
+      Uri.parse('http://${_server.address.address}:${_server.port}/post');
+
+  Future<void> close() async {
+    try {
+      await _sse?.close();
+    } catch (_) {}
+    await _server.close(force: true);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -1030,6 +1115,143 @@ void main() {
 
         // The transport is closed; a fresh request must fail rather than hang.
         await expectLater(client.listResources(), throwsA(isA<MCPException>()));
+      });
+    });
+
+    // ── SSE transport failure paths (exactly one error, no leaks) ────────────
+    //
+    // Each scenario must surface exactly one observable MCPException via
+    // send()/initialize(). A SECONDARY MCPException escaping unhandled (from the
+    // internal connection future, the SSE GET stream, or the unlistened
+    // notifications broadcast) would be reported by the test runner as an
+    // unhandled async error and fail the test — so these tests guard against
+    // that regression. The trailing delay gives any leaked async error a chance
+    // to escape into the test's error zone.
+
+    group('SseClientTransport failure paths', () {
+      test('SSE GET returning 401 surfaces a single MCPException', () async {
+        final server = await _EdgeSseServer.start(sseStatus: 401);
+        addTearDown(server.close);
+
+        final transport = SseClientTransport(url: server.sseUri);
+        addTearDown(transport.close);
+
+        await expectLater(
+          transport.send(JsonRpcRequest(method: 'initialize', id: 1)),
+          throwsA(isA<MCPException>()),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+
+      test('SSE connect to a refused port surfaces a single MCPException', () async {
+        final port = await _refusedPort();
+        final transport = SseClientTransport(
+          url: Uri.parse('http://127.0.0.1:$port/sse'),
+          connectTimeout: const Duration(seconds: 2),
+        );
+        addTearDown(transport.close);
+
+        await expectLater(
+          transport.send(JsonRpcRequest(method: 'initialize', id: 1)),
+          throwsA(isA<MCPException>()),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+
+      test('explicit postUrl with no endpoint event surfaces one error on a '
+          'failed POST', () async {
+        final server = await _EdgeSseServer.start(postStatus: 500);
+        addTearDown(server.close);
+
+        final transport = SseClientTransport(
+          url: server.sseUri,
+          postUrl: server.postUri,
+        );
+        addTearDown(transport.close);
+
+        await expectLater(
+          transport.send(JsonRpcRequest(method: 'initialize', id: 1)),
+          throwsA(isA<MCPException>()),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+
+      test('no-endpoint fallback to the SSE url surfaces one error', () async {
+        final server = await _EdgeSseServer.start(postStatus: 405);
+        addTearDown(server.close);
+
+        final transport = SseClientTransport(
+          url: server.sseUri,
+          connectTimeout: const Duration(milliseconds: 150),
+        );
+        addTearDown(transport.close);
+
+        await expectLater(
+          transport.send(JsonRpcRequest(method: 'initialize', id: 1)),
+          throwsA(isA<MCPException>()),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+
+      test('reconnect via transportFactory after a transport failure surfaces '
+          'one error', () async {
+        final mock = await _MockSseServer.start();
+        addTearDown(mock.close);
+        mock.enqueueInitialize();
+        final sseUri = mock.sseUri;
+
+        final client = MCPClient(
+          transport: SseClientTransport(
+            url: sseUri,
+            connectTimeout: const Duration(milliseconds: 200),
+          ),
+          reconnectPolicy: const MCPReconnectPolicy(
+            maxAttempts: 2,
+            initialDelayMs: 1,
+            backoffFactor: 1.0,
+            maxDelayMs: 5,
+          ),
+          transportFactory: () => SseClientTransport(
+            url: sseUri,
+            connectTimeout: const Duration(milliseconds: 200),
+          ),
+        );
+        addTearDown(client.close);
+
+        // First transport connects and initializes against the live server.
+        await client.initialize();
+        // Server dies; every subsequent send (and reconnect) now fails.
+        await mock.close();
+
+        await expectLater(client.tools(), throwsA(isA<MCPException>()));
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      });
+
+      test('give up after maxAttempts (no factory) surfaces one error', () async {
+        final mock = await _MockSseServer.start();
+        addTearDown(mock.close);
+        mock.enqueueInitialize();
+        final sseUri = mock.sseUri;
+
+        final client = MCPClient(
+          transport: SseClientTransport(
+            url: sseUri,
+            connectTimeout: const Duration(milliseconds: 200),
+          ),
+          reconnectPolicy: const MCPReconnectPolicy(
+            maxAttempts: 2,
+            initialDelayMs: 1,
+            backoffFactor: 1.0,
+            maxDelayMs: 5,
+          ),
+        );
+        addTearDown(client.close);
+
+        await client.initialize();
+        await mock.close();
+
+        await expectLater(client.tools(), throwsA(isA<MCPException>()));
+        await Future<void>.delayed(const Duration(milliseconds: 100));
       });
     });
   });

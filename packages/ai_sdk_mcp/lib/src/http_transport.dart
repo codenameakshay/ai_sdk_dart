@@ -134,6 +134,11 @@ class SseClientTransport implements MCPTransport {
   Uri? _postUrl;
 
   StreamSubscription<_SseEvent>? _eventSub;
+
+  /// Bounds the wait for the `endpoint` event so callers don't hang. Held in a
+  /// field so it can be cancelled once the endpoint arrives or the transport
+  /// closes, rather than firing after the fact.
+  Timer? _connectTimer;
   bool _closed = false;
 
   @override
@@ -183,24 +188,28 @@ class SseClientTransport implements MCPTransport {
         ready.complete();
       } else {
         // Time out the wait for the endpoint event so callers don't hang.
-        unawaited(
-          Future<void>.delayed(connectTimeout).then((_) {
-            if (!ready.isCompleted) {
-              // No endpoint event arrived; fall back to the SSE url itself.
-              _postUrl ??= url;
-              ready.complete();
-            }
-          }),
-        );
+        _connectTimer = Timer(connectTimeout, () {
+          _connectTimer = null;
+          if (!ready.isCompleted) {
+            // No endpoint event arrived; fall back to the SSE url itself.
+            _postUrl ??= url;
+            ready.complete();
+          }
+        });
       }
     } catch (e) {
+      // Route the failure to the single `ready` future the caller awaits — and
+      // do NOT also rethrow. Rethrowing would surface the error twice: once to
+      // the caller (as the raw, unwrapped exception) and once as an *unhandled*
+      // error on `ready.future`, which nobody else observes.
+      _ready = null;
+      _connectTimer?.cancel();
+      _connectTimer = null;
       if (!ready.isCompleted) {
         ready.completeError(
           e is MCPException ? e : MCPException('SSE connect failed: $e'),
         );
       }
-      _ready = null;
-      rethrow;
     }
 
     return ready.future;
@@ -212,6 +221,8 @@ class SseClientTransport implements MCPTransport {
         // The data is the (possibly relative) URL to POST requests to.
         final resolved = _resolveEndpoint(event.data.trim());
         _postUrl = resolved;
+        _connectTimer?.cancel();
+        _connectTimer = null;
         final ready = _ready;
         if (ready != null && !ready.isCompleted) ready.complete();
       case 'message':
@@ -350,8 +361,20 @@ class SseClientTransport implements MCPTransport {
 
   @override
   Future<void> close() async {
+    if (_closed) return; // Idempotent: safe to call repeatedly / on error paths.
     _closed = true;
-    await _eventSub?.cancel();
+    _connectTimer?.cancel();
+    _connectTimer = null;
+    // Fail a connect still in progress (no endpoint event yet) so the awaiting
+    // caller gets a single error instead of hanging until connectTimeout.
+    final ready = _ready;
+    _ready = null;
+    if (ready != null && !ready.isCompleted) {
+      ready.completeError(const MCPException('SSE transport closed'));
+    }
+    final sub = _eventSub;
+    _eventSub = null;
+    await sub?.cancel();
     _failAllPending(const MCPException('SSE transport closed'));
     if (!_notifications.isClosed) await _notifications.close();
     _client.close();

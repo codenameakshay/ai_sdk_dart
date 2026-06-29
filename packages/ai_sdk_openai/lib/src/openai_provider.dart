@@ -110,11 +110,16 @@ class _OpenAIEmbeddingModel implements EmbeddingModelV2<String> {
     final providerOptions = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
-    final response = await client.post<Map<String, dynamic>>(
-      '/embeddings',
-      data: {'model': modelId, 'input': options.values, ...?providerOptions},
-      options: Options(headers: options.headers),
-    );
+    final Response<Map<String, dynamic>> response;
+    try {
+      response = await client.post<Map<String, dynamic>>(
+        '/embeddings',
+        data: {'model': modelId, 'input': options.values, ...?providerOptions},
+        options: Options(headers: options.headers),
+      );
+    } on DioException catch (e) {
+      throw await apiErrorFromDioException(e, provider: provider);
+    }
 
     final data = response.data ?? <String, dynamic>{};
     final rawEmbeddings = (data['data'] as List?) ?? const [];
@@ -168,20 +173,25 @@ class _OpenAIImageModel implements ImageModelV3 {
     final providerOptions = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
-    final response = await client.post<Map<String, dynamic>>(
-      '/images/generations',
-      data: {
-        'model': modelId,
-        'prompt': options.prompt ?? options.promptObject?.text ?? '',
-        if (options.n != null) 'n': options.n,
-        if (options.size != null) 'size': options.size,
-        // gpt-image-1 always returns base64 and rejects `response_format`;
-        // dall-e-2/3 need it to return bytes (b64) instead of a hosted URL.
-        if (!modelId.startsWith('gpt-image')) 'response_format': 'b64_json',
-        ...?providerOptions,
-      },
-      options: Options(headers: options.headers),
-    );
+    final Response<Map<String, dynamic>> response;
+    try {
+      response = await client.post<Map<String, dynamic>>(
+        '/images/generations',
+        data: {
+          'model': modelId,
+          'prompt': options.prompt ?? options.promptObject?.text ?? '',
+          if (options.n != null) 'n': options.n,
+          if (options.size != null) 'size': options.size,
+          // gpt-image-1 always returns base64 and rejects `response_format`;
+          // dall-e-2/3 need it to return bytes (b64) instead of a hosted URL.
+          if (!modelId.startsWith('gpt-image')) 'response_format': 'b64_json',
+          ...?providerOptions,
+        },
+        options: Options(headers: options.headers),
+      );
+    } on DioException catch (e) {
+      throw await apiErrorFromDioException(e, provider: provider);
+    }
 
     final data = response.data ?? <String, dynamic>{};
     final imagesData = (data['data'] as List?) ?? const [];
@@ -263,14 +273,19 @@ class _OpenAISpeechModel implements SpeechModelV1 {
       if (options.speed != null) 'speed': options.speed,
       ...?providerOptions,
     };
-    final response = await client.post<Uint8List>(
-      '/audio/speech',
-      data: requestBody,
-      options: Options(
-        responseType: ResponseType.bytes,
-        headers: options.headers,
-      ),
-    );
+    final Response<Uint8List> response;
+    try {
+      response = await client.post<Uint8List>(
+        '/audio/speech',
+        data: requestBody,
+        options: Options(
+          responseType: ResponseType.bytes,
+          headers: options.headers,
+        ),
+      );
+    } on DioException catch (e) {
+      throw await apiErrorFromDioException(e, provider: provider);
+    }
     final contentType = response.headers.value('content-type') ?? 'audio/mpeg';
     final mediaType = contentType.split(';').first.trim();
     return SpeechModelV1GenerateResult(
@@ -314,11 +329,16 @@ class _OpenAITranscriptionModel implements TranscriptionModelV1 {
       if (options.language != null) 'language': options.language,
       if (options.prompt != null) 'prompt': options.prompt,
     });
-    final response = await client.post<Map<String, dynamic>>(
-      '/audio/transcriptions',
-      data: formData,
-      options: Options(headers: options.headers),
-    );
+    final Response<Map<String, dynamic>> response;
+    try {
+      response = await client.post<Map<String, dynamic>>(
+        '/audio/transcriptions',
+        data: formData,
+        options: Options(headers: options.headers),
+      );
+    } on DioException catch (e) {
+      throw await apiErrorFromDioException(e, provider: provider);
+    }
     final data = response.data ?? <String, dynamic>{};
     return TranscriptionModelV1GenerateResult(
       text: data['text']?.toString() ?? '',

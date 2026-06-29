@@ -99,12 +99,17 @@ class _GoogleLanguageModel implements LanguageModelV3 {
       ...?providerOptions,
     };
 
-    final response = await client.post<Map<String, dynamic>>(
-      '/$modelPath:generateContent',
-      queryParameters: {'key': _resolvedApiKey(apiKey)},
-      data: requestBody,
-      options: Options(headers: options.headers),
-    );
+    final Response<Map<String, dynamic>> response;
+    try {
+      response = await client.post<Map<String, dynamic>>(
+        '/$modelPath:generateContent',
+        queryParameters: {'key': _resolvedApiKey(apiKey)},
+        data: requestBody,
+        options: Options(headers: options.headers),
+      );
+    } on DioException catch (e) {
+      throw await _apiCallError(e, provider);
+    }
 
     final data = response.data ?? <String, dynamic>{};
     final candidates = (data['candidates'] as List?) ?? const [];
@@ -264,20 +269,27 @@ class _GoogleLanguageModel implements LanguageModelV3 {
       ..._googleToolChoicePayload(options.toolChoice),
       ...?providerOptions,
     };
-    final response = await client.post<ResponseBody>(
-      '/$modelPath:streamGenerateContent',
-      queryParameters: {'alt': 'sse', 'key': _resolvedApiKey(apiKey)},
-      data: requestBody,
-      options: Options(
-        responseType: ResponseType.stream,
-        headers: options.headers,
-      ),
-    );
+    final Response<ResponseBody> response;
+    try {
+      response = await client.post<ResponseBody>(
+        '/$modelPath:streamGenerateContent',
+        queryParameters: {'alt': 'sse', 'key': _resolvedApiKey(apiKey)},
+        data: requestBody,
+        options: Options(
+          responseType: ResponseType.stream,
+          headers: options.headers,
+        ),
+      );
+    } on DioException catch (e) {
+      throw await _apiCallError(e, provider);
+    }
 
     final body = response.data;
     if (body == null) {
       // Defensive; Dio stream body is never null on a 200 streaming response.
-      throw StateError('Google stream response body is null.'); // coverage:ignore-line
+      throw StateError(
+        'Google stream response body is null.',
+      ); // coverage:ignore-line
     }
 
     final controller = StreamController<LanguageModelV3StreamPart>();
@@ -457,26 +469,32 @@ class _GoogleEmbeddingModel implements EmbeddingModelV2<String> {
     final providerOptions = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
-    final response = await client.post<Map<String, dynamic>>(
-      '/$modelPath:batchEmbedContents',
-      queryParameters: {'key': _resolvedApiKey(apiKey)},
-      data: {
-        'requests': options.values
-            .map(
-              (value) => {
-                'model': modelPath,
-                'content': {
-                  'parts': [
-                    {'text': value},
-                  ],
-                },
+    final embedRequest = <String, dynamic>{
+      'requests': options.values
+          .map(
+            (value) => {
+              'model': modelPath,
+              'content': {
+                'parts': [
+                  {'text': value},
+                ],
               },
-            )
-            .toList(),
-        ...?providerOptions,
-      },
-      options: Options(headers: options.headers),
-    );
+            },
+          )
+          .toList(),
+      ...?providerOptions,
+    };
+    final Response<Map<String, dynamic>> response;
+    try {
+      response = await client.post<Map<String, dynamic>>(
+        '/$modelPath:batchEmbedContents',
+        queryParameters: {'key': _resolvedApiKey(apiKey)},
+        data: embedRequest,
+        options: Options(headers: options.headers),
+      );
+    } on DioException catch (e) {
+      throw await _apiCallError(e, provider);
+    }
 
     final data = response.data ?? <String, dynamic>{};
     final embeddings = (data['embeddings'] as List?) ?? const [];
@@ -729,4 +747,29 @@ Map<String, dynamic> _googleToolChoicePayload(
       },
     },
   };
+}
+
+/// Maps a [DioException] from a non-2xx response to a typed [AiApiCallError]
+/// carrying the provider's message/status/code. Drains a streamed error body
+/// (`ResponseType.stream`) when present so the message is recoverable.
+Future<AiApiCallError> _apiCallError(
+  DioException error,
+  String provider,
+) async {
+  final data = error.response?.data;
+  Object? body = data;
+  if (data is ResponseBody) {
+    final bytes = <int>[];
+    await for (final chunk in data.stream) {
+      bytes.addAll(chunk);
+    }
+    body = bytes;
+  }
+  return AiApiCallError.fromResponse(
+    statusCode: error.response?.statusCode,
+    url: error.requestOptions.uri.toString(),
+    body: body ?? error.message,
+    provider: provider,
+    cause: error,
+  );
 }

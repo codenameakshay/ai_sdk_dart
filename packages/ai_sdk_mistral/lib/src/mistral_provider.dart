@@ -99,10 +99,15 @@ class _MistralEmbeddingModel implements EmbeddingModelV2<String> {
 
     final body = <String, dynamic>{'model': modelId, 'input': options.values};
 
-    final response = await client.post<Map<String, dynamic>>(
-      '/embeddings',
-      data: body,
-    );
+    final Response<Map<String, dynamic>> response;
+    try {
+      response = await client.post<Map<String, dynamic>>(
+        '/embeddings',
+        data: body,
+      );
+    } on DioException catch (e) {
+      throw await apiErrorFromDioException(e, provider: provider);
+    }
     final data = response.data!;
     final dataList = (data['data'] as List?) ?? [];
     final embeddings = dataList.asMap().entries.map((entry) {

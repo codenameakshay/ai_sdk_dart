@@ -269,10 +269,12 @@ class _CohereLanguageModel implements LanguageModelV3 {
     final client = _cohereDio(apiKey: apiKey, baseUrl: baseUrl);
     final body = _buildBody(options);
 
-    final response = await client.post<Map<String, dynamic>>(
-      '/chat',
-      data: body,
-    );
+    final Response<Map<String, dynamic>> response;
+    try {
+      response = await client.post<Map<String, dynamic>>('/chat', data: body);
+    } on DioException catch (e) {
+      throw await _apiCallError(e, provider);
+    }
     final data = response.data!;
 
     final message = data['message'] as Map<String, dynamic>?;
@@ -324,11 +326,16 @@ class _CohereLanguageModel implements LanguageModelV3 {
     final client = _cohereDio(apiKey: apiKey, baseUrl: baseUrl);
     final body = _buildBody(options)..['stream'] = true;
 
-    final response = await client.post<ResponseBody>(
-      '/chat',
-      data: body,
-      options: Options(responseType: ResponseType.stream),
-    );
+    final Response<ResponseBody> response;
+    try {
+      response = await client.post<ResponseBody>(
+        '/chat',
+        data: body,
+        options: Options(responseType: ResponseType.stream),
+      );
+    } on DioException catch (e) {
+      throw await _apiCallError(e, provider);
+    }
 
     final controller = StreamController<LanguageModelV3StreamPart>();
     final byteStream = response.data!.stream;
@@ -525,10 +532,12 @@ class _CohereEmbeddingModel implements EmbeddingModelV2<String> {
       'embedding_types': ['float'],
     };
 
-    final response = await client.post<Map<String, dynamic>>(
-      '/embed',
-      data: body,
-    );
+    final Response<Map<String, dynamic>> response;
+    try {
+      response = await client.post<Map<String, dynamic>>('/embed', data: body);
+    } on DioException catch (e) {
+      throw await _apiCallError(e, provider);
+    }
     final data = response.data!;
     final embeddingsData = data['embeddings'] as Map<String, dynamic>?;
     final floats = (embeddingsData?['float'] as List?) ?? [];
@@ -573,10 +582,12 @@ class _CohereRerankModel implements RerankModelV1 {
       if (options.topN != null) 'top_n': options.topN,
     };
 
-    final response = await client.post<Map<String, dynamic>>(
-      '/rerank',
-      data: body,
-    );
+    final Response<Map<String, dynamic>> response;
+    try {
+      response = await client.post<Map<String, dynamic>>('/rerank', data: body);
+    } on DioException catch (e) {
+      throw await _apiCallError(e, provider);
+    }
     final data = response.data!;
     final results = (data['results'] as List?) ?? [];
 
@@ -592,4 +603,29 @@ class _CohereRerankModel implements RerankModelV1 {
 
     return RerankModelV1Result(documents: documents);
   }
+}
+
+/// Maps a [DioException] from a non-2xx response to a typed [AiApiCallError]
+/// carrying the provider's message/status/code. Drains a streamed error body
+/// (`ResponseType.stream`) when present so the message is recoverable.
+Future<AiApiCallError> _apiCallError(
+  DioException error,
+  String provider,
+) async {
+  final data = error.response?.data;
+  Object? body = data;
+  if (data is ResponseBody) {
+    final bytes = <int>[];
+    await for (final chunk in data.stream) {
+      bytes.addAll(chunk);
+    }
+    body = bytes;
+  }
+  return AiApiCallError.fromResponse(
+    statusCode: error.response?.statusCode,
+    url: error.requestOptions.uri.toString(),
+    body: body ?? error.message,
+    provider: provider,
+    cause: error,
+  );
 }

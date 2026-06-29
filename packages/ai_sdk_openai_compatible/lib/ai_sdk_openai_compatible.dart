@@ -8,5 +8,6 @@
 /// its own. See `docs/adr/0004-openai-compatible-base.md`.
 library ai_sdk_openai_compatible;
 
+export 'src/api_error.dart';
 export 'src/openai_compatible_chat_language_model.dart';
 export 'src/openai_compatible_config.dart';

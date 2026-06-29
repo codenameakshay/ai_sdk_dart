@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
 
+import 'api_error.dart';
 import 'openai_compatible_config.dart';
 
 /// A [LanguageModelV3] implementing the full OpenAI Chat Completions wire
@@ -95,12 +96,17 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
   ) async {
     final client = _client();
     final requestBody = _buildBody(options, stream: false);
-    final response = await client.post<Map<String, dynamic>>(
-      '/chat/completions',
-      data: requestBody,
-      queryParameters: config.queryParameters,
-      options: _requestOptions(options),
-    );
+    final Response<Map<String, dynamic>> response;
+    try {
+      response = await client.post<Map<String, dynamic>>(
+        '/chat/completions',
+        data: requestBody,
+        queryParameters: config.queryParameters,
+        options: _requestOptions(options),
+      );
+    } on DioException catch (e) {
+      throw await apiErrorFromDioException(e, provider: provider);
+    }
 
     final data = response.data ?? <String, dynamic>{};
     final choices = (data['choices'] as List?) ?? const [];
@@ -166,12 +172,17 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
   ) async {
     final client = _client();
     final requestBody = _buildBody(options, stream: true);
-    final response = await client.post<ResponseBody>(
-      '/chat/completions',
-      data: requestBody,
-      queryParameters: config.queryParameters,
-      options: _requestOptions(options, responseType: ResponseType.stream),
-    );
+    final Response<ResponseBody> response;
+    try {
+      response = await client.post<ResponseBody>(
+        '/chat/completions',
+        data: requestBody,
+        queryParameters: config.queryParameters,
+        options: _requestOptions(options, responseType: ResponseType.stream),
+      );
+    } on DioException catch (e) {
+      throw await apiErrorFromDioException(e, provider: provider);
+    }
 
     final body = response.data;
     if (body == null) {

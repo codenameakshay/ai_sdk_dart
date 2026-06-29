@@ -124,11 +124,16 @@ class _AzureEmbeddingModel implements EmbeddingModelV2<String> {
       'model': deploymentId,
     };
 
-    final response = await client.post<Map<String, dynamic>>(
-      '/embeddings',
-      queryParameters: {'api-version': apiVersion},
-      data: body,
-    );
+    final Response<Map<String, dynamic>> response;
+    try {
+      response = await client.post<Map<String, dynamic>>(
+        '/embeddings',
+        queryParameters: {'api-version': apiVersion},
+        data: body,
+      );
+    } on DioException catch (e) {
+      throw await apiErrorFromDioException(e, provider: provider);
+    }
     final data = response.data!;
     final dataList = (data['data'] as List?) ?? [];
     final embeddings = dataList.asMap().entries.map((entry) {

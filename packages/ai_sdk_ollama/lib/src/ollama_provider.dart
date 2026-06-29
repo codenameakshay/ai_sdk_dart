@@ -202,10 +202,12 @@ class _OllamaLanguageModel implements LanguageModelV3 {
     final client = _ollamaDio(baseUrl: baseUrl);
     final body = _buildBody(options);
 
-    final response = await client.post<Map<String, dynamic>>(
-      '/chat',
-      data: body,
-    );
+    final Response<Map<String, dynamic>> response;
+    try {
+      response = await client.post<Map<String, dynamic>>('/chat', data: body);
+    } on DioException catch (e) {
+      throw await _apiCallError(e, provider);
+    }
     final data = response.data!;
 
     final message = data['message'] as Map<String, dynamic>?;
@@ -237,11 +239,16 @@ class _OllamaLanguageModel implements LanguageModelV3 {
     final body = _buildBody(options);
     body['stream'] = true;
 
-    final response = await client.post<ResponseBody>(
-      '/chat',
-      data: body,
-      options: Options(responseType: ResponseType.stream),
-    );
+    final Response<ResponseBody> response;
+    try {
+      response = await client.post<ResponseBody>(
+        '/chat',
+        data: body,
+        options: Options(responseType: ResponseType.stream),
+      );
+    } on DioException catch (e) {
+      throw await _apiCallError(e, provider);
+    }
 
     final controller = StreamController<LanguageModelV3StreamPart>();
     unawaited(
@@ -399,10 +406,12 @@ class _OllamaEmbeddingModel implements EmbeddingModelV2<String> {
 
     final body = <String, dynamic>{'model': model, 'input': options.values};
 
-    final response = await client.post<Map<String, dynamic>>(
-      '/embed',
-      data: body,
-    );
+    final Response<Map<String, dynamic>> response;
+    try {
+      response = await client.post<Map<String, dynamic>>('/embed', data: body);
+    } on DioException catch (e) {
+      throw await _apiCallError(e, provider);
+    }
     final data = response.data!;
     final embeddingsList = (data['embeddings'] as List?) ?? [];
     final embeddings = embeddingsList.asMap().entries.map((entry) {
@@ -415,4 +424,29 @@ class _OllamaEmbeddingModel implements EmbeddingModelV2<String> {
 
     return EmbeddingModelV2GenerateResult<String>(embeddings: embeddings);
   }
+}
+
+/// Maps a [DioException] from a non-2xx response to a typed [AiApiCallError]
+/// carrying the provider's message/status/code. Drains a streamed error body
+/// (`ResponseType.stream`) when present so the message is recoverable.
+Future<AiApiCallError> _apiCallError(
+  DioException error,
+  String provider,
+) async {
+  final data = error.response?.data;
+  Object? body = data;
+  if (data is ResponseBody) {
+    final bytes = <int>[];
+    await for (final chunk in data.stream) {
+      bytes.addAll(chunk);
+    }
+    body = bytes;
+  }
+  return AiApiCallError.fromResponse(
+    statusCode: error.response?.statusCode,
+    url: error.requestOptions.uri.toString(),
+    body: body ?? error.message,
+    provider: provider,
+    cause: error,
+  );
 }

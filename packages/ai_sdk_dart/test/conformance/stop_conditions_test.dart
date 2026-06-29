@@ -3,6 +3,8 @@ import 'package:ai_sdk_dart/test.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
 
+import 'helpers/fake_models.dart';
+
 void main() {
   group('StepSnapshot', () {
     test('has stepCount, toolCallNames, and finishReason fields', () {
@@ -230,6 +232,34 @@ void main() {
       );
       expect(result.text, 'Hello!');
     });
+
+    test(
+      'stopWhen drives the tool loop past the default maxSteps (regression)',
+      () async {
+        // maxSteps defaults to 1; a stopWhen condition must be able to extend
+        // the loop beyond it. The model returns a tool call on every step.
+        var executions = 0;
+        final result = await generateText(
+          model: FakeToolModel(toolName: 'ping', toolInput: const {}),
+          prompt: 'go',
+          stopWhen: stepCountIs(3),
+          tools: {
+            'ping': tool<Map<String, dynamic>, String>(
+              inputSchema: Schema<Map<String, dynamic>>(
+                jsonSchema: const {'type': 'object'},
+                fromJson: (json) => json,
+              ),
+              execute: (_, __) async {
+                executions++;
+                return 'pong';
+              },
+            ),
+          },
+        );
+        expect(result.steps, hasLength(3));
+        expect(executions, 3);
+      },
+    );
   });
 
   group('streamText stopWhen parameter', () {
@@ -258,5 +288,33 @@ void main() {
       );
       expect(await result.text, 'Hello!');
     });
+
+    test(
+      'stopWhen drives the tool loop past the default maxSteps (regression)',
+      () async {
+        var executions = 0;
+        final result = await streamText(
+          model: FakeToolModel(toolName: 'ping', toolInput: const {}),
+          prompt: 'go',
+          stopWhen: stepCountIs(3),
+          tools: {
+            'ping': tool<Map<String, dynamic>, String>(
+              inputSchema: Schema<Map<String, dynamic>>(
+                jsonSchema: const {'type': 'object'},
+                fromJson: (json) => json,
+              ),
+              execute: (_, __) async {
+                executions++;
+                return 'pong';
+              },
+            ),
+          },
+        );
+        await result.text;
+        final steps = await result.steps;
+        expect(steps, hasLength(3));
+        expect(executions, 3);
+      },
+    );
   });
 }

@@ -577,6 +577,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   unawaited(
     Future<void>(() async {
       final steps = <GenerateTextStep>[];
+      var aborted = false;
       final overallTextBuffer = StringBuffer();
       var emittedArrayElements = 0;
       StreamPartFinish? lastFinishPart;
@@ -635,7 +636,15 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
         };
         final _allStopConditions = [..._stopWhenList, ...stopConditions];
 
-        final totalSteps = tools.isEmpty ? 1 : (maxSteps < 1 ? 1 : maxSteps);
+        // When [stopWhen] is supplied it governs termination and [maxSteps] is
+        // ignored — a high safety cap guards against a condition that never
+        // trips. Otherwise [maxSteps] (with any [stopConditions]) bounds it.
+        const stopWhenStepSafetyCap = 1000;
+        final totalSteps = tools.isEmpty
+            ? 1
+            : (_stopWhenList.isEmpty
+                ? (maxSteps < 1 ? 1 : maxSteps)
+                : stopWhenStepSafetyCap);
         for (var stepNumber = 0; stepNumber < totalSteps; stepNumber++) {
           fullController.add(StreamTextStartStepEvent(stepNumber: stepNumber));
 
@@ -736,6 +745,13 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
           StreamPartFinish? stepFinishPart;
 
           await for (final part in response.stream) {
+            // Honor cancellation: break the read loop (which cancels the
+            // underlying subscription, stopping the in-flight provider read)
+            // instead of merely firing the onAbort callback.
+            if (abortSignal?.isCancelled ?? false) {
+              aborted = true;
+              break;
+            }
             rawController.add(part);
             fullController.add(StreamTextRawEvent(part: part));
             onChunk?.call(StreamTextRawChunk(part: part));
@@ -890,6 +906,11 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                 lastFinishPart = part;
             }
           }
+
+          // Cancelled mid-stream: skip tool execution and step finalization
+          // and fall through to the run finalizer (completes the result
+          // futures with partial content so consumers never hang).
+          if (aborted) break;
 
           if (inReasoning && !reasoningClosed) {
             stepContent.add(

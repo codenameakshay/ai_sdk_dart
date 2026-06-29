@@ -421,12 +421,16 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
   };
   final _allStopConditions = [..._stopWhenList, ...stopConditions];
 
-  // When no stopWhen is supplied, treat maxSteps as the primary limit.
+  // Step budget: without tools there is never more than one step. When
+  // [stopWhen] is supplied it governs termination and [maxSteps] is ignored —
+  // a high safety cap guards against a stop condition that never trips.
+  // Otherwise [maxSteps] (alongside any [stopConditions]) bounds the loop.
+  const stopWhenStepSafetyCap = 1000;
   final totalSteps = tools.isEmpty
       ? 1
       : (_stopWhenList.isEmpty
           ? (maxSteps < 1 ? 1 : maxSteps)
-          : (maxSteps < 1 ? 1 : maxSteps));
+          : stopWhenStepSafetyCap);
 
   for (var stepNumber = 0; stepNumber < totalSteps; stepNumber++) {
     final prepareResult = await Future.value(

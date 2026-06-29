@@ -1,4 +1,5 @@
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
+import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
 
 import 'helpers/fake_models.dart';
@@ -169,5 +170,81 @@ void main() {
 
       expect(abortCalled, isFalse);
     });
+
+    test('cancelling mid-stream stops processing further deltas', () async {
+      // Regression: cancelling must actually break the read loop, not merely
+      // fire the onAbort callback while the stream keeps draining.
+      final token = CancellationToken();
+      final model = _SlowStreamModel(
+        const ['one ', 'two ', 'three ', 'four ', 'five'],
+        chunkDelayInMs: 25,
+      );
+      final received = <String>[];
+      final result = await streamText(
+        model: model,
+        prompt: 'hi',
+        abortSignal: token,
+      );
+
+      final sub = result.textStream.listen((delta) {
+        received.add(delta);
+        if (received.length == 2) token.cancel();
+      });
+
+      // Finalizer completes with partial content; guard against hangs.
+      await result.text.timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => '',
+      );
+      await sub.cancel();
+
+      // The loop broke after the cancel, so not all five deltas were seen.
+      expect(received.length, greaterThanOrEqualTo(2));
+      expect(received.length, lessThan(5));
+    });
   });
+}
+
+/// A streaming model that emits text deltas spaced by [chunkDelayInMs], so a
+/// mid-stream cancellation can land between chunks.
+class _SlowStreamModel implements LanguageModelV3 {
+  _SlowStreamModel(this.deltas, {this.chunkDelayInMs = 25});
+
+  final List<String> deltas;
+  final int chunkDelayInMs;
+
+  @override
+  String get provider => 'fake';
+
+  @override
+  String get modelId => 'slow-stream';
+
+  @override
+  String get specificationVersion => 'v3';
+
+  @override
+  Future<LanguageModelV3GenerateResult> doGenerate(
+    LanguageModelV3CallOptions options,
+  ) async => LanguageModelV3GenerateResult(
+    content: [LanguageModelV3TextPart(text: deltas.join())],
+    finishReason: LanguageModelV3FinishReason.stop,
+  );
+
+  @override
+  Future<LanguageModelV3StreamResult> doStream(
+    LanguageModelV3CallOptions options,
+  ) async {
+    final parts = <LanguageModelV3StreamPart>[
+      StreamPartTextStart(id: 't'),
+      for (final d in deltas) StreamPartTextDelta(id: 't', delta: d),
+      StreamPartTextEnd(id: 't'),
+      StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+    ];
+    return LanguageModelV3StreamResult(
+      stream: simulateReadableStream(
+        parts: parts,
+        chunkDelayInMs: chunkDelayInMs,
+      ),
+    );
+  }
 }

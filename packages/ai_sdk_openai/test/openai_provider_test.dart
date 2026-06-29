@@ -902,6 +902,279 @@ void main() {
       expect(file.filename, 'file_456');
     });
 
+    // ── embedding providerOptions + string usage tokens ──────────────────
+
+    test('embedding forwards providerOptions and parses string tokens',
+        () async {
+      late Map<String, dynamic> captured;
+      final server = await _TestServer.start((request) async {
+        expect(request.uri.path, '/v1/embeddings');
+        final body = await utf8.decoder.bind(request).join();
+        captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'data': [
+              {
+                'embedding': [0.5, 0.6],
+              },
+            ],
+            // total_tokens as a string exercises the String branch of
+            // _intOrNull.
+            'usage': {'total_tokens': '42'},
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = OpenAIProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).embedding('text-embedding-3-small');
+      final result = await model.doEmbed(
+        const EmbeddingModelV2CallOptions(
+          values: ['a'],
+          providerOptions: {
+            'openai': {'dimensions': 256},
+          },
+        ),
+      );
+
+      expect(captured['model'], 'text-embedding-3-small');
+      expect(captured['dimensions'], 256);
+      expect(result.embeddings.single.embedding, [0.5, 0.6]);
+      expect(result.usage?.tokens, 42);
+      expect(model.provider, 'openai');
+      expect(model.specificationVersion, 'v2');
+    });
+
+    // ── image providerOptions + metadata ─────────────────────────────────
+
+    test('image forwards size/n/providerOptions and exposes metadata',
+        () async {
+      final imageB64 = base64Encode(utf8.encode('png'));
+      late Map<String, dynamic> captured;
+      final server = await _TestServer.start((request) async {
+        expect(request.uri.path, '/v1/images/generations');
+        final body = await utf8.decoder.bind(request).join();
+        captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'data': [
+              {'b64_json': imageB64},
+              {'b64_json': ''}, // empty b64 is skipped
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = OpenAIProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).image('gpt-image-1');
+      final result = await model.doGenerate(
+        const ImageModelV3CallOptions(
+          prompt: 'a cat',
+          n: 2,
+          size: '1024x1024',
+          providerOptions: {
+            'openai': {'quality': 'high'},
+          },
+        ),
+      );
+
+      expect(captured['n'], 2);
+      expect(captured['size'], '1024x1024');
+      expect(captured['response_format'], 'b64_json');
+      expect(captured['quality'], 'high');
+      expect(result.images, hasLength(1));
+      expect(result.responses.single.modelId, 'gpt-image-1');
+      expect(model.provider, 'openai');
+      expect(model.specificationVersion, 'v3');
+    });
+
+    // ── speech (text-to-speech) ──────────────────────────────────────────
+
+    test('speech sends text/voice/format/speed and returns audio bytes',
+        () async {
+      final audioBytes = Uint8List.fromList(utf8.encode('mp3-data'));
+      late Map<String, dynamic> captured;
+      final server = await _TestServer.start((request) async {
+        expect(request.uri.path, '/v1/audio/speech');
+        final body = await utf8.decoder.bind(request).join();
+        captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+        request.response.statusCode = 200;
+        request.response.headers.set('content-type', 'audio/mpeg; charset=x');
+        request.response.add(audioBytes);
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = OpenAIProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).speech('tts-1');
+      final result = await model.doGenerate(
+        const SpeechModelV1CallOptions(
+          text: 'hello world',
+          voice: 'alloy',
+          format: 'mp3',
+          speed: 1.25,
+          providerOptions: {
+            'openai': {'instructions': 'cheerful'},
+          },
+        ),
+      );
+
+      expect(captured['model'], 'tts-1');
+      expect(captured['input'], 'hello world');
+      expect(captured['voice'], 'alloy');
+      expect(captured['response_format'], 'mp3');
+      expect(captured['speed'], 1.25);
+      expect(captured['instructions'], 'cheerful');
+      expect(result.audio, audioBytes);
+      // content-type parameters are stripped to the bare media type.
+      expect(result.mediaType, 'audio/mpeg');
+      expect(model.provider, 'openai');
+      expect(model.specificationVersion, 'v1');
+    });
+
+    test('speech omits optional fields and defaults media type', () async {
+      late Map<String, dynamic> captured;
+      final server = await _TestServer.start((request) async {
+        final body = await utf8.decoder.bind(request).join();
+        captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+        request.response.statusCode = 200;
+        // No content-type header -> default audio/mpeg.
+        request.response.headers.removeAll('content-type');
+        request.response.headers.contentType = null;
+        request.response.add(utf8.encode('x'));
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = OpenAIProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).speech('tts-1');
+      final result = await model.doGenerate(
+        const SpeechModelV1CallOptions(text: 'hi'),
+      );
+
+      expect(captured.containsKey('voice'), isFalse);
+      expect(captured.containsKey('response_format'), isFalse);
+      expect(captured.containsKey('speed'), isFalse);
+      expect(result.mediaType, 'audio/mpeg');
+    });
+
+    // ── transcription (speech-to-text) ───────────────────────────────────
+
+    test('transcription posts multipart audio and parses text', () async {
+      late String contentTypeHeader;
+      late String rawBody;
+      final server = await _TestServer.start((request) async {
+        expect(request.uri.path, '/v1/audio/transcriptions');
+        contentTypeHeader = request.headers.value('content-type') ?? '';
+        rawBody = await utf8.decoder.bind(request).join();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({'text': 'hello there'}));
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = OpenAIProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).transcription('whisper-1');
+      final result = await model.doGenerate(
+        TranscriptionModelV1CallOptions(
+          audio: Uint8List.fromList(utf8.encode('audio-bytes')),
+          audioMediaType: 'audio/wav',
+          language: 'en',
+          prompt: 'a greeting',
+        ),
+      );
+
+      expect(contentTypeHeader, contains('multipart/form-data'));
+      // multipart form should carry the model, language, prompt and a .wav file.
+      expect(rawBody, contains('whisper-1'));
+      expect(rawBody, contains('audio.wav'));
+      expect(rawBody, contains('a greeting'));
+      expect(rawBody, contains('name="language"'));
+      expect(result.text, 'hello there');
+      expect(model.provider, 'openai');
+      expect(model.specificationVersion, 'v1');
+    });
+
+    test('transcription maps audio media types to file extensions', () async {
+      Future<String> filenameFor(String? mediaType) async {
+        late String rawBody;
+        final server = await _TestServer.start((request) async {
+          rawBody = await utf8.decoder.bind(request).join();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(jsonEncode({'text': 'ok'}));
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = OpenAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).transcription('whisper-1');
+        await model.doGenerate(
+          TranscriptionModelV1CallOptions(
+            audio: Uint8List.fromList([1, 2, 3]),
+            audioMediaType: mediaType,
+          ),
+        );
+        await server.close();
+        final match = RegExp('audio\\.([a-z0-9]+)').firstMatch(rawBody);
+        return match!.group(1)!;
+      }
+
+      expect(await filenameFor('audio/mpeg'), 'mp3');
+      expect(await filenameFor('audio/mp3'), 'mp3');
+      expect(await filenameFor('audio/wav'), 'wav');
+      expect(await filenameFor('audio/ogg'), 'ogg');
+      expect(await filenameFor('audio/flac'), 'flac');
+      expect(await filenameFor('audio/mp4'), 'm4a');
+      expect(await filenameFor('audio/m4a'), 'm4a');
+      expect(await filenameFor('audio/webm'), 'webm');
+      // unknown / null media types fall back to mp3.
+      expect(await filenameFor('audio/unknown'), 'mp3');
+      expect(await filenameFor(null), 'mp3');
+    });
+
+    test('transcription defaults to empty text when none returned', () async {
+      final server = await _TestServer.start((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode(<String, dynamic>{}));
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = OpenAIProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).transcription('whisper-1');
+      final result = await model.doGenerate(
+        TranscriptionModelV1CallOptions(
+          audio: Uint8List.fromList([1, 2, 3]),
+        ),
+      );
+
+      expect(result.text, '');
+    });
+
     runProviderContractTests(
       providerName: 'openai',
       captureRequestBody: _captureOpenAiRequestBody,

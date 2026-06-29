@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:ai_sdk_dart/test.dart';
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -106,6 +108,29 @@ void main() {
         controller.dispose();
       },
     );
+
+    test('stop cancels an in-flight stream and resets flags', () async {
+      final controller = ObjectStreamController<int>();
+      // A long-lived source so stop() runs while the subscription is active.
+      final source = StreamController<int>();
+      addTearDown(source.close);
+
+      unawaited(controller.bind(source.stream));
+      source.add(1);
+      await pumpUntil(() => controller.value == 1);
+      expect(controller.isStreaming, isTrue);
+      expect(controller.isLoading, isTrue);
+
+      await controller.stop();
+      expect(controller.isLoading, isFalse);
+      expect(controller.isStreaming, isFalse);
+
+      // Further events after stop must not revive the controller (sub cancelled).
+      source.add(2);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(controller.value, 1);
+      controller.dispose();
+    });
 
     test('submit binds via bind() so a later bind still works', () async {
       final controller = ObjectStreamController<Map<String, dynamic>>(

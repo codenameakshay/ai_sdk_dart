@@ -182,6 +182,95 @@ void main() {
       },
     );
   });
+
+  group('Azure embedding doEmbed wire format', () {
+    test(
+      'posts to deployment /embeddings with api-key header and api-version '
+      'query, parses embeddings in input order',
+      () async {
+        late Map<String, dynamic> captured;
+        String? path;
+        String? apiKeyHeader;
+        String? query;
+        final server = await _TestServer.start((request) async {
+          path = request.uri.path;
+          apiKeyHeader = request.headers.value('api-key');
+          query = request.uri.query;
+          captured = await _captureBody(request);
+
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'data': [
+                {
+                  'index': 0,
+                  'embedding': [0.1, 0.2, 0.3],
+                },
+                {
+                  'index': 1,
+                  'embedding': [0.4, 0.5, 0.6],
+                },
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = AzureOpenAIProvider(
+          endpoint: server.endpoint,
+          apiKey: 'secret-key',
+          apiVersion: '2024-05-01-preview',
+        ).embedding('text-embedding-ada-002');
+
+        final result = await model.doEmbed(
+          const EmbeddingModelV2CallOptions<String>(
+            values: ['hello', 'world'],
+          ),
+        );
+
+        // Routed to the deployment-scoped embeddings endpoint.
+        expect(
+          path,
+          '/openai/deployments/text-embedding-ada-002/embeddings',
+        );
+        // Azure auth wiring on the embedding path.
+        expect(apiKeyHeader, 'secret-key');
+        expect(query, contains('api-version=2024-05-01-preview'));
+        // Request body carries input and the deployment as model.
+        expect(captured['input'], ['hello', 'world']);
+        expect(captured['model'], 'text-embedding-ada-002');
+        // Embeddings parsed and paired with their source values, in order.
+        expect(result.embeddings, hasLength(2));
+        expect(result.embeddings[0].value, 'hello');
+        expect(result.embeddings[0].embedding, [0.1, 0.2, 0.3]);
+        expect(result.embeddings[1].value, 'world');
+        expect(result.embeddings[1].embedding, [0.4, 0.5, 0.6]);
+      },
+    );
+
+    test('tolerates a response with no data list', () async {
+      final server = await _TestServer.start((request) async {
+        await _captureBody(request);
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({'object': 'list'}));
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = AzureOpenAIProvider(
+        endpoint: server.endpoint,
+        apiKey: 'key',
+      ).embedding('text-embedding-ada-002');
+
+      final result = await model.doEmbed(
+        const EmbeddingModelV2CallOptions<String>(values: ['only']),
+      );
+      expect(result.embeddings, isEmpty);
+    });
+  });
 }
 
 LanguageModelV3Prompt _userPrompt(String text) => LanguageModelV3Prompt(

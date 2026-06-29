@@ -80,6 +80,23 @@ void main() {
       expect(stopped, isTrue);
     });
 
+    testWidgets('submitting the field via the keyboard action sends', (
+      tester,
+    ) async {
+      String? sent;
+      await tester.pumpWidget(_wrap(ChatComposer(onSend: (t) => sent = t)));
+
+      await tester.enterText(
+        find.byKey(const ValueKey('chat-composer-field')),
+        'via keyboard',
+      );
+      // Triggers TextField.onSubmitted -> _send(), without tapping the button.
+      await tester.testTextInput.receiveAction(TextInputAction.send);
+      await tester.pump();
+
+      expect(sent, 'via keyboard');
+    });
+
     testWidgets('shows an attach button only when onAttach is set', (
       tester,
     ) async {

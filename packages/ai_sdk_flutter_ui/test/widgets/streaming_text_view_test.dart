@@ -30,6 +30,28 @@ void main() {
       expect(find.byKey(const ValueKey('streaming-cursor')), findsNothing);
     });
 
+    testWidgets('starts blinking when it transitions into streaming', (
+      tester,
+    ) async {
+      // Non-const so the constructor body runs at runtime, and starts idle so
+      // the didUpdateWidget false->true branch (re-)starts the blink.
+      await tester.pumpWidget(
+        _wrap(StreamingTextView(text: 'typing', isStreaming: false)),
+      );
+      expect(find.byKey(const ValueKey('streaming-cursor')), findsNothing);
+
+      await tester.pumpWidget(
+        _wrap(StreamingTextView(text: 'typing', isStreaming: true)),
+      );
+      expect(find.byKey(const ValueKey('streaming-cursor')), findsOneWidget);
+
+      // Advance the blink, then settle by leaving streaming so no timer dangles.
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pumpWidget(
+        _wrap(StreamingTextView(text: 'typing', isStreaming: false)),
+      );
+    });
+
     testWidgets('updates as text grows', (tester) async {
       await tester.pumpWidget(
         _wrap(const StreamingTextView(text: 'Hel', isStreaming: false)),

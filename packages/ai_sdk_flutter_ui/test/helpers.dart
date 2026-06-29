@@ -80,6 +80,43 @@ ToolLoopAgent erroringAgent(Object error) {
   return ToolLoopAgent(model: MockLanguageModelV3(doStreamError: error));
 }
 
+/// A language model that throws [error] synchronously from `doStream`, before
+/// any stream is opened — so the `await agent.stream(...)` call itself rejects
+/// and is handled by the controller's surrounding try/catch rather than its
+/// stream-error listener.
+class _SyncThrowingModel implements LanguageModelV3 {
+  _SyncThrowingModel(this.error);
+
+  final Object error;
+
+  @override
+  String get provider => 'mock';
+  @override
+  String get modelId => 'sync-throwing';
+  @override
+  String get specificationVersion => 'v3';
+
+  @override
+  Future<LanguageModelV3GenerateResult> doGenerate(
+    LanguageModelV3CallOptions options,
+  ) {
+    throw error;
+  }
+
+  @override
+  Future<LanguageModelV3StreamResult> doStream(
+    LanguageModelV3CallOptions options,
+  ) {
+    throw error;
+  }
+}
+
+/// Builds a [ToolLoopAgent] whose model throws synchronously, so the
+/// `agent.stream()` future rejects (exercising the controller's try/catch).
+ToolLoopAgent syncThrowingAgent(Object error) {
+  return ToolLoopAgent(model: _SyncThrowingModel(error));
+}
+
 /// A simple object schema returning the JSON map unchanged.
 final Schema<Map<String, dynamic>> mapSchema = Schema<Map<String, dynamic>>(
   jsonSchema: const {

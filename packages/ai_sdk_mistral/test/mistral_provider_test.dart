@@ -131,6 +131,81 @@ void main() {
       expect(captured['max_tokens'], 200);
     });
   });
+
+  group('Mistral embedding doEmbed wire format', () {
+    test(
+      'posts to /embeddings with bearer auth, parses embeddings in order',
+      () async {
+        late Map<String, dynamic> captured;
+        String? path;
+        String? authHeader;
+        final server = await _TestServer.start((request) async {
+          path = request.uri.path;
+          authHeader = request.headers.value('authorization');
+          captured = await _captureBody(request);
+
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'data': [
+                {
+                  'index': 0,
+                  'embedding': [0.1, 0.2],
+                },
+                {
+                  'index': 1,
+                  'embedding': [0.3, 0.4],
+                },
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = MistralProvider(
+          apiKey: 'secret-key',
+          baseUrl: server.baseUrl,
+        ).embedding('mistral-embed');
+
+        final result = await model.doEmbed(
+          const EmbeddingModelV2CallOptions<String>(values: ['a', 'b']),
+        );
+
+        expect(path, '/v1/embeddings');
+        expect(authHeader, 'Bearer secret-key');
+        expect(captured['model'], 'mistral-embed');
+        expect(captured['input'], ['a', 'b']);
+        expect(result.embeddings, hasLength(2));
+        expect(result.embeddings[0].value, 'a');
+        expect(result.embeddings[0].embedding, [0.1, 0.2]);
+        expect(result.embeddings[1].value, 'b');
+        expect(result.embeddings[1].embedding, [0.3, 0.4]);
+      },
+    );
+
+    test('tolerates a response with no data list', () async {
+      final server = await _TestServer.start((request) async {
+        await _captureBody(request);
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({'object': 'list'}));
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = MistralProvider(
+        apiKey: 'key',
+        baseUrl: server.baseUrl,
+      ).embedding('mistral-embed');
+
+      final result = await model.doEmbed(
+        const EmbeddingModelV2CallOptions<String>(values: ['only']),
+      );
+      expect(result.embeddings, isEmpty);
+    });
+  });
 }
 
 LanguageModelV3Prompt _userPrompt(String text) => LanguageModelV3Prompt(

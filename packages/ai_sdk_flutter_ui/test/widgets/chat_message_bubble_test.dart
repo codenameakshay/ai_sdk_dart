@@ -49,5 +49,26 @@ void main() {
       await tester.pumpWidget(_wrap(ChatMessageBubble.text(text: '')));
       expect(find.text('…'), findsOneWidget);
     });
+
+    testWidgets('renders a tool message with the tool styling branch', (
+      tester,
+    ) async {
+      // Non-const so the constructor body is exercised at runtime, and a tool
+      // role so the dedicated tool color branch is taken.
+      await tester.pumpWidget(
+        _wrap(
+          ChatMessageBubble(
+            message: ModelMessage(
+              role: ModelMessageRole.tool,
+              content: 'tool output',
+            ),
+          ),
+        ),
+      );
+      expect(find.text('tool output'), findsOneWidget);
+      // Left-aligned like assistant/system (not right-aligned like user).
+      final align = tester.widget<Align>(find.byType(Align));
+      expect(align.alignment, Alignment.centerLeft);
+    });
   });
 }

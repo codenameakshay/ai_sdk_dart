@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -189,5 +191,78 @@ void main() {
       expect(controller.status, ChatStatus.ready);
       controller.dispose();
     });
+
+    test('stop mid-stream flushes the partial buffer as an assistant message',
+        () async {
+      final controller = ChatController();
+      final model = HoldingTextModel('partial answer');
+
+      // Don't await: the holding model keeps the stream open so we can stop
+      // while content is buffered but the turn hasn't finished.
+      unawaited(
+        controller.sendMessage(
+          agent: ToolLoopAgent(model: model),
+          text: 'q',
+        ),
+      );
+      await pumpUntil(() => controller.streamingContent.isNotEmpty);
+      expect(controller.streamingContent, 'partial answer');
+
+      await controller.stop();
+
+      // The buffered text is committed as a trailing assistant message and the
+      // buffer is cleared.
+      expect(controller.status, ChatStatus.ready);
+      expect(controller.streamingContent, isEmpty);
+      expect(controller.messages.last.role, ModelMessageRole.assistant);
+      expect(controller.messages.last.content, 'partial answer');
+
+      model.finish();
+      controller.dispose();
+    });
+
+    test(
+      'a pending tool approval is consumed by the next generation',
+      () async {
+        final controller = ChatController();
+        controller.addToolApprovalResponse(approvalId: 'a1', approved: true);
+
+        // sendMessage runs _runGeneration, which consumes pending approvals.
+        // We only need the generation to start and finish cleanly.
+        await controller.sendMessage(agent: textAgent('ok'), text: 'go');
+        await pumpUntil(() => controller.status == ChatStatus.ready);
+        expect(controller.messages.last.content, 'ok');
+
+        // A second generation with no pending approvals still works (the buffer
+        // was cleared by the first consume).
+        await controller.reload();
+        await pumpUntil(() => controller.status == ChatStatus.ready);
+        expect(controller.status, ChatStatus.ready);
+        controller.dispose();
+      },
+    );
+
+    test(
+      'a synchronous failure from agent.stream() is caught and reported',
+      () async {
+        Object? captured;
+        final controller = ChatController(onError: (e) => captured = e);
+        final failure = StateError('sync boom');
+
+        // throwOnStream makes doStream throw synchronously, so the
+        // `await agent.stream(...)` itself rejects and is handled by the
+        // try/catch in _runGeneration (not the stream error listener).
+        await controller.sendMessage(
+          agent: syncThrowingAgent(failure),
+          text: 'x',
+        );
+        await pumpUntil(() => controller.status == ChatStatus.error);
+
+        expect(controller.status, ChatStatus.error);
+        expect(controller.error, same(failure));
+        expect(captured, same(failure));
+        controller.dispose();
+      },
+    );
   });
 }

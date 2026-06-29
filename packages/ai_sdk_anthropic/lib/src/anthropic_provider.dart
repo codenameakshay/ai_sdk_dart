@@ -226,9 +226,13 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
     );
 
     final body = response.data;
+    // Defensive: Dio always supplies a ResponseBody for a successful streamed
+    // response, so this guard is unreachable under normal operation.
+    // coverage:ignore-start
     if (body == null) {
       throw StateError('Anthropic stream response body is null.');
     }
+    // coverage:ignore-end
 
     final controller = StreamController<LanguageModelV3StreamPart>();
     final toolState = <int, _ToolState>{};

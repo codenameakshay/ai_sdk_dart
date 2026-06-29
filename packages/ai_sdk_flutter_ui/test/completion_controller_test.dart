@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -97,5 +100,43 @@ void main() {
       expect(controller.isStreaming, isFalse);
       controller.dispose();
     });
+
+    test('stop cancels an in-flight stream and resets flags', () async {
+      final controller = CompletionController(
+        agent: ToolLoopAgent(model: HoldingTextModel('partial')),
+      );
+
+      // Don't await: the holding model keeps the stream open so stop() runs
+      // while a subscription is genuinely active.
+      unawaited(controller.complete('q'));
+      await pumpUntil(() => controller.completion.isNotEmpty);
+      expect(controller.isStreaming, isTrue);
+
+      await controller.stop();
+      expect(controller.isLoading, isFalse);
+      expect(controller.isStreaming, isFalse);
+      controller.dispose();
+    });
+
+    test(
+      'a synchronous failure from agent.stream() is caught and reported',
+      () async {
+        Object? captured;
+        final failure = StateError('sync boom');
+        final controller = CompletionController(
+          agent: syncThrowingAgent(failure),
+          onError: (e) => captured = e,
+        );
+
+        await controller.complete('go');
+        await pumpUntil(() => controller.error != null);
+
+        expect(controller.error, same(failure));
+        expect(captured, same(failure));
+        expect(controller.isLoading, isFalse);
+        expect(controller.isStreaming, isFalse);
+        controller.dispose();
+      },
+    );
   });
 }

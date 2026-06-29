@@ -99,5 +99,37 @@ void main() {
       );
       expect(find.text('custom:raw'), findsOneWidget);
     });
+
+    testWidgets('swapping the controller re-subscribes to the new one', (
+      tester,
+    ) async {
+      final first = ChatController(
+        initialMessages: const [
+          ModelMessage(role: ModelMessageRole.user, content: 'from first'),
+        ],
+      );
+      addTearDown(first.dispose);
+      final second = ChatController(
+        initialMessages: const [
+          ModelMessage(role: ModelMessageRole.user, content: 'from second'),
+        ],
+      );
+      addTearDown(second.dispose);
+
+      await tester.pumpWidget(_wrap(ChatMessageList(controller: first)));
+      expect(find.text('from first'), findsOneWidget);
+
+      // Rebuild with a different controller -> didUpdateWidget swaps listeners.
+      await tester.pumpWidget(_wrap(ChatMessageList(controller: second)));
+      expect(find.text('from second'), findsOneWidget);
+      expect(find.text('from first'), findsNothing);
+
+      // The new controller is the live one: its changes drive rebuilds.
+      second.append(
+        const ModelMessage(role: ModelMessageRole.user, content: 'later'),
+      );
+      await tester.pump();
+      expect(find.text('later'), findsOneWidget);
+    });
   });
 }

@@ -1,11 +1,16 @@
 # ai_sdk_flutter_ui
 
-Flutter UI controllers for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart) — the
-Dart/Flutter equivalent of the Vercel AI SDK React hooks (`useChat`, `useCompletion`,
-`useObject`).
+A one-stop Flutter UI hub for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart): reactive
+**controllers** (the Dart/Flutter equivalent of the Vercel AI SDK React hooks `useChat`,
+`useCompletion`, `useObject`) plus a small library of prebuilt, themeable **Material widgets** to
+render their state.
 
 Each controller is a `ChangeNotifier`, so wrap it in a `ListenableBuilder` (or
-`AnimatedBuilder`) and it rebuilds as tokens stream in.
+`AnimatedBuilder`) and it rebuilds as tokens stream in. The widgets do this wiring for you.
+
+No heavy platform dependencies: attachments and link-opening are exposed as callbacks rather than
+pulling in `image_picker`/`file_selector`/`url_launcher`. Everything themes via
+`Theme.of(context)`.
 
 ## Installation
 
@@ -109,8 +114,8 @@ class _ChatPageState extends State<ChatPage> {
 `reload({agent})` / `regenerate({agent})`, `stop()`, `clear()`, `clearError()`,
 `addToolApprovalResponse({approvalId, approved, reason})` (for tools with `needsApproval`).
 
-> ChatController exposes streaming state via `status`/`isLoading`; `CompletionController` and
-> `ObjectStreamController` expose a dedicated `isStreaming` bool.
+> All three controllers expose an `isStreaming` bool. `ChatController` additionally exposes the
+> richer `status`/`isLoading` (`isStreaming` there is just `status == ChatStatus.streaming`).
 
 ### CompletionController — single-turn completion
 
@@ -130,13 +135,13 @@ completion.dispose();
 
 ### ObjectStreamController — live structured output
 
-`ObjectStreamController` adapts any `Stream<T>` of partial values into reactive state. Build the
-stream yourself with `streamText(... output: Output.object(...))` and `bind` its
-`partialOutputStream`:
+Two ways to drive it.
+
+**Ergonomic (`submit`)** — pass a `model` and `schema` up front, then call `submit(prompt)`. It
+runs `streamText(... output: Output.object(schema:))` and binds the partial-output stream for you,
+giving true `useObject`-style ergonomics:
 
 ```dart
-final controller = ObjectStreamController<Map<String, dynamic>>();
-
 final schema = Schema<Map<String, dynamic>>(
   jsonSchema: const {
     'type': 'object',
@@ -145,6 +150,24 @@ final schema = Schema<Map<String, dynamic>>(
   fromJson: (json) => json,
 );
 
+final controller = ObjectStreamController<Map<String, dynamic>>(
+  model: openai('gpt-4.1-mini'),
+  schema: schema,
+);
+
+await controller.submit('Give me a book title as JSON.');
+print(controller.value); // partial object, updated as it streams
+
+controller.dispose();
+```
+
+`submit` throws a `StateError` if `model`/`schema` were not provided.
+
+**Flexible (`bind`)** — adapt any `Stream<T>` of partial values yourself. Build the stream with
+`streamText(... output: Output.object(...))` (or anything else) and `bind` its
+`partialOutputStream`:
+
+```dart
 final streamResult = await streamText<Map<String, dynamic>>(
   model: openai('gpt-4.1-mini'),
   prompt: 'Give me a book title as JSON.',
@@ -154,13 +177,73 @@ final streamResult = await streamText<Map<String, dynamic>>(
 await controller.bind(
   streamResult.partialOutputStream.map((v) => v as Map<String, dynamic>),
 );
-print(controller.value); // partial object, updated as it streams
-
-controller.dispose();
 ```
 
 **State:** `value` (`T?`), `isLoading`, `isStreaming`, `error`.
-**Methods:** `bind(Stream<T>)`, `stop()`, `clear()` / `reset()`.
+**Methods:** `submit(prompt)` (requires `model`+`schema`), `bind(Stream<T>)`, `stop()`,
+`clear()` / `reset()`.
+
+## Prebuilt widgets
+
+The package ships a small library of composable Material widgets that read only the controllers'
+public state. Use them piecemeal, or drop in `AiChatScaffold` for a full chat screen.
+
+| Widget | Purpose |
+| --- | --- |
+| `AiChatScaffold` | Drop-in chat body: `ChatMessageList` + `ChatComposer` wired to a `ChatController` + `ToolLoopAgent`. |
+| `ChatMessageList` | Renders a controller's history + an optimistic streaming bubble; auto-scrolls; optional `messageBuilder`. |
+| `ChatMessageBubble` | A single message styled by role (user/assistant/tool), with selectable text. |
+| `ChatComposer` | Text field + send button; disabled while loading; optional `onStop` and `onAttach` callbacks. |
+| `StreamingTextView` | Text that grows as it streams, with a subtle blinking cursor. |
+| `ToolCallCard` | A tool call (name + pretty-printed JSON args) and its result/error. |
+| `ReasoningView` | A collapsible panel for reasoning / "thinking" text. |
+| `SourceCitations` | A wrap of citation chips for source parts (title + link), with an `onTap` callback. |
+
+### Drop-in chat screen with `AiChatScaffold`
+
+```dart
+import 'package:ai_sdk_dart/ai_sdk_dart.dart';
+import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
+import 'package:ai_sdk_openai/ai_sdk_openai.dart';
+import 'package:flutter/material.dart';
+
+class ChatScreen extends StatefulWidget {
+  const ChatScreen({super.key});
+  @override
+  State<ChatScreen> createState() => _ChatScreenState();
+}
+
+class _ChatScreenState extends State<ChatScreen> {
+  final _agent = ToolLoopAgent(
+    model: openai('gpt-4.1-mini'),
+    instructions: 'You are a helpful assistant.',
+  );
+  final _chat = ChatController();
+
+  @override
+  void dispose() {
+    _chat.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Chat')),
+      body: AiChatScaffold(
+        controller: _chat,
+        agent: _agent,
+        emptyState: const Center(child: Text('Ask me anything')),
+        // onAttach: () => pickAndAttachFile(), // wire your own picker
+      ),
+    );
+  }
+}
+```
+
+Need more control? Compose the pieces yourself — e.g. `ChatMessageList` over your own scroll view
+plus a custom `ChatComposer`, or a custom `messageBuilder` that renders `ToolCallCard`,
+`ReasoningView`, and `SourceCitations` inline for richer turns.
 
 ## License
 

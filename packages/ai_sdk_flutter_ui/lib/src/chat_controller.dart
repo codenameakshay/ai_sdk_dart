@@ -62,6 +62,13 @@ class ChatController extends ChangeNotifier {
   bool get isLoading =>
       _status == ChatStatus.submitted || _status == ChatStatus.streaming;
 
+  /// True while the assistant response is actively streaming.
+  ///
+  /// Provided for consistency with [CompletionController] and
+  /// [ObjectStreamController], which both expose an `isStreaming` flag.
+  /// Equivalent to `status == ChatStatus.streaming`.
+  bool get isStreaming => _status == ChatStatus.streaming;
+
   Object? _error;
   Object? get error => _error;
 
@@ -71,6 +78,7 @@ class ChatController extends ChangeNotifier {
 
   final StringBuffer _streamBuffer = StringBuffer();
   StreamSubscription<String>? _activeSubscription;
+  StreamSubscription<StreamTextEvent>? _errorSubscription;
   ToolLoopAgent? _lastAgent;
 
   // Pending tool-approval responses indexed by approvalId.
@@ -166,12 +174,28 @@ class ChatController extends ChangeNotifier {
       _status = ChatStatus.streaming;
       notifyListeners();
 
+      // The result's `text`/`output` futures reject on a streaming error; we
+      // surface errors via [fullStream] instead, so swallow those completions
+      // to keep them from becoming unhandled async errors.
+      streamResult.text.then((_) {}, onError: (_) {});
+      streamResult.output.then((_) {}, onError: (_) {});
+
+      // Streaming errors surface on the full event stream (not the text
+      // stream), so watch both: text for content, fullStream for errors.
+      _errorSubscription = streamResult.fullStream.listen((event) {
+        if (event is StreamTextErrorEvent) _handleError(event.error);
+      }, onError: _handleError);
+
       _activeSubscription = streamResult.textStream.listen(
         (delta) {
           _streamBuffer.write(delta);
           notifyListeners();
         },
         onDone: () {
+          unawaited(_errorSubscription?.cancel());
+          _errorSubscription = null;
+          // An error event may already have moved us out of streaming.
+          if (_status != ChatStatus.streaming) return;
           final assistantMessage = ModelMessage(
             role: ModelMessageRole.assistant,
             content: _streamBuffer.toString(),
@@ -182,28 +206,33 @@ class ChatController extends ChangeNotifier {
           notifyListeners();
           onFinish?.call(assistantMessage);
         },
-        onError: (Object err) {
-          _error = err;
-          _streamBuffer.clear();
-          _status = ChatStatus.error;
-          notifyListeners();
-          onError?.call(err);
-        },
+        onError: _handleError,
         cancelOnError: true,
       );
     } catch (err) {
-      _error = err;
-      _streamBuffer.clear();
-      _status = ChatStatus.error;
-      notifyListeners();
-      onError?.call(err);
+      _handleError(err);
     }
+  }
+
+  void _handleError(Object err) {
+    if (_status == ChatStatus.error) return; // first error wins
+    unawaited(_activeSubscription?.cancel());
+    _activeSubscription = null;
+    unawaited(_errorSubscription?.cancel());
+    _errorSubscription = null;
+    _error = err;
+    _streamBuffer.clear();
+    _status = ChatStatus.error;
+    notifyListeners();
+    onError?.call(err);
   }
 
   /// Cancel the active stream.
   Future<void> stop() async {
     await _activeSubscription?.cancel();
     _activeSubscription = null;
+    await _errorSubscription?.cancel();
+    _errorSubscription = null;
     if (_streamBuffer.isNotEmpty) {
       _messages.add(
         ModelMessage(
@@ -219,6 +248,10 @@ class ChatController extends ChangeNotifier {
 
   /// Remove all messages and reset to initial state.
   void clear() {
+    unawaited(_activeSubscription?.cancel());
+    _activeSubscription = null;
+    unawaited(_errorSubscription?.cancel());
+    _errorSubscription = null;
     _messages
       ..clear()
       ..addAll(initialMessages);
@@ -232,6 +265,7 @@ class ChatController extends ChangeNotifier {
   @override
   void dispose() {
     _activeSubscription?.cancel();
+    _errorSubscription?.cancel();
     super.dispose();
   }
 }

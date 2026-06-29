@@ -1,6 +1,6 @@
 name: ai_sdk_flutter_ui
-description: Flutter UI hooks for the AI SDK Dart port.
-version: 1.1.0
+description: Flutter UI controllers and prebuilt widgets for the AI SDK Dart port.
+version: 1.2.0
 homepage: https://github.com/codenameakshay/ai_sdk_dart
 repository: https://github.com/codenameakshay/ai_sdk_dart
 resolution: workspace

@@ -90,7 +90,7 @@ Legend:
 - [x] `CompletionController` baseline behavior
 - [x] `ObjectStreamController` baseline behavior
 - [x] full hook parity (`append`, `reload`, `clear`/`reset`, optimistic streaming content, `onFinish`/`onError` callbacks, `isStreaming` status)
-- [x] prebuilt widget library — 18 themeable Material widgets (`AiChatScaffold`, message list/bubbles, composer, streaming text, tool-call/approval cards, reasoning, citations, usage, object stream, …)
+- [x] prebuilt widget library — 19 themeable Material widgets (`AiChatScaffold`, message list/bubbles, composer, streaming text, tool-call/approval cards, reasoning, citations, usage, object stream, …)
 
 ## MCP
 
@@ -104,8 +104,8 @@ Legend:
 
 ## Multimodal Model APIs
 
-- [~] `experimental_generateSpeech` (interface + OpenAI provider)
-- [~] `experimental_transcribe` (interface + OpenAI provider)
+- [x] `experimental_generateSpeech` (interface + OpenAI provider)
+- [x] `experimental_transcribe` (interface + OpenAI provider)
 - [ ] `experimental_generateVideo` — intentionally not ported (no backing provider; removed in 1.2.0, see `docs/adr/`)
 - [x] `rerank` (interface + core + Cohere provider)
 
@@ -117,6 +117,8 @@ Legend:
 - [x] `extractJsonMiddleware` — strips markdown code fences from JSON output
 - [x] `defaultSettingsMiddleware` — applies default call option overrides
 - [x] `addToolInputExamplesMiddleware` — enriches tool descriptions with examples
+- [x] `wrapEmbeddingModel()` — embedding model middleware wrapper
+- [x] `wrapImageModel()` — image model middleware wrapper
 
 ## Utility Functions
 

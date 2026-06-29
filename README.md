@@ -116,19 +116,20 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
 - `simulateStreamingMiddleware` — converts non-streaming models to streaming
 - `defaultSettingsMiddleware` — applies default temperature/top-p/etc.
 - `addToolInputExamplesMiddleware` — enriches tool descriptions with examples
+- `wrapEmbeddingModel` / `wrapImageModel` — the same composable middleware pattern for embedding and image models
 
 ### 🌐 Provider Registry
 - `createProviderRegistry` — map provider aliases to model factories
 - `customProvider()` — lightweight on-the-fly provider construction without a full registry
 - Resolve models by `'provider:modelId'` string at runtime
-- Supports 6 model categories: language, embedding, image, speech, transcription, rerank
+- Supports 5 model categories: language, embedding, image, speech, transcription
 - Mix providers in a single registry for multi-provider apps
 
 ### 📱 Flutter UI Controllers & Widgets
 - `ChatController` — multi-turn streaming chat with message history
 - `CompletionController` — single-turn text completion with status
 - `ObjectStreamController` — streaming typed JSON object updates
-- **18 prebuilt, themeable Material widgets** — `AiChatScaffold`, message list/bubbles, composer,
+- **19 prebuilt, themeable Material widgets** — `AiChatScaffold`, message list/bubbles, composer,
   streaming text, typing indicator, tool-call & approval cards, reasoning, citations, usage, and more
 
 ### 🔌 MCP Client (Model Context Protocol)
@@ -161,7 +162,7 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
 | [`ai_sdk_groq`](https://pub.dev/packages/ai_sdk_groq) | `dart pub add ai_sdk_groq` | `groq('llama3-8b-8192')`, ultra-low latency inference |
 | [`ai_sdk_mistral`](https://pub.dev/packages/ai_sdk_mistral) | `dart pub add ai_sdk_mistral` | `mistral('mistral-large-latest')`, embeddings |
 | [`ai_sdk_ollama`](https://pub.dev/packages/ai_sdk_ollama) | `dart pub add ai_sdk_ollama` | `ollama('llama3')`, local inference, embeddings |
-| [`ai_sdk_flutter_ui`](https://pub.dev/packages/ai_sdk_flutter_ui) | `dart pub add ai_sdk_flutter_ui` | `ChatController`, `CompletionController`, `ObjectStreamController` + 18 prebuilt chat widgets |
+| [`ai_sdk_flutter_ui`](https://pub.dev/packages/ai_sdk_flutter_ui) | `dart pub add ai_sdk_flutter_ui` | `ChatController`, `CompletionController`, `ObjectStreamController` + 19 prebuilt chat widgets |
 | [`ai_sdk_mcp`](https://pub.dev/packages/ai_sdk_mcp) | `dart pub add ai_sdk_mcp` | `MCPClient`, `SseClientTransport`, `HttpClientTransport`, `StdioMCPTransport` (web-safe) |
 | [`ai_sdk_provider`](https://pub.dev/packages/ai_sdk_provider) | *(transitive)* | Provider interfaces for building custom providers |
 | `ai_sdk_openai_compatible` | *(transitive)* | Shared OpenAI Chat Completions base — powers the OpenAI/Azure/Groq/Mistral language models |
@@ -258,13 +259,18 @@ dart pub add ai_sdk_dart ai_sdk_openai ai_sdk_flutter_ui
 ```
 
 ```dart
+import 'package:ai_sdk_dart/ai_sdk_dart.dart';
+import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 
-final chat = ChatController(model: openai('gpt-4.1-mini'));
+final agent = ToolLoopAgent(
+  model: openai('gpt-4.1-mini'),
+  instructions: 'You are a helpful assistant.',
+);
+final chat = ChatController();
 
-// In your widget:
-await chat.append('Tell me a joke');
-print(chat.messages.last.content);
+// In your widget — a complete chat surface:
+AiChatScaffold(controller: chat, agent: agent);
 ```
 
 ---
@@ -291,19 +297,21 @@ print(chat.messages.last.content);
 
 ## 🛠️ Flutter UI
 
-The `ai_sdk_flutter_ui` package provides three reactive controllers plus a library of **18 prebuilt,
+The `ai_sdk_flutter_ui` package provides three reactive controllers plus a library of **19 prebuilt,
 themeable Material widgets** — so you can wire up a full chat UI in a few lines, or drop down to the
 controllers and render everything yourself.
 
 ### Drop-in chat UI
 
 ```dart
+import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 
-final chat = ChatController(model: openai('gpt-4.1-mini'));
+final agent = ToolLoopAgent(model: openai('gpt-4.1-mini'));
+final chat = ChatController();
 
-// A complete message list + composer, wired to the controller:
-AiChatScaffold(controller: chat);
+// A complete message list + composer, wired to the controller + agent:
+AiChatScaffold(controller: chat, agent: agent);
 ```
 
 Other widgets — `ChatMessageList`, `ChatMessageBubble`, `ChatComposer`, `StreamingTextView`,
@@ -314,7 +322,8 @@ read only the controllers' public state, so they work with any state-management 
 ### ChatController — Multi-turn streaming chat
 
 ```dart
-final chat = ChatController(model: openai('gpt-4.1-mini'));
+final agent = ToolLoopAgent(model: openai('gpt-4.1-mini'));
+final chat = ChatController();
 
 // In your widget:
 ListenableBuilder(
@@ -331,15 +340,17 @@ ListenableBuilder(
 );
 
 // Send a message:
-await chat.append('What is the capital of France?');
+await chat.sendMessage(agent: agent, text: 'What is the capital of France?');
 ```
 
 ### CompletionController — Single-turn completion
 
 ```dart
-final completion = CompletionController(model: openai('gpt-4.1-mini'));
+final completion = CompletionController(
+  agent: ToolLoopAgent(model: openai('gpt-4.1-mini')),
+);
 await completion.complete('Write a haiku about Dart.');
-print(completion.text);
+print(completion.completion);
 ```
 
 ### ObjectStreamController — Streaming typed JSON
@@ -353,7 +364,7 @@ final controller = ObjectStreamController<Map<String, dynamic>>(
   ),
 );
 await controller.submit('Describe Japan as a JSON object.');
-print(controller.object); // Partial updates arrive in real-time
+print(controller.value); // Partial updates arrive in real-time
 ```
 
 ---
@@ -406,7 +417,7 @@ Flutter web.
 ### ✅ Implemented
 
 - ✅ `generateText` — full result envelope (text, steps, usage, reasoning, sources, files)
-- ✅ `streamText` — complete event taxonomy (19 typed event types), `onAbort` callback
+- ✅ `streamText` — complete event taxonomy (20 typed event types), `onAbort` callback
 - ✅ `generateObject` / structured output (object, array, choice, json) with native JSON schema
 - ✅ `embed` / `embedMany` + `cosineSimilarity`, `wrapEmbeddingModel`
 - ✅ `generateImage` (OpenAI DALL-E 3)
@@ -415,10 +426,10 @@ Flutter web.
 - ✅ `rerank`
 - ✅ `timeout` parameter on all core functions
 - ✅ `customProvider()` for lightweight on-the-fly provider construction
-- ✅ Middleware system with 5 built-in middlewares
-- ✅ Provider registry (`createProviderRegistry`) — 6 model categories
+- ✅ Middleware system — 5 built-in language-model middlewares, plus embedding & image model middleware
+- ✅ Provider registry (`createProviderRegistry`) — 5 model categories
 - ✅ Multi-step agentic loops with tool approval
-- ✅ Flutter UI controllers (Chat, Completion, ObjectStream) + 18 prebuilt Material widgets
+- ✅ Flutter UI controllers (Chat, Completion, ObjectStream) + 19 prebuilt Material widgets
 - ✅ MCP client (real SSE + HTTP + stdio transports, prompts, resources, web-safe)
 - ✅ OpenAI (with reasoning options), Anthropic (with thinking options), Google providers
 - ✅ Cohere, Mistral, Groq, Ollama, Azure OpenAI providers — all with tools + multimodal
@@ -476,8 +487,9 @@ export GOOGLE_API_KEY=AIza...
 | Dart CLI | `make run-basic` | `generateText`, streaming, structured output, tools, embeddings, middleware |
 | Flutter chat | `make run` | ChatController, CompletionController, ObjectStreamController |
 | Flutter chat (web) | `make run-web` | Same as above on Chrome |
-| Advanced app | `make run-advanced` | All providers, image gen, TTS, STT, multimodal |
+| Advanced app | `make run-advanced` | All providers, tools, image gen, TTS, STT, multimodal, embeddings, completion, object stream + widget gallery |
 | Advanced app (web) | `make run-advanced-web` | Same as above on Chrome |
+| MCP demo | `make run-mcp` | MCP tool discovery + direct tool calls (works without an API key) |
 
 ---
 

@@ -159,8 +159,9 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
 | [`ai_sdk_flutter_ui`](https://pub.dev/packages/ai_sdk_flutter_ui) | `dart pub add ai_sdk_flutter_ui` | `ChatController`, `CompletionController`, `ObjectStreamController` |
 | [`ai_sdk_mcp`](https://pub.dev/packages/ai_sdk_mcp) | `dart pub add ai_sdk_mcp` | `MCPClient`, `SseClientTransport`, `StdioMCPTransport` |
 | [`ai_sdk_provider`](https://pub.dev/packages/ai_sdk_provider) | *(transitive)* | Provider interfaces for building custom providers |
+| `ai_sdk_openai_compatible` | *(transitive)* | Shared OpenAI Chat Completions base — powers the OpenAI/Azure/Groq/Mistral language models |
 
-> `ai_sdk_provider` is a transitive dependency — you **do not** need to add it directly.
+> `ai_sdk_provider` and `ai_sdk_openai_compatible` are transitive dependencies — you **do not** need to add them directly.
 
 ---
 
@@ -270,7 +271,7 @@ print(chat.messages.last.content);
 | Text generation | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Streaming | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Structured output | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Native JSON schema output | ✅ | — | — | ✅ | — | — | — | — |
+| Native JSON schema output | ✅ | — | — | ✅ | — | ✅ | ✅ | — |
 | Tool use | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Embeddings | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | ✅ |
 | Reranking | — | — | — | — | ✅ | — | — | — |
@@ -279,7 +280,7 @@ print(chat.messages.last.content);
 | Transcription | ✅ | — | — | — | — | — | — | — |
 | Extended thinking | — | ✅ | — | — | — | — | — | — |
 | Reasoning options | ✅ | — | — | — | — | — | — | — |
-| Multimodal (image input) | ✅ | ✅ | ✅ | ✅ | — | — | — | — |
+| Multimodal (image input) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ---
 

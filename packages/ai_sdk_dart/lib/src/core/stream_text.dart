@@ -477,6 +477,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   List<ModelMessage>? messages,
   Output<TOutput>? output,
   ProviderOptions? providerOptions,
+  LanguageModelV3ReasoningEffort? reasoning,
   ToolSet tools = const {},
   List<LanguageModelV3ProviderDefinedTool> providerDefinedTools = const [],
   LanguageModelV3ToolChoice? toolChoice,
@@ -708,6 +709,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
             seed: seed,
             headers: headers,
             providerOptions: stepProviderOptions,
+            reasoning: reasoning,
           );
           final response = await _withRetry(
             maxRetries: maxRetries,

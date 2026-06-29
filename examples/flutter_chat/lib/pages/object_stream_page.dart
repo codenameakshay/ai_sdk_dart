@@ -50,7 +50,12 @@ class _ObjectStreamPageState extends State<ObjectStreamPage> {
   @override
   void initState() {
     super.initState();
+    // useObject-style: hand the controller a model + schema up front, then just
+    // call `submit(prompt)` — it runs streamText(output: Output.object(...))
+    // and binds the partial-output stream for you.
     _objectController = ObjectStreamController<Map<String, dynamic>>(
+      model: OpenAIProvider(apiKey: openAiApiKey)('gpt-4.1-mini'),
+      schema: _schema,
       onError: (err) => _showSnackBar('Error: $err'),
     );
   }
@@ -66,15 +71,7 @@ class _ObjectStreamPageState extends State<ObjectStreamPage> {
     final country = _countryController.text.trim();
     if (country.isEmpty || _objectController.isStreaming) return;
 
-    final streamResult = await streamText<Map<String, dynamic>>(
-      model: OpenAIProvider(apiKey: openAiApiKey)('gpt-4.1-mini'),
-      prompt: 'Generate a country profile for $country.',
-      output: Output.object(schema: _schema),
-    );
-
-    await _objectController.bind(
-      streamResult.partialOutputStream.map((v) => v as Map<String, dynamic>),
-    );
+    await _objectController.submit('Generate a country profile for $country.');
   }
 
   void _showSnackBar(String msg) {

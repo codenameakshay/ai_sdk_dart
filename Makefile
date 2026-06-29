@@ -79,6 +79,12 @@ run-basic:
 	fi
 	$(DART) run -C $(DART_APP) lib/main.dart
 
+## Run the MCP (Model Context Protocol) CLI demo. Works without a key (the
+## tool-discovery + direct-call steps); set OPENAI_API_KEY to also run the
+## generateText-with-MCP-tools step.
+run-mcp:
+	$(DART) run -C $(DART_APP) lib/mcp_demo.dart
+
 # ── Quality ───────────────────────────────────────────────────────────────────
 
 ## Run tests across all packages
@@ -172,6 +178,7 @@ help:
 	@echo "  make run-advanced      Run advanced app on default device"
 	@echo "  make run-advanced-web  Run advanced app on Chrome"
 	@echo "  make run-basic         Run Dart CLI example"
+	@echo "  make run-mcp           Run the MCP CLI demo (works without a key)"
 	@echo "  make test              Run all package tests"
 	@echo "  make analyze           Run dart analyze across all packages"
 	@echo "  make format            Format all Dart source files"

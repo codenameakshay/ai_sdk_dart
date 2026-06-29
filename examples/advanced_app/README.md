@@ -1,20 +1,41 @@
 # AI SDK Dart — Advanced Example
 
-A comprehensive Flutter app demonstrating all major AI SDK capabilities: multiple providers, tools, image generation, multimodal input, embeddings, text-to-speech, and speech-to-text.
+A comprehensive Flutter app demonstrating all major AI SDK capabilities: multiple providers, tool calling, image generation, multimodal input, embeddings, text-to-speech, and speech-to-text. Chat-style screens are built from the **prebuilt widgets** in `ai_sdk_flutter_ui` rather than hand-rolled UI.
 
 ## Features
 
-| Feature | API | Provider(s) |
-|---------|-----|-------------|
-| Provider Chat | `ChatController` + `createProviderRegistry` | OpenAI, Anthropic, Google |
-| Tools Chat | `ToolLoopAgent` with tools | OpenAI |
-| Image Generation | `generateImage` | OpenAI (DALL-E 3) |
-| Multimodal | `LanguageModelV3ImagePart` in messages | OpenAI |
-| Embeddings | `embed`, `cosineSimilarity` | OpenAI, Google |
-| Text-to-Speech | `generateSpeech` | OpenAI |
-| Speech-to-Text | `transcribe` | OpenAI |
-| Completion | `CompletionController` | OpenAI |
-| Object Stream | `ObjectStreamController` + `streamObject` | OpenAI |
+| Feature | API | Prebuilt widgets | Provider(s) |
+|---------|-----|------------------|-------------|
+| Provider Chat | `ChatController` + `createProviderRegistry` | `AiChatScaffold` | OpenAI, Anthropic, Google |
+| Tools Chat | `streamText` + `tools` + `extractReasoningMiddleware` | `ChatComposer`, `ChatMessageBubble`, `ToolCallCard`, `ReasoningView`, `SourceCitations` | OpenAI |
+| Image Generation | `generateImage` | — | OpenAI (DALL-E 3) |
+| Multimodal | `streamText` + `LanguageModelV3ImagePart` | `StreamingTextView` | OpenAI |
+| Embeddings | `embed`, `cosineSimilarity` | — | OpenAI, Google |
+| Text-to-Speech | `generateSpeech` | — | OpenAI |
+| Speech-to-Text | `transcribe` | — | OpenAI |
+| Completion | `CompletionController` | `StreamingTextView` | OpenAI |
+| Object Stream | `ObjectStreamController.submit(model, schema)` | — | OpenAI |
+
+### Tools Chat
+
+The Tools Chat screen drives `streamText` directly (instead of `ChatController`)
+so it can read tool-call, tool-result, reasoning, and source events off
+`fullStream` and render the full agentic turn:
+
+- **`ToolCallCard`** — each tool call with its pretty-printed input and result.
+- **`ReasoningView`** — the model's `<think>…</think>` reasoning, surfaced via
+  `extractReasoningMiddleware`.
+- **`ChatMessageBubble`** / **`ChatComposer`** — the conversation text and input.
+- **`SourceCitations`** — rendered when the model returns sources.
+
+## Tests
+
+A smoke widget test (`test/widget_test.dart`) boots the app and verifies the
+prebuilt chat surface and navigation render without a network call:
+
+```bash
+fvm flutter test examples/advanced_app
+```
 
 ## Setup
 

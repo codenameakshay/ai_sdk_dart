@@ -26,8 +26,8 @@ jobs:
       - name: Activate coverage tool
         run: dart pub global activate coverage
 
-      # Ratchet gate: prevents coverage regressions. Total is ~99.5% (all
-      # pure-Dart packages are at 100%; anthropic, openai_compatible, and
-      # flutter_ui sit at ~98%). Raise toward 100 as those are finished.
+      # Ratchet gate: prevents coverage regressions. Total is ~99.6% (9 of 12
+      # packages at 100%; anthropic, openai_compatible, and flutter_ui sit at
+      # ~97-99% on defensive/unreachable branches). Raise toward 100 as those close.
       - name: Test with coverage (gate)
         run: tool/coverage.sh 99

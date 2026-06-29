@@ -1,3 +1,12 @@
+## 1.2.0
+
+- Added **tool use** and **multimodal image input** to the Cohere v2 implementation. Cohere uses a
+  bespoke wire format rather than the OpenAI Chat Completions one, so these were implemented
+  natively rather than via `ai_sdk_openai_compatible`.
+- **100%** line coverage.
+
+---
+
 ## 1.1.0
 
 - Bumped `ai_sdk_provider` constraint to `^1.1.0`.

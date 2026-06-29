@@ -2,7 +2,7 @@
 
 ## Cursor Cloud specific instructions
 
-This is a Dart/Flutter monorepo (AI SDK Dart) with 7 library packages and 3 example apps. No Docker, databases, or backend services are required — it is a pure client-side SDK.
+This is a Dart/Flutter monorepo (AI SDK Dart) with 13 library packages and 3 example apps. No Docker, databases, or backend services are required — it is a pure client-side SDK.
 
 ### Toolchain
 
@@ -38,6 +38,6 @@ fvm flutter test examples/advanced_app/
 ### Gotchas
 
 - `make test` / `make analyze` use the correct package paths (`packages/ai_sdk_dart/`, `packages/ai_sdk_flutter_ui/`, etc.) and both `flutter_chat` and `advanced_app` now ship widget tests, so the full `make test` target passes.
-- All 562+ tests use fake/mock models and JSON fixtures — no API keys are needed to run them.
+- All 999 tests use fake/mock models and JSON fixtures — no API keys are needed to run them.
 - API keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`) are only needed for running the example apps with real AI providers.
 - To build and serve the Flutter web app: `cd examples/flutter_chat && fvm flutter build web` then serve `build/web/` with any HTTP server.

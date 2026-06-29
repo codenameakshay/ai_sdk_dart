@@ -1,4 +1,8 @@
-## Unreleased
+## 1.2.0
+
+> **Behavior change:** `SseClientTransport` now performs real SSE streaming instead of a plain
+> request/response POST. If you relied on the old single-endpoint POST behavior, switch to the new
+> `HttpClientTransport`.
 
 - **Flutter-web compatible.** The package no longer imports `dart:io` at the
   top level. `StdioMCPTransport` (which spawns a process) now lives behind a
@@ -20,6 +24,9 @@
   expose a single JSON-RPC endpoint without SSE.
 - `MCPTransport` gained a `notifications` stream for server-initiated messages
   (empty for transports without server push).
+- **Fixed** a secondary unhandled async error that could leak from the SSE transport when the
+  initial connection failed.
+- **100%** line coverage.
 
 ---
 

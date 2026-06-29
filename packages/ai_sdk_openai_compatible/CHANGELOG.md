@@ -1,6 +1,6 @@
-## 1.1.0
+## 1.2.0
 
-First release.
+First release (versioned 1.2.0 to align with the AI SDK Dart monorepo).
 
 - `OpenAICompatibleChatLanguageModel` — a full `LanguageModelV3` implementation
   of the OpenAI Chat Completions wire format: multimodal content parts (text +

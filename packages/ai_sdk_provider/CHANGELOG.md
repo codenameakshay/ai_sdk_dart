@@ -1,3 +1,13 @@
+## 1.2.0
+
+### Removed
+
+- **`VideoModelV1`** and its `VideoModelV1CallOptions` / `VideoModelV1GenerateResult` types. No
+  provider ever implemented video generation, so the interface was dead surface area. The matching
+  `generateVideo` entry point was removed from `ai_sdk_dart` in the same release.
+
+---
+
 ## 1.1.0
 
 - **`LanguageModelV3CallOptions.outputSchema`** — new optional `Map<String, dynamic>?` field. When non-null, providers that support native structured output (e.g. OpenAI `response_format: json_schema`) should use it to request schema-validated responses directly from the model API.

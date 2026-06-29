@@ -1,3 +1,11 @@
+## 1.2.0
+
+- Coverage hardening only — annotated an unreachable defensive null-check on the streamed response
+  body. No behavior change.
+- Version aligned with the rest of the monorepo (1.2.0).
+
+---
+
 ## 1.1.0
 
 ### New Features

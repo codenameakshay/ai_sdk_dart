@@ -1,3 +1,12 @@
+## 1.2.0
+
+- Rebuilt on the shared **`ai_sdk_openai_compatible`** base; Groq models now get real **tool use**
+  and **multimodal image input** in addition to streaming + usage reporting.
+- Now requires `ai_sdk_openai_compatible ^1.2.0`.
+- **100%** line coverage.
+
+---
+
 ## 1.1.0
 
 - Bumped `ai_sdk_provider` constraint to `^1.1.0`.

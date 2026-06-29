@@ -124,21 +124,26 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
 - Supports 5 model categories: language, embedding, image, speech, transcription
 - Mix providers in a single registry for multi-provider apps
 
-### 📱 Flutter UI Controllers
+### 📱 Flutter UI Controllers & Widgets
 - `ChatController` — multi-turn streaming chat with message history
 - `CompletionController` — single-turn text completion with status
 - `ObjectStreamController` — streaming typed JSON object updates
+- **18 prebuilt, themeable Material widgets** — `AiChatScaffold`, message list/bubbles, composer,
+  streaming text, typing indicator, tool-call & approval cards, reasoning, citations, usage, and more
 
 ### 🔌 MCP Client (Model Context Protocol)
 - `MCPClient` — connect to MCP servers, discover tools, invoke them
-- `SseClientTransport` — HTTP SSE transport
-- `StdioMCPTransport` — stdio process transport
+- `SseClientTransport` — real Server-Sent-Events streaming transport (MCP HTTP+SSE 2024-11-05)
+- `HttpClientTransport` — plain request/response POST transport for single-endpoint servers
+- `StdioMCPTransport` — stdio process transport (native platforms)
+- **Web-safe** — `dart:io` is isolated behind conditional imports, so the client runs on Flutter web
 - Discovered tools are directly compatible with `generateText`/`streamText`
 
 ### 🧪 Conformance Suite
-- 562+ tests covering every public API
+- **999 tests** (878 Dart + 121 Flutter) covering every public API
+- **99.6% line coverage** overall — 9 of 12 packages at 100%, enforced by a CI coverage gate
 - Spec-driven JSON fixtures as the source of truth
-- Provider wire-format conformance tests for OpenAI, Anthropic, and Google
+- Provider wire-format conformance tests for every provider
 - `MockEmbeddingModelV3` testing utility for embedding model conformance
 
 ---
@@ -156,8 +161,8 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
 | [`ai_sdk_groq`](https://pub.dev/packages/ai_sdk_groq) | `dart pub add ai_sdk_groq` | `groq('llama3-8b-8192')`, ultra-low latency inference |
 | [`ai_sdk_mistral`](https://pub.dev/packages/ai_sdk_mistral) | `dart pub add ai_sdk_mistral` | `mistral('mistral-large-latest')`, embeddings |
 | [`ai_sdk_ollama`](https://pub.dev/packages/ai_sdk_ollama) | `dart pub add ai_sdk_ollama` | `ollama('llama3')`, local inference, embeddings |
-| [`ai_sdk_flutter_ui`](https://pub.dev/packages/ai_sdk_flutter_ui) | `dart pub add ai_sdk_flutter_ui` | `ChatController`, `CompletionController`, `ObjectStreamController` |
-| [`ai_sdk_mcp`](https://pub.dev/packages/ai_sdk_mcp) | `dart pub add ai_sdk_mcp` | `MCPClient`, `SseClientTransport`, `StdioMCPTransport` |
+| [`ai_sdk_flutter_ui`](https://pub.dev/packages/ai_sdk_flutter_ui) | `dart pub add ai_sdk_flutter_ui` | `ChatController`, `CompletionController`, `ObjectStreamController` + 18 prebuilt chat widgets |
+| [`ai_sdk_mcp`](https://pub.dev/packages/ai_sdk_mcp) | `dart pub add ai_sdk_mcp` | `MCPClient`, `SseClientTransport`, `HttpClientTransport`, `StdioMCPTransport` (web-safe) |
 | [`ai_sdk_provider`](https://pub.dev/packages/ai_sdk_provider) | *(transitive)* | Provider interfaces for building custom providers |
 | `ai_sdk_openai_compatible` | *(transitive)* | Shared OpenAI Chat Completions base — powers the OpenAI/Azure/Groq/Mistral language models |
 
@@ -284,9 +289,27 @@ print(chat.messages.last.content);
 
 ---
 
-## 🛠️ Flutter UI Controllers
+## 🛠️ Flutter UI
 
-The `ai_sdk_flutter_ui` package provides three reactive controllers that integrate with any Flutter state management approach.
+The `ai_sdk_flutter_ui` package provides three reactive controllers plus a library of **18 prebuilt,
+themeable Material widgets** — so you can wire up a full chat UI in a few lines, or drop down to the
+controllers and render everything yourself.
+
+### Drop-in chat UI
+
+```dart
+import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
+
+final chat = ChatController(model: openai('gpt-4.1-mini'));
+
+// A complete message list + composer, wired to the controller:
+AiChatScaffold(controller: chat);
+```
+
+Other widgets — `ChatMessageList`, `ChatMessageBubble`, `ChatComposer`, `StreamingTextView`,
+`TypingIndicator`, `ToolCallCard`, `ToolApprovalCard`, `ReasoningView`, `SourceCitations`,
+`UsageView`, `PromptSuggestions`, `ObjectStreamView`, and more — can be composed à la carte. They
+read only the controllers' public state, so they work with any state-management approach.
 
 ### ChatController — Multi-turn streaming chat
 
@@ -370,6 +393,12 @@ final client = MCPClient(
 );
 ```
 
+`SseClientTransport` does real Server-Sent-Events streaming (and surfaces server-pushed
+notifications); for servers that expose a single JSON-RPC POST endpoint without SSE, use
+`HttpClientTransport`. The HTTP/SSE transports are web-safe — `dart:io` is only pulled in by
+`StdioMCPTransport` on native platforms, behind a conditional import — so the client also runs on
+Flutter web.
+
 ---
 
 ## 🗺️ Roadmap
@@ -389,16 +418,16 @@ final client = MCPClient(
 - ✅ Middleware system with 5 built-in middlewares
 - ✅ Provider registry (`createProviderRegistry`) — 5 model categories
 - ✅ Multi-step agentic loops with tool approval
-- ✅ Flutter UI controllers (Chat, Completion, ObjectStream)
-- ✅ MCP client (SSE + stdio transports, reconnection, prompts, resources)
+- ✅ Flutter UI controllers (Chat, Completion, ObjectStream) + 18 prebuilt Material widgets
+- ✅ MCP client (real SSE + HTTP + stdio transports, prompts, resources, web-safe)
 - ✅ OpenAI (with reasoning options), Anthropic (with thinking options), Google providers
-- ✅ Cohere, Mistral, Groq, Ollama, Azure OpenAI providers
-- ✅ 562+ conformance tests
+- ✅ Cohere, Mistral, Groq, Ollama, Azure OpenAI providers — all with tools + multimodal
+- ✅ 999 tests, 99.6% line coverage with a CI coverage gate
 
 ### 🔜 Planned
 
 - 🔜 Streaming MCP tool outputs
-- 🔜 Additional Flutter widgets (file picker, reasoning display, citation cards)
+- 🔜 Richer attachment widgets (file/image pickers, audio capture)
 - 🔜 Dart Edge / Cloudflare Workers support
 - 🔜 WebSocket transport for MCP
 

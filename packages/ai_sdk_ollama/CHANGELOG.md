@@ -1,3 +1,11 @@
+## 1.2.0
+
+- Added **tool use** and **multimodal image input** to the Ollama implementation, and fixed
+  prompt / completion **usage token** reporting.
+- **100%** line coverage.
+
+---
+
 ## 1.1.0
 
 - Bumped `ai_sdk_provider` constraint to `^1.1.0`.

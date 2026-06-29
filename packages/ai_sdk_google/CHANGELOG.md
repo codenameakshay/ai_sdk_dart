@@ -1,3 +1,11 @@
+## 1.2.0
+
+- Coverage hardening only — annotated a few unreachable defensive branches (null stream body,
+  exhaustive sealed-type switches). No behavior change.
+- Version aligned with the rest of the monorepo (1.2.0). **100%** line coverage.
+
+---
+
 ## 1.1.0
 
 - Bumped `ai_sdk_provider` constraint to `^1.1.0` to pick up `LanguageModelV3CallOptions.outputSchema`.

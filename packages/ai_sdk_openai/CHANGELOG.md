@@ -1,3 +1,14 @@
+## 1.2.0
+
+- Refactored onto the shared **`ai_sdk_openai_compatible`** base. The OpenAI Chat Completions wire
+  format (multimodal content parts, `tools` / `tool_choice`, `response_format` JSON schema, SSE
+  streaming + usage, non-streaming tool-call parsing) now lives in one place that the OpenAI
+  provider configures. No public API or behavior change.
+- Now requires `ai_sdk_openai_compatible ^1.2.0`.
+- **100%** line coverage.
+
+---
+
 ## 1.1.0
 
 ### New Features

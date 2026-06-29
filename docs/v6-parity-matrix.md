@@ -73,9 +73,13 @@ Legend:
 
 ## Provider Packages
 
-- [x] OpenAI language + embedding + image
-- [x] Anthropic language
+- [x] OpenAI language + embedding + image + speech + transcription
+- [x] Anthropic language (extended thinking)
 - [x] Google language + embedding
+- [x] Azure, Groq, Mistral providers (built on the shared `ai_sdk_openai_compatible` base)
+- [x] Cohere (language + embedding + rerank) and Ollama (language + embedding) providers
+- [x] shared `ai_sdk_openai_compatible` Chat Completions base — tools + multimodal + JSON-schema
+- [x] all 8 providers support tool use + multimodal image input
 - [~] exhaustive provider option parity with AI SDK docs examples
 - [~] exhaustive finish-reason mapping and raw metadata parity edge cases
 - [x] provider-level strict/approval/tool-example feature matrix coverage
@@ -86,21 +90,24 @@ Legend:
 - [x] `CompletionController` baseline behavior
 - [x] `ObjectStreamController` baseline behavior
 - [x] full hook parity (`append`, `reload`, `clear`/`reset`, optimistic streaming content, `onFinish`/`onError` callbacks, `isStreaming` status)
+- [x] prebuilt widget library — 18 themeable Material widgets (`AiChatScaffold`, message list/bubbles, composer, streaming text, tool-call/approval cards, reasoning, citations, usage, object stream, …)
 
 ## MCP
 
-- [x] transport/client scaffolding (SSE + Stdio)
+- [x] transport/client scaffolding (real SSE + HTTP POST + Stdio)
 - [x] tool discovery (`tools/list` → `ToolSet`)
 - [x] tool invocation (`tools/call` with structured result extraction)
 - [x] initialize handshake (MCP protocol 2024-11-05)
-- [~] streaming tool outputs / reconnection (basic; no live SSE event streaming yet)
+- [x] real Server-Sent-Events streaming transport (`SseClientTransport`) + server-pushed notifications
+- [x] web-safe (`dart:io` isolated behind conditional imports; stdio is native-only)
+- [~] streaming tool outputs / reconnection (no live tool-output streaming or auto-reconnect yet)
 
 ## Multimodal Model APIs
 
-- [~] `experimental_generateSpeech` (interface + provider)
-- [~] `experimental_transcribe` (interface + provider)
-- [ ] `experimental_generateVideo`
-- [~] `rerank` (interface + core; no provider yet)
+- [~] `experimental_generateSpeech` (interface + OpenAI provider)
+- [~] `experimental_transcribe` (interface + OpenAI provider)
+- [ ] `experimental_generateVideo` — intentionally not ported (no backing provider; removed in 1.2.0, see `docs/adr/`)
+- [x] `rerank` (interface + core + Cohere provider)
 
 ## Middleware System
 
@@ -192,8 +199,10 @@ Legend:
 
 ## Next Actions to Reach Full Parity
 
-1. Expand MCP parity from scaffolding to full tool discovery/invocation and reconnection semantics.
-2. Add a Cohere (or other) provider implementation for `rerank()`.
-3. Add `experimental_generateVideo` support (new model type interface + provider).
-4. Complete provider-defined tools pipeline integration.
-5. Continue tracking edge-case provider metadata/finish-reason normalization as docs evolve.
+1. Add live tool-output streaming and automatic reconnection to the MCP transports (real SSE
+   streaming + `HttpClientTransport` already landed).
+2. Continue tracking edge-case provider metadata/finish-reason normalization as docs evolve.
+3. Broaden exhaustive provider-option parity against the AI SDK docs examples.
+
+> `rerank()` now ships with a Cohere provider, and `experimental_generateVideo` was intentionally
+> dropped (no backing provider) — both previously listed here are resolved.

@@ -5,19 +5,46 @@ and full test coverage.
 
 ### Prebuilt widget library (new)
 
-A set of composable, themeable Material widgets that read only the controllers' public state. No
-heavy platform dependencies — attachments and link-opening are exposed as callbacks.
+18 composable, themeable Material widgets that read only the controllers' public state and
+`Theme.of(context)`. No heavy platform dependencies — attachment rendering and link-opening are
+exposed as callbacks.
+
+**Scaffolding & message list**
 
 - `AiChatScaffold` — drop-in chat body (`ChatMessageList` + `ChatComposer`) wired to a
   `ChatController` + `ToolLoopAgent`.
 - `ChatMessageList` — renders message history + an optimistic streaming bubble; auto-scrolls;
   optional `messageBuilder`.
 - `ChatMessageBubble` — a single message styled by role, with selectable text.
-- `ChatComposer` — text field + send button; disabled while loading; optional `onStop`/`onAttach`.
+- `AssistantMessageView` — a rich assistant turn composing text, reasoning, tool calls, sources,
+  and media together.
+- `MessageMedia` / `MessageImage` / `MessageAttachment` — render image and file attachments on a
+  message, with an `onOpen` callback.
+- `MessageActionsBar` — a per-message action row (copy, retry, …) with callbacks.
+
+**Streaming & status**
+
 - `StreamingTextView` — streaming text with a subtle blinking cursor.
-- `ToolCallCard` — a tool call (name + pretty-printed JSON args) and its result/error.
+- `TypingIndicator` — animated "assistant is typing" dots.
+- `UsageView` — a compact token-usage summary (prompt / completion / total).
+
+**Reasoning, tools & sources**
+
 - `ReasoningView` — a collapsible panel for reasoning / "thinking" text.
+- `ToolCallCard` — a tool call (name + pretty-printed JSON args) and its result/error.
+- `ToolApprovalCard` — approve/reject UI for tools gated by `needsApproval`.
 - `SourceCitations` — a wrap of citation chips for source parts, with an `onTap` callback.
+
+**Input & navigation**
+
+- `ChatComposer` — text field + send button; disabled while loading; optional `onStop`/`onAttach`.
+- `PromptSuggestions` — tappable starter-prompt chips.
+- `ScrollToBottomButton` — appears when the list is scrolled up; jumps to the latest message.
+- `ChatErrorView` — an inline error banner with a retry callback.
+
+**Object streaming**
+
+- `ObjectStreamView` — renders an `ObjectStreamController`'s partial JSON as it streams.
 
 ### Controller improvements
 
@@ -34,9 +61,10 @@ heavy platform dependencies — attachments and link-opening are exposed as call
 
 ### Tests
 
-- Added the package's first test suite: 27 controller tests + 30 widget tests (57 total) covering
-  state transitions, `streamingContent`, `append`/`reload`/`clear`/`stop`, `onFinish`/`onError`,
+- Added the package's first test suite: **121 tests** (controller + widget) covering state
+  transitions, `streamingContent`, `append`/`reload`/`clear`/`stop`, `onFinish`/`onError`,
   `isStreaming`, `ObjectStreamController.submit`/`bind`, and a `testWidgets` pass for every widget.
+  **99.6%** line coverage.
 
 ## 1.1.0
 

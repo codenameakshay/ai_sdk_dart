@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-06-29",
+  "title": "Design System: AI SDK Flutter UI",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "Host Accent",
+        "canonical": "Material 3 ColorScheme.primary (representative: #6750A4 from fromSeed(#6750A4))",
+        "tonalRamp": ["#21005D", "#381E72", "#4F378B", "#6750A4", "#7F67BE", "#9A82DB", "#B69DF8", "#EADDFF"]
+      },
+      "surface-container-high": {
+        "role": "neutral",
+        "displayName": "Assistant Surface",
+        "canonical": "Material 3 ColorScheme.surfaceContainerHigh (representative: #ECE6F0)",
+        "tonalRamp": ["#1D1B20", "#322F35", "#48464C", "#605D64", "#79767D", "#938F96", "#CAC5CD", "#ECE6F0"]
+      },
+      "surface-container-highest": {
+        "role": "neutral",
+        "displayName": "Recessed Surface",
+        "canonical": "Material 3 ColorScheme.surfaceContainerHighest (representative: #E6E0E9)",
+        "tonalRamp": ["#1D1B20", "#322F35", "#48464C", "#605D64", "#79767D", "#938F96", "#C7C2CB", "#E6E0E9"]
+      },
+      "on-surface-variant": {
+        "role": "neutral",
+        "displayName": "Muted Ink",
+        "canonical": "Material 3 ColorScheme.onSurfaceVariant (representative: #49454F)",
+        "tonalRamp": ["#1D1A22", "#2B2930", "#3A383F", "#49454F", "#605D66", "#79767F", "#938F99", "#AEA9B4"]
+      },
+      "error-container": {
+        "role": "status",
+        "displayName": "Error Surface",
+        "canonical": "Material 3 ColorScheme.errorContainer (representative: #F9DEDC), paired with onErrorContainer #410E0B",
+        "tonalRamp": ["#410E0B", "#601410", "#8C1D18", "#B3261E", "#DC362E", "#E46962", "#F2B8B5", "#F9DEDC"]
+      },
+      "tertiary": {
+        "role": "tertiary",
+        "displayName": "Trust Mark",
+        "canonical": "Material 3 ColorScheme.tertiary (representative: #7D5260), used only on the tool-approval shield",
+        "tonalRamp": ["#31111D", "#492532", "#633B48", "#7D5260", "#996977", "#B58392", "#D29DAC", "#FFD8E4"]
+      }
+    },
+    "typographyMeta": {
+      "body": { "displayName": "Body", "purpose": "Message content; flush assistant prose at line-height 1.5. Inherited from host TextTheme." },
+      "title": { "displayName": "Title", "purpose": "Tool names and card titles, on tabular figures." },
+      "label": { "displayName": "Label", "purpose": "Section labels, usage values, result/error tags." },
+      "mono": { "displayName": "Mono", "purpose": "Pretty-printed tool input/output only. The one explicit font family." }
+    },
+    "shadows": [
+      { "name": "flat-by-doctrine", "value": "none", "purpose": "All bubbles, cards (elevation: 0), banners, chips, and the composer are shadowless. Depth is tonal layering + outlineVariant hairlines." },
+      { "name": "fab-elevation", "value": "Material FloatingActionButton.small default elevation", "purpose": "The single intentional elevation, on the scroll-to-bottom FAB only, because it floats over scrolling content." }
+    ],
+    "motion": [
+      { "name": "curve-standard", "value": "Curves.easeOutCubic", "purpose": "Confident deceleration for most transitions." },
+      { "name": "curve-emphasized", "value": "Curves.easeOutQuart", "purpose": "Slightly snappier deceleration for larger reveals." },
+      { "name": "curve-gentle", "value": "Cubic(0.16, 1, 0.3, 1) (ease-out-expo)", "purpose": "Scale-ins and pops. No overshoot, never bounce." },
+      { "name": "press", "value": "120ms, scale to 0.96 (PressableScale, Listener-driven)", "purpose": "Tap-down feedback on every interactive control; springs back on release." },
+      { "name": "entrance", "value": "220ms easeOutCubic, opacity 0->1 + 6px lift (AiEntrance)", "purpose": "New messages, banners, and object values ease in once; identity-tracked so scrolling never replays it." },
+      { "name": "streaming-cursor", "value": "900ms cosine pulse, opacity 1.0<->0.2 (StreamingCursor)", "purpose": "Inline caret on the in-flight assistant message — a soft breath, not a hard blink." },
+      { "name": "typing-wave", "value": "1200ms repeat, staggered (0.18 offset/dot), fade + 1.5px rise", "purpose": "Three-dot indicator before the first token; cross-fades into the streaming text." },
+      { "name": "send-stop-morph", "value": "200ms AnimatedSwitcher, fade + scale(0.8->1)", "purpose": "Send morphs into stop as one object changing state." },
+      { "name": "disclosure", "value": "240ms easeOutCubic, AnimatedSize + chevron rotate", "purpose": "Reasoning panel expand/collapse." },
+      { "name": "auto-scroll", "value": "280ms easeOutCubic (animateTo)", "purpose": "Transcript auto-scroll and scroll-to-bottom FAB; FAB also scales+fades in on appear." },
+      { "name": "suggestion-stagger", "value": "420ms controller, Interval per chip capped at 6 steps", "purpose": "Empty-state prompt chips ease in on a short stagger." },
+      { "name": "reduced-motion", "value": "MediaQuery.disableAnimations -> Duration.zero / instant; haptics suppressed", "purpose": "First-class path on every animation. Mandatory, not a branch." }
+    ],
+    "haptics": [
+      { "name": "light", "value": "HapticFeedback.lightImpact (iOS/Android only)", "purpose": "Send, stop, copy-success, scroll-to-bottom, error retry." },
+      { "name": "selection", "value": "HapticFeedback.selectionClick (iOS/Android only)", "purpose": "Approve/deny, reasoning toggle, chip and attachment taps." }
+    ]
+  },
+  "components": [
+    {
+      "name": "User Bubble",
+      "kind": "custom",
+      "refersTo": "bubble-user",
+      "description": "The user's message; the one place the host primary accent fills a surface.",
+      "html": "<div class=\"ds-bubble-user\">How do I cancel my plan?</div>",
+      "css": ".ds-bubble-user { display: inline-block; max-width: 78%; background: #6750A4; color: #FFFFFF; font-size: 14px; line-height: 1.5; padding: 10px 14px; border-radius: 16px 16px 4px 16px; }"
+    },
+    {
+      "name": "Assistant Turn",
+      "kind": "custom",
+      "refersTo": "assistant-turn",
+      "description": "Bubbleless assistant reply: a small marker leads flush prose, so long answers read as content, not chat chrome.",
+      "html": "<div class=\"ds-assistant-turn\"><div class=\"ds-marker\"><svg width=\"15\" height=\"15\" viewBox=\"0 0 24 24\" fill=\"#6750A4\"><path d=\"M12 2l1.9 5.8L20 9.7l-5.1 3.1L16.5 19 12 15.6 7.5 19l1.6-6.2L4 9.7l6.1-1.9z\"/></svg></div><p class=\"ds-assistant-text\">You can cancel anytime under Settings &rarr; Billing. Your plan stays active until the end of the cycle.</p></div>",
+      "css": ".ds-assistant-turn { display: flex; align-items: flex-start; gap: 10px; padding: 6px 0; } .ds-marker { width: 26px; height: 26px; border-radius: 50%; background: #E6E0E9; display: flex; align-items: center; justify-content: center; flex: none; } .ds-assistant-text { margin: 0; font-size: 14px; line-height: 1.5; color: #1D1B20; }"
+    },
+    {
+      "name": "Composer Field",
+      "kind": "input",
+      "refersTo": "composer-field",
+      "description": "Filled, borderless pill input. The filled primary send button morphs into a stop square (fade + scale) while streaming; both press-scale with a light haptic.",
+      "html": "<div class=\"ds-composer\"><div class=\"ds-field\">Message&hellip;</div><button class=\"ds-send\" aria-label=\"Send\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M12 19V5M5 12l7-7 7 7\"/></svg></button></div>",
+      "css": ".ds-composer { display: flex; align-items: center; gap: 8px; } .ds-field { flex: 1; background: #E6E0E9; color: #49454F; font-size: 14px; padding: 12px 18px; border-radius: 24px; } .ds-send { width: 40px; height: 40px; border: none; border-radius: 50%; background: #6750A4; color: #FFFFFF; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: transform 0.12s ease-out, filter 0.12s ease-out; } .ds-send:hover { filter: brightness(1.05); } .ds-send:active { transform: scale(0.96); }"
+    },
+    {
+      "name": "Tool Call Card",
+      "kind": "card",
+      "refersTo": "tool-card",
+      "description": "A tool call with pretty-printed input and a result row; flat (elevation 0), hairline-bordered, with a tonal code tile inside (no nested card). The result status icon scale-springs in.",
+      "html": "<div class=\"ds-tool-card\"><div class=\"ds-tool-head\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#6750A4\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M3 12h18M3 6h18M3 18h18\"/></svg><span class=\"ds-tool-name\">getWeather</span></div><pre class=\"ds-code\">{ \"city\": \"Kyoto\" }</pre><div class=\"ds-tool-result\"><span>Result</span> 18&deg;, clear</div></div>",
+      "css": ".ds-tool-card { border: 1px solid #CAC4D0; border-radius: 12px; padding: 12px; color: #1D1B20; } .ds-tool-head { display: flex; align-items: center; gap: 8px; } .ds-tool-name { font-size: 14px; font-weight: 500; font-variant-numeric: tabular-nums; } .ds-code { background: #E6E0E9; border-radius: 8px; padding: 10px; font-family: monospace; font-size: 12px; line-height: 1.4; margin: 8px 0 0; white-space: pre-wrap; } .ds-tool-result { font-size: 12px; color: #49454F; margin-top: 12px; } .ds-tool-result span { font-weight: 500; }"
+    },
+    {
+      "name": "Source Chips",
+      "kind": "chip",
+      "refersTo": "chip-source",
+      "description": "A wrap of citation chips; the link icon carries the lone primary accent. Each press-scales and fires a selection haptic.",
+      "html": "<div class=\"ds-chips\"><button class=\"ds-chip\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#6750A4\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1\"/><path d=\"M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1\"/></svg>Billing FAQ</button><button class=\"ds-chip\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#6750A4\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1\"/><path d=\"M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1\"/></svg>Refunds</button></div>",
+      "css": ".ds-chips { display: flex; flex-wrap: wrap; gap: 6px; } .ds-chip { display: inline-flex; align-items: center; gap: 6px; background: transparent; border: 1px solid #CAC4D0; border-radius: 8px; padding: 5px 10px; font-size: 12px; color: #49454F; cursor: pointer; transition: background 0.12s ease-out, transform 0.12s ease-out; } .ds-chip:hover { background: #ECE6F0; } .ds-chip:active { transform: scale(0.96); }"
+    },
+    {
+      "name": "Error Banner",
+      "kind": "custom",
+      "refersTo": "error-banner",
+      "description": "Inline error state with retry/dismiss; errorContainer surface paired with onErrorContainer ink. Eases in on appear.",
+      "html": "<div class=\"ds-error\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 8v4M12 16h.01\"/></svg><span class=\"ds-error-msg\">Something went wrong. </span><button class=\"ds-error-retry\">Retry</button></div>",
+      "css": ".ds-error { display: flex; align-items: center; gap: 10px; background: #F9DEDC; color: #410E0B; border-radius: 12px; padding: 10px 12px; } .ds-error-msg { flex: 1; font-size: 14px; } .ds-error-retry { background: transparent; border: none; color: #410E0B; font-weight: 500; font-size: 14px; cursor: pointer; }"
+    },
+    {
+      "name": "Usage Pills",
+      "kind": "custom",
+      "refersTo": "usage-pill",
+      "description": "Token usage as small tonal pills with tabular figures; null counts omitted.",
+      "html": "<div class=\"ds-usage\"><span class=\"ds-pill\">Input <b>1,204</b></span><span class=\"ds-pill\">Output <b>318</b></span><span class=\"ds-pill\">Total <b>1,522</b></span></div>",
+      "css": ".ds-usage { display: flex; flex-wrap: wrap; gap: 6px; } .ds-pill { background: #E6E0E9; border-radius: 8px; padding: 4px 10px; font-size: 11px; color: #49454F; } .ds-pill b { font-weight: 500; color: #1D1B20; font-variant-numeric: tabular-nums; margin-left: 4px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Quiet Conductor",
+    "overview": "A Flutter UI library that conducts a genuinely rich performance — streaming text, reasoning, tool calls, human-in-the-loop approvals, source citations, token usage — and then steps out of the spotlight. It owns no palette and no typeface; every color is a Material 3 ColorScheme role and every text style a TextTheme role, resolved from the host app's Theme.of(context). The transcript reads as a natural conversation: the user's message in a soft bubble, the assistant flush (no bubble) as readable prose behind a small marker. The craft lives in structure, rhythm, restraint, and timing. Motion is a material here, not a finish — Apple-grade continuity over popping, gentle ease-out, press + haptics, and a first-class reduced-motion path, all built from core Flutter. It rejects the heavy branded chat SDK look, the dependency-bloated aesthetic, and the generic 'AI made this' chat template.",
+    "keyCharacteristics": [
+      "Theme-deferential: zero owned colors or fonts; pure Material 3 role consumption.",
+      "Natural transcript: user bubbles, flush assistant prose with a minimal marker.",
+      "Flat and tonal: surface-container layering + hairline borders, no shadows (one functional FAB excepted).",
+      "Motion as material: continuity, gentle ease-out, press + haptics, mandatory reduced-motion path — all core Flutter.",
+      "Dependency-light: heavyweight capabilities are callbacks/slots, never bundled."
+    ],
+    "rules": [
+      { "name": "The Borrowed Color Rule", "body": "The library defines no color. Every surface, text, and accent is a ColorScheme role from Theme.of(context). A hardcoded color literal is a bug, not a style choice.", "section": "colors" },
+      { "name": "The On-Pair Rule", "body": "A role is never used without its on- counterpart (primary/onPrimary, errorContainer/onErrorContainer, surfaceContainerHigh/onSurface). This guarantees contrast survives any host palette.", "section": "colors" },
+      { "name": "The One Accent Rule", "body": "Only primary carries accent weight, on <=10% of any screen. Its rarity makes the send button and user bubble read as the live edge of the conversation.", "section": "colors" },
+      { "name": "The Inherited Voice Rule", "body": "Type comes from the host. The library assigns roles and reading line-height; it never sets a font family (except monospace for serialized data) and never hardcodes a font size outside the Material scale.", "section": "typography" },
+      { "name": "The Tabular Numerics Rule", "body": "Tool names and token counts always use tabular figures. Conversational prose never does.", "section": "typography" },
+      { "name": "The Tonal-Not-Shadow Rule", "body": "Depth is layered tonally and fenced with hairlines, never with shadow. The only elevated element in the entire library is the scroll-to-bottom FAB.", "section": "elevation" },
+      { "name": "The Motion-As-Material Rule", "body": "State changes flow, never cut: cross-fade or morph instead of hard swap, gentle ease-out (never bounce), every control answers a press with a light haptic, and every animation has a reduced-motion fallback. Built from core Flutter, no animation dependency.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do resolve every color from Theme.of(context).colorScheme and every text style from textTheme — nothing hardcoded.",
+      "Do pair each role with its on- counterpart so contrast holds on any host theme.",
+      "Do render the assistant flush (no bubble); reserve bubbles for the user (and standalone tool messages).",
+      "Do convey depth tonally and fence it with outlineVariant hairlines; keep cards at elevation 0.",
+      "Do cap card corners at 12px; reserve full-pill rounding for the composer input and chips/tags only.",
+      "Do set tabular figures on tool names and token counts.",
+      "Do treat motion as a material: continuity, ease-out only, press + light haptic on controls.",
+      "Do give every animation a reduced-motion fallback and build it from core Flutter.",
+      "Do expose attachments, link-opening, and markdown as callbacks/slots — never as bundled dependencies."
+    ],
+    "donts": [
+      "Don't hardcode a color or font — the library must never stamp its own identity over the host.",
+      "Don't put the assistant in a bubble in the default transcript — flush prose is the voice.",
+      "Don't build toward a heavy branded chat SDK look (Intercom/Drift-style, powered-by bubbles) that resists theming.",
+      "Don't add dependencies for image pickers, url launchers, markdown engines, or animation — that is the dependency-bloated anti-reference.",
+      "Don't ship the generic 'AI made this' chat template: gradient message bubbles, glassmorphism, or novelty animation.",
+      "Don't use bounce or elastic easing, or a hard on/off blink — motion is gentle ease-out and the cursor breathes.",
+      "Don't use drop shadows for depth — the only elevated element is the scroll-to-bottom FAB.",
+      "Don't nest a card inside a card, or use a border-left/side-stripe accent — full hairline borders or tonal fills only.",
+      "Don't over-round: a 24px+ radius on a card or tool tile is forbidden (the composer pill input is the sole intentional exception)."
+    ]
+  }
+}

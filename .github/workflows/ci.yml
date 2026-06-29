@@ -6,22 +6,27 @@ on:
   pull_request:
 
 jobs:
-  analyze-and-test:
+  analyze-test-coverage:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Dart
-        uses: dart-lang/setup-dart@v1
-
-      - name: Set up Flutter
+      - name: Set up Flutter (includes Dart)
         uses: subosito/flutter-action@v2
         with:
           channel: stable
 
       - name: Install dependencies
-        run: dart pub get
+        run: flutter pub get
 
       - name: Analyze
         run: dart analyze .
+
+      - name: Activate coverage tool
+        run: dart pub global activate coverage
+
+      # Ratchet gate: prevents coverage regressions. Target is 100%; raise this
+      # as the remaining packages (ai_sdk_dart, google, cohere, mcp) are covered.
+      - name: Test with coverage (gate)
+        run: tool/coverage.sh 85

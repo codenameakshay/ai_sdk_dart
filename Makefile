@@ -113,6 +113,16 @@ analyze:
 	$(FLUTTER) analyze $(FLUTTER_APP)/
 	$(FLUTTER) analyze $(ADVANCED_APP)/
 
+## Run tests with coverage across all packages and print a summary
+coverage:
+	$(DART) pub global activate coverage >/dev/null 2>&1 || true
+	DART="$(DART)" FLUTTER="$(FLUTTER)" tool/coverage.sh
+
+## Run coverage and fail if total line coverage is below the gate (target: 100%)
+coverage-check:
+	$(DART) pub global activate coverage >/dev/null 2>&1 || true
+	DART="$(DART)" FLUTTER="$(FLUTTER)" tool/coverage.sh 85
+
 ## Format all Dart source files
 format:
 	$(DART) format packages/ examples/

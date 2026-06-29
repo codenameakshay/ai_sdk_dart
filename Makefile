@@ -40,6 +40,20 @@ ifdef GOOGLE_API_KEY
   DART_DEFINES += --dart-define=GOOGLE_API_KEY=$(GOOGLE_API_KEY)
 endif
 
+# `dart run` uses --define (compile-time consts via String.fromEnvironment),
+# whereas `flutter run` uses --dart-define. The example providers read keys
+# through String.fromEnvironment, so a plain shell export is not enough.
+DART_RUN_DEFINES :=
+ifdef OPENAI_API_KEY
+  DART_RUN_DEFINES += --define=OPENAI_API_KEY=$(OPENAI_API_KEY)
+endif
+ifdef ANTHROPIC_API_KEY
+  DART_RUN_DEFINES += --define=ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY)
+endif
+ifdef GOOGLE_API_KEY
+  DART_RUN_DEFINES += --define=GOOGLE_API_KEY=$(GOOGLE_API_KEY)
+endif
+
 .PHONY: all get run run-web run-advanced run-advanced-web run-basic \
         test analyze format dry-run publish clean help \
         coverage coverage-check
@@ -70,20 +84,20 @@ run-advanced:
 run-advanced-web:
 	cd $(ADVANCED_APP) && $(FLUTTER) run $(DART_DEFINES) -d chrome
 
-## Run the Dart CLI example (uses OPENAI_API_KEY from env directly)
+## Run the Dart CLI example (passes OPENAI_API_KEY as a compile-time --define)
 run-basic:
 	@if [ -z "$(OPENAI_API_KEY)" ]; then \
 		echo "Error: OPENAI_API_KEY is not set."; \
 		echo "  export OPENAI_API_KEY=sk-..."; \
 		exit 1; \
 	fi
-	cd $(DART_APP) && $(DART) run lib/main.dart
+	cd $(DART_APP) && $(DART) run $(DART_RUN_DEFINES) lib/main.dart
 
 ## Run the MCP (Model Context Protocol) CLI demo. Works without a key (the
 ## tool-discovery + direct-call steps); set OPENAI_API_KEY to also run the
 ## generateText-with-MCP-tools step.
 run-mcp:
-	cd $(DART_APP) && $(DART) run lib/mcp_demo.dart
+	cd $(DART_APP) && $(DART) run $(DART_RUN_DEFINES) lib/mcp_demo.dart
 
 # ── Quality ───────────────────────────────────────────────────────────────────
 

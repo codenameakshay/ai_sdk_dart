@@ -6,7 +6,7 @@ A comprehensive Flutter app demonstrating all major AI SDK capabilities: multipl
 
 | Feature | API | Prebuilt widgets | Provider(s) |
 |---------|-----|------------------|-------------|
-| Provider Chat | `ChatController` + `createProviderRegistry` | `AiChatScaffold` | OpenAI, Anthropic, Google |
+| Provider Chat | `ChatController` + `createProviderRegistry` | `AiChatScaffold`, `PromptSuggestions` | OpenAI, Anthropic, Google |
 | Tools Chat | `streamText` + `tools` + `extractReasoningMiddleware` | `ChatComposer`, `ChatMessageBubble`, `ToolCallCard`, `ReasoningView`, `SourceCitations` | OpenAI |
 | Image Generation | `generateImage` | — | OpenAI (DALL-E 3) |
 | Multimodal | `streamText` + `LanguageModelV3ImagePart` | `StreamingTextView` | OpenAI |
@@ -15,6 +15,21 @@ A comprehensive Flutter app demonstrating all major AI SDK capabilities: multipl
 | Speech-to-Text | `transcribe` | — | OpenAI |
 | Completion | `CompletionController` | `StreamingTextView` | OpenAI |
 | Object Stream | `ObjectStreamController.submit(model, schema)` | — | OpenAI |
+| Widget Gallery | — (sample data) | All prebuilt widgets | None (offline) |
+
+### Widget Gallery
+
+A live catalogue of every prebuilt widget in `ai_sdk_flutter_ui`, driven by
+sample data and a synthetic stream — so it renders and reacts **without an API
+key or a network call**. Open it from the navigation drawer to see:
+
+- **`AssistantMessageView`** — a whole assistant turn (reasoning + text + tool
+  call with its result + a source) from one `ModelMessage.parts`.
+- **`ToolApprovalCard`** — a human-in-the-loop approve/deny gate.
+- **`ObjectStreamView`** — partial structured output streaming in live.
+- **`PromptSuggestions`**, **`TypingIndicator`**, **`MessageActionsBar`**,
+  **`UsageView`**, **`ChatErrorView`**, **`ScrollToBottomButton`**,
+  **`MessageImage`** / **`MessageAttachment`**, and **`ToolCallCard`**.
 
 ### Tools Chat
 

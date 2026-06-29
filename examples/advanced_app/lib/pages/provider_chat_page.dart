@@ -112,7 +112,54 @@ class _ProviderChatPageState extends State<ProviderChatPage> {
           ),
         ],
       ),
-      body: AiChatScaffold(controller: _chat, agent: _agent),
+      body: AiChatScaffold(
+        controller: _chat,
+        agent: _agent,
+        // A prebuilt PromptSuggestions empty state — tapping a chip sends it
+        // as the first message.
+        emptyState: _EmptyState(
+          onSelected: (text) =>
+              _chat.sendMessage(agent: _agent, text: text),
+        ),
+      ),
+    );
+  }
+}
+
+/// Empty-conversation state: a hint plus tappable prompt starters built from
+/// the prebuilt [PromptSuggestions] widget.
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({required this.onSelected});
+
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.chat_bubble_outline,
+              size: 48,
+              color: scheme.onSurfaceVariant,
+            ),
+            const SizedBox(height: 16),
+            PromptSuggestions(
+              title: 'Try one of these',
+              suggestions: const [
+                'Explain async/await in Dart',
+                'Write a haiku about Flutter',
+                'Compare REST and GraphQL',
+              ],
+              onSelected: onSelected,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

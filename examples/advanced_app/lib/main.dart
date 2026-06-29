@@ -9,6 +9,7 @@ import 'pages/provider_chat_page.dart';
 import 'pages/stt_page.dart';
 import 'pages/tools_chat_page.dart';
 import 'pages/tts_page.dart';
+import 'pages/widget_gallery_page.dart';
 
 void main() {
   runApp(const App());
@@ -61,6 +62,7 @@ class _ShellState extends State<_Shell> {
     _NavItem('Speech-to-Text', Icons.mic, SttPage()),
     _NavItem('Completion', Icons.edit_note, CompletionPage()),
     _NavItem('Object Stream', Icons.data_object, ObjectStreamPage()),
+    _NavItem('Widget Gallery', Icons.widgets_outlined, WidgetGalleryPage()),
   ];
 
   @override

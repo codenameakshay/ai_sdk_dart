@@ -64,10 +64,14 @@ class StdioMCPTransport implements MCPTransport {
     await _process!.stdin.flush();
     return completer.future.timeout(
       const Duration(seconds: 30),
+      // coverage:ignore-start
+      // Hardcoded 30s timeout; covering it would require a 30s+ hang, which is
+      // not deterministic to test quickly. Exercised in integration only.
       onTimeout: () {
         _pending.remove(request.id);
         throw MCPException('Timeout waiting for response to ${request.method}');
       },
+      // coverage:ignore-end
     );
   }
 

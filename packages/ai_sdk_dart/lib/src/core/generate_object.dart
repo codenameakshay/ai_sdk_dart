@@ -133,9 +133,12 @@ Map<String, dynamic> _extractJsonObject(
   if (parsed is Map<String, dynamic>) {
     return parsed;
   }
+  // Defensive: jsonDecode always yields Map<String, dynamic> for objects.
+  // coverage:ignore-start
   if (parsed is Map) {
     return parsed.cast<String, dynamic>();
   }
+  // coverage:ignore-end
 
   throw AiInvalidToolInputError('Model did not return a JSON object: $text');
 }

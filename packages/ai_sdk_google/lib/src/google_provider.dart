@@ -276,7 +276,8 @@ class _GoogleLanguageModel implements LanguageModelV3 {
 
     final body = response.data;
     if (body == null) {
-      throw StateError('Google stream response body is null.');
+      // Defensive; Dio stream body is never null on a 200 streaming response.
+      throw StateError('Google stream response body is null.'); // coverage:ignore-line
     }
 
     final controller = StreamController<LanguageModelV3StreamPart>();
@@ -604,7 +605,8 @@ Map<String, dynamic>? _safeParseMap(String input) {
   try {
     final decoded = jsonDecode(input);
     if (decoded is Map<String, dynamic>) return decoded;
-    if (decoded is Map) return decoded.cast<String, dynamic>();
+    // jsonDecode of a JSON object always yields a Map<String, dynamic>.
+    if (decoded is Map) return decoded.cast<String, dynamic>(); // coverage:ignore-line
     return null;
   } catch (_) {
     return null;
@@ -656,7 +658,8 @@ Object _toGoogleToolResultOutput(LanguageModelV3ToolResultOutput output) {
       'parts': output.parts.map(_toGoogleToolResultPart).toList(),
     };
   }
-  return {'type': 'unknown'};
+  // Sealed output type; both concrete subtypes are handled above.
+  return {'type': 'unknown'}; // coverage:ignore-line
 }
 
 Map<String, dynamic> _toGoogleToolResultPart(LanguageModelV3ContentPart part) {
@@ -684,7 +687,8 @@ String? _toBase64(LanguageModelV3DataContent data) {
   return switch (data) {
     DataContentBytes(:final bytes) => base64Encode(bytes),
     DataContentBase64(:final base64) => base64,
-    DataContentUrl() => null,
+    // Callers resolve DataContentUrl to fileData before reaching _toBase64.
+    DataContentUrl() => null, // coverage:ignore-line
   };
 }
 

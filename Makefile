@@ -41,7 +41,8 @@ ifdef GOOGLE_API_KEY
 endif
 
 .PHONY: all get run run-web run-advanced run-advanced-web run-basic \
-        test analyze format dry-run publish clean help
+        test analyze format dry-run publish clean help \
+        coverage coverage-check
 
 all: help
 
@@ -121,7 +122,7 @@ coverage:
 ## Run coverage and fail if total line coverage is below the gate (target: 100%)
 coverage-check:
 	$(DART) pub global activate coverage >/dev/null 2>&1 || true
-	DART="$(DART)" FLUTTER="$(FLUTTER)" tool/coverage.sh 85
+	DART="$(DART)" FLUTTER="$(FLUTTER)" tool/coverage.sh 99
 
 ## Format all Dart source files
 format:

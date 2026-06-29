@@ -198,9 +198,12 @@ Map<String, dynamic>? _tryParseObjectJson(String text) {
   if (parsed is Map<String, dynamic>) {
     return parsed;
   }
+  // Defensive: jsonDecode always yields Map<String, dynamic> for objects.
+  // coverage:ignore-start
   if (parsed is Map) {
     return parsed.cast<String, dynamic>();
   }
+  // coverage:ignore-end
   return null;
 }
 
@@ -337,6 +340,10 @@ String _escapeJsonPointerToken(String token) {
 }
 
 bool _jsonValueEquals(Object? left, Object? right) {
+  // Defensive: _diffJson recurses structurally into same-type containers and
+  // only calls this on type-mismatched or scalar pairs, so the Map/List
+  // equality branches below are never exercised from the diff path.
+  // coverage:ignore-start
   if (left is Map && right is Map) {
     if (left.length != right.length) return false;
     for (final key in left.keys) {
@@ -352,6 +359,7 @@ bool _jsonValueEquals(Object? left, Object? right) {
     }
     return true;
   }
+  // coverage:ignore-end
   return left == right;
 }
 

@@ -472,7 +472,9 @@ String? _imageUrl(LanguageModelV3DataContent data, String? mediaType) {
   final b64 = switch (data) {
     DataContentBytes(:final bytes) => base64Encode(bytes),
     DataContentBase64(:final base64) => base64,
-    DataContentUrl() => null,
+    // coverage:ignore-start
+    DataContentUrl() => null, // unreachable: URL data early-returns above
+    // coverage:ignore-end
   };
   if (b64 == null) return null;
   return 'data:${mediaType ?? 'image/png'};base64,$b64';

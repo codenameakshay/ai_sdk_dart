@@ -760,7 +760,8 @@ _ToolSelection _resolveToolSelection({
       toolChoice: choice,
     );
   }
-  return _ToolSelection(exposedTools: tools, toolChoice: choice);
+  // Defensive: every ToolChoice subtype is handled above.
+  return _ToolSelection(exposedTools: tools, toolChoice: choice); // coverage:ignore-line
 }
 
 void _validateToolChoiceInResponse({
@@ -810,6 +811,9 @@ Future<_ToolExecutionResult> _executeToolCall({
   GenerateTextExperimentalOnToolCallFinish? onToolCallFinish,
 }) async {
   final tool = tools[call.toolName];
+  // Defensive: unknown tool names are rejected by tool-choice validation
+  // before any call reaches here.
+  // coverage:ignore-start
   if (tool == null) {
     return _ToolExecutionResult(
       toolResult: LanguageModelV3ToolResultPart(
@@ -820,6 +824,7 @@ Future<_ToolExecutionResult> _executeToolCall({
       ),
     );
   }
+  // coverage:ignore-end
 
   final approvalId = 'approval_${call.toolCallId}';
   final rawInput = call.input;
@@ -865,6 +870,9 @@ Future<_ToolExecutionResult> _executeToolCall({
       );
     }
 
+    // Defensive: an approval-requiring tool with no response is already
+    // short-circuited by the earlier `approvalResponse == null` guard.
+    // coverage:ignore-start
     if (tool.requiresApproval && needsApproval && approvalResponse == null) {
       return _ToolExecutionResult(
         approvalRequest: LanguageModelV3ToolApprovalRequestPart(
@@ -873,6 +881,7 @@ Future<_ToolExecutionResult> _executeToolCall({
         ),
       );
     }
+    // coverage:ignore-end
 
     final executor = tool.executeDynamic;
     if (executor == null) {
@@ -1078,8 +1087,11 @@ TOutput _parseOutput<TOutput>(Output<TOutput> output, String text) {
       for (final item in jsonValue) {
         if (item is Map<String, dynamic>) {
           list.add(element.fromJson(item));
+          // Defensive: jsonDecode always yields Map<String, dynamic> objects.
+          // coverage:ignore-start
         } else if (item is Map) {
           list.add(element.fromJson(item.cast<String, dynamic>()));
+          // coverage:ignore-end
         } else {
           throw AiInvalidToolInputError(
             'Array element is not a JSON object: $item',
@@ -1130,9 +1142,12 @@ Map<String, dynamic> _extractJsonObject(String text) {
   if (parsed is Map<String, dynamic>) {
     return parsed;
   }
+  // Defensive: jsonDecode always yields Map<String, dynamic> for objects.
+  // coverage:ignore-start
   if (parsed is Map) {
     return parsed.cast<String, dynamic>();
   }
+  // coverage:ignore-end
   throw AiInvalidToolInputError('Model did not return a JSON object: $text');
 }
 

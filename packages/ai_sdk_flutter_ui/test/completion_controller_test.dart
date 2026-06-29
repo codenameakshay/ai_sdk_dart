@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
+import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'helpers.dart';
@@ -138,5 +139,38 @@ void main() {
         controller.dispose();
       },
     );
+
+    test('an agent.stream() that throws synchronously is caught', () async {
+      Object? captured;
+      final failure = StateError('stream() threw');
+      final controller = CompletionController(
+        agent: ThrowingStreamAgent(failure),
+        onError: (e) => captured = e,
+      );
+
+      await controller.complete('go');
+      await pumpUntil(() => controller.error != null);
+
+      expect(controller.error, same(failure));
+      expect(captured, same(failure));
+      controller.dispose();
+    });
+
+    test('captures the last usage after completing', () async {
+      const usage = LanguageModelV3Usage(
+        inputTokens: 3,
+        outputTokens: 5,
+        totalTokens: 8,
+      );
+      final controller = CompletionController(
+        agent: textAgentWithUsage('done', usage),
+      );
+
+      await controller.complete('go');
+      await pumpUntil(() => !controller.isStreaming && !controller.isLoading);
+
+      expect(controller.lastUsage?.totalTokens, 8);
+      controller.dispose();
+    });
   });
 }

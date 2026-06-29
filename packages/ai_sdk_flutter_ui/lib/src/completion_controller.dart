@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
+import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
 /// Flutter controller for single-turn completion — mirrors the JS `useCompletion` hook.
 ///
@@ -34,6 +35,10 @@ class CompletionController extends ChangeNotifier {
   bool _isStreaming = false;
   bool get isStreaming => _isStreaming;
 
+  /// Token usage reported by the most recent completion, if any.
+  LanguageModelV3Usage? get lastUsage => _lastUsage;
+  LanguageModelV3Usage? _lastUsage;
+
   StreamSubscription<String>? _activeSubscription;
   StreamSubscription<StreamTextEvent>? _errorSubscription;
 
@@ -41,6 +46,7 @@ class CompletionController extends ChangeNotifier {
   Future<void> complete(String prompt) async {
     _completion = '';
     _error = null;
+    _lastUsage = null;
     _isLoading = true;
     _isStreaming = false;
     notifyListeners();
@@ -67,10 +73,17 @@ class CompletionController extends ChangeNotifier {
           _completion += delta;
           notifyListeners();
         },
-        onDone: () {
+        onDone: () async {
           unawaited(_errorSubscription?.cancel());
           _errorSubscription = null;
           if (_error != null) return; // an error already terminated us
+          try {
+            _lastUsage =
+                await streamResult.totalUsage ?? await streamResult.usage;
+          } catch (_) {
+            // Usage is best-effort.
+          }
+          if (_error != null) return; // a late error may have arrived
           _isLoading = false;
           _isStreaming = false;
           notifyListeners();
@@ -114,6 +127,7 @@ class CompletionController extends ChangeNotifier {
     _errorSubscription = null;
     _completion = '';
     _error = null;
+    _lastUsage = null;
     _isLoading = false;
     _isStreaming = false;
     notifyListeners();

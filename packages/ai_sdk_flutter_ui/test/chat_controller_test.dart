@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
+import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'helpers.dart';
@@ -264,5 +265,112 @@ void main() {
         controller.dispose();
       },
     );
+  });
+
+  group('ChatController surfacing', () {
+    test('captures the last usage after a turn', () async {
+      final controller = ChatController();
+      const usage = LanguageModelV3Usage(
+        inputTokens: 7,
+        outputTokens: 11,
+        totalTokens: 18,
+      );
+
+      await controller.sendMessage(
+        agent: textAgentWithUsage('hi', usage),
+        text: 'q',
+      );
+      await pumpUntil(() => controller.status == ChatStatus.ready);
+
+      expect(controller.lastUsage?.totalTokens, 18);
+      controller.dispose();
+    });
+
+    test('captures the reasoning text after a turn', () async {
+      final controller = ChatController();
+
+      await controller.sendMessage(
+        agent: reasoningAgent(reasoning: 'because reasons', text: 'answer'),
+        text: 'why',
+      );
+      await pumpUntil(() => controller.status == ChatStatus.ready);
+
+      expect(controller.reasoningText, contains('because reasons'));
+      expect(controller.streamingReasoning, isEmpty); // reset once committed
+      expect(controller.messages.last.content, 'answer');
+      controller.dispose();
+    });
+
+    test('pauses for tool approval and exposes the pending request', () async {
+      final controller = ChatController();
+
+      await controller.sendMessage(agent: approvalAgent(), text: 'go');
+      await pumpUntil(() => controller.status == ChatStatus.awaitingApproval);
+
+      expect(controller.status, ChatStatus.awaitingApproval);
+      expect(controller.isLoading, isFalse);
+      expect(controller.pendingApprovalRequests, hasLength(1));
+      expect(
+        controller.pendingApprovalRequests.single.approvalId,
+        'approval_c1',
+      );
+      // No assistant message committed while awaiting approval.
+      expect(controller.messages, hasLength(1));
+      expect(controller.messages.single.role, ModelMessageRole.user);
+      controller.dispose();
+    });
+
+    test('approving the tool resumes and completes the turn', () async {
+      final controller = ChatController();
+
+      await controller.sendMessage(agent: approvalAgent(), text: 'go');
+      await pumpUntil(() => controller.status == ChatStatus.awaitingApproval);
+
+      controller.addToolApprovalResponse(
+        approvalId: 'approval_c1',
+        approved: true,
+      );
+      await pumpUntil(() => controller.status == ChatStatus.ready);
+
+      expect(controller.pendingApprovalRequests, isEmpty);
+      expect(controller.messages.last.role, ModelMessageRole.assistant);
+      expect(controller.messages.last.content, 'final answer');
+      // The latest-turn getters reflect the final (text) step, which carried
+      // no tool calls / results / sources of its own.
+      expect(controller.lastToolCalls, isEmpty);
+      expect(controller.lastToolResults, isEmpty);
+      expect(controller.lastSources, isEmpty);
+      controller.dispose();
+    });
+
+    test('an agent.stream() that throws synchronously is caught', () async {
+      Object? captured;
+      final controller = ChatController(onError: (e) => captured = e);
+      final failure = StateError('stream() threw');
+
+      await controller.sendMessage(
+        agent: ThrowingStreamAgent(failure),
+        text: 'x',
+      );
+      await pumpUntil(() => controller.status == ChatStatus.error);
+
+      expect(controller.status, ChatStatus.error);
+      expect(controller.error, same(failure));
+      expect(captured, same(failure));
+      controller.dispose();
+    });
+
+    test('clear resets the surfaced state', () async {
+      final controller = ChatController();
+      await controller.sendMessage(agent: approvalAgent(), text: 'go');
+      await pumpUntil(() => controller.status == ChatStatus.awaitingApproval);
+
+      controller.clear();
+
+      expect(controller.status, ChatStatus.ready);
+      expect(controller.pendingApprovalRequests, isEmpty);
+      expect(controller.messages, isEmpty);
+      controller.dispose();
+    });
   });
 }

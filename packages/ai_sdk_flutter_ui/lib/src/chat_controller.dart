@@ -16,6 +16,11 @@ enum ChatStatus {
   /// Actively streaming response.
   streaming,
 
+  /// The turn paused waiting on one or more tool-approval decisions. Supply
+  /// them via [ChatController.addToolApprovalResponse]; once every pending
+  /// request is answered the turn resumes automatically.
+  awaitingApproval,
+
   /// An error occurred.
   error,
 }
@@ -75,6 +80,43 @@ class ChatController extends ChangeNotifier {
   /// Live content of the currently-streaming assistant message.
   /// Empty string when not streaming.
   String get streamingContent => _streamBuffer.toString();
+
+  /// Live reasoning ("thinking") text for the in-flight turn, accumulated from
+  /// the model's reasoning deltas. Empty when there is none. Pair it with
+  /// `ReasoningView`.
+  String get streamingReasoning => _streamingReasoning;
+  String _streamingReasoning = '';
+
+  /// Final reasoning text of the most recent completed turn.
+  String get reasoningText => _reasoningText;
+  String _reasoningText = '';
+
+  /// Token usage reported by the most recent completed turn, if any.
+  LanguageModelV3Usage? get lastUsage => _lastUsage;
+  LanguageModelV3Usage? _lastUsage;
+
+  /// Source citations gathered from the most recent completed turn.
+  List<LanguageModelV3SourcePart> get lastSources =>
+      List.unmodifiable(_lastSources);
+  List<LanguageModelV3SourcePart> _lastSources = const [];
+
+  /// Tool calls made during the most recent completed turn.
+  List<LanguageModelV3ToolCallPart> get lastToolCalls =>
+      List.unmodifiable(_lastToolCalls);
+  List<LanguageModelV3ToolCallPart> _lastToolCalls = const [];
+
+  /// Tool results produced during the most recent completed turn.
+  List<LanguageModelV3ToolResultPart> get lastToolResults =>
+      List.unmodifiable(_lastToolResults);
+  List<LanguageModelV3ToolResultPart> _lastToolResults = const [];
+
+  /// Tool-approval requests awaiting a decision. Non-empty only while
+  /// [status] is [ChatStatus.awaitingApproval]. Render each with
+  /// `ToolApprovalCard` and answer via [addToolApprovalResponse].
+  List<LanguageModelV3ToolApprovalRequestPart> get pendingApprovalRequests =>
+      List.unmodifiable(_pendingApprovalRequests);
+  List<LanguageModelV3ToolApprovalRequestPart> _pendingApprovalRequests =
+      const [];
 
   final StringBuffer _streamBuffer = StringBuffer();
   StreamSubscription<String>? _activeSubscription;
@@ -148,8 +190,20 @@ class ChatController extends ChangeNotifier {
     _pendingApprovals[approvalId] = LanguageModelV3ToolApprovalResponse(
       approvalId: approvalId,
       approved: approved,
+      reason: reason,
     );
+    _pendingApprovalRequests = _pendingApprovalRequests
+        .where((request) => request.approvalId != approvalId)
+        .toList();
     notifyListeners();
+
+    // Once every paused request has a decision, replay the turn with the
+    // collected responses so the agent can execute (or skip) the tools.
+    if (_status == ChatStatus.awaitingApproval &&
+        _pendingApprovalRequests.isEmpty &&
+        _lastAgent != null) {
+      unawaited(_runGeneration(_lastAgent!));
+    }
   }
 
   /// Returns any pending tool-approval responses and clears the buffer.
@@ -162,6 +216,13 @@ class ChatController extends ChangeNotifier {
 
   Future<void> _runGeneration(ToolLoopAgent agent) async {
     _streamBuffer.clear();
+    _streamingReasoning = '';
+    _reasoningText = '';
+    _lastUsage = null;
+    _lastSources = const [];
+    _lastToolCalls = const [];
+    _lastToolResults = const [];
+    _pendingApprovalRequests = const [];
     _status = ChatStatus.submitted;
     _error = null;
     notifyListeners();
@@ -181,9 +242,15 @@ class ChatController extends ChangeNotifier {
       streamResult.output.then((_) {}, onError: (_) {});
 
       // Streaming errors surface on the full event stream (not the text
-      // stream), so watch both: text for content, fullStream for errors.
+      // stream), so watch both: text for content, fullStream for errors and
+      // live reasoning deltas.
       _errorSubscription = streamResult.fullStream.listen((event) {
-        if (event is StreamTextErrorEvent) _handleError(event.error);
+        if (event is StreamTextErrorEvent) {
+          _handleError(event.error);
+        } else if (event is StreamTextReasoningDeltaEvent) {
+          _streamingReasoning += event.delta;
+          notifyListeners();
+        }
       }, onError: _handleError);
 
       _activeSubscription = streamResult.textStream.listen(
@@ -191,27 +258,62 @@ class ChatController extends ChangeNotifier {
           _streamBuffer.write(delta);
           notifyListeners();
         },
-        onDone: () {
-          unawaited(_errorSubscription?.cancel());
-          _errorSubscription = null;
-          // An error event may already have moved us out of streaming.
-          if (_status != ChatStatus.streaming) return;
-          final assistantMessage = ModelMessage(
-            role: ModelMessageRole.assistant,
-            content: _streamBuffer.toString(),
-          );
-          _messages.add(assistantMessage);
-          _streamBuffer.clear();
-          _status = ChatStatus.ready;
-          notifyListeners();
-          onFinish?.call(assistantMessage);
-        },
+        onDone: () => unawaited(_finalizeTurn(streamResult)),
         onError: _handleError,
         cancelOnError: true,
       );
     } catch (err) {
       _handleError(err);
     }
+  }
+
+  /// Finalize a completed (or approval-paused) turn: capture the turn's
+  /// metadata, then either surface pending approval requests or commit the
+  /// assistant message.
+  Future<void> _finalizeTurn(StreamTextResult streamResult) async {
+    unawaited(_errorSubscription?.cancel());
+    _errorSubscription = null;
+
+    // An error event may already have moved us out of streaming.
+    if (_status != ChatStatus.streaming) return;
+
+    var approvals = const <LanguageModelV3ToolApprovalRequestPart>[];
+    try {
+      final steps = await streamResult.steps;
+      approvals = [
+        for (final step in steps) ...step.toolApprovalRequests,
+      ];
+      _lastUsage = await streamResult.totalUsage ?? await streamResult.usage;
+      _lastSources = await streamResult.sources;
+      _lastToolCalls = await streamResult.toolCalls;
+      _lastToolResults = await streamResult.toolResults;
+      _reasoningText = await streamResult.reasoningText;
+    } catch (_) {
+      // Metadata is best-effort; a late stream error must not break finalize.
+    }
+
+    // A late error may have arrived while awaiting the result futures.
+    if (_status != ChatStatus.streaming) return;
+
+    if (approvals.isNotEmpty) {
+      _pendingApprovalRequests = approvals;
+      _streamBuffer.clear();
+      _streamingReasoning = '';
+      _status = ChatStatus.awaitingApproval;
+      notifyListeners();
+      return;
+    }
+
+    final assistantMessage = ModelMessage(
+      role: ModelMessageRole.assistant,
+      content: _streamBuffer.toString(),
+    );
+    _messages.add(assistantMessage);
+    _streamBuffer.clear();
+    _streamingReasoning = '';
+    _status = ChatStatus.ready;
+    notifyListeners();
+    onFinish?.call(assistantMessage);
   }
 
   void _handleError(Object err) {
@@ -242,6 +344,8 @@ class ChatController extends ChangeNotifier {
       );
       _streamBuffer.clear();
     }
+    _streamingReasoning = '';
+    _pendingApprovalRequests = const [];
     _status = ChatStatus.ready;
     notifyListeners();
   }
@@ -256,6 +360,13 @@ class ChatController extends ChangeNotifier {
       ..clear()
       ..addAll(initialMessages);
     _streamBuffer.clear();
+    _streamingReasoning = '';
+    _reasoningText = '';
+    _lastUsage = null;
+    _lastSources = const [];
+    _lastToolCalls = const [];
+    _lastToolResults = const [];
+    _pendingApprovalRequests = const [];
     _pendingApprovals.clear();
     _status = ChatStatus.ready;
     _error = null;

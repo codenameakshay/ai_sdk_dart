@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 
+import '../theme/ai_motion.dart';
+
 /// An inline error banner with optional retry and dismiss actions.
 ///
 /// Render it when a controller enters its error state — e.g. when
 /// `ChatController.error` is non-null or `CompletionController.error` is set —
 /// and wire [onRetry] to `regenerate()`/`complete(...)` and [onDismiss] to
-/// `clearError()`.
+/// `clearError()`. It eases in on appear; the actions answer a press with a
+/// light haptic.
 ///
 /// Pure presentation: it reads only its inputs and themes via
 /// `Theme.of(context)`.
@@ -49,49 +52,65 @@ class ChatErrorView extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final text = message ?? error.toString();
+    final onRetry = this.onRetry;
+    final onDismiss = this.onDismiss;
 
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
-      decoration: BoxDecoration(
-        color: scheme.errorContainer,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(
-            Icons.error_outline_rounded,
-            size: 20,
-            color: scheme.onErrorContainer,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(top: 1),
-              child: Text(
-                text,
-                style: textTheme.bodyMedium?.copyWith(
-                  color: scheme.onErrorContainer,
+    return AiEntrance(
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+        decoration: BoxDecoration(
+          color: scheme.errorContainer,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              Icons.error_outline_rounded,
+              size: 20,
+              color: scheme.onErrorContainer,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 1),
+                child: Text(
+                  text,
+                  style: textTheme.bodyMedium?.copyWith(
+                    color: scheme.onErrorContainer,
+                  ),
                 ),
               ),
             ),
-          ),
-          if (onRetry != null)
-            TextButton(
-              key: const ValueKey('chat-error-retry'),
-              onPressed: onRetry,
-              style: TextButton.styleFrom(foregroundColor: scheme.onErrorContainer),
-              child: Text(retryLabel),
-            ),
-          if (onDismiss != null)
-            IconButton(
-              key: const ValueKey('chat-error-dismiss'),
-              tooltip: 'Dismiss',
-              onPressed: onDismiss,
-              icon: Icon(Icons.close_rounded, color: scheme.onErrorContainer),
-            ),
-        ],
+            if (onRetry != null)
+              PressableScale(
+                child: TextButton(
+                  key: const ValueKey('chat-error-retry'),
+                  onPressed: () {
+                    AiHaptics.light();
+                    onRetry();
+                  },
+                  style: TextButton.styleFrom(
+                    foregroundColor: scheme.onErrorContainer,
+                  ),
+                  child: Text(retryLabel),
+                ),
+              ),
+            if (onDismiss != null)
+              PressableScale(
+                child: IconButton(
+                  key: const ValueKey('chat-error-dismiss'),
+                  tooltip: 'Dismiss',
+                  onPressed: () {
+                    AiHaptics.selection();
+                    onDismiss();
+                  },
+                  icon: Icon(Icons.close_rounded, color: scheme.onErrorContainer),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

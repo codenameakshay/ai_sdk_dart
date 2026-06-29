@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:flutter/material.dart';
 
+import '../theme/ai_motion.dart';
+
 /// Renders a tool call — the tool name plus its pretty-printed JSON arguments —
 /// and, when supplied, the matching tool result or error.
 ///
@@ -15,8 +17,9 @@ import 'package:flutter/material.dart';
 /// )
 /// ```
 ///
-/// Pure presentation: it reads only the content-part fields and themes via
-/// `Theme.of(context)`.
+/// Flat and hairline-bordered per the design system. When a result arrives its
+/// status icon eases in (suppressed under reduced motion). Pure presentation:
+/// it reads only the content-part fields and themes via `Theme.of(context)`.
 class ToolCallCard extends StatelessWidget {
   const ToolCallCard({super.key, required this.call, this.result});
 
@@ -36,6 +39,8 @@ class ToolCallCard extends StatelessWidget {
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
+      elevation: 0,
+      color: scheme.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(color: scheme.outlineVariant),
@@ -69,12 +74,20 @@ class ToolCallCard extends StatelessWidget {
               const SizedBox(height: 12),
               Row(
                 children: [
-                  Icon(
-                    isError
-                        ? Icons.error_outline_rounded
-                        : Icons.check_circle_outline_rounded,
-                    size: 16,
-                    color: isError ? scheme.error : scheme.primary,
+                  TweenAnimationBuilder<double>(
+                    key: ValueKey(isError),
+                    tween: Tween(begin: 0.6, end: 1),
+                    duration: AiMotion.duration(context, AiMotion.quick),
+                    curve: AiMotion.gentle,
+                    builder: (context, scale, child) =>
+                        Transform.scale(scale: scale, child: child),
+                    child: Icon(
+                      isError
+                          ? Icons.error_outline_rounded
+                          : Icons.check_circle_outline_rounded,
+                      size: 16,
+                      color: isError ? scheme.error : scheme.primary,
+                    ),
                   ),
                   const SizedBox(width: 6),
                   Text(

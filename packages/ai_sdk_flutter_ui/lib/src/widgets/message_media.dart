@@ -3,9 +3,12 @@ import 'dart:convert';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:flutter/material.dart';
 
+import '../theme/ai_motion.dart';
+
 /// Renders an image content part ([LanguageModelV3ImagePart]) from any of the
 /// three `DataContent` carriers — raw bytes, base64, or a URL — using core
-/// Flutter image widgets (no extra dependency).
+/// Flutter image widgets (no extra dependency). The image fades in once decoded
+/// (suppressed under reduced motion).
 ///
 /// Decode/network failures fall back to a broken-image placeholder rather than
 /// throwing, so a malformed part never breaks the surrounding message.
@@ -47,7 +50,17 @@ class MessageImage extends StatelessWidget {
         width: width,
         height: height,
         fit: fit,
-        errorBuilder: (context, _, __) => _ImageError(width: width, height: height),
+        frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+          if (wasSynchronouslyLoaded || AiMotion.reduced(context)) return child;
+          return AnimatedOpacity(
+            opacity: frame == null ? 0 : 1,
+            duration: AiMotion.quick,
+            curve: AiMotion.standard,
+            child: child,
+          );
+        },
+        errorBuilder: (context, _, __) =>
+            _ImageError(width: width, height: height),
       ),
     );
   }
@@ -86,7 +99,8 @@ class _ImageError extends StatelessWidget {
 /// compact attachment tile: a type icon, the filename (falling back to the
 /// media type), and the media type as a subtitle.
 ///
-/// The package does not open files itself; supply [onTap] to handle it.
+/// The package does not open files itself; supply [onTap] to handle it. The
+/// tile answers a press with a subtle scale and a selection haptic.
 ///
 /// ```dart
 /// MessageAttachment(file: filePart, onTap: () => openFile(filePart))
@@ -107,39 +121,46 @@ class MessageAttachment extends StatelessWidget {
     final title = file.filename ?? file.mediaType;
     final showSubtitle = file.filename != null;
 
-    return Material(
-      color: scheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(12),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(_iconFor(file.mediaType), color: scheme.onSurfaceVariant),
-              const SizedBox(width: 10),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    title,
-                    style: textTheme.bodyMedium?.copyWith(
-                      color: scheme.onSurface,
-                    ),
-                  ),
-                  if (showSubtitle)
+    return PressableScale(
+      child: Material(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap == null
+              ? null
+              : () {
+                  AiHaptics.selection();
+                  onTap!();
+                },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(_iconFor(file.mediaType), color: scheme.onSurfaceVariant),
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
                     Text(
-                      file.mediaType,
-                      style: textTheme.labelSmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
+                      title,
+                      style: textTheme.bodyMedium?.copyWith(
+                        color: scheme.onSurface,
                       ),
                     ),
-                ],
-              ),
-            ],
+                    if (showSubtitle)
+                      Text(
+                        file.mediaType,
+                        style: textTheme.labelSmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),

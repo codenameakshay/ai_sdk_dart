@@ -53,7 +53,13 @@ void main() {
       }
 
       expect(controller.streamingContent.isNotEmpty, isTrue);
-      expect(find.text('streamed reply'), findsOneWidget);
+      // The optimistic assistant turn renders flush via StreamingTextView
+      // (no bubble), carrying the live buffer.
+      expect(find.byType(StreamingTextView), findsOneWidget);
+      expect(
+        tester.widget<StreamingTextView>(find.byType(StreamingTextView)).text,
+        'streamed reply',
+      );
 
       // Release the stream and let it settle so no timers dangle.
       model.finish();

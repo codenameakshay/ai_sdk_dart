@@ -1,6 +1,8 @@
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:flutter/material.dart';
 
+import '../theme/ai_motion.dart';
+
 /// A wrap of citation chips, one per [LanguageModelV3SourcePart].
 ///
 /// Each chip shows the source's title (falling back to its URL) and, when
@@ -54,16 +56,23 @@ class SourceCitations extends StatelessWidget {
           runSpacing: 6,
           children: [
             for (final source in sources)
-              ActionChip(
-                avatar: Icon(
-                  Icons.link_rounded,
-                  size: 16,
-                  color: scheme.primary,
+              PressableScale(
+                child: ActionChip(
+                  avatar: Icon(
+                    Icons.link_rounded,
+                    size: 16,
+                    color: scheme.primary,
+                  ),
+                  label: Text(_chipLabel(source)),
+                  tooltip: source.url,
+                  visualDensity: VisualDensity.compact,
+                  onPressed: onTap == null
+                      ? null
+                      : () {
+                          AiHaptics.selection();
+                          onTap!(source);
+                        },
                 ),
-                label: Text(_chipLabel(source)),
-                tooltip: source.url,
-                visualDensity: VisualDensity.compact,
-                onPressed: onTap == null ? null : () => onTap!(source),
               ),
           ],
         ),

@@ -1,19 +1,23 @@
 import 'package:flutter/material.dart';
 
+import '../theme/ai_motion.dart';
+
 /// A message-input row: a text field plus a send button, with optional attach
 /// and stop affordances.
 ///
 /// - Calls [onSend] with the trimmed text when the user submits (and clears the
 ///   field if no external [controller] is supplied).
 /// - The send button is disabled while [isLoading] is true.
-/// - When [isLoading] and [onStop] are both set, the send button is replaced by
-///   a stop button.
+/// - When [isLoading] and [onStop] are both set, the send button **morphs**
+///   into a stop button (cross-fade + scale), so it reads as one control
+///   changing state.
 /// - An optional [onAttach] callback adds a leading attach button. The package
 ///   intentionally does NOT depend on `image_picker`/`file_selector`; wire your
 ///   own picker inside this callback.
 ///
-/// Stateless and theme-driven. Provide a [controller] to keep ownership of the
-/// text, or let the widget manage its own internally.
+/// Buttons answer a press with a subtle scale and a light haptic. Theme-driven;
+/// honors reduced motion. Provide a [controller] to keep ownership of the text,
+/// or let the widget manage its own internally.
 class ChatComposer extends StatefulWidget {
   const ChatComposer({
     super.key,
@@ -75,7 +79,18 @@ class _ChatComposerState extends State<ChatComposer> {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
     if (_ownsController) _controller.clear();
+    AiHaptics.light();
     widget.onSend(text);
+  }
+
+  void _stop() {
+    AiHaptics.light();
+    widget.onStop?.call();
+  }
+
+  void _attach() {
+    AiHaptics.selection();
+    widget.onAttach?.call();
   }
 
   @override
@@ -90,11 +105,13 @@ class _ChatComposerState extends State<ChatComposer> {
         child: Row(
           children: [
             if (widget.onAttach != null)
-              IconButton(
-                key: const ValueKey('chat-composer-attach'),
-                tooltip: 'Attach',
-                onPressed: widget.enabled ? widget.onAttach : null,
-                icon: const Icon(Icons.attach_file_rounded),
+              PressableScale(
+                child: IconButton(
+                  key: const ValueKey('chat-composer-attach'),
+                  tooltip: 'Attach',
+                  onPressed: widget.enabled ? _attach : null,
+                  icon: const Icon(Icons.add_rounded),
+                ),
               ),
             Expanded(
               child: TextField(
@@ -121,18 +138,37 @@ class _ChatComposerState extends State<ChatComposer> {
               ),
             ),
             const SizedBox(width: 8),
-            if (showStop)
-              IconButton.filled(
-                key: const ValueKey('chat-composer-stop'),
-                onPressed: widget.onStop,
-                icon: const Icon(Icons.stop_rounded),
-              )
-            else
-              IconButton.filled(
-                key: const ValueKey('chat-composer-send'),
-                onPressed: (widget.enabled && !widget.isLoading) ? _send : null,
-                icon: const Icon(Icons.send_rounded),
+            AnimatedSwitcher(
+              duration: AiMotion.duration(context, AiMotion.quick),
+              switchInCurve: AiMotion.standard,
+              switchOutCurve: AiMotion.standard,
+              transitionBuilder: (child, animation) => FadeTransition(
+                opacity: animation,
+                child: ScaleTransition(
+                  scale: Tween<double>(begin: 0.8, end: 1).animate(animation),
+                  child: child,
+                ),
               ),
+              child: showStop
+                  ? PressableScale(
+                      key: const ValueKey('composer-trailing-stop'),
+                      child: IconButton.filled(
+                        key: const ValueKey('chat-composer-stop'),
+                        onPressed: _stop,
+                        icon: const Icon(Icons.stop_rounded),
+                      ),
+                    )
+                  : PressableScale(
+                      key: const ValueKey('composer-trailing-send'),
+                      child: IconButton.filled(
+                        key: const ValueKey('chat-composer-send'),
+                        onPressed: (widget.enabled && !widget.isLoading)
+                            ? _send
+                            : null,
+                        icon: const Icon(Icons.arrow_upward_rounded),
+                      ),
+                    ),
+            ),
           ],
         ),
       ),

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../object_stream_controller.dart';
+import '../theme/ai_motion.dart';
 import 'chat_error_view.dart';
 
 /// Signature for rendering the current value of an [ObjectStreamController].
@@ -10,8 +11,8 @@ typedef ObjectValueBuilder<T> =
     Widget Function(BuildContext context, T value, bool isStreaming);
 
 /// Renders the live state of an [ObjectStreamController] — mirrors the JS
-/// `useObject` UI: a spinner while loading, the partial value as it streams,
-/// and an error banner if the stream fails.
+/// `useObject` UI: a spinner while loading, the partial value as it streams
+/// (eased in once it first appears), and an error banner if the stream fails.
 ///
 /// By default the value is shown as pretty-printed JSON; pass a [builder] to
 /// render it however you like (e.g. a schema-driven form). Rebuilds reactively
@@ -63,10 +64,10 @@ class ObjectStreamView<T> extends StatelessWidget {
         }
 
         final builder = this.builder;
-        if (builder != null) {
-          return builder(context, value, controller.isStreaming);
-        }
-        return _JsonView(value: value);
+        final content = builder != null
+            ? builder(context, value, controller.isStreaming)
+            : _JsonView(value: value);
+        return AiEntrance(child: content);
       },
     );
   }

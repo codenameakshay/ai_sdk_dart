@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 
+import '../theme/ai_motion.dart';
+
 /// A wrap of tappable prompt-starter chips.
 ///
 /// Ideal for an empty conversation state: surface a few example prompts the
 /// user can tap to kick things off. [onSelected] fires with the chosen string —
 /// wire it to `ChatController.sendMessage` or your composer.
 ///
-/// Collapses to nothing when [suggestions] is empty. Themed via
-/// `Theme.of(context)`; holds no business logic.
+/// The chips ease in on a short stagger and answer a press with a subtle scale
+/// and a selection haptic. Collapses to nothing when [suggestions] is empty.
 ///
 /// ```dart
 /// PromptSuggestions(
@@ -16,7 +18,7 @@ import 'package:flutter/material.dart';
 ///   onSelected: (text) => controller.sendMessage(agent: agent, text: text),
 /// )
 /// ```
-class PromptSuggestions extends StatelessWidget {
+class PromptSuggestions extends StatefulWidget {
   const PromptSuggestions({
     super.key,
     required this.suggestions,
@@ -38,12 +40,42 @@ class PromptSuggestions extends StatelessWidget {
   final double spacing;
 
   @override
+  State<PromptSuggestions> createState() => _PromptSuggestionsState();
+}
+
+class _PromptSuggestionsState extends State<PromptSuggestions>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 420),
+  );
+  bool _started = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    if (AiMotion.reduced(context)) {
+      _controller.value = 1;
+    } else {
+      _controller.forward();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (suggestions.isEmpty) return const SizedBox.shrink();
+    if (widget.suggestions.isEmpty) return const SizedBox.shrink();
 
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    final title = this.title;
+    final title = widget.title;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -59,17 +91,46 @@ class PromptSuggestions extends StatelessWidget {
           const SizedBox(height: 8),
         ],
         Wrap(
-          spacing: spacing,
-          runSpacing: spacing,
+          spacing: widget.spacing,
+          runSpacing: widget.spacing,
           children: [
-            for (final suggestion in suggestions)
-              ActionChip(
-                label: Text(suggestion),
-                onPressed: () => onSelected(suggestion),
-              ),
+            for (var i = 0; i < widget.suggestions.length; i++)
+              _staggered(i, _chip(widget.suggestions[i])),
           ],
         ),
       ],
+    );
+  }
+
+  Widget _chip(String suggestion) {
+    return PressableScale(
+      child: ActionChip(
+        label: Text(suggestion),
+        onPressed: () {
+          AiHaptics.selection();
+          widget.onSelected(suggestion);
+        },
+      ),
+    );
+  }
+
+  Widget _staggered(int index, Widget child) {
+    // Cap the staggered count so a long list still finishes promptly.
+    final start = (index.clamp(0, 5)) * 0.08;
+    final animation = CurvedAnimation(
+      parent: _controller,
+      curve: Interval(start, (start + 0.5).clamp(0.0, 1.0), curve: AiMotion.standard),
+    );
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, child) {
+        final t = animation.value;
+        return Opacity(
+          opacity: t,
+          child: Transform.translate(offset: Offset(0, 6 * (1 - t)), child: child),
+        );
+      },
+      child: child,
     );
   }
 }

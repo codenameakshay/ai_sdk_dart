@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 
-/// A collapsible/expandable panel for reasoning ("thinking") text.
+import '../theme/ai_motion.dart';
+
+/// A collapsible panel for reasoning ("thinking") text.
 ///
 /// Use it to surface a model's chain-of-thought without dominating the
-/// conversation. Collapsed by default; tap the header to expand.
+/// conversation. Collapsed by default; tap the header to expand. The disclosure
+/// eases open and the chevron rotates; both collapse to instant under reduced
+/// motion.
 ///
 /// ```dart
 /// ReasoningView(text: result.reasoningText)
@@ -35,12 +39,16 @@ class ReasoningView extends StatefulWidget {
 class _ReasoningViewState extends State<ReasoningView> {
   late bool _expanded = widget.initiallyExpanded;
 
-  void _toggle() => setState(() => _expanded = !_expanded);
+  void _toggle() {
+    AiHaptics.selection();
+    setState(() => _expanded = !_expanded);
+  }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final motion = AiMotion.duration(context, AiMotion.base);
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 4),
@@ -74,7 +82,8 @@ class _ReasoningViewState extends State<ReasoningView> {
                   ),
                   AnimatedRotation(
                     turns: _expanded ? 0.5 : 0,
-                    duration: const Duration(milliseconds: 200),
+                    duration: motion,
+                    curve: AiMotion.standard,
                     child: Icon(
                       Icons.expand_more_rounded,
                       color: scheme.onSurfaceVariant,
@@ -85,8 +94,8 @@ class _ReasoningViewState extends State<ReasoningView> {
             ),
           ),
           AnimatedSize(
-            duration: const Duration(milliseconds: 200),
-            curve: Curves.easeOut,
+            duration: motion,
+            curve: AiMotion.standard,
             alignment: Alignment.topCenter,
             child: _expanded
                 ? Padding(

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
-/// Renders text that grows as it streams in, with a subtle blinking cursor
-/// shown while [isStreaming] is true.
+import '../theme/ai_motion.dart';
+
+/// Renders text that grows as it streams in, with a soft breathing cursor shown
+/// while [isStreaming] is true.
 ///
 /// Pair it with any controller that exposes a growing `String` — e.g.
 /// `CompletionController.completion` or `ChatController.streamingContent` —
@@ -16,7 +18,9 @@ import 'package:flutter/material.dart';
 ///   ),
 /// )
 /// ```
-class StreamingTextView extends StatefulWidget {
+///
+/// The cursor honors reduced-motion (it holds steady instead of pulsing).
+class StreamingTextView extends StatelessWidget {
   const StreamingTextView({
     super.key,
     required this.text,
@@ -29,7 +33,7 @@ class StreamingTextView extends StatefulWidget {
   /// The (growing) text to display.
   final String text;
 
-  /// Whether to show the blinking typing cursor.
+  /// Whether to show the breathing typing cursor.
   final bool isStreaming;
 
   /// Text style; falls back to the ambient `DefaultTextStyle`/`bodyMedium`.
@@ -43,89 +47,29 @@ class StreamingTextView extends StatefulWidget {
   final bool selectable;
 
   @override
-  State<StreamingTextView> createState() => _StreamingTextViewState();
-}
-
-class _StreamingTextViewState extends State<StreamingTextView>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _blink;
-
-  @override
-  void initState() {
-    super.initState();
-    _blink = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 900),
-    );
-    if (widget.isStreaming) _blink.repeat();
-  }
-
-  @override
-  void didUpdateWidget(covariant StreamingTextView oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.isStreaming && !_blink.isAnimating) {
-      _blink.repeat();
-    } else if (!widget.isStreaming && _blink.isAnimating) {
-      _blink.stop();
-    }
-  }
-
-  @override
-  void dispose() {
-    _blink.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final effectiveStyle =
-        widget.style ?? Theme.of(context).textTheme.bodyMedium;
+    final effectiveStyle = style ?? Theme.of(context).textTheme.bodyMedium;
 
-    final textWidget = widget.selectable && !widget.isStreaming
-        ? SelectableText(
-            widget.text,
-            style: effectiveStyle,
-            textAlign: widget.textAlign,
-          )
-        : Text(widget.text, style: effectiveStyle, textAlign: widget.textAlign);
+    if (!isStreaming) {
+      return selectable
+          ? SelectableText(text, style: effectiveStyle, textAlign: textAlign)
+          : Text(text, style: effectiveStyle, textAlign: textAlign);
+    }
 
-    if (!widget.isStreaming) return textWidget;
-
-    return RichText(
-      textAlign: widget.textAlign,
-      text: TextSpan(
+    // While streaming, render the text plus an inline breathing caret. The
+    // caret rides the last line so the message reads as "still arriving".
+    return Text.rich(
+      TextSpan(
         style: effectiveStyle,
         children: [
-          TextSpan(text: widget.text),
-          WidgetSpan(
+          TextSpan(text: text),
+          const WidgetSpan(
             alignment: PlaceholderAlignment.middle,
-            child: FadeTransition(
-              opacity: _blink.drive(
-                Animatable<double>.fromCallback((t) => (t < 0.5) ? 1.0 : 0.0),
-              ),
-              child: _Cursor(color: effectiveStyle?.color),
-            ),
+            child: StreamingCursor(key: ValueKey('streaming-cursor')),
           ),
         ],
       ),
-    );
-  }
-}
-
-class _Cursor extends StatelessWidget {
-  const _Cursor({this.color});
-
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      key: const ValueKey('streaming-cursor'),
-      width: 2,
-      height: 16,
-      margin: const EdgeInsets.only(left: 2),
-      color: color ?? scheme.primary,
+      textAlign: textAlign,
     );
   }
 }

@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:flutter/material.dart';
 
+import '../theme/ai_motion.dart';
+
 /// A human-in-the-loop prompt for a tool call that requires approval.
 ///
 /// Renders the requested tool's name and pretty-printed input, plus Approve and
@@ -21,8 +23,9 @@ import 'package:flutter/material.dart';
 ///   )
 /// ```
 ///
-/// Set [showReasonField] to collect an optional free-text reason that is passed
-/// to the callbacks; otherwise they receive `null`.
+/// The buttons answer a press with a subtle scale and a selection haptic. Set
+/// [showReasonField] to collect an optional free-text reason that is passed to
+/// the callbacks; otherwise they receive `null`.
 class ToolApprovalCard extends StatefulWidget {
   const ToolApprovalCard({
     super.key,
@@ -75,6 +78,16 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
     return text.isEmpty ? null : text;
   }
 
+  void _approve() {
+    AiHaptics.selection();
+    widget.onApprove(_reasonText);
+  }
+
+  void _deny() {
+    AiHaptics.selection();
+    widget.onDeny(_reasonText);
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -83,6 +96,8 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
+      elevation: 0,
+      color: scheme.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(color: scheme.outlineVariant),
@@ -133,17 +148,21 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                TextButton(
-                  key: const ValueKey('tool-approval-deny'),
-                  onPressed: () => widget.onDeny(_reasonText),
-                  style: TextButton.styleFrom(foregroundColor: scheme.error),
-                  child: Text(widget.denyLabel),
+                PressableScale(
+                  child: TextButton(
+                    key: const ValueKey('tool-approval-deny'),
+                    onPressed: _deny,
+                    style: TextButton.styleFrom(foregroundColor: scheme.error),
+                    child: Text(widget.denyLabel),
+                  ),
                 ),
                 const SizedBox(width: 8),
-                FilledButton(
-                  key: const ValueKey('tool-approval-approve'),
-                  onPressed: () => widget.onApprove(_reasonText),
-                  child: Text(widget.approveLabel),
+                PressableScale(
+                  child: FilledButton(
+                    key: const ValueKey('tool-approval-approve'),
+                    onPressed: _approve,
+                    child: Text(widget.approveLabel),
+                  ),
                 ),
               ],
             ),

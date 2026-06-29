@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../theme/ai_motion.dart';
+
 /// A compact row of per-message actions: copy, regenerate, and 👍/👎 feedback.
 ///
 /// Each action renders only when its input is supplied, so you opt into exactly
 /// the affordances you want. Copy uses the core `Clipboard` service (no extra
-/// dependency); the rest are plain callbacks you wire to your controller.
+/// dependency); the rest are plain callbacks you wire to your controller. Every
+/// button answers a press with a subtle scale and a light haptic.
 ///
 /// ```dart
 /// MessageActionsBar(
@@ -45,6 +48,7 @@ class MessageActionsBar extends StatelessWidget {
   final double iconSize;
 
   Future<void> _copy() async {
+    AiHaptics.light();
     await Clipboard.setData(ClipboardData(text: copyText!));
     onCopied?.call();
   }
@@ -74,7 +78,10 @@ class MessageActionsBar extends StatelessWidget {
             icon: Icons.refresh_rounded,
             color: color,
             iconSize: iconSize,
-            onPressed: onRegenerate!,
+            onPressed: () {
+              AiHaptics.selection();
+              onRegenerate!();
+            },
           ),
         if (onThumbUp != null)
           _ActionButton(
@@ -83,7 +90,10 @@ class MessageActionsBar extends StatelessWidget {
             icon: Icons.thumb_up_outlined,
             color: color,
             iconSize: iconSize,
-            onPressed: onThumbUp!,
+            onPressed: () {
+              AiHaptics.selection();
+              onThumbUp!();
+            },
           ),
         if (onThumbDown != null)
           _ActionButton(
@@ -92,7 +102,10 @@ class MessageActionsBar extends StatelessWidget {
             icon: Icons.thumb_down_outlined,
             color: color,
             iconSize: iconSize,
-            onPressed: onThumbDown!,
+            onPressed: () {
+              AiHaptics.selection();
+              onThumbDown!();
+            },
           ),
       ],
     );
@@ -118,14 +131,16 @@ class _ActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return IconButton(
-      key: buttonKey,
-      tooltip: tooltip,
-      onPressed: onPressed,
-      iconSize: iconSize,
-      visualDensity: VisualDensity.compact,
-      color: color,
-      icon: Icon(icon),
+    return PressableScale(
+      child: IconButton(
+        key: buttonKey,
+        tooltip: tooltip,
+        onPressed: onPressed,
+        iconSize: iconSize,
+        visualDensity: VisualDensity.compact,
+        color: color,
+        icon: Icon(icon),
+      ),
     );
   }
 }

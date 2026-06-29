@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 
+import '../theme/ai_motion.dart';
+
 /// A small floating button that appears when a scroll view is scrolled away
-/// from its bottom edge, and jumps back to the bottom when tapped.
+/// from its bottom edge, and eases back to the bottom when tapped.
 ///
 /// Drop it into a `Stack` over your [ChatMessageList] (or any [ListView]) and
 /// give it the same [ScrollController]. It hides itself while the list is
 /// within [threshold] pixels of the bottom, so it never covers the latest
-/// message when the user is already there.
+/// message when the user is already there. It scales and fades in on appear and
+/// fires a light haptic on tap; both are suppressed under reduced motion.
 ///
 /// ```dart
 /// Stack(children: [
@@ -23,8 +26,8 @@ class ScrollToBottomButton extends StatefulWidget {
     required this.controller,
     this.threshold = 120,
     this.icon = Icons.keyboard_arrow_down_rounded,
-    this.duration = const Duration(milliseconds: 250),
-    this.curve = Curves.easeOut,
+    this.duration = AiMotion.scroll,
+    this.curve = AiMotion.standard,
   });
 
   /// The scroll controller of the list this button controls.
@@ -92,21 +95,42 @@ class _ScrollToBottomButtonState extends State<ScrollToBottomButton> {
   void _scrollToBottom() {
     final controller = widget.controller;
     if (!controller.hasClients) return;
-    controller.animateTo(
-      controller.position.maxScrollExtent,
-      duration: widget.duration,
-      curve: widget.curve,
-    );
+    AiHaptics.light();
+    if (AiMotion.reduced(context)) {
+      controller.jumpTo(controller.position.maxScrollExtent);
+    } else {
+      controller.animateTo(
+        controller.position.maxScrollExtent,
+        duration: widget.duration,
+        curve: widget.curve,
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     if (!_visible) return const SizedBox.shrink();
-    return FloatingActionButton.small(
+
+    final fab = FloatingActionButton.small(
       key: const ValueKey('scroll-to-bottom'),
       onPressed: _scrollToBottom,
       tooltip: 'Scroll to latest',
       child: Icon(widget.icon),
+    );
+
+    if (AiMotion.reduced(context)) return fab;
+
+    // Ease in on appear. Min scale stays well above zero so the tap target is
+    // always hittable, even mid-animation.
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: AiMotion.quick,
+      curve: AiMotion.gentle,
+      builder: (context, t, child) => Opacity(
+        opacity: t.clamp(0.0, 1.0),
+        child: Transform.scale(scale: 0.85 + 0.15 * t, child: child),
+      ),
+      child: fab,
     );
   }
 }

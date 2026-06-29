@@ -1,5 +1,8 @@
-name: ai_sdk_mistral
-description: Mistral AI provider for AI SDK Dart. Use Mistral models for text generation and embeddings.
+name: ai_sdk_openai_compatible
+description: >-
+  Shared OpenAI Chat Completions base for AI SDK Dart providers. Implements tool
+  calling, multimodal content, structured output, and SSE streaming once, behind
+  a small per-provider config.
 version: 1.1.0
 homepage: https://github.com/codenameakshay/ai_sdk_dart
 repository: https://github.com/codenameakshay/ai_sdk_dart
@@ -9,7 +12,6 @@ environment:
   sdk: ^3.11.1
 
 dependencies:
-  ai_sdk_openai_compatible: ^1.1.0
   ai_sdk_provider: ^1.1.0
   dio: ^5.9.0
 

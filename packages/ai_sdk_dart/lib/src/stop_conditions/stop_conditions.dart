@@ -97,3 +97,67 @@ StopCondition stopWhenAny(List<StopCondition> conditions) {
 StopCondition stopWhenAll(List<StopCondition> conditions) {
   return (snapshot) => conditions.every((c) => c(snapshot));
 }
+
+// ---------------------------------------------------------------------------
+// Tool-loop run policy (shared by generateText and streamText)
+//
+// These helpers concentrate the multi-step loop policy that was previously
+// duplicated across both core functions — the duplication that let the same
+// `stopWhen` / `maxSteps` bug exist in both. Keeping it here makes the policy
+// the single test surface.
+// ---------------------------------------------------------------------------
+
+/// Resolves the `stopWhen` union (`StopCondition | List<StopCondition> | null`)
+/// and merges it with the explicit [stopConditions] into one effective list.
+List<StopCondition> resolveStopConditions(
+  Object? stopWhen,
+  List<StopCondition> stopConditions,
+) {
+  final fromStopWhen = switch (stopWhen) {
+    null => const <StopCondition>[],
+    final StopCondition fn => [fn],
+    final List<Object?> lst => lst.whereType<StopCondition>().toList(),
+    _ => const <StopCondition>[],
+  };
+  return [...fromStopWhen, ...stopConditions];
+}
+
+/// Whether `stopWhen` supplied at least one condition. When it does, it governs
+/// termination and `maxSteps` is ignored (see [resolveStepBudget]).
+bool stopWhenIsSet(Object? stopWhen) => switch (stopWhen) {
+  null => false,
+  StopCondition() => true,
+  final List<Object?> lst => lst.whereType<StopCondition>().isNotEmpty,
+  _ => false,
+};
+
+/// Safety cap on tool-loop steps when `stopWhen` governs termination — guards
+/// against a stop condition that never trips.
+const int stopWhenStepSafetyCap = 1000;
+
+/// The maximum number of tool-loop steps to run.
+///
+/// Without tools there is never more than one step. When `stopWhen` is set it
+/// governs termination and [maxSteps] is ignored (a high safety cap guards
+/// runaway loops). Otherwise [maxSteps] (with any `stopConditions`) bounds it.
+int resolveStepBudget({
+  required bool hasTools,
+  required Object? stopWhen,
+  required int maxSteps,
+}) {
+  if (!hasTools) return 1;
+  if (stopWhenIsSet(stopWhen)) return stopWhenStepSafetyCap;
+  return maxSteps < 1 ? 1 : maxSteps;
+}
+
+/// Whether the tool loop should stop after the current step: no further tool
+/// results to feed back, a pending approval request, or a satisfied condition.
+bool shouldStopAfterStep({
+  required bool toolResultsEmpty,
+  required bool hasApprovalRequests,
+  required StepSnapshot snapshot,
+  required List<StopCondition> conditions,
+}) =>
+    toolResultsEmpty ||
+    hasApprovalRequests ||
+    conditions.any((condition) => condition(snapshot));

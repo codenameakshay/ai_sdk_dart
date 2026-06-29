@@ -627,24 +627,15 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
       try {
         fullController.add(const StreamTextStartEvent());
 
-        // Merge stopWhen + stopConditions.
-        final _stopWhenList = switch (stopWhen) {
-          null => <StopCondition>[],
-          final StopCondition fn => [fn],
-          final List<Object?> lst => lst.whereType<StopCondition>().toList(),
-          _ => <StopCondition>[],
-        };
-        final _allStopConditions = [..._stopWhenList, ...stopConditions];
-
-        // When [stopWhen] is supplied it governs termination and [maxSteps] is
-        // ignored — a high safety cap guards against a condition that never
-        // trips. Otherwise [maxSteps] (with any [stopConditions]) bounds it.
-        const stopWhenStepSafetyCap = 1000;
-        final totalSteps = tools.isEmpty
-            ? 1
-            : (_stopWhenList.isEmpty
-                ? (maxSteps < 1 ? 1 : maxSteps)
-                : stopWhenStepSafetyCap);
+        final _allStopConditions = resolveStopConditions(
+          stopWhen,
+          stopConditions,
+        );
+        final totalSteps = resolveStepBudget(
+          hasTools: tools.isNotEmpty,
+          stopWhen: stopWhen,
+          maxSteps: maxSteps,
+        );
         for (var stepNumber = 0; stepNumber < totalSteps; stepNumber++) {
           fullController.add(StreamTextStartStepEvent(stepNumber: stepNumber));
 
@@ -1051,20 +1042,18 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
           _safeInvoke(() => onStepFinish?.call(stepFinish));
           fullController.add(StreamTextFinishStepEvent(step: stepFinish));
 
-          final shouldStop =
-              stepToolResults.isEmpty ||
-              stepApprovalRequests.isNotEmpty ||
-              _allStopConditions.any(
-                (condition) => condition(
-                  StepSnapshot(
-                    stepCount: stepNumber + 1,
-                    toolCallNames: stepToolCalls
-                        .map((call) => call.toolName)
-                        .toList(),
-                    finishReason: stepFinish.finishReason,
-                  ),
-                ),
-              );
+          final shouldStop = shouldStopAfterStep(
+            toolResultsEmpty: stepToolResults.isEmpty,
+            hasApprovalRequests: stepApprovalRequests.isNotEmpty,
+            snapshot: StepSnapshot(
+              stepCount: stepNumber + 1,
+              toolCallNames: stepToolCalls
+                  .map((call) => call.toolName)
+                  .toList(),
+              finishReason: stepFinish.finishReason,
+            ),
+            conditions: _allStopConditions,
+          );
           if (shouldStop) {
             break;
           }

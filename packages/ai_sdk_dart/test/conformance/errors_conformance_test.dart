@@ -344,29 +344,6 @@ void main() {
       });
     });
 
-    // ── AiNoVideoGeneratedError ───────────────────────────────────────────
-
-    group('AiNoVideoGeneratedError', () {
-      test('is an AiSdkError', () {
-        final err = AiNoVideoGeneratedError(message: 'no video');
-        expect(err, isA<AiSdkError>());
-      });
-
-      test('cause is optional', () {
-        final err = AiNoVideoGeneratedError(message: 'no video');
-        expect(err.cause, isNull);
-      });
-
-      test('isInstance returns true', () {
-        expect(
-          AiNoVideoGeneratedError.isInstance(
-            AiNoVideoGeneratedError(message: 'no video'),
-          ),
-          isTrue,
-        );
-      });
-    });
-
     // ── AiNoSpeechGeneratedError ──────────────────────────────────────────
 
     group('AiNoSpeechGeneratedError', () {
@@ -523,7 +500,6 @@ void main() {
           isA<Exception>(),
         );
         expect(AiNoImageGeneratedError(message: 'e'), isA<Exception>());
-        expect(AiNoVideoGeneratedError(message: 'e'), isA<Exception>());
         expect(AiNoSpeechGeneratedError(message: 'e'), isA<Exception>());
         expect(AiNoTranscriptGeneratedError(message: 'e'), isA<Exception>());
         expect(

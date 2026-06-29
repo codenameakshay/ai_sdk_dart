@@ -412,25 +412,12 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
   List<LanguageModelV3Message>? firstRequestMessages;
   LanguageModelV3GenerateResult? lastResponse;
 
-  // Merge stopWhen + stopConditions into a single effective conditions list.
-  final _stopWhenList = switch (stopWhen) {
-    null => <StopCondition>[],
-    final StopCondition fn => [fn],
-    final List<Object?> lst => lst.whereType<StopCondition>().toList(),
-    _ => <StopCondition>[],
-  };
-  final _allStopConditions = [..._stopWhenList, ...stopConditions];
-
-  // Step budget: without tools there is never more than one step. When
-  // [stopWhen] is supplied it governs termination and [maxSteps] is ignored —
-  // a high safety cap guards against a stop condition that never trips.
-  // Otherwise [maxSteps] (alongside any [stopConditions]) bounds the loop.
-  const stopWhenStepSafetyCap = 1000;
-  final totalSteps = tools.isEmpty
-      ? 1
-      : (_stopWhenList.isEmpty
-          ? (maxSteps < 1 ? 1 : maxSteps)
-          : stopWhenStepSafetyCap);
+  final _allStopConditions = resolveStopConditions(stopWhen, stopConditions);
+  final totalSteps = resolveStepBudget(
+    hasTools: tools.isNotEmpty,
+    stopWhen: stopWhen,
+    maxSteps: maxSteps,
+  );
 
   for (var stepNumber = 0; stepNumber < totalSteps; stepNumber++) {
     final prepareResult = await Future.value(
@@ -598,10 +585,12 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
       toolCallNames: toolCalls.map((call) => call.toolName).toList(),
       finishReason: response.finishReason,
     );
-    final shouldStop =
-        toolResults.isEmpty ||
-        approvalRequests.isNotEmpty ||
-        _allStopConditions.any((condition) => condition(snapshot));
+    final shouldStop = shouldStopAfterStep(
+      toolResultsEmpty: toolResults.isEmpty,
+      hasApprovalRequests: approvalRequests.isNotEmpty,
+      snapshot: snapshot,
+      conditions: _allStopConditions,
+    );
     if (shouldStop) {
       break;
     }

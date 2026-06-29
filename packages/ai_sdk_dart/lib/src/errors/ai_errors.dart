@@ -90,20 +90,6 @@ class AiNoImageGeneratedError extends AiSdkError {
   static bool isInstance(Object error) => error is AiNoImageGeneratedError;
 }
 
-/// Thrown when video generation produces no output.
-///
-/// Mirrors `AI_NoVideoGeneratedError` from the JS AI SDK v6.
-class AiNoVideoGeneratedError extends AiSdkError {
-  const AiNoVideoGeneratedError({
-    required String message,
-    this.cause,
-  }) : super(message);
-
-  final Object? cause;
-
-  static bool isInstance(Object error) => error is AiNoVideoGeneratedError;
-}
-
 /// Thrown when speech synthesis produces no audio output.
 ///
 /// Mirrors `AI_NoSpeechGeneratedError` from the JS AI SDK v6.

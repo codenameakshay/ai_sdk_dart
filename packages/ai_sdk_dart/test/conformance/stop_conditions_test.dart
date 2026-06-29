@@ -317,4 +317,92 @@ void main() {
       },
     );
   });
+
+  group('run policy helpers', () {
+    final condA = stepCountIs(2);
+    final condB = hasToolCall('x');
+
+    test('resolveStopConditions merges single stopWhen with stopConditions', () {
+      expect(resolveStopConditions(condA, [condB]), [condA, condB]);
+    });
+
+    test('resolveStopConditions accepts a list stopWhen', () {
+      expect(resolveStopConditions([condA, never], const []), [condA, never]);
+    });
+
+    test('resolveStopConditions with null stopWhen keeps stopConditions', () {
+      expect(resolveStopConditions(null, [condB]), [condB]);
+    });
+
+    test('stopWhenIsSet distinguishes set vs unset', () {
+      expect(stopWhenIsSet(null), isFalse);
+      expect(stopWhenIsSet(condA), isTrue);
+      expect(stopWhenIsSet([condA]), isTrue);
+      expect(stopWhenIsSet(const <StopCondition>[]), isFalse);
+    });
+
+    test('resolveStepBudget returns 1 without tools', () {
+      expect(resolveStepBudget(hasTools: false, stopWhen: condA, maxSteps: 9), 1);
+    });
+
+    test('resolveStepBudget uses the safety cap when stopWhen is set', () {
+      expect(
+        resolveStepBudget(hasTools: true, stopWhen: condA, maxSteps: 3),
+        stopWhenStepSafetyCap,
+      );
+    });
+
+    test('resolveStepBudget falls back to maxSteps (clamped >= 1)', () {
+      expect(resolveStepBudget(hasTools: true, stopWhen: null, maxSteps: 5), 5);
+      expect(resolveStepBudget(hasTools: true, stopWhen: null, maxSteps: 0), 1);
+    });
+
+    test('shouldStopAfterStep stops when no tool results', () {
+      expect(
+        shouldStopAfterStep(
+          toolResultsEmpty: true,
+          hasApprovalRequests: false,
+          snapshot: const StepSnapshot(stepCount: 1),
+          conditions: const [],
+        ),
+        isTrue,
+      );
+    });
+
+    test('shouldStopAfterStep stops on pending approval', () {
+      expect(
+        shouldStopAfterStep(
+          toolResultsEmpty: false,
+          hasApprovalRequests: true,
+          snapshot: const StepSnapshot(stepCount: 1),
+          conditions: const [],
+        ),
+        isTrue,
+      );
+    });
+
+    test('shouldStopAfterStep stops when a condition trips', () {
+      expect(
+        shouldStopAfterStep(
+          toolResultsEmpty: false,
+          hasApprovalRequests: false,
+          snapshot: const StepSnapshot(stepCount: 3),
+          conditions: [stepCountIs(3)],
+        ),
+        isTrue,
+      );
+    });
+
+    test('shouldStopAfterStep continues when tools ran and no condition trips', () {
+      expect(
+        shouldStopAfterStep(
+          toolResultsEmpty: false,
+          hasApprovalRequests: false,
+          snapshot: const StepSnapshot(stepCount: 1),
+          conditions: [stepCountIs(3)],
+        ),
+        isFalse,
+      );
+    });
+  });
 }

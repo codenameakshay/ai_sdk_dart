@@ -991,12 +991,46 @@ void main() {
 
       expect(captured['n'], 2);
       expect(captured['size'], '1024x1024');
-      expect(captured['response_format'], 'b64_json');
+      // gpt-image-1 always returns base64 and rejects response_format.
+      expect(captured.containsKey('response_format'), isFalse);
       expect(captured['quality'], 'high');
       expect(result.images, hasLength(1));
       expect(result.responses.single.modelId, 'gpt-image-1');
       expect(model.provider, 'openai');
       expect(model.specificationVersion, 'v3');
+    });
+
+    test('image sends response_format b64_json for dall-e models', () async {
+      final imageB64 = base64Encode(utf8.encode('png'));
+      late Map<String, dynamic> captured;
+      final server = await _TestServer.start((request) async {
+        expect(request.uri.path, '/v1/images/generations');
+        final body = await utf8.decoder.bind(request).join();
+        captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'data': [
+              {'b64_json': imageB64},
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = OpenAIProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).image('dall-e-3');
+      final result = await model.doGenerate(
+        const ImageModelV3CallOptions(prompt: 'a cat'),
+      );
+
+      // dall-e-* default to a hosted URL, so we must request b64_json.
+      expect(captured['response_format'], 'b64_json');
+      expect(result.images, hasLength(1));
     });
 
     // ── speech (text-to-speech) ──────────────────────────────────────────

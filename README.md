@@ -98,7 +98,7 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
 - `onInputStart`, `onInputDelta`, `onInputAvailable` lifecycle hooks
 
 ### 🖼️ Multimodal
-- `generateImage` — image generation (DALL-E 3 via OpenAI)
+- `generateImage` — image generation (gpt-image-1 / DALL·E via OpenAI)
 - `generateSpeech` — text-to-speech audio synthesis
 - `transcribe` — speech-to-text transcription
 - Image inputs in prompts (multimodal vision)
@@ -420,7 +420,7 @@ Flutter web.
 - ✅ `streamText` — complete event taxonomy (20 typed event types), `onAbort` callback
 - ✅ `generateObject` / structured output (object, array, choice, json) with native JSON schema
 - ✅ `embed` / `embedMany` + `cosineSimilarity`, `wrapEmbeddingModel`
-- ✅ `generateImage` (OpenAI DALL-E 3)
+- ✅ `generateImage` (OpenAI gpt-image-1 / DALL·E)
 - ✅ `generateSpeech` (OpenAI TTS)
 - ✅ `transcribe` (OpenAI Whisper)
 - ✅ `rerank`

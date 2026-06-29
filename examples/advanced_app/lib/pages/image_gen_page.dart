@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../config.dart';
 
-/// Image generation via [generateImage] with DALL-E 3.
+/// Image generation via [generateImage] with gpt-image-1.
 class ImageGenPage extends StatefulWidget {
   const ImageGenPage({super.key});
 
@@ -41,7 +41,7 @@ class _ImageGenPageState extends State<ImageGenPage> {
 
     try {
       final result = await generateImage(
-        model: OpenAIProvider(apiKey: openAiApiKey).image('dall-e-3'),
+        model: OpenAIProvider(apiKey: openAiApiKey).image('gpt-image-1'),
         prompt: prompt,
       );
       setState(() {
@@ -50,8 +50,8 @@ class _ImageGenPageState extends State<ImageGenPage> {
           // empty list. Show a calm empty state instead of crashing.
           _emptyMessage =
               'The model returned an empty response — no image was '
-              'generated. (DALL·E 3 image generation may be unavailable '
-              'for this API key.)';
+              'generated. (Image generation may be unavailable for this '
+              'API key.)';
         } else {
           _imageBytes = result.images.first.bytes;
         }
@@ -84,7 +84,7 @@ class _ImageGenPageState extends State<ImageGenPage> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'Generate images with DALL-E 3 (OpenAI).',
+              'Generate images with gpt-image-1 (OpenAI).',
               style: textTheme.bodySmall?.copyWith(
                 color: scheme.onSurfaceVariant,
               ),

@@ -175,7 +175,9 @@ class _OpenAIImageModel implements ImageModelV3 {
         'prompt': options.prompt ?? options.promptObject?.text ?? '',
         if (options.n != null) 'n': options.n,
         if (options.size != null) 'size': options.size,
-        'response_format': 'b64_json',
+        // gpt-image-1 always returns base64 and rejects `response_format`;
+        // dall-e-2/3 need it to return bytes (b64) instead of a hosted URL.
+        if (!modelId.startsWith('gpt-image')) 'response_format': 'b64_json',
         ...?providerOptions,
       },
       options: Options(headers: options.headers),

@@ -14,6 +14,13 @@ dependencies:
 
 ### SSE transport (remote server)
 
+`SseClientTransport` speaks the MCP HTTP+SSE transport (protocol 2024-11-05):
+it opens a streaming `GET` to the SSE endpoint, POSTs requests to the endpoint
+the server advertises, and receives responses and server-pushed notifications
+(including `resources/updated`) over the event stream. It uses only web-safe
+HTTP, so it works on Flutter web. For a server that exposes a single plain
+JSON-RPC endpoint without SSE, use `HttpClientTransport` instead.
+
 ```dart
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_mcp/ai_sdk_mcp.dart';
@@ -41,6 +48,10 @@ await client.close();
 ```
 
 ### Stdio transport (local process)
+
+> Desktop/CLI only. `StdioMCPTransport` spawns an OS process and is not
+> available on Flutter web — referencing it still compiles for web (via a
+> stub), but constructing and using it on web throws `UnsupportedError`.
 
 ```dart
 final transport = StdioMCPTransport(

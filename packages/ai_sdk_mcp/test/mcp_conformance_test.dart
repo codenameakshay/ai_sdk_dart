@@ -79,11 +79,129 @@ class _MockMCPServer {
 }
 
 // ---------------------------------------------------------------------------
+// Mock MCP HTTP+SSE server (protocol 2024-11-05)
+// ---------------------------------------------------------------------------
+
+/// A local server implementing the MCP HTTP+SSE transport:
+///   - `GET /sse`     → opens a long-lived `text/event-stream`, emits an
+///                      `endpoint` event pointing at `/messages`, then keeps
+///                      the connection open and writes server→client messages.
+///   - `POST /messages` → accepts a JSON-RPC request, logs it, and pushes the
+///                      matching response (from the queue) back over the SSE
+///                      stream. Replies `202 Accepted` to the POST itself.
+class _MockSseServer {
+  _MockSseServer._(this._server);
+
+  final HttpServer _server;
+  final List<Map<String, dynamic>> _requestLog = [];
+  final _responseQueue = <Map<String, dynamic>>[];
+
+  HttpResponse? _sseResponse;
+  final _sseReady = Completer<void>();
+
+  List<Map<String, dynamic>> get requestLog => List.unmodifiable(_requestLog);
+
+  static Future<_MockSseServer> start() async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final mock = _MockSseServer._(server);
+    unawaited(mock._serve());
+    return mock;
+  }
+
+  void enqueue(Map<String, dynamic> response) => _responseQueue.add(response);
+
+  void enqueueInitialize() {
+    enqueue({
+      'jsonrpc': '2.0',
+      'result': {
+        'protocolVersion': '2024-11-05',
+        'capabilities': {'tools': {}},
+        'serverInfo': {'name': 'sse-test-server', 'version': '1.0.0'},
+      },
+    });
+    enqueue({'jsonrpc': '2.0', 'result': {}});
+  }
+
+  /// Push an arbitrary server-initiated message over the open SSE stream.
+  Future<void> pushMessage(Map<String, dynamic> message) async {
+    await _sseReady.future;
+    _writeEvent('message', jsonEncode(message));
+  }
+
+  void _writeEvent(String event, String data) {
+    final res = _sseResponse;
+    if (res == null) return;
+    res.write('event: $event\n');
+    for (final line in const LineSplitter().convert(data)) {
+      res.write('data: $line\n');
+    }
+    res.write('\n');
+  }
+
+  Future<void> _serve() async {
+    await for (final request in _server) {
+      if (request.method == 'GET' && request.uri.path == '/sse') {
+        request.response.statusCode = 200;
+        request.response.headers.set('Content-Type', 'text/event-stream');
+        request.response.headers.set('Cache-Control', 'no-cache');
+        request.response.bufferOutput = false;
+        _sseResponse = request.response;
+        // Advertise the POST endpoint.
+        _writeEvent('endpoint', '/messages');
+        if (!_sseReady.isCompleted) _sseReady.complete();
+        // Keep the response open; do not close it here.
+        continue;
+      }
+
+      if (request.method == 'POST' && request.uri.path == '/messages') {
+        final bodyText = await utf8.decoder.bind(request).join();
+        try {
+          final body = (jsonDecode(bodyText) as Map).cast<String, dynamic>();
+          _requestLog.add(body);
+          final id = body['id'];
+          // Acknowledge the POST.
+          request.response.statusCode = 202;
+          request.response.write('Accepted');
+          await request.response.close();
+
+          // Deliver the JSON-RPC response over the SSE stream.
+          if (_responseQueue.isNotEmpty) {
+            final responseBody = Map.of(_responseQueue.removeAt(0))
+              ..['id'] = id;
+            await pushMessage(responseBody);
+          } else {
+            await pushMessage({'jsonrpc': '2.0', 'id': id, 'result': {}});
+          }
+        } catch (e) {
+          request.response.statusCode = 500;
+          request.response.write('{"error":"$e"}');
+          await request.response.close();
+        }
+        continue;
+      }
+
+      request.response.statusCode = 404;
+      await request.response.close();
+    }
+  }
+
+  Uri get sseUri =>
+      Uri.parse('http://${_server.address.address}:${_server.port}/sse');
+
+  Future<void> close() async {
+    try {
+      await _sseResponse?.close();
+    } catch (_) {}
+    await _server.close(force: true);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 MCPClient _client(_MockMCPServer mock) => MCPClient(
-  transport: SseClientTransport(url: mock.uri, postUrl: mock.uri),
+  transport: HttpClientTransport(url: mock.uri, postUrl: mock.uri),
 );
 
 // ---------------------------------------------------------------------------
@@ -596,10 +714,9 @@ void main() {
         addTearDown(client.close);
 
         final updates = <MCPResourceContent>[];
-        final subscription =
-            client.subscribeResource('file:///data/log.txt').listen(
-              updates.add,
-            );
+        final subscription = client
+            .subscribeResource('file:///data/log.txt')
+            .listen(updates.add);
         addTearDown(subscription.cancel);
 
         await Future<void>.delayed(Duration.zero); // let subscribe settle
@@ -646,7 +763,7 @@ void main() {
       });
 
       test('MCPClient accepts reconnectPolicy constructor param', () {
-        final mock_transport = SseClientTransport(
+        final mock_transport = HttpClientTransport(
           url: Uri.parse('http://localhost:9999/mcp'),
         );
         final client = MCPClient(
@@ -661,23 +778,27 @@ void main() {
     // ── capabilities advertised in initialize() ───────────────────────────────
 
     group('capabilities', () {
-      test('initialize advertises prompts and resources capabilities', () async {
-        final mock = await _MockMCPServer.start();
-        addTearDown(mock.close);
-        mock.enqueueInitialize();
+      test(
+        'initialize advertises prompts and resources capabilities',
+        () async {
+          final mock = await _MockMCPServer.start();
+          addTearDown(mock.close);
+          mock.enqueueInitialize();
 
-        final client = _client(mock);
-        addTearDown(client.close);
+          final client = _client(mock);
+          addTearDown(client.close);
 
-        await client.initialize();
+          await client.initialize();
 
-        final initReq = mock.requestLog.first;
-        final caps =
-            (initReq['params'] as Map)['capabilities'] as Map<String, dynamic>;
-        expect(caps.keys, contains('prompts'));
-        expect(caps.keys, contains('resources'));
-        expect((caps['resources'] as Map)['subscribe'], isTrue);
-      });
+          final initReq = mock.requestLog.first;
+          final caps =
+              (initReq['params'] as Map)['capabilities']
+                  as Map<String, dynamic>;
+          expect(caps.keys, contains('prompts'));
+          expect(caps.keys, contains('resources'));
+          expect((caps['resources'] as Map)['subscribe'], isTrue);
+        },
+      );
     });
 
     // ── MCPException ─────────────────────────────────────────────────────────
@@ -698,8 +819,8 @@ void main() {
     // ── Transport types ──────────────────────────────────────────────────────
 
     group('transport types', () {
-      test('SseClientTransport accepts url and optional postUrl', () {
-        final t = SseClientTransport(
+      test('HttpClientTransport accepts url and optional postUrl', () {
+        final t = HttpClientTransport(
           url: Uri.parse('http://localhost:3000/sse'),
           postUrl: Uri.parse('http://localhost:3000/mcp'),
         );
@@ -707,11 +828,22 @@ void main() {
         expect(t.postUrl.path, '/mcp');
       });
 
-      test('SseClientTransport defaults postUrl to url when omitted', () {
-        final t = SseClientTransport(
+      test('HttpClientTransport defaults postUrl to url when omitted', () {
+        final t = HttpClientTransport(
           url: Uri.parse('http://localhost:3000/mcp'),
         );
         expect(t.url, t.postUrl);
+      });
+
+      test('SseClientTransport accepts url and headers', () {
+        final t = SseClientTransport(
+          url: Uri.parse('http://localhost:3000/sse'),
+          headers: {'Authorization': 'Bearer token'},
+        );
+        expect(t.url.path, '/sse');
+        expect(t.headers?['Authorization'], 'Bearer token');
+        // No server push received yet, so no POST endpoint resolved.
+        expect(t.resolvedPostUrl, isNull);
       });
 
       test('StdioMCPTransport accepts command and args', () {
@@ -725,6 +857,179 @@ void main() {
           '@modelcontextprotocol/server-filesystem',
           '/tmp',
         ]);
+      });
+    });
+
+    // ── Real SSE transport (HTTP+SSE, 2024-11-05) ────────────────────────────
+
+    group('SseClientTransport (real SSE)', () {
+      test('opens SSE stream, POSTs to advertised endpoint, reads response '
+          'over the stream', () async {
+        final mock = await _MockSseServer.start();
+        addTearDown(mock.close);
+        mock.enqueueInitialize();
+        mock.enqueue({
+          'jsonrpc': '2.0',
+          'result': {
+            'tools': [
+              {
+                'name': 'ping',
+                'inputSchema': {'type': 'object'},
+              },
+            ],
+          },
+        });
+
+        final client = MCPClient(
+          transport: SseClientTransport(url: mock.sseUri),
+        );
+        addTearDown(client.close);
+
+        final toolSet = await client.tools();
+        expect(toolSet.keys, contains('ping'));
+
+        // Requests were POSTed to the server-advertised /messages endpoint.
+        expect(mock.requestLog, isNotEmpty);
+        expect(mock.requestLog.first['method'], 'initialize');
+      });
+
+      test(
+        'resolves the relative endpoint from the `endpoint` event',
+        () async {
+          final mock = await _MockSseServer.start();
+          addTearDown(mock.close);
+          mock.enqueueInitialize();
+
+          final transport = SseClientTransport(url: mock.sseUri);
+          final client = MCPClient(transport: transport);
+          addTearDown(client.close);
+
+          await client.initialize();
+
+          expect(transport.resolvedPostUrl, isNotNull);
+          expect(transport.resolvedPostUrl!.path, '/messages');
+        },
+      );
+
+      test(
+        'surfaces server-initiated notifications via notifications stream',
+        () async {
+          final mock = await _MockSseServer.start();
+          addTearDown(mock.close);
+          mock.enqueueInitialize();
+
+          final transport = SseClientTransport(url: mock.sseUri);
+          final client = MCPClient(transport: transport);
+          addTearDown(client.close);
+
+          await client.initialize();
+
+          final received = <Map<String, dynamic>>[];
+          final sub = transport.notifications.listen(received.add);
+          addTearDown(sub.cancel);
+
+          await mock.pushMessage({
+            'jsonrpc': '2.0',
+            'method': 'notifications/message',
+            'params': {'level': 'info', 'data': 'hello'},
+          });
+
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+          expect(received, isNotEmpty);
+          expect(received.first['method'], 'notifications/message');
+        },
+      );
+
+      test(
+        'server-pushed resources/updated reaches resource subscribers',
+        () async {
+          final mock = await _MockSseServer.start();
+          addTearDown(mock.close);
+          mock.enqueueInitialize();
+          // Response to resources/subscribe.
+          mock.enqueue({'jsonrpc': '2.0', 'result': {}});
+          // Response to the readResource triggered by the update notification.
+          mock.enqueue({
+            'jsonrpc': '2.0',
+            'result': {
+              'contents': [
+                {
+                  'uri': 'file:///watched.txt',
+                  'mimeType': 'text/plain',
+                  'text': 'updated body',
+                },
+              ],
+            },
+          });
+
+          final client = MCPClient(
+            transport: SseClientTransport(url: mock.sseUri),
+          );
+          addTearDown(client.close);
+
+          final updates = <MCPResourceContent>[];
+          final sub = client
+              .subscribeResource('file:///watched.txt')
+              .listen(updates.add);
+          addTearDown(sub.cancel);
+
+          // Let initialize + subscribe round-trips settle.
+          await Future<void>.delayed(const Duration(milliseconds: 150));
+
+          // Server pushes an update notification over the SSE stream.
+          await mock.pushMessage({
+            'jsonrpc': '2.0',
+            'method': 'notifications/resources/updated',
+            'params': {'uri': 'file:///watched.txt'},
+          });
+
+          await Future<void>.delayed(const Duration(milliseconds: 250));
+          expect(updates, isNotEmpty);
+          expect(updates.first.text, 'updated body');
+        },
+      );
+
+      test('parses multi-line and named data events correctly', () async {
+        final mock = await _MockSseServer.start();
+        addTearDown(mock.close);
+        mock.enqueueInitialize();
+
+        final transport = SseClientTransport(url: mock.sseUri);
+        final client = MCPClient(transport: transport);
+        addTearDown(client.close);
+
+        await client.initialize();
+
+        final received = <Map<String, dynamic>>[];
+        final sub = transport.notifications.listen(received.add);
+        addTearDown(sub.cancel);
+
+        // JSON containing a newline-bearing value is split across two data:
+        // lines by the mock and must be reassembled by the SSE parser.
+        await mock.pushMessage({
+          'jsonrpc': '2.0',
+          'method': 'notifications/message',
+          'params': {'text': 'line one\nline two'},
+        });
+
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        expect(received, isNotEmpty);
+        expect((received.first['params'] as Map)['text'], 'line one\nline two');
+      });
+
+      test('operations after close throw MCPException', () async {
+        final mock = await _MockSseServer.start();
+        addTearDown(mock.close);
+        mock.enqueueInitialize();
+
+        final client = MCPClient(
+          transport: SseClientTransport(url: mock.sseUri),
+        );
+        await client.initialize();
+        await client.close();
+
+        // The transport is closed; a fresh request must fail rather than hang.
+        await expectLater(client.listResources(), throwsA(isA<MCPException>()));
       });
     });
   });

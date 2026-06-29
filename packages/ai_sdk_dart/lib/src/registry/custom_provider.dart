@@ -29,14 +29,12 @@ class CustomProvider {
     required Map<String, ImageModelV3> imageModels,
     required Map<String, SpeechModelV1> speechModels,
     required Map<String, TranscriptionModelV1> transcriptionModels,
-    required Map<String, VideoModelV1> videoModels,
     required _ProviderFallback? fallback,
   })  : _languageModels = languageModels,
         _embeddingModels = embeddingModels,
         _imageModels = imageModels,
         _speechModels = speechModels,
         _transcriptionModels = transcriptionModels,
-        _videoModels = videoModels,
         _fallback = fallback;
 
   final Map<String, LanguageModelV3> _languageModels;
@@ -44,7 +42,6 @@ class CustomProvider {
   final Map<String, ImageModelV3> _imageModels;
   final Map<String, SpeechModelV1> _speechModels;
   final Map<String, TranscriptionModelV1> _transcriptionModels;
-  final Map<String, VideoModelV1> _videoModels;
   final _ProviderFallback? _fallback;
 
   /// Resolve a language model by [modelId].
@@ -119,20 +116,6 @@ class CustomProvider {
       'Available: ${_transcriptionModels.keys.join(', ')}',
     );
   }
-
-  /// Resolve a video model by [modelId].
-  VideoModelV1 videoModel(String modelId) {
-    if (_videoModels.containsKey(modelId)) {
-      return _videoModels[modelId]!;
-    }
-    if (_fallback != null && _fallback.supportsVideoModel(modelId)) {
-      return _fallback.videoModel(modelId);
-    }
-    throw ArgumentError(
-      'No video model registered for "$modelId". '
-      'Available: ${_videoModels.keys.join(', ')}',
-    );
-  }
 }
 
 /// Fallback interface passed to [customProvider].
@@ -153,9 +136,6 @@ abstract interface class _ProviderFallback {
 
   bool supportsTranscriptionModel(String modelId);
   TranscriptionModelV1 transcriptionModel(String modelId);
-
-  bool supportsVideoModel(String modelId);
-  VideoModelV1 videoModel(String modelId);
 }
 
 /// Concrete fallback backed by factory functions.
@@ -166,7 +146,6 @@ class _FunctionFallback implements _ProviderFallback {
     this.imageModelFactory,
     this.speechModelFactory,
     this.transcriptionModelFactory,
-    this.videoModelFactory,
   });
 
   final LanguageModelV3 Function(String)? languageModelFactory;
@@ -174,7 +153,6 @@ class _FunctionFallback implements _ProviderFallback {
   final ImageModelV3 Function(String)? imageModelFactory;
   final SpeechModelV1 Function(String)? speechModelFactory;
   final TranscriptionModelV1 Function(String)? transcriptionModelFactory;
-  final VideoModelV1 Function(String)? videoModelFactory;
 
   @override
   bool supportsLanguageModel(String id) => languageModelFactory != null;
@@ -203,11 +181,6 @@ class _FunctionFallback implements _ProviderFallback {
   @override
   TranscriptionModelV1 transcriptionModel(String id) =>
       transcriptionModelFactory!(id);
-
-  @override
-  bool supportsVideoModel(String id) => videoModelFactory != null;
-  @override
-  VideoModelV1 videoModel(String id) => videoModelFactory!(id);
 }
 
 /// Creates a [CustomProvider] from explicit model maps and an optional fallback.
@@ -220,7 +193,6 @@ class _FunctionFallback implements _ProviderFallback {
 /// - [imageModels] — map of model ID → [ImageModelV3] instance.
 /// - [speechModels] — map of model ID → [SpeechModelV1] instance.
 /// - [transcriptionModels] — map of model ID → [TranscriptionModelV1] instance.
-/// - [videoModels] — map of model ID → [VideoModelV1] instance.
 /// - [fallbackLanguageModel] — factory to resolve unknown language model IDs.
 /// - [fallbackEmbeddingModel] — factory to resolve unknown embedding model IDs.
 /// - [fallbackImageModel] — factory to resolve unknown image model IDs.
@@ -230,20 +202,17 @@ CustomProvider customProvider({
   Map<String, ImageModelV3>? imageModels,
   Map<String, SpeechModelV1>? speechModels,
   Map<String, TranscriptionModelV1>? transcriptionModels,
-  Map<String, VideoModelV1>? videoModels,
   LanguageModelV3 Function(String modelId)? fallbackLanguageModel,
   EmbeddingModelV2<String> Function(String modelId)? fallbackEmbeddingModel,
   ImageModelV3 Function(String modelId)? fallbackImageModel,
   SpeechModelV1 Function(String modelId)? fallbackSpeechModel,
   TranscriptionModelV1 Function(String modelId)? fallbackTranscriptionModel,
-  VideoModelV1 Function(String modelId)? fallbackVideoModel,
 }) {
   final hasFallback = fallbackLanguageModel != null ||
       fallbackEmbeddingModel != null ||
       fallbackImageModel != null ||
       fallbackSpeechModel != null ||
-      fallbackTranscriptionModel != null ||
-      fallbackVideoModel != null;
+      fallbackTranscriptionModel != null;
 
   return CustomProvider._(
     languageModels: languageModels ?? const {},
@@ -251,7 +220,6 @@ CustomProvider customProvider({
     imageModels: imageModels ?? const {},
     speechModels: speechModels ?? const {},
     transcriptionModels: transcriptionModels ?? const {},
-    videoModels: videoModels ?? const {},
     fallback: hasFallback
         ? _FunctionFallback(
             languageModelFactory: fallbackLanguageModel,
@@ -259,7 +227,6 @@ CustomProvider customProvider({
             imageModelFactory: fallbackImageModel,
             speechModelFactory: fallbackSpeechModel,
             transcriptionModelFactory: fallbackTranscriptionModel,
-            videoModelFactory: fallbackVideoModel,
           )
         : null,
   );

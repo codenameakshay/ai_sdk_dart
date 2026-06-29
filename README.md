@@ -121,7 +121,7 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
 - `createProviderRegistry` — map provider aliases to model factories
 - `customProvider()` — lightweight on-the-fly provider construction without a full registry
 - Resolve models by `'provider:modelId'` string at runtime
-- Supports 6 model categories: language, embedding, image, speech, transcription, rerank
+- Supports 5 model categories: language, embedding, image, speech, transcription
 - Mix providers in a single registry for multi-provider apps
 
 ### 📱 Flutter UI Controllers
@@ -379,14 +379,14 @@ final client = MCPClient(
 - ✅ `streamText` — complete event taxonomy (20 typed event types), `onAbort` callback
 - ✅ `generateObject` / structured output (object, array, choice, json) with native JSON schema
 - ✅ `embed` / `embedMany` + `cosineSimilarity`, `wrapEmbeddingModel`
-- ✅ `generateImage` (OpenAI DALL-E 3), `generateVideo`
+- ✅ `generateImage` (OpenAI DALL-E 3)
 - ✅ `generateSpeech` (OpenAI TTS)
 - ✅ `transcribe` (OpenAI Whisper)
 - ✅ `rerank`
 - ✅ `timeout` parameter on all core functions
 - ✅ `customProvider()` for lightweight on-the-fly provider construction
 - ✅ Middleware system with 5 built-in middlewares
-- ✅ Provider registry (`createProviderRegistry`) — 6 model categories
+- ✅ Provider registry (`createProviderRegistry`) — 5 model categories
 - ✅ Multi-step agentic loops with tool approval
 - ✅ Flutter UI controllers (Chat, Completion, ObjectStream)
 - ✅ MCP client (SSE + stdio transports, reconnection, prompts, resources)

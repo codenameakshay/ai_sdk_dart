@@ -77,13 +77,13 @@ run-basic:
 		echo "  export OPENAI_API_KEY=sk-..."; \
 		exit 1; \
 	fi
-	$(DART) run -C $(DART_APP) lib/main.dart
+	cd $(DART_APP) && $(DART) run lib/main.dart
 
 ## Run the MCP (Model Context Protocol) CLI demo. Works without a key (the
 ## tool-discovery + direct-call steps); set OPENAI_API_KEY to also run the
 ## generateText-with-MCP-tools step.
 run-mcp:
-	$(DART) run -C $(DART_APP) lib/mcp_demo.dart
+	cd $(DART_APP) && $(DART) run lib/mcp_demo.dart
 
 # ── Quality ───────────────────────────────────────────────────────────────────
 

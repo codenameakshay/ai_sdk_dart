@@ -1,5 +1,6 @@
 import '../shared/json_value.dart';
 import 'language_model_v3_prompt.dart';
+import 'language_model_v3_reasoning_effort.dart';
 import 'language_model_v3_tool.dart';
 import 'language_model_v3_tool_choice.dart';
 
@@ -24,6 +25,7 @@ class LanguageModelV3CallOptions {
     this.headers,
     this.providerOptions,
     this.outputSchema,
+    this.reasoning,
   });
 
   final LanguageModelV3Prompt prompt;
@@ -48,4 +50,11 @@ class LanguageModelV3CallOptions {
   /// on prompt engineering. Providers that do not implement native structured
   /// output safely ignore this field.
   final Map<String, dynamic>? outputSchema;
+
+  /// Standardized, portable reasoning-effort control (AI SDK v7).
+  ///
+  /// Capable providers map this to their native reasoning API. Providers that
+  /// do not support reasoning safely ignore it. Provider-specific reasoning
+  /// settings in [providerOptions] take precedence over this value.
+  final LanguageModelV3ReasoningEffort? reasoning;
 }

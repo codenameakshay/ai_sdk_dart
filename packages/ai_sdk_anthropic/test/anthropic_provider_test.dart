@@ -1180,15 +1180,21 @@ void main() {
     });
 
     test('stream surfaces transport errors as StreamPartError', () async {
-      // A raw socket server sends chunked headers + a partial event, then
-      // destroys the connection so the response byte stream errors mid-read,
-      // exercising the catch in doStream.
-      final rawServer = await ServerSocket.bind(
-        InternetAddress.loopbackIPv4,
-        0,
-      );
-      rawServer.listen((socket) {
-        socket.listen((_) {}, onError: (_) {});
+      // Fully drain the request first so the client's POST write always
+      // completes, then detach the socket and send chunked headers plus a
+      // single partial event before destroying the connection. The response
+      // byte stream errors mid-read, exercising the catch in doStream.
+      //
+      // Draining before destroying is what makes this deterministic: writing
+      // the partial response and tearing down the socket while the client is
+      // still sending its request body would surface a "broken pipe" write
+      // error instead of the intended mid-stream read error, which made this
+      // test flaky under different socket timing.
+      final server = await _TestServer.start((request) async {
+        await request.drain<void>();
+        final socket = await request.response.detachSocket(
+          writeHeaders: false,
+        );
         socket.write(
           'HTTP/1.1 200 OK\r\n'
           'content-type: text/event-stream\r\n'
@@ -1200,14 +1206,14 @@ void main() {
             '"content_block":{"type":"text"}}\n\n';
         // Write one valid chunk, then destroy without the terminating chunk.
         socket.write('${event.length.toRadixString(16)}\r\n$event\r\n');
-        socket.flush().then((_) => socket.destroy());
+        await socket.flush();
+        socket.destroy();
       });
-      addTearDown(rawServer.close);
+      addTearDown(server.close);
 
       final model = AnthropicProvider(
         apiKey: 'test',
-        baseUrl:
-            'http://${rawServer.address.host}:${rawServer.port}/v1',
+        baseUrl: server.baseUrl,
       ).call('claude-sonnet-4-5');
 
       final streamResult = await model.doStream(

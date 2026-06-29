@@ -349,6 +349,7 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
   int maxRetries = 2,
   List<String> activeToolNames = const [],
   ProviderOptions? providerOptions,
+  LanguageModelV3ReasoningEffort? reasoning,
   Output<TOutput>? output,
   ToolSet tools = const {},
   List<LanguageModelV3ProviderDefinedTool> providerDefinedTools = const [],
@@ -499,6 +500,7 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
       seed: seed,
       headers: headers,
       providerOptions: stepProviderOptions,
+      reasoning: reasoning,
     );
     final response = await _withRetry(
       maxRetries: maxRetries,

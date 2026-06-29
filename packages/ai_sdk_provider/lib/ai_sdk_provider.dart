@@ -12,6 +12,7 @@ export 'src/language_model/language_model_v3_data_content.dart';
 export 'src/language_model/language_model_v3_finish_reason.dart';
 export 'src/language_model/language_model_v3_generate_result.dart';
 export 'src/language_model/language_model_v3_prompt.dart';
+export 'src/language_model/language_model_v3_reasoning_effort.dart';
 export 'src/language_model/language_model_v3_stream_part.dart';
 export 'src/language_model/language_model_v3_stream_result.dart';
 export 'src/language_model/language_model_v3_tool.dart';

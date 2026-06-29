@@ -111,7 +111,9 @@ class _OpenAILanguageModel implements LanguageModelV3 {
         'frequency_penalty': options.frequencyPenalty,
       if (options.stopSequences.isNotEmpty) 'stop': options.stopSequences,
       if (options.seed != null) 'seed': options.seed,
-      if (reasoningEffort != null) 'reasoning_effort': reasoningEffort,
+      if ((reasoningEffort ?? _mapReasoningEffort(options.reasoning)) != null)
+        'reasoning_effort':
+            reasoningEffort ?? _mapReasoningEffort(options.reasoning),
       if (reasoningSummary != null) 'reasoning_summary': reasoningSummary,
       if (options.outputSchema != null)
         'response_format': {
@@ -256,7 +258,9 @@ class _OpenAILanguageModel implements LanguageModelV3 {
         'max_completion_tokens': options.maxOutputTokens,
       if (options.temperature != null) 'temperature': options.temperature,
       if (options.topP != null) 'top_p': options.topP,
-      if (reasoningEffort != null) 'reasoning_effort': reasoningEffort,
+      if ((reasoningEffort ?? _mapReasoningEffort(options.reasoning)) != null)
+        'reasoning_effort':
+            reasoningEffort ?? _mapReasoningEffort(options.reasoning),
       if (reasoningSummary != null) 'reasoning_summary': reasoningSummary,
       if (options.outputSchema != null)
         'response_format': {
@@ -1001,6 +1005,23 @@ class _OpenAITranscriptionModel implements TranscriptionModelV1 {
     reasoningSummary,
     cleaned.isEmpty ? null : cleaned,
   );
+}
+
+/// Maps the standardized v7 [LanguageModelV3ReasoningEffort] to OpenAI's native
+/// `reasoning_effort` value. Returns `null` when no effort should be sent
+/// (`providerDefault`/`none`). `xhigh` is coerced down to OpenAI's `high`.
+String? _mapReasoningEffort(LanguageModelV3ReasoningEffort? effort) {
+  return switch (effort) {
+    null ||
+    LanguageModelV3ReasoningEffort.providerDefault ||
+    LanguageModelV3ReasoningEffort.none =>
+      null,
+    LanguageModelV3ReasoningEffort.minimal => 'minimal',
+    LanguageModelV3ReasoningEffort.low => 'low',
+    LanguageModelV3ReasoningEffort.medium => 'medium',
+    LanguageModelV3ReasoningEffort.high => 'high',
+    LanguageModelV3ReasoningEffort.xhigh => 'high',
+  };
 }
 
 extension IterableX<T> on Iterable<T> {

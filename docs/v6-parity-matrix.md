@@ -140,43 +140,43 @@ Legend:
 
 | Docs evidence (AI-SDK.md) | Parity target | Status | Current coverage |
 | --- | --- | --- | --- |
-| `AI-SDK.md:9308` (`generateText`) | Baseline non-stream text generation | [x] | `packages/ai/lib/src/core/generate_text.dart`, `packages/ai/test/core_api_test.dart` |
-| `AI-SDK.md:9452` (`streamText`) | Baseline streaming text generation | [x] | `packages/ai/lib/src/core/stream_text.dart`, provider stream tests |
+| `AI-SDK.md:9308` (`generateText`) | Baseline non-stream text generation | [x] | `packages/ai_sdk_dart/lib/src/core/generate_text.dart`, `packages/ai_sdk_dart/test/core_api_test.dart` |
+| `AI-SDK.md:9452` (`streamText`) | Baseline streaming text generation | [x] | `packages/ai_sdk_dart/lib/src/core/stream_text.dart`, provider stream tests |
 | `AI-SDK.md:9337` + `AI-SDK.md:9497` | Rich result object fields/promises | [x] | Added request/response envelopes plus response body/request body surfacing in `generateText`/`streamText` with core tests |
-| `AI-SDK.md:9537` | `onChunk` typed chunk callback parity | [x] | Normalized stream chunk taxonomy (`source/file/tool-input-*` included) in `packages/ai/lib/src/core/stream_text.dart`; assertions in `packages/ai/test/core_api_test.dart` |
-| `AI-SDK.md:9646` | `fullStream` event model parity | [x] | Core taxonomy implemented end-to-end in `packages/ai/lib/src/core/stream_text.dart`; ordering+payload tests in `packages/ai/test/core_api_test.dart` |
+| `AI-SDK.md:9537` | `onChunk` typed chunk callback parity | [x] | Normalized stream chunk taxonomy (`source/file/tool-input-*` included) in `packages/ai_sdk_dart/lib/src/core/stream_text.dart`; assertions in `packages/ai_sdk_dart/test/core_api_test.dart` |
+| `AI-SDK.md:9646` | `fullStream` event model parity | [x] | Core taxonomy implemented end-to-end in `packages/ai_sdk_dart/lib/src/core/stream_text.dart`; ordering+payload tests in `packages/ai_sdk_dart/test/core_api_test.dart` |
 | `AI-SDK.md:10012` | Output API in `generateText`/`streamText` | [x] | Implemented for `Output.text/object/array/choice/json` |
-| `AI-SDK.md:10075` | `partialOutputStream` parity | [x] | Robust partial parsing, fenced JSON handling, and malformed boundary coverage in `packages/ai/test/core_api_test.dart` |
-| `AI-SDK.md:10202` | `elementStream` parity | [x] | Partial array emission + invalid element recovery in `packages/ai/lib/src/core/stream_text.dart` and `packages/ai/test/core_api_test.dart` |
+| `AI-SDK.md:10075` | `partialOutputStream` parity | [x] | Robust partial parsing, fenced JSON handling, and malformed boundary coverage in `packages/ai_sdk_dart/test/core_api_test.dart` |
+| `AI-SDK.md:10202` | `elementStream` parity | [x] | Partial array emission + invalid element recovery in `packages/ai_sdk_dart/lib/src/core/stream_text.dart` and `packages/ai_sdk_dart/test/core_api_test.dart` |
 | `AI-SDK.md:10552` | strict tool mode (`strict`) | [x] | Strict input failure-path conformance tests in `packages/ai_sdk_openai/test/openai_provider_test.dart`, `packages/ai_sdk_anthropic/test/anthropic_provider_test.dart`, `packages/ai_sdk_google/test/google_provider_test.dart` |
-| `AI-SDK.md:10605` | tool approval flow (`needsApproval`) | [~] | Core approval request/response flow covered in `packages/ai/test/core_api_test.dart` (`streamText approval flow emits request then executes after approval`); richer UI/agent parity pending |
-| `AI-SDK.md:10722` | multi-step tool calls (`stopWhen`) | [x] | `stopWhen` semantics verified in `packages/ai/test/core_api_test.dart` for both `generateText` and `streamText` |
-| `AI-SDK.md:10590` + `AI-SDK.md:14000` | tool input examples (`inputExamples`) | [x] | Core tool-to-provider forwarding in `packages/ai/lib/src/core/generate_text.dart` and `packages/ai/lib/src/core/stream_text.dart`; Anthropic wire forwarding asserted in `packages/ai_sdk_anthropic/test/anthropic_provider_test.dart` |
+| `AI-SDK.md:10605` | tool approval flow (`needsApproval`) | [~] | Core approval request/response flow covered in `packages/ai_sdk_dart/test/core_api_test.dart` (`streamText approval flow emits request then executes after approval`); richer UI/agent parity pending |
+| `AI-SDK.md:10722` | multi-step tool calls (`stopWhen`) | [x] | `stopWhen` semantics verified in `packages/ai_sdk_dart/test/core_api_test.dart` for both `generateText` and `streamText` |
+| `AI-SDK.md:10590` + `AI-SDK.md:14000` | tool input examples (`inputExamples`) | [x] | Core tool-to-provider forwarding in `packages/ai_sdk_dart/lib/src/core/generate_text.dart` and `packages/ai_sdk_dart/lib/src/core/stream_text.dart`; Anthropic wire forwarding asserted in `packages/ai_sdk_anthropic/test/anthropic_provider_test.dart` |
 | `AI-SDK.md:17581` + `AI-SDK.md:17619` | provider-native `source` / `file` content surfacing | [x] | OpenAI/Anthropic/Google extraction in provider impls with assertions in `packages/ai_sdk_openai/test/openai_provider_test.dart`, `packages/ai_sdk_anthropic/test/anthropic_provider_test.dart`, `packages/ai_sdk_google/test/google_provider_test.dart` |
 | `AI-SDK.md:10757` | `prepareStep` step-level overrides | [x] | Model/toolChoice/activeTools/messages/providerOptions per-step overrides in `generateText` + `streamText` |
 | `AI-SDK.md:10949` | dynamic tools (`dynamicTool`) | [x] | Core `dynamicTool` helper implemented; raw input passed through as-is in both `generateText` and `streamText` via `_parseToolInput` dynamic branch |
-| `AI-SDK.md:10797` | `onStepFinish` callback parity | [x] | Step callbacks in `generateText` and `streamText` with step payload coverage in `packages/ai/test/core_api_test.dart` |
+| `AI-SDK.md:10797` | `onStepFinish` callback parity | [x] | Step callbacks in `generateText` and `streamText` with step payload coverage in `packages/ai_sdk_dart/test/core_api_test.dart` |
 | `AI-SDK.md:10857` | `prepareStep` callback parity | [x] | Step preparation contract implemented and validated with forced tool choice + message compression test |
 | `AI-SDK.md:10825` | tool execution lifecycle callbacks | [x] | `experimentalOnToolCallStart` / `experimentalOnToolCallFinish` with no-throw guards and tests |
 | `AI-SDK.md:9590` | streaming lifecycle callbacks | [x] | `experimentalOnStart` / `experimentalOnStepStart` added to `streamText` with swallow-safe behavior |
-| `AI-SDK.md:9766` | stream transforms (`experimental_transform`) | [x] | Transform hook applies before stream callbacks/output accumulation; verified in `packages/ai/test/core_api_test.dart` |
-| `AI-SDK.md:9776` | `smoothStream` helper | [x] | `smoothStream(chunkSize)` implemented and tested in `packages/ai/test/core_api_test.dart` |
+| `AI-SDK.md:9766` | stream transforms (`experimental_transform`) | [x] | Transform hook applies before stream callbacks/output accumulation; verified in `packages/ai_sdk_dart/test/core_api_test.dart` |
+| `AI-SDK.md:9776` | `smoothStream` helper | [x] | `smoothStream(chunkSize)` implemented and tested in `packages/ai_sdk_dart/test/core_api_test.dart` |
 | `AI-SDK.md:11014` | preliminary tool results (async iterable) | [x] | Streaming preliminary tool-result events + canonical final tool result in `streamText` |
 | `AI-SDK.md:11048` | tool choice controls | [x] | Enforced `auto` / `required` / `none` / specific tool semantics and invalid-name guards |
-| `AI-SDK.md:10416` | `AI_NoObjectGeneratedError` parity | [x] | `AiNoObjectGeneratedError` wired with response metadata/body across structured helpers; tests in `packages/ai/test/core_api_test.dart` |
+| `AI-SDK.md:10416` | `AI_NoObjectGeneratedError` parity | [x] | `AiNoObjectGeneratedError` wired with response metadata/body across structured helpers; tests in `packages/ai_sdk_dart/test/core_api_test.dart` |
 
 ## Page-Level Core Feature Traceability
 
 | Feature | AI-SDK.md evidence | Implementation | Tests |
 | --- | --- | --- | --- |
-| `streamText` event taxonomy | `AI-SDK.md:9646-9763` | `packages/ai/lib/src/core/stream_text.dart` | `packages/ai/test/core_api_test.dart` (`streamText emits full event taxonomy in order`, `streamText onChunk includes source/file/tool-input chunks`) |
-| `onStepFinish` | `AI-SDK.md:10797-10823` | `packages/ai/lib/src/core/generate_text.dart`, `packages/ai/lib/src/core/stream_text.dart` | `packages/ai/test/core_api_test.dart` (`onStepFinish works for multi-step...`) |
-| `prepareStep` | `AI-SDK.md:10857-10920` | `packages/ai/lib/src/core/generate_text.dart`, `packages/ai/lib/src/core/stream_text.dart` | `packages/ai/test/core_api_test.dart` (`prepareStep supports...`) |
-| Tool choice | `AI-SDK.md:11048-11080` | `packages/ai/lib/src/core/generate_text.dart`, `packages/ai/lib/src/core/stream_text.dart` | `packages/ai/test/core_api_test.dart` (`toolChoice enforces...`) |
-| Tool input lifecycle hooks | `AI-SDK.md:9547-9549`, `AI-SDK.md:9721-9731` | `packages/ai/lib/src/core/stream_text.dart` | `packages/ai/test/core_api_test.dart` (`streamText tool input lifecycle hooks...`) |
-| Preliminary tool results | `AI-SDK.md:11014-11046` | `packages/ai/lib/src/core/generate_text.dart`, `packages/ai/lib/src/core/stream_text.dart` | `packages/ai/test/core_api_test.dart` (`streamText emits preliminary tool results...`) |
-| Experimental lifecycle callbacks | `AI-SDK.md:9590-9644`, `AI-SDK.md:10825-10855` | `packages/ai/lib/src/core/generate_text.dart`, `packages/ai/lib/src/core/stream_text.dart` | `packages/ai/test/core_api_test.dart` (`experimental lifecycle callbacks are swallow-safe`) |
-| Structured output robustness | `AI-SDK.md:10075-10202` | `packages/ai/lib/src/core/stream_text.dart`, `packages/ai/lib/src/core/stream_object.dart` | `packages/ai/test/core_api_test.dart` (`partialOutputStream...`, `elementStream...`, `output fails...`, `streamObject patch stream supports nested json pointer operations`) |
+| `streamText` event taxonomy | `AI-SDK.md:9646-9763` | `packages/ai_sdk_dart/lib/src/core/stream_text.dart` | `packages/ai_sdk_dart/test/core_api_test.dart` (`streamText emits full event taxonomy in order`, `streamText onChunk includes source/file/tool-input chunks`) |
+| `onStepFinish` | `AI-SDK.md:10797-10823` | `packages/ai_sdk_dart/lib/src/core/generate_text.dart`, `packages/ai_sdk_dart/lib/src/core/stream_text.dart` | `packages/ai_sdk_dart/test/core_api_test.dart` (`onStepFinish works for multi-step...`) |
+| `prepareStep` | `AI-SDK.md:10857-10920` | `packages/ai_sdk_dart/lib/src/core/generate_text.dart`, `packages/ai_sdk_dart/lib/src/core/stream_text.dart` | `packages/ai_sdk_dart/test/core_api_test.dart` (`prepareStep supports...`) |
+| Tool choice | `AI-SDK.md:11048-11080` | `packages/ai_sdk_dart/lib/src/core/generate_text.dart`, `packages/ai_sdk_dart/lib/src/core/stream_text.dart` | `packages/ai_sdk_dart/test/core_api_test.dart` (`toolChoice enforces...`) |
+| Tool input lifecycle hooks | `AI-SDK.md:9547-9549`, `AI-SDK.md:9721-9731` | `packages/ai_sdk_dart/lib/src/core/stream_text.dart` | `packages/ai_sdk_dart/test/core_api_test.dart` (`streamText tool input lifecycle hooks...`) |
+| Preliminary tool results | `AI-SDK.md:11014-11046` | `packages/ai_sdk_dart/lib/src/core/generate_text.dart`, `packages/ai_sdk_dart/lib/src/core/stream_text.dart` | `packages/ai_sdk_dart/test/core_api_test.dart` (`streamText emits preliminary tool results...`) |
+| Experimental lifecycle callbacks | `AI-SDK.md:9590-9644`, `AI-SDK.md:10825-10855` | `packages/ai_sdk_dart/lib/src/core/generate_text.dart`, `packages/ai_sdk_dart/lib/src/core/stream_text.dart` | `packages/ai_sdk_dart/test/core_api_test.dart` (`experimental lifecycle callbacks are swallow-safe`) |
+| Structured output robustness | `AI-SDK.md:10075-10202` | `packages/ai_sdk_dart/lib/src/core/stream_text.dart`, `packages/ai_sdk_dart/lib/src/core/stream_object.dart` | `packages/ai_sdk_dart/test/core_api_test.dart` (`partialOutputStream...`, `elementStream...`, `output fails...`, `streamObject patch stream supports nested json pointer operations`) |
 
 ## Provider-Level Traceability (Tool Choice / Strict)
 

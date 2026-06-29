@@ -376,7 +376,7 @@ final client = MCPClient(
 ### ✅ Implemented
 
 - ✅ `generateText` — full result envelope (text, steps, usage, reasoning, sources, files)
-- ✅ `streamText` — complete event taxonomy (22 typed event types), `onAbort` callback
+- ✅ `streamText` — complete event taxonomy (20 typed event types), `onAbort` callback
 - ✅ `generateObject` / structured output (object, array, choice, json) with native JSON schema
 - ✅ `embed` / `embedMany` + `cosineSimilarity`, `wrapEmbeddingModel`
 - ✅ `generateImage` (OpenAI DALL-E 3), `generateVideo`

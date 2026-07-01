@@ -1,3 +1,18 @@
+## Unreleased
+
+- **Fixed:** the streaming (`doStream`) and non-streaming (`doGenerate`) paths
+  now surface model reasoning/thinking. Streaming `delta` reasoning is emitted
+  as `StreamPartReasoningDelta`, and non-streaming `message` reasoning as a
+  `LanguageModelV3ReasoningPart`, so `streamText(...).fullStream` /
+  `result.reasoning` and `generateText(...).reasoning` are populated when the
+  provider returns it. Previously reasoning was silently dropped.
+- **New:** `OpenAICompatibleConfig.reasoningKeys` — the response field names
+  checked (in order) for reasoning text. Defaults to
+  `['reasoning_content', 'reasoning', 'thinking']`, covering DeepSeek
+  (`reasoning_content`), OpenRouter (`reasoning`), and `thinking`-style hosts;
+  set to `const []` to disable extraction. Benefits every provider built on this
+  base (OpenAI, Azure, Groq, Mistral, …).
+
 ## 1.2.0
 
 First release (versioned 1.2.0 to align with the AI SDK Dart monorepo).

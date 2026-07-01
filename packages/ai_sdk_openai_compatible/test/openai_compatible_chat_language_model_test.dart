@@ -778,6 +778,180 @@ void main() {
       );
     });
 
+    // ── reasoning/thinking deltas during streaming ───────────────────────
+    test('doStream emits reasoning deltas from delta.reasoning_content',
+        () async {
+      final server = await _TestServer.start((request) async {
+        _writeSse(request, [
+          '{"choices":[{"delta":{"reasoning_content":"Let me "}}]}',
+          '{"choices":[{"delta":{"reasoning_content":"think."}}]}',
+          '{"choices":[{"delta":{"content":"Answer."}}]}',
+          '{"choices":[{"delta":{},"finish_reason":"stop"}]}',
+          '[DONE]',
+        ]);
+      });
+      addTearDown(server.close);
+
+      final model = _bearerModel(server.baseUrl);
+      final streamResult = await model.doStream(
+        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+      );
+      final parts = await streamResult.stream.toList();
+
+      expect(
+        parts.whereType<StreamPartReasoningDelta>().map((p) => p.delta).join(),
+        'Let me think.',
+      );
+      expect(
+        parts.whereType<StreamPartTextDelta>().map((p) => p.delta).join(),
+        'Answer.',
+      );
+    });
+
+    test('doStream emits reasoning deltas from delta.reasoning', () async {
+      final server = await _TestServer.start((request) async {
+        _writeSse(request, [
+          '{"choices":[{"delta":{"reasoning":"Because X."}}]}',
+          '{"choices":[{"delta":{},"finish_reason":"stop"}]}',
+          '[DONE]',
+        ]);
+      });
+      addTearDown(server.close);
+
+      final model = _bearerModel(server.baseUrl);
+      final streamResult = await model.doStream(
+        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+      );
+      final parts = await streamResult.stream.toList();
+
+      expect(
+        parts.whereType<StreamPartReasoningDelta>().single.delta,
+        'Because X.',
+      );
+    });
+
+    test('doStream emits reasoning deltas from delta.thinking', () async {
+      final server = await _TestServer.start((request) async {
+        _writeSse(request, [
+          '{"choices":[{"delta":{"thinking":"Hmm."}}]}',
+          '{"choices":[{"delta":{},"finish_reason":"stop"}]}',
+          '[DONE]',
+        ]);
+      });
+      addTearDown(server.close);
+
+      final model = _bearerModel(server.baseUrl);
+      final streamResult = await model.doStream(
+        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+      );
+      final parts = await streamResult.stream.toList();
+
+      expect(parts.whereType<StreamPartReasoningDelta>().single.delta, 'Hmm.');
+    });
+
+    test('doStream emits no reasoning delta when the field is absent or empty',
+        () async {
+      final server = await _TestServer.start((request) async {
+        _writeSse(request, [
+          '{"choices":[{"delta":{"reasoning_content":""}}]}',
+          '{"choices":[{"delta":{"content":"Hi"}}]}',
+          '{"choices":[{"delta":{},"finish_reason":"stop"}]}',
+          '[DONE]',
+        ]);
+      });
+      addTearDown(server.close);
+
+      final model = _bearerModel(server.baseUrl);
+      final streamResult = await model.doStream(
+        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+      );
+      final parts = await streamResult.stream.toList();
+
+      expect(parts.whereType<StreamPartReasoningDelta>(), isEmpty);
+    });
+
+    test('doStream honors custom config.reasoningKeys', () async {
+      final server = await _TestServer.start((request) async {
+        _writeSse(request, [
+          '{"choices":[{"delta":{"chain_of_thought":"Step 1."}}]}',
+          '{"choices":[{"delta":{},"finish_reason":"stop"}]}',
+          '[DONE]',
+        ]);
+      });
+      addTearDown(server.close);
+
+      final model = OpenAICompatibleChatLanguageModel(
+        modelId: 'm',
+        config: OpenAICompatibleConfig(
+          provider: 'test',
+          baseUrl: server.baseUrl,
+          headers: () => {'Authorization': 'Bearer k'},
+          reasoningKeys: const ['chain_of_thought'],
+        ),
+      );
+      final streamResult = await model.doStream(
+        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+      );
+      final parts = await streamResult.stream.toList();
+
+      expect(
+        parts.whereType<StreamPartReasoningDelta>().single.delta,
+        'Step 1.',
+      );
+    });
+
+    // ── reasoning/thinking part (non-streaming) ──────────────────────────
+    test('doGenerate extracts reasoning from message.reasoning_content',
+        () async {
+      final server = await _TestServer.start((request) async {
+        _writeJson(request, {
+          'choices': [
+            {
+              'finish_reason': 'stop',
+              'message': {
+                'reasoning_content': 'I reasoned about it.',
+                'content': 'Final answer.',
+              },
+            },
+          ],
+        });
+      });
+      addTearDown(server.close);
+
+      final model = _bearerModel(server.baseUrl);
+      final result = await model.doGenerate(
+        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+      );
+
+      final reasoning = result.content
+          .whereType<LanguageModelV3ReasoningPart>()
+          .single;
+      expect(reasoning.text, 'I reasoned about it.');
+      final text = result.content.whereType<LanguageModelV3TextPart>().single;
+      expect(text.text, 'Final answer.');
+    });
+
+    test('doGenerate emits no reasoning part when absent', () async {
+      final server = await _TestServer.start((request) async {
+        _writeJson(request, {
+          'choices': [
+            {
+              'finish_reason': 'stop',
+              'message': {'content': 'Just an answer.'},
+            },
+          ],
+        });
+      });
+      addTearDown(server.close);
+
+      final model = _bearerModel(server.baseUrl);
+      final result = await model.doGenerate(
+        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+      );
+
+      expect(result.content.whereType<LanguageModelV3ReasoningPart>(), isEmpty);
+    });
+
     // ── streaming tool call without explicit id/function ─────────────────
     test('doStream generates a tool id when none is provided', () async {
       final server = await _TestServer.start((request) async {

@@ -118,6 +118,11 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
         <String, dynamic>{};
 
     final content = <LanguageModelV3ContentPart>[];
+    final reasoning = _extractReasoning(message);
+    if (reasoning != null) {
+      content.add(LanguageModelV3ReasoningPart(text: reasoning));
+    }
+
     final text = message['content'];
     if (text is String && text.isNotEmpty) {
       content.add(LanguageModelV3TextPart(text: text));
@@ -232,6 +237,13 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
           final delta =
               (choice['delta'] as Map?)?.cast<String, dynamic>() ??
               <String, dynamic>{};
+
+          // Reasoning/thinking precedes visible output; emit it first so the
+          // consumer's reasoning span opens before any text/tool deltas.
+          final reasoningDelta = _extractReasoning(delta);
+          if (reasoningDelta != null) {
+            controller.add(StreamPartReasoningDelta(delta: reasoningDelta));
+          }
 
           _appendAnnotationParts(
             (delta['annotations'] as List?) ?? const [],
@@ -584,6 +596,21 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
       };
     }
     return {'type': 'unsupported'};
+  }
+
+  // ── reasoning / thinking extraction ───────────────────────────────────
+
+  /// Returns the first non-empty reasoning string found in [source] under one
+  /// of [OpenAICompatibleConfig.reasoningKeys], or `null` when none is present.
+  ///
+  /// Shared by the streaming `delta` and non-streaming `message` paths so both
+  /// honor the same provider-specific field names.
+  String? _extractReasoning(Map<String, dynamic> source) {
+    for (final key in config.reasoningKeys) {
+      final value = source[key];
+      if (value is String && value.isNotEmpty) return value;
+    }
+    return null;
   }
 
   // ── finish reason ─────────────────────────────────────────────────────

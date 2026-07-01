@@ -152,6 +152,59 @@ void main() {
       );
     });
 
+    test('doStream emits reasoning deltas from the default OpenAI config',
+        () async {
+      final server = await _TestServer.start((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.set('content-type', 'text/event-stream');
+        request.response.write(
+          'data: {"choices":[{"delta":{"reasoning_content":"Thinking"}}]}\n\n',
+        );
+        request.response.write(
+          'data: {"choices":[{"delta":{"reasoning_content":"..."}}]}\n\n',
+        );
+        request.response.write(
+          'data: {"choices":[{"delta":{"content":"Answer"}}]}\n\n',
+        );
+        request.response.write(
+          'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+        );
+        request.response.write('data: [DONE]\n\n');
+        await request.response.close();
+      });
+
+      addTearDown(server.close);
+
+      final provider = OpenAIProvider(apiKey: 'test', baseUrl: server.baseUrl);
+      final model = provider.call('gpt-4.1-mini');
+
+      final streamResult = await model.doStream(
+        LanguageModelV3CallOptions(
+          prompt: LanguageModelV3Prompt(
+            messages: [
+              LanguageModelV3Message(
+                role: LanguageModelV3Role.user,
+                content: [LanguageModelV3TextPart(text: 'Hi')],
+              ),
+            ],
+          ),
+          providerOptions: const {
+            'openai': {'reasoning_effort': 'high'},
+          },
+        ),
+      );
+
+      final parts = await streamResult.stream.toList();
+      expect(
+        parts.whereType<StreamPartReasoningDelta>().map((p) => p.delta).join(),
+        'Thinking...',
+      );
+      expect(
+        parts.whereType<StreamPartTextDelta>().map((p) => p.delta).join(),
+        'Answer',
+      );
+    });
+
     test('maps tool choice modes and strict tool schemas', () async {
       final seenBodies = <Map<String, dynamic>>[];
       final server = await _TestServer.start((request) async {

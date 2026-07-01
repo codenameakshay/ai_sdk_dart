@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_dart/test.dart';
+import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
 
 // ---------------------------------------------------------------------------
@@ -336,6 +337,37 @@ void main() {
       await result.text;
 
       expect(recorder.spans, isEmpty);
+    });
+
+    test('records usage attributes on the span after the finish chain settles',
+        () async {
+      final recorder = _TestRecorder();
+      final model = MockLanguageModelV3(
+        response: [mockText('Done')],
+        usage: const LanguageModelV3Usage(
+          inputTokens: 7,
+          outputTokens: 3,
+          totalTokens: 10,
+        ),
+      );
+
+      final result = await streamText(
+        model: model,
+        prompt: 'Hi',
+        experimentalTelemetry: TelemetrySettings(
+          isEnabled: true,
+          recorder: recorder,
+        ),
+      );
+      // Drain everything and let the nested finish→usage .then() chain run.
+      await result.fullStream.toList();
+      await result.totalUsage;
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+
+      final span = recorder.spans.first;
+      expect(span.setAttributes['ai.usage.promptTokens'], 7);
+      expect(span.setAttributes['ai.usage.completionTokens'], 3);
+      expect(span.ended, isTrue);
     });
   });
 }

@@ -159,8 +159,9 @@ class _CompletionPageState extends State<CompletionPage> {
                       color: scheme.surfaceContainerHigh,
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Text(
-                      _completion.completion,
+                    child: StreamingTextView(
+                      text: _completion.completion,
+                      isStreaming: _completion.isStreaming,
                       style: textTheme.bodyMedium?.copyWith(height: 1.6),
                     ),
                   ),

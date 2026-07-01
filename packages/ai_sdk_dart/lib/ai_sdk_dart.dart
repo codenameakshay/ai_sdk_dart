@@ -5,7 +5,6 @@ export 'src/core/embed.dart';
 export 'src/core/embed_many.dart';
 export 'src/core/generate_image.dart';
 export 'src/core/generate_object.dart';
-export 'src/core/generate_video.dart';
 export 'src/core/generate_speech.dart';
 export 'src/core/generate_text.dart';
 export 'src/core/stream_text.dart';

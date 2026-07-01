@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
+import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:flutter/material.dart';
@@ -22,7 +23,7 @@ class _MultimodalPageState extends State<MultimodalPage> {
   Uint8List? _imageBytes;
   String? _mediaType;
   bool _loading = false;
-  String? _response;
+  String _response = '';
   String? _error;
 
   Future<void> _pickImage() async {
@@ -37,7 +38,7 @@ class _MultimodalPageState extends State<MultimodalPage> {
     setState(() {
       _imageBytes = bytes;
       _mediaType = 'image/jpeg';
-      _response = null;
+      _response = '';
       _error = null;
     });
   }
@@ -54,7 +55,7 @@ class _MultimodalPageState extends State<MultimodalPage> {
     setState(() {
       _imageBytes = bytes;
       _mediaType = 'image/jpeg';
-      _response = null;
+      _response = '';
       _error = null;
     });
   }
@@ -78,11 +79,13 @@ class _MultimodalPageState extends State<MultimodalPage> {
     setState(() {
       _loading = true;
       _error = null;
-      _response = null;
+      _response = '';
     });
 
     try {
-      final result = await generateText(
+      // Multimodal input: one user message carrying an image part + a text
+      // part. The reply is streamed token-by-token into a StreamingTextView.
+      final result = await streamText(
         model: OpenAIProvider(apiKey: openAiApiKey)('gpt-4.1-mini'),
         messages: [
           ModelMessage.parts(
@@ -97,11 +100,14 @@ class _MultimodalPageState extends State<MultimodalPage> {
           ),
         ],
       );
-      setState(() {
-        _response = result.text;
-        _loading = false;
-      });
+      result.text.then((_) {}, onError: (_) {});
+      await for (final delta in result.textStream) {
+        if (!mounted) return;
+        setState(() => _response += delta);
+      }
+      if (mounted) setState(() => _loading = false);
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = e.toString();
         _loading = false;
@@ -188,7 +194,7 @@ class _MultimodalPageState extends State<MultimodalPage> {
                   : const Icon(Icons.analytics),
               label: Text(_loading ? 'Analyzing…' : 'Analyze'),
             ),
-            if (_response != null) ...[
+            if (_response.isNotEmpty) ...[
               const SizedBox(height: 24),
               Text('Response', style: textTheme.titleMedium),
               const SizedBox(height: 8),
@@ -199,8 +205,9 @@ class _MultimodalPageState extends State<MultimodalPage> {
                   color: scheme.surfaceContainerHigh,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Text(
-                  _response!,
+                child: StreamingTextView(
+                  text: _response,
+                  isStreaming: _loading,
                   style: textTheme.bodyMedium?.copyWith(height: 1.6),
                 ),
               ),

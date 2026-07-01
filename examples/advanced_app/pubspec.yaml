@@ -12,12 +12,12 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
-  ai_sdk_dart: ^1.0.0
-  ai_sdk_provider: ^1.0.0
-  ai_sdk_openai: ^1.0.0
-  ai_sdk_anthropic: ^1.0.0
-  ai_sdk_google: ^1.0.0
-  ai_sdk_flutter_ui: ^1.0.0
+  ai_sdk_dart: ^1.2.0
+  ai_sdk_provider: ^1.2.0
+  ai_sdk_openai: ^1.2.0
+  ai_sdk_anthropic: ^1.2.0
+  ai_sdk_google: ^1.2.0
+  ai_sdk_flutter_ui: ^1.2.0
   image_picker: ^1.0.7
   record: ^6.2.0
   audioplayers: ^6.0.0

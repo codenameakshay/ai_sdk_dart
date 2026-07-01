@@ -1,0 +1,20 @@
+name: ai_sdk_openai_compatible
+description: >-
+  Shared OpenAI Chat Completions base for AI SDK Dart providers. Implements tool
+  calling, multimodal content, structured output, and SSE streaming once, behind
+  a small per-provider config.
+version: 1.2.0
+homepage: https://github.com/codenameakshay/ai_sdk_dart
+repository: https://github.com/codenameakshay/ai_sdk_dart
+resolution: workspace
+
+environment:
+  sdk: ^3.11.1
+
+dependencies:
+  ai_sdk_provider: ^1.2.0
+  dio: ^5.9.0
+
+dev_dependencies:
+  lints: ^6.1.0
+  test: ^1.25.0

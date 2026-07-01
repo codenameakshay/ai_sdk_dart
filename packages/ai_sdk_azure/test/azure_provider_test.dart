@@ -1,3 +1,8 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:ai_sdk_azure/ai_sdk_azure.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
@@ -69,4 +74,271 @@ void main() {
       expect(model, isA<EmbeddingModelV2<String>>());
     });
   });
+
+  group('OpenAI-compatible capabilities (via shared base)', () {
+    test('serializes tools and tool_choice', () async {
+      late Map<String, dynamic> captured;
+      final server = await _TestServer.start((request) async {
+        captured = await _captureBody(request);
+        _writeOk(request);
+      });
+      addTearDown(server.close);
+
+      final model = AzureOpenAIProvider(
+        endpoint: server.endpoint,
+        apiKey: 'key',
+      )('gpt-4-deployment');
+      await model.doGenerate(
+        LanguageModelV3CallOptions(
+          prompt: _userPrompt('weather'),
+          tools: const [
+            LanguageModelV3FunctionTool(
+              name: 'weather',
+              inputSchema: {'type': 'object'},
+            ),
+          ],
+          toolChoice: const ToolChoiceRequired(),
+        ),
+      );
+
+      final tools = (captured['tools'] as List).cast<Map<String, dynamic>>();
+      expect((tools.single['function'] as Map)['name'], 'weather');
+      expect(captured['tool_choice'], 'required');
+    });
+
+    test('serializes multimodal image content part', () async {
+      late Map<String, dynamic> captured;
+      final server = await _TestServer.start((request) async {
+        captured = await _captureBody(request);
+        _writeOk(request);
+      });
+      addTearDown(server.close);
+
+      final model = AzureOpenAIProvider(
+        endpoint: server.endpoint,
+        apiKey: 'key',
+      )('gpt-4o-deployment');
+      await model.doGenerate(
+        LanguageModelV3CallOptions(prompt: _imagePrompt()),
+      );
+
+      final messages = (captured['messages'] as List)
+          .cast<Map<String, dynamic>>();
+      final content = (messages.first['content'] as List)
+          .cast<Map<String, dynamic>>();
+      expect(content[0]['type'], 'text');
+      expect(content[1]['type'], 'image_url');
+    });
+
+    test('sends api-key header and api-version query param', () async {
+      String? authHeader;
+      String? apiKeyHeader;
+      String? query;
+      final server = await _TestServer.start((request) async {
+        authHeader = request.headers.value('authorization');
+        apiKeyHeader = request.headers.value('api-key');
+        query = request.uri.query;
+        _writeOk(request);
+      });
+      addTearDown(server.close);
+
+      final model = AzureOpenAIProvider(
+        endpoint: server.endpoint,
+        apiKey: 'secret-key',
+        apiVersion: '2024-05-01-preview',
+      )('gpt-4-deployment');
+      await model.doGenerate(
+        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+      );
+
+      expect(apiKeyHeader, 'secret-key');
+      expect(authHeader, isNull);
+      expect(query, contains('api-version=2024-05-01-preview'));
+    });
+
+    test(
+      'response_format json_schema is serialized from outputSchema',
+      () async {
+        late Map<String, dynamic> captured;
+        final server = await _TestServer.start((request) async {
+          captured = await _captureBody(request);
+          _writeOk(request);
+        });
+        addTearDown(server.close);
+
+        final model = AzureOpenAIProvider(
+          endpoint: server.endpoint,
+          apiKey: 'key',
+        )('gpt-4o-deployment');
+        await model.doGenerate(
+          LanguageModelV3CallOptions(
+            prompt: _userPrompt('weather'),
+            outputSchema: const {'type': 'object'},
+          ),
+        );
+
+        final rf = captured['response_format'] as Map<String, dynamic>;
+        expect(rf['type'], 'json_schema');
+      },
+    );
+  });
+
+  group('Azure embedding doEmbed wire format', () {
+    test(
+      'posts to deployment /embeddings with api-key header and api-version '
+      'query, parses embeddings in input order',
+      () async {
+        late Map<String, dynamic> captured;
+        String? path;
+        String? apiKeyHeader;
+        String? query;
+        final server = await _TestServer.start((request) async {
+          path = request.uri.path;
+          apiKeyHeader = request.headers.value('api-key');
+          query = request.uri.query;
+          captured = await _captureBody(request);
+
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'data': [
+                {
+                  'index': 0,
+                  'embedding': [0.1, 0.2, 0.3],
+                },
+                {
+                  'index': 1,
+                  'embedding': [0.4, 0.5, 0.6],
+                },
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = AzureOpenAIProvider(
+          endpoint: server.endpoint,
+          apiKey: 'secret-key',
+          apiVersion: '2024-05-01-preview',
+        ).embedding('text-embedding-ada-002');
+
+        final result = await model.doEmbed(
+          const EmbeddingModelV2CallOptions<String>(
+            values: ['hello', 'world'],
+          ),
+        );
+
+        // Routed to the deployment-scoped embeddings endpoint.
+        expect(
+          path,
+          '/openai/deployments/text-embedding-ada-002/embeddings',
+        );
+        // Azure auth wiring on the embedding path.
+        expect(apiKeyHeader, 'secret-key');
+        expect(query, contains('api-version=2024-05-01-preview'));
+        // Request body carries input and the deployment as model.
+        expect(captured['input'], ['hello', 'world']);
+        expect(captured['model'], 'text-embedding-ada-002');
+        // Embeddings parsed and paired with their source values, in order.
+        expect(result.embeddings, hasLength(2));
+        expect(result.embeddings[0].value, 'hello');
+        expect(result.embeddings[0].embedding, [0.1, 0.2, 0.3]);
+        expect(result.embeddings[1].value, 'world');
+        expect(result.embeddings[1].embedding, [0.4, 0.5, 0.6]);
+      },
+    );
+
+    test('tolerates a response with no data list', () async {
+      final server = await _TestServer.start((request) async {
+        await _captureBody(request);
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({'object': 'list'}));
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = AzureOpenAIProvider(
+        endpoint: server.endpoint,
+        apiKey: 'key',
+      ).embedding('text-embedding-ada-002');
+
+      final result = await model.doEmbed(
+        const EmbeddingModelV2CallOptions<String>(values: ['only']),
+      );
+      expect(result.embeddings, isEmpty);
+    });
+  });
+}
+
+LanguageModelV3Prompt _userPrompt(String text) => LanguageModelV3Prompt(
+  messages: [
+    LanguageModelV3Message(
+      role: LanguageModelV3Role.user,
+      content: [LanguageModelV3TextPart(text: text)],
+    ),
+  ],
+);
+
+LanguageModelV3Prompt _imagePrompt() => LanguageModelV3Prompt(
+  messages: [
+    LanguageModelV3Message(
+      role: LanguageModelV3Role.user,
+      content: [
+        LanguageModelV3TextPart(text: 'describe'),
+        LanguageModelV3ImagePart(
+          image: DataContentBytes(Uint8List.fromList(utf8.encode('img'))),
+          mediaType: 'image/png',
+        ),
+      ],
+    ),
+  ],
+);
+
+Future<Map<String, dynamic>> _captureBody(HttpRequest request) async {
+  final body = await utf8.decoder.bind(request).join();
+  return (jsonDecode(body) as Map).cast<String, dynamic>();
+}
+
+void _writeOk(HttpRequest request) {
+  request.response.statusCode = 200;
+  request.response.headers.contentType = ContentType.json;
+  request.response.write(
+    jsonEncode({
+      'choices': [
+        {
+          'finish_reason': 'stop',
+          'message': {'content': 'ok'},
+        },
+      ],
+    }),
+  );
+  request.response.close();
+}
+
+class _TestServer {
+  _TestServer._(this._server);
+
+  final HttpServer _server;
+
+  static Future<_TestServer> start(
+    FutureOr<void> Function(HttpRequest request) handler,
+  ) async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    unawaited(() async {
+      await for (final request in server) {
+        await handler(request);
+      }
+    }());
+    return _TestServer._(server);
+  }
+
+  /// Used as the Azure `endpoint`; the base URL becomes
+  /// `<endpoint>/openai/deployments/<deployment>` which all resolves to this
+  /// loopback server.
+  String get endpoint => 'http://${_server.address.host}:${_server.port}';
+
+  Future<void> close() => _server.close(force: true);
 }

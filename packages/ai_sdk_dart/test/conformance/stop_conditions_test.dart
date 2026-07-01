@@ -3,6 +3,8 @@ import 'package:ai_sdk_dart/test.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
 
+import 'helpers/fake_models.dart';
+
 void main() {
   group('StepSnapshot', () {
     test('has stepCount, toolCallNames, and finishReason fields', () {
@@ -230,6 +232,34 @@ void main() {
       );
       expect(result.text, 'Hello!');
     });
+
+    test(
+      'stopWhen drives the tool loop past the default maxSteps (regression)',
+      () async {
+        // maxSteps defaults to 1; a stopWhen condition must be able to extend
+        // the loop beyond it. The model returns a tool call on every step.
+        var executions = 0;
+        final result = await generateText(
+          model: FakeToolModel(toolName: 'ping', toolInput: const {}),
+          prompt: 'go',
+          stopWhen: stepCountIs(3),
+          tools: {
+            'ping': tool<Map<String, dynamic>, String>(
+              inputSchema: Schema<Map<String, dynamic>>(
+                jsonSchema: const {'type': 'object'},
+                fromJson: (json) => json,
+              ),
+              execute: (_, __) async {
+                executions++;
+                return 'pong';
+              },
+            ),
+          },
+        );
+        expect(result.steps, hasLength(3));
+        expect(executions, 3);
+      },
+    );
   });
 
   group('streamText stopWhen parameter', () {
@@ -257,6 +287,122 @@ void main() {
         stopWhen: [stepCountIs(1), never],
       );
       expect(await result.text, 'Hello!');
+    });
+
+    test(
+      'stopWhen drives the tool loop past the default maxSteps (regression)',
+      () async {
+        var executions = 0;
+        final result = await streamText(
+          model: FakeToolModel(toolName: 'ping', toolInput: const {}),
+          prompt: 'go',
+          stopWhen: stepCountIs(3),
+          tools: {
+            'ping': tool<Map<String, dynamic>, String>(
+              inputSchema: Schema<Map<String, dynamic>>(
+                jsonSchema: const {'type': 'object'},
+                fromJson: (json) => json,
+              ),
+              execute: (_, __) async {
+                executions++;
+                return 'pong';
+              },
+            ),
+          },
+        );
+        await result.text;
+        final steps = await result.steps;
+        expect(steps, hasLength(3));
+        expect(executions, 3);
+      },
+    );
+  });
+
+  group('run policy helpers', () {
+    final condA = stepCountIs(2);
+    final condB = hasToolCall('x');
+
+    test('resolveStopConditions merges single stopWhen with stopConditions', () {
+      expect(resolveStopConditions(condA, [condB]), [condA, condB]);
+    });
+
+    test('resolveStopConditions accepts a list stopWhen', () {
+      expect(resolveStopConditions([condA, never], const []), [condA, never]);
+    });
+
+    test('resolveStopConditions with null stopWhen keeps stopConditions', () {
+      expect(resolveStopConditions(null, [condB]), [condB]);
+    });
+
+    test('stopWhenIsSet distinguishes set vs unset', () {
+      expect(stopWhenIsSet(null), isFalse);
+      expect(stopWhenIsSet(condA), isTrue);
+      expect(stopWhenIsSet([condA]), isTrue);
+      expect(stopWhenIsSet(const <StopCondition>[]), isFalse);
+    });
+
+    test('resolveStepBudget returns 1 without tools', () {
+      expect(resolveStepBudget(hasTools: false, stopWhen: condA, maxSteps: 9), 1);
+    });
+
+    test('resolveStepBudget uses the safety cap when stopWhen is set', () {
+      expect(
+        resolveStepBudget(hasTools: true, stopWhen: condA, maxSteps: 3),
+        stopWhenStepSafetyCap,
+      );
+    });
+
+    test('resolveStepBudget falls back to maxSteps (clamped >= 1)', () {
+      expect(resolveStepBudget(hasTools: true, stopWhen: null, maxSteps: 5), 5);
+      expect(resolveStepBudget(hasTools: true, stopWhen: null, maxSteps: 0), 1);
+    });
+
+    test('shouldStopAfterStep stops when no tool results', () {
+      expect(
+        shouldStopAfterStep(
+          toolResultsEmpty: true,
+          hasApprovalRequests: false,
+          snapshot: const StepSnapshot(stepCount: 1),
+          conditions: const [],
+        ),
+        isTrue,
+      );
+    });
+
+    test('shouldStopAfterStep stops on pending approval', () {
+      expect(
+        shouldStopAfterStep(
+          toolResultsEmpty: false,
+          hasApprovalRequests: true,
+          snapshot: const StepSnapshot(stepCount: 1),
+          conditions: const [],
+        ),
+        isTrue,
+      );
+    });
+
+    test('shouldStopAfterStep stops when a condition trips', () {
+      expect(
+        shouldStopAfterStep(
+          toolResultsEmpty: false,
+          hasApprovalRequests: false,
+          snapshot: const StepSnapshot(stepCount: 3),
+          conditions: [stepCountIs(3)],
+        ),
+        isTrue,
+      );
+    });
+
+    test('shouldStopAfterStep continues when tools ran and no condition trips', () {
+      expect(
+        shouldStopAfterStep(
+          toolResultsEmpty: false,
+          hasApprovalRequests: false,
+          snapshot: const StepSnapshot(stepCount: 1),
+          conditions: [stepCountIs(3)],
+        ),
+        isFalse,
+      );
     });
   });
 }

@@ -1,3 +1,42 @@
+## 1.2.0
+
+### Errors
+
+- Provider HTTP failures now surface as a typed **`AiApiCallError`** carrying the provider's
+  `message` / `type` / `code` / `statusCode` (and the raw response body), instead of a raw
+  `DioException`. The `AiSdkError` hierarchy was relocated into `ai_sdk_provider` so all provider
+  packages can throw it; `ai_sdk_dart`'s public surface is unchanged via a re-export shim, and
+  existing `import`s keep working.
+
+### Bug Fixes
+
+- **`onAbort` now interrupts streaming.** Cancelling the `CancellationToken` during a `streamText`
+  run stops the read loop immediately, instead of firing the callback while the underlying stream
+  kept draining to completion.
+- **`stopWhen` can extend the tool loop past `maxSteps`.** Custom stop conditions are now the
+  authoritative loop terminator: a higher `stepCountIs(...)` (or any custom condition) is honored
+  even when `maxSteps` alone would have stopped earlier, matching Vercel AI SDK v6 semantics. A
+  1000-step safety cap still backstops runaway loops.
+
+### Removed (breaking for the unused video API)
+
+- **`generateVideo`**, **`AiNoVideoGeneratedError`**, the provider registry's video model category,
+  and the `mockVideoModelV1` test helper. No provider ever implemented `VideoModelV1` (also removed
+  from `ai_sdk_provider`), so this API could not be exercised. If you referenced any of these
+  symbols, delete the reference — there was no working code path behind them.
+
+### Internal
+
+- Extracted a shared tool-loop run policy (`resolveStopConditions`, `resolveStepBudget`,
+  `shouldStopAfterStep`) and a `completeIfPending` fan-out helper, de-duplicating `generateText`
+  and `streamText`. No public API change.
+
+### Coverage
+
+- `ai_sdk_dart` now has **100%** line coverage of `lib/`.
+
+---
+
 ## 1.1.0
 
 ### New APIs

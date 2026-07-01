@@ -88,11 +88,16 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
       if (thinking != null) 'thinking': thinking,
       ...?cleanedPo,
     };
-    final response = await client.post<Map<String, dynamic>>(
-      '/messages',
-      data: requestBody,
-      options: Options(headers: options.headers),
-    );
+    final Response<Map<String, dynamic>> response;
+    try {
+      response = await client.post<Map<String, dynamic>>(
+        '/messages',
+        data: requestBody,
+        options: Options(headers: options.headers),
+      );
+    } on DioException catch (e) {
+      throw await _apiCallError(e, provider);
+    }
 
     final data = response.data ?? <String, dynamic>{};
     final content = <LanguageModelV3ContentPart>[];
@@ -216,19 +221,28 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
       if (thinking != null) 'thinking': thinking,
       ...?cleanedPo,
     };
-    final response = await client.post<ResponseBody>(
-      '/messages',
-      data: requestBody,
-      options: Options(
-        responseType: ResponseType.stream,
-        headers: options.headers,
-      ),
-    );
+    final Response<ResponseBody> response;
+    try {
+      response = await client.post<ResponseBody>(
+        '/messages',
+        data: requestBody,
+        options: Options(
+          responseType: ResponseType.stream,
+          headers: options.headers,
+        ),
+      );
+    } on DioException catch (e) {
+      throw await _apiCallError(e, provider);
+    }
 
     final body = response.data;
+    // Defensive: Dio always supplies a ResponseBody for a successful streamed
+    // response, so this guard is unreachable under normal operation.
+    // coverage:ignore-start
     if (body == null) {
       throw StateError('Anthropic stream response body is null.');
     }
+    // coverage:ignore-end
 
     final controller = StreamController<LanguageModelV3StreamPart>();
     final toolState = <int, _ToolState>{};
@@ -507,7 +521,11 @@ Stream<String> _readSseDataLines(Stream<Uint8List> bytesStream) async* {
 Map<String, dynamic>? _safeParseMap(String input) {
   final parsed = _safeParseJson(input);
   if (parsed is Map<String, dynamic>) return parsed;
-  if (parsed is Map) return parsed.cast<String, dynamic>();
+  // Defensive: `jsonDecode` of a JSON object always yields a
+  // `Map<String, dynamic>`, so the first guard above always wins. This cast
+  // path only exists for a hypothetical non-`<String, dynamic>` Map and is
+  // unreachable via the SSE data-line input that calls this.
+  if (parsed is Map) return parsed.cast<String, dynamic>(); // coverage:ignore-line
   return null;
 }
 
@@ -611,7 +629,10 @@ String? _toBase64(LanguageModelV3DataContent data) {
   return switch (data) {
     DataContentBytes(:final bytes) => base64Encode(bytes),
     DataContentBase64(:final base64) => base64,
-    DataContentUrl() => null,
+    // Required for switch exhaustiveness over the sealed data-content type, but
+    // unreachable in practice: both call sites (`_toAnthropicImagePart` and
+    // `_toAnthropicFilePart`) handle `DataContentUrl` before reaching here.
+    DataContentUrl() => null, // coverage:ignore-line
   };
 }
 
@@ -658,4 +679,29 @@ class _ToolState {
   }
 
   return (thinking, cleaned.isEmpty ? null : cleaned);
+}
+
+/// Maps a [DioException] from a non-2xx response to a typed [AiApiCallError]
+/// carrying the provider's message/status/code. Drains a streamed error body
+/// (`ResponseType.stream`) when present so the message is recoverable.
+Future<AiApiCallError> _apiCallError(
+  DioException error,
+  String provider,
+) async {
+  final data = error.response?.data;
+  Object? body = data;
+  if (data is ResponseBody) {
+    final bytes = <int>[];
+    await for (final chunk in data.stream) {
+      bytes.addAll(chunk);
+    }
+    body = bytes;
+  }
+  return AiApiCallError.fromResponse(
+    statusCode: error.response?.statusCode,
+    url: error.requestOptions.uri.toString(),
+    body: body ?? error.message,
+    provider: provider,
+    cause: error,
+  );
 }

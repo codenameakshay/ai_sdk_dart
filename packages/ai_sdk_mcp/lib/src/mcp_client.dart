@@ -1,50 +1,22 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
-import 'package:http/http.dart' as http;
 
-// ---------------------------------------------------------------------------
-// JSON-RPC primitives
-// ---------------------------------------------------------------------------
+import 'json_rpc.dart';
 
-/// JSON-RPC 2.0 request.
-class _JsonRpcRequest {
-  _JsonRpcRequest({required this.method, required this.id, this.params});
+// Re-export the shared JSON-RPC transport interface and exception so callers
+// importing the barrel get them.
+export 'json_rpc.dart' show MCPTransport, MCPException;
 
-  final String method;
-  final int id;
-  final Map<String, dynamic>? params;
+// Web-safe HTTP/SSE transports (no dart:io).
+export 'http_transport.dart' show HttpClientTransport, SseClientTransport;
 
-  Map<String, dynamic> toJson() => {
-    'jsonrpc': '2.0',
-    'id': id,
-    'method': method,
-    if (params != null) 'params': params,
-  };
-}
-
-/// JSON-RPC 2.0 response.
-class _JsonRpcResponse {
-  const _JsonRpcResponse({this.result, this.error, this.id});
-
-  final Object? result;
-  final Map<String, dynamic>? error;
-  final int? id;
-
-  bool get isError => error != null;
-
-  factory _JsonRpcResponse.fromJson(Map<String, dynamic> json) {
-    return _JsonRpcResponse(
-      result: json['result'],
-      error: json['error'] is Map
-          ? (json['error'] as Map).cast<String, dynamic>()
-          : null,
-      id: json['id'] is int ? json['id'] as int : null,
-    );
-  }
-}
+// Stdio transport: real (dart:io) on native, throwing stub on web. The
+// top-level library never imports `dart:io` directly — it is reachable only
+// through this conditional export.
+export 'stdio_transport_stub.dart'
+    if (dart.library.io) 'stdio_transport_io.dart'
+    show StdioMCPTransport;
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -142,138 +114,6 @@ class MCPResourceContent {
 }
 
 // ---------------------------------------------------------------------------
-// Exception
-// ---------------------------------------------------------------------------
-
-/// Exception thrown when an MCP operation fails.
-class MCPException implements Exception {
-  const MCPException(this.message);
-  final String message;
-
-  @override
-  String toString() => 'MCPException: $message';
-}
-
-// ---------------------------------------------------------------------------
-// Transports
-// ---------------------------------------------------------------------------
-
-/// Abstract transport for MCP JSON-RPC communication.
-abstract class MCPTransport {
-  /// Send a JSON-RPC request and receive the response.
-  Future<_JsonRpcResponse> send(_JsonRpcRequest request);
-
-  /// Close the transport.
-  Future<void> close();
-}
-
-/// SSE (HTTP) transport for MCP over HTTP.
-///
-/// Sends requests via POST to [postUrl]; receives responses as JSON.
-class SseClientTransport implements MCPTransport {
-  SseClientTransport({required this.url, Uri? postUrl, this.headers})
-    : postUrl = postUrl ?? url;
-
-  final Uri url;
-  final Uri postUrl;
-  final Map<String, String>? headers;
-
-  final _client = http.Client();
-
-  @override
-  Future<_JsonRpcResponse> send(_JsonRpcRequest request) async {
-    final allHeaders = {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-      ...?headers,
-    };
-    final response = await _client.post(
-      postUrl,
-      headers: allHeaders,
-      body: jsonEncode(request.toJson()),
-    );
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw MCPException('HTTP ${response.statusCode}: ${response.body}');
-    }
-    final body = jsonDecode(response.body);
-    if (body is! Map) {
-      throw MCPException('Unexpected MCP response format: $body');
-    }
-    return _JsonRpcResponse.fromJson(body.cast<String, dynamic>());
-  }
-
-  @override
-  Future<void> close() async {
-    _client.close();
-  }
-}
-
-/// Stdio transport for MCP — spawns [command] and communicates via stdin/stdout.
-class StdioMCPTransport implements MCPTransport {
-  StdioMCPTransport({required this.command, this.args = const []});
-
-  final String command;
-  final List<String> args;
-
-  Process? _process;
-  StreamSubscription<String>? _stdoutSub;
-  final _pending = <int, Completer<_JsonRpcResponse>>{};
-  final _buffer = StringBuffer();
-
-  Future<void> _ensureStarted() async {
-    if (_process != null) return;
-    _process = await Process.start(command, args);
-    _stdoutSub = _process!.stdout
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())
-        .listen(_handleLine);
-  }
-
-  void _handleLine(String line) {
-    if (line.trim().isEmpty) return;
-    _buffer.write(line);
-    try {
-      final json = jsonDecode(_buffer.toString());
-      _buffer.clear();
-      if (json is Map<String, dynamic>) {
-        final response = _JsonRpcResponse.fromJson(json);
-        final id = response.id;
-        if (id != null && _pending.containsKey(id)) {
-          _pending.remove(id)!.complete(response);
-        }
-      }
-    } catch (_) {
-      // Incomplete JSON — accumulate more lines.
-    }
-  }
-
-  @override
-  Future<_JsonRpcResponse> send(_JsonRpcRequest request) async {
-    await _ensureStarted();
-    final completer = Completer<_JsonRpcResponse>();
-    _pending[request.id] = completer;
-    final line = '${jsonEncode(request.toJson())}\n';
-    _process!.stdin.write(line);
-    await _process!.stdin.flush();
-    return completer.future.timeout(
-      const Duration(seconds: 30),
-      onTimeout: () {
-        _pending.remove(request.id);
-        throw MCPException('Timeout waiting for response to ${request.method}');
-      },
-    );
-  }
-
-  @override
-  Future<void> close() async {
-    await _stdoutSub?.cancel();
-    _process?.stdin.close();
-    _process?.kill();
-    _process = null;
-  }
-}
-
-// ---------------------------------------------------------------------------
 // MCPClient
 // ---------------------------------------------------------------------------
 
@@ -317,7 +157,7 @@ class MCPReconnectPolicy {
 ///
 /// ```dart
 /// final client = MCPClient(
-///   transport: SseClientTransport(url: Uri.parse('http://localhost:3000/mcp')),
+///   transport: SseClientTransport(url: Uri.parse('http://localhost:3000/sse')),
 ///   reconnectPolicy: MCPReconnectPolicy(),
 /// );
 /// await client.initialize();
@@ -330,7 +170,9 @@ class MCPClient {
     required this.transport,
     this.reconnectPolicy,
     MCPTransportFactory? transportFactory,
-  }) : _transportFactory = transportFactory;
+  }) : _transportFactory = transportFactory {
+    _listenToTransport();
+  }
 
   MCPTransport transport;
 
@@ -349,7 +191,48 @@ class MCPClient {
   bool _initialized = false;
 
   /// Resource subscription controllers keyed by resource URI.
-  final _resourceSubscriptions = <String, StreamController<MCPResourceContent>>{};
+  final _resourceSubscriptions =
+      <String, StreamController<MCPResourceContent>>{};
+
+  /// Subscription to the active transport's server-initiated message stream.
+  StreamSubscription<Map<String, dynamic>>? _notificationSub;
+
+  // ---------------------------------------------------------------------------
+  // Transport notifications (server push)
+  // ---------------------------------------------------------------------------
+
+  /// Wire the current transport's [MCPTransport.notifications] stream into the
+  /// client so server-initiated `notifications/resources/updated` messages
+  /// reach resource subscribers automatically.
+  void _listenToTransport() {
+    _notificationSub?.cancel();
+    _notificationSub = transport.notifications.listen(
+      _handleServerMessage,
+      onError: (_) {}, // Transport-level errors handled by _send/reconnect.
+    );
+  }
+
+  void _handleServerMessage(Map<String, dynamic> json) {
+    final method = json['method'];
+    if (method != 'notifications/resources/updated') return;
+    final params = json['params'];
+    if (params is! Map) return;
+    final uri = params['uri']?.toString();
+    if (uri == null) return;
+
+    final controller = _resourceSubscriptions[uri];
+    if (controller == null || controller.isClosed) return;
+
+    // The notification only carries the uri; fetch the fresh content and push
+    // it to subscribers.
+    unawaited(
+      readResource(uri)
+          .then((content) {
+            if (!controller.isClosed) controller.add(content);
+          })
+          .catchError((_) {}),
+    );
+  }
 
   // ---------------------------------------------------------------------------
   // Initialize + reconnect
@@ -366,7 +249,7 @@ class MCPClient {
 
   Future<void> _doInitialize() async {
     final response = await transport.send(
-      _JsonRpcRequest(
+      JsonRpcRequest(
         method: 'initialize',
         id: _id,
         params: {
@@ -386,7 +269,7 @@ class MCPClient {
     // Send initialized notification (fire-and-forget, no response expected).
     try {
       await transport.send(
-        _JsonRpcRequest(method: 'notifications/initialized', id: _id),
+        JsonRpcRequest(method: 'notifications/initialized', id: _id),
       );
     } catch (_) {
       // Notifications may not return a response — ignore errors.
@@ -395,7 +278,7 @@ class MCPClient {
   }
 
   /// Send a request, retrying with reconnect if the policy allows.
-  Future<_JsonRpcResponse> _send(_JsonRpcRequest request) async {
+  Future<JsonRpcResponse> _send(JsonRpcRequest request) async {
     final policy = reconnectPolicy;
     if (policy == null) {
       return transport.send(request);
@@ -411,6 +294,7 @@ class MCPClient {
         if (_transportFactory != null) {
           await transport.close();
           transport = _transportFactory();
+          _listenToTransport();
           _initialized = false;
           try {
             await _doInitialize();
@@ -420,7 +304,7 @@ class MCPClient {
         }
       }
     }
-    throw MCPException('Max reconnect attempts reached');
+    throw const MCPException('Max reconnect attempts reached');
   }
 
   // ---------------------------------------------------------------------------
@@ -432,9 +316,7 @@ class MCPClient {
   /// Returns a [ToolSet] compatible with `generateText`/`streamText`.
   Future<ToolSet> tools() async {
     await initialize();
-    final response = await _send(
-      _JsonRpcRequest(method: 'tools/list', id: _id),
-    );
+    final response = await _send(JsonRpcRequest(method: 'tools/list', id: _id));
     if (response.isError) {
       throw MCPException('tools/list failed: ${response.error}');
     }
@@ -468,7 +350,7 @@ class MCPClient {
   Future<Object?> callTool(String name, Object? input) async {
     await initialize();
     final response = await _send(
-      _JsonRpcRequest(
+      JsonRpcRequest(
         method: 'tools/call',
         id: _id,
         params: {
@@ -505,7 +387,7 @@ class MCPClient {
   Future<List<MCPPromptInfo>> listPrompts() async {
     await initialize();
     final response = await _send(
-      _JsonRpcRequest(method: 'prompts/list', id: _id),
+      JsonRpcRequest(method: 'prompts/list', id: _id),
     );
     if (response.isError) {
       throw MCPException('prompts/list failed: ${response.error}');
@@ -516,7 +398,8 @@ class MCPClient {
     if (prompts is! List) return [];
 
     return prompts.whereType<Map>().map((p) {
-      final args = (p['arguments'] as List?)
+      final args =
+          (p['arguments'] as List?)
               ?.whereType<Map>()
               .map(
                 (a) => MCPPromptArgument(
@@ -544,7 +427,7 @@ class MCPClient {
   }) async {
     await initialize();
     final response = await _send(
-      _JsonRpcRequest(
+      JsonRpcRequest(
         method: 'prompts/get',
         id: _id,
         params: {
@@ -589,7 +472,7 @@ class MCPClient {
   Future<List<MCPResourceInfo>> listResources() async {
     await initialize();
     final response = await _send(
-      _JsonRpcRequest(method: 'resources/list', id: _id),
+      JsonRpcRequest(method: 'resources/list', id: _id),
     );
     if (response.isError) {
       throw MCPException('resources/list failed: ${response.error}');
@@ -613,11 +496,7 @@ class MCPClient {
   Future<MCPResourceContent> readResource(String uri) async {
     await initialize();
     final response = await _send(
-      _JsonRpcRequest(
-        method: 'resources/read',
-        id: _id,
-        params: {'uri': uri},
-      ),
+      JsonRpcRequest(method: 'resources/read', id: _id, params: {'uri': uri}),
     );
     if (response.isError) {
       throw MCPException('resources/read "$uri" failed: ${response.error}');
@@ -647,9 +526,10 @@ class MCPClient {
   /// Returns a [Stream] that emits whenever the resource changes.
   /// The subscription is automatically cancelled when the stream is cancelled.
   ///
-  /// Note: the server must support `resources/subscribe`. Polling is used when
-  /// server-push is not available; for full push support, use an SSE transport
-  /// and override this via a subclass.
+  /// The server must support `resources/subscribe`. When the transport is an
+  /// [SseClientTransport], server-pushed `notifications/resources/updated`
+  /// messages are delivered automatically. For transports without server push
+  /// (e.g. [HttpClientTransport]), call [notifyResourceUpdated] yourself.
   Stream<MCPResourceContent> subscribeResource(String uri) {
     final existing = _resourceSubscriptions[uri];
     if (existing != null && !existing.isClosed) {
@@ -674,7 +554,7 @@ class MCPClient {
   Future<void> _subscribeResourceOnServer(String uri) async {
     await initialize();
     final response = await _send(
-      _JsonRpcRequest(
+      JsonRpcRequest(
         method: 'resources/subscribe',
         id: _id,
         params: {'uri': uri},
@@ -692,7 +572,7 @@ class MCPClient {
     try {
       await initialize();
       await _send(
-        _JsonRpcRequest(
+        JsonRpcRequest(
           method: 'resources/unsubscribe',
           id: _id,
           params: {'uri': uri},
@@ -705,8 +585,9 @@ class MCPClient {
 
   /// Push a resource update to all active subscribers for [uri].
   ///
-  /// Call this when the transport receives a `notifications/resources/updated`
-  /// message from the server.
+  /// Called automatically for [SseClientTransport] when the server sends a
+  /// `notifications/resources/updated` message. Call it manually when using a
+  /// transport without server push.
   void notifyResourceUpdated(String uri, MCPResourceContent content) {
     _resourceSubscriptions[uri]?.add(content);
   }
@@ -717,6 +598,7 @@ class MCPClient {
 
   /// Close the transport connection and all resource subscriptions.
   Future<void> close() async {
+    await _notificationSub?.cancel();
     for (final controller in _resourceSubscriptions.values) {
       await controller.close();
     }

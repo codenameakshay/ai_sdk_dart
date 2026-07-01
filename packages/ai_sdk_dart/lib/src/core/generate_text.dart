@@ -3,7 +3,6 @@ import 'dart:convert';
 
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
-import '../errors/ai_errors.dart';
 import '../messages/model_message.dart';
 import '../output/output.dart';
 import '../stop_conditions/stop_conditions.dart';
@@ -412,21 +411,12 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
   List<LanguageModelV3Message>? firstRequestMessages;
   LanguageModelV3GenerateResult? lastResponse;
 
-  // Merge stopWhen + stopConditions into a single effective conditions list.
-  final _stopWhenList = switch (stopWhen) {
-    null => <StopCondition>[],
-    final StopCondition fn => [fn],
-    final List<Object?> lst => lst.whereType<StopCondition>().toList(),
-    _ => <StopCondition>[],
-  };
-  final _allStopConditions = [..._stopWhenList, ...stopConditions];
-
-  // When no stopWhen is supplied, treat maxSteps as the primary limit.
-  final totalSteps = tools.isEmpty
-      ? 1
-      : (_stopWhenList.isEmpty
-          ? (maxSteps < 1 ? 1 : maxSteps)
-          : (maxSteps < 1 ? 1 : maxSteps));
+  final _allStopConditions = resolveStopConditions(stopWhen, stopConditions);
+  final totalSteps = resolveStepBudget(
+    hasTools: tools.isNotEmpty,
+    stopWhen: stopWhen,
+    maxSteps: maxSteps,
+  );
 
   for (var stepNumber = 0; stepNumber < totalSteps; stepNumber++) {
     final prepareResult = await Future.value(
@@ -594,10 +584,12 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
       toolCallNames: toolCalls.map((call) => call.toolName).toList(),
       finishReason: response.finishReason,
     );
-    final shouldStop =
-        toolResults.isEmpty ||
-        approvalRequests.isNotEmpty ||
-        _allStopConditions.any((condition) => condition(snapshot));
+    final shouldStop = shouldStopAfterStep(
+      toolResultsEmpty: toolResults.isEmpty,
+      hasApprovalRequests: approvalRequests.isNotEmpty,
+      snapshot: snapshot,
+      conditions: _allStopConditions,
+    );
     if (shouldStop) {
       break;
     }
@@ -767,7 +759,8 @@ _ToolSelection _resolveToolSelection({
       toolChoice: choice,
     );
   }
-  return _ToolSelection(exposedTools: tools, toolChoice: choice);
+  // Defensive: every ToolChoice subtype is handled above.
+  return _ToolSelection(exposedTools: tools, toolChoice: choice); // coverage:ignore-line
 }
 
 void _validateToolChoiceInResponse({
@@ -817,6 +810,9 @@ Future<_ToolExecutionResult> _executeToolCall({
   GenerateTextExperimentalOnToolCallFinish? onToolCallFinish,
 }) async {
   final tool = tools[call.toolName];
+  // Defensive: unknown tool names are rejected by tool-choice validation
+  // before any call reaches here.
+  // coverage:ignore-start
   if (tool == null) {
     return _ToolExecutionResult(
       toolResult: LanguageModelV3ToolResultPart(
@@ -827,6 +823,7 @@ Future<_ToolExecutionResult> _executeToolCall({
       ),
     );
   }
+  // coverage:ignore-end
 
   final approvalId = 'approval_${call.toolCallId}';
   final rawInput = call.input;
@@ -872,6 +869,9 @@ Future<_ToolExecutionResult> _executeToolCall({
       );
     }
 
+    // Defensive: an approval-requiring tool with no response is already
+    // short-circuited by the earlier `approvalResponse == null` guard.
+    // coverage:ignore-start
     if (tool.requiresApproval && needsApproval && approvalResponse == null) {
       return _ToolExecutionResult(
         approvalRequest: LanguageModelV3ToolApprovalRequestPart(
@@ -880,6 +880,7 @@ Future<_ToolExecutionResult> _executeToolCall({
         ),
       );
     }
+    // coverage:ignore-end
 
     final executor = tool.executeDynamic;
     if (executor == null) {
@@ -1085,8 +1086,11 @@ TOutput _parseOutput<TOutput>(Output<TOutput> output, String text) {
       for (final item in jsonValue) {
         if (item is Map<String, dynamic>) {
           list.add(element.fromJson(item));
+          // Defensive: jsonDecode always yields Map<String, dynamic> objects.
+          // coverage:ignore-start
         } else if (item is Map) {
           list.add(element.fromJson(item.cast<String, dynamic>()));
+          // coverage:ignore-end
         } else {
           throw AiInvalidToolInputError(
             'Array element is not a JSON object: $item',
@@ -1137,9 +1141,12 @@ Map<String, dynamic> _extractJsonObject(String text) {
   if (parsed is Map<String, dynamic>) {
     return parsed;
   }
+  // Defensive: jsonDecode always yields Map<String, dynamic> for objects.
+  // coverage:ignore-start
   if (parsed is Map) {
     return parsed.cast<String, dynamic>();
   }
+  // coverage:ignore-end
   throw AiInvalidToolInputError('Model did not return a JSON object: $text');
 }
 

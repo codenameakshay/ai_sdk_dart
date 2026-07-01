@@ -126,7 +126,7 @@ void main() {
 
     // ── extended model types ──────────────────────────────────────────────
 
-    group('extended model types (image, speech, transcription, video)', () {
+    group('extended model types (image, speech, transcription)', () {
       late ProviderRegistry registry;
 
       setUp(() {
@@ -142,7 +142,6 @@ void main() {
             ),
             transcriptionModelFactory: (id) =>
                 FakeTranscriptionModel('hello', modelId: id),
-            videoModelFactory: (id) => _FakeVideoModel(id),
           ),
           'no-extras': RegistrableProvider(
             languageModelFactory: (id) => FakeTextModel('hi'),
@@ -169,12 +168,6 @@ void main() {
         expect(model.modelId, 'whisper-1');
       });
 
-      test('resolves video model by provider:modelId', () {
-        final model = registry.videoModel('fake:video-gen');
-        expect(model, isA<VideoModelV1>());
-        expect(model.modelId, 'video-gen');
-      });
-
       test('throws UnsupportedError when imageModelFactory not registered', () {
         expect(
           () => registry.imageModel('no-extras:dall-e-3'),
@@ -193,13 +186,6 @@ void main() {
           () {
         expect(
           () => registry.transcriptionModel('no-extras:whisper-1'),
-          throwsA(isA<UnsupportedError>()),
-        );
-      });
-
-      test('throws UnsupportedError when videoModelFactory not registered', () {
-        expect(
-          () => registry.videoModel('no-extras:vgen'),
           throwsA(isA<UnsupportedError>()),
         );
       });
@@ -229,7 +215,6 @@ void main() {
         expect(provider.imageModelFactory, isNull);
         expect(provider.speechModelFactory, isNull);
         expect(provider.transcriptionModelFactory, isNull);
-        expect(provider.videoModelFactory, isNull);
       });
     });
   });
@@ -248,19 +233,4 @@ class _FakeImageModel implements ImageModelV3 {
     ImageModelV3CallOptions options,
   ) async =>
       const ImageModelV3GenerateResult(images: []);
-}
-
-class _FakeVideoModel implements VideoModelV1 {
-  _FakeVideoModel(this.modelId);
-  @override
-  final String modelId;
-  @override
-  String get provider => 'fake';
-  @override
-  String get specificationVersion => 'v1';
-  @override
-  Future<VideoModelV1GenerateResult> doGenerate(
-    VideoModelV1CallOptions options,
-  ) async =>
-      const VideoModelV1GenerateResult(videos: []);
 }

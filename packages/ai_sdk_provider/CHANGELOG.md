@@ -1,3 +1,23 @@
+## 1.2.0
+
+### Error hierarchy
+
+- The full `AiSdkError` hierarchy now lives here (relocated from `ai_sdk_dart`) so that every
+  provider package — which depends on `ai_sdk_provider`, not `ai_sdk_dart` — can throw the same
+  typed errors. `ai_sdk_dart` re-exports the hierarchy, so its public surface is unchanged.
+- **`AiApiCallError`** is enriched with `statusCode`, `url`, `responseBody`, `responseHeaders`,
+  `type`, `code`, `isRetryable`, and `cause`, plus an `AiApiCallError.fromResponse(...)` factory
+  that tolerantly parses each provider's error-body shape (OpenAI/Groq/Mistral, Anthropic, Google,
+  Cohere, Ollama). The original positional-message constructor stays `const` and backward-compatible.
+
+### Removed
+
+- **`VideoModelV1`** and its `VideoModelV1CallOptions` / `VideoModelV1GenerateResult` types. No
+  provider ever implemented video generation, so the interface was dead surface area. The matching
+  `generateVideo` entry point was removed from `ai_sdk_dart` in the same release.
+
+---
+
 ## 1.1.0
 
 - **`LanguageModelV3CallOptions.outputSchema`** — new optional `Map<String, dynamic>?` field. When non-null, providers that support native structured output (e.g. OpenAI `response_format: json_schema`) should use it to request schema-validated responses directly from the model API.

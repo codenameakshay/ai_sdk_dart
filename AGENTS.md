@@ -2,7 +2,7 @@
 
 ## Cursor Cloud specific instructions
 
-This is a Dart/Flutter monorepo (AI SDK Dart) with 7 library packages and 3 example apps. No Docker, databases, or backend services are required — it is a pure client-side SDK.
+This is a Dart/Flutter monorepo (AI SDK Dart) with 13 library packages and 3 example apps. No Docker, databases, or backend services are required — it is a pure client-side SDK.
 
 ### Toolchain
 
@@ -18,8 +18,8 @@ Standard dev commands are documented in the `Makefile` and `README.md`. The CI w
 | Task | CI-style command | Makefile command |
 |------|-----------------|-----------------|
 | Install deps | `fvm dart pub get` | `make get` |
-| Lint/analyze | `fvm dart analyze .` | `make analyze` (note: Makefile paths are outdated) |
-| Run all tests | see per-package commands below | `make test` (note: Makefile paths are outdated) |
+| Lint/analyze | `fvm dart analyze .` | `make analyze` |
+| Run all tests | see per-package commands below | `make test` |
 | Format | `fvm dart format packages/ examples/` | `make format` |
 
 ### Running tests
@@ -32,13 +32,12 @@ fvm dart test packages/ai_sdk_openai/test/
 fvm dart test packages/ai_sdk_anthropic/test/
 fvm dart test packages/ai_sdk_google/test/
 fvm flutter test examples/flutter_chat/
+fvm flutter test examples/advanced_app/
 ```
-
-The `advanced_app` example has no test directory.
 
 ### Gotchas
 
-- The `Makefile` references `packages/ai/` and `packages/ai_sdk_flutter/` but the actual directories are `packages/ai_sdk_dart/` and `packages/ai_sdk_flutter_ui/`. Use `fvm dart analyze .` and per-package test commands instead of `make test` / `make analyze`.
-- All 178+ tests use fake/mock models and JSON fixtures — no API keys are needed to run them.
+- `make test` / `make analyze` use the correct package paths (`packages/ai_sdk_dart/`, `packages/ai_sdk_flutter_ui/`, etc.) and both `flutter_chat` and `advanced_app` now ship widget tests, so the full `make test` target passes.
+- All 999 tests use fake/mock models and JSON fixtures — no API keys are needed to run them.
 - API keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`) are only needed for running the example apps with real AI providers.
 - To build and serve the Flutter web app: `cd examples/flutter_chat && fvm flutter build web` then serve `build/web/` with any HTTP server.

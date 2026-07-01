@@ -40,8 +40,23 @@ ifdef GOOGLE_API_KEY
   DART_DEFINES += --dart-define=GOOGLE_API_KEY=$(GOOGLE_API_KEY)
 endif
 
+# `dart run` uses --define (compile-time consts via String.fromEnvironment),
+# whereas `flutter run` uses --dart-define. The example providers read keys
+# through String.fromEnvironment, so a plain shell export is not enough.
+DART_RUN_DEFINES :=
+ifdef OPENAI_API_KEY
+  DART_RUN_DEFINES += --define=OPENAI_API_KEY=$(OPENAI_API_KEY)
+endif
+ifdef ANTHROPIC_API_KEY
+  DART_RUN_DEFINES += --define=ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY)
+endif
+ifdef GOOGLE_API_KEY
+  DART_RUN_DEFINES += --define=GOOGLE_API_KEY=$(GOOGLE_API_KEY)
+endif
+
 .PHONY: all get run run-web run-advanced run-advanced-web run-basic \
-        test analyze format dry-run publish clean help
+        test analyze format dry-run publish clean help \
+        coverage coverage-check
 
 all: help
 
@@ -69,14 +84,20 @@ run-advanced:
 run-advanced-web:
 	cd $(ADVANCED_APP) && $(FLUTTER) run $(DART_DEFINES) -d chrome
 
-## Run the Dart CLI example (uses OPENAI_API_KEY from env directly)
+## Run the Dart CLI example (passes OPENAI_API_KEY as a compile-time --define)
 run-basic:
 	@if [ -z "$(OPENAI_API_KEY)" ]; then \
 		echo "Error: OPENAI_API_KEY is not set."; \
 		echo "  export OPENAI_API_KEY=sk-..."; \
 		exit 1; \
 	fi
-	$(DART) run -C $(DART_APP) lib/main.dart
+	cd $(DART_APP) && $(DART) run $(DART_RUN_DEFINES) lib/main.dart
+
+## Run the MCP (Model Context Protocol) CLI demo. Works without a key (the
+## tool-discovery + direct-call steps); set OPENAI_API_KEY to also run the
+## generateText-with-MCP-tools step.
+run-mcp:
+	cd $(DART_APP) && $(DART) run $(DART_RUN_DEFINES) lib/mcp_demo.dart
 
 # ── Quality ───────────────────────────────────────────────────────────────────
 
@@ -84,6 +105,7 @@ run-basic:
 test:
 	$(DART) test packages/ai_sdk_dart/test/
 	$(DART) test packages/ai_sdk_provider/test/
+	$(DART) test packages/ai_sdk_openai_compatible/test/
 	$(DART) test packages/ai_sdk_openai/test/
 	$(DART) test packages/ai_sdk_anthropic/test/
 	$(DART) test packages/ai_sdk_google/test/
@@ -100,6 +122,7 @@ test:
 analyze:
 	$(DART) analyze packages/ai_sdk_dart/
 	$(DART) analyze packages/ai_sdk_provider/
+	$(DART) analyze packages/ai_sdk_openai_compatible/
 	$(DART) analyze packages/ai_sdk_openai/
 	$(DART) analyze packages/ai_sdk_anthropic/
 	$(DART) analyze packages/ai_sdk_google/
@@ -113,6 +136,16 @@ analyze:
 	$(FLUTTER) analyze $(FLUTTER_APP)/
 	$(FLUTTER) analyze $(ADVANCED_APP)/
 
+## Run tests with coverage across all packages and print a summary
+coverage:
+	$(DART) pub global activate coverage >/dev/null 2>&1 || true
+	DART="$(DART)" FLUTTER="$(FLUTTER)" tool/coverage.sh
+
+## Run coverage and fail if total line coverage is below the gate (target: 100%)
+coverage-check:
+	$(DART) pub global activate coverage >/dev/null 2>&1 || true
+	DART="$(DART)" FLUTTER="$(FLUTTER)" tool/coverage.sh 99
+
 ## Format all Dart source files
 format:
 	$(DART) format packages/ examples/
@@ -123,6 +156,7 @@ format:
 dry-run:
 	$(DART) pub publish --dry-run -C packages/ai_sdk_provider
 	$(DART) pub publish --dry-run -C packages/ai_sdk_dart
+	$(DART) pub publish --dry-run -C packages/ai_sdk_openai_compatible
 	$(DART) pub publish --dry-run -C packages/ai_sdk_openai
 	$(DART) pub publish --dry-run -C packages/ai_sdk_anthropic
 	$(DART) pub publish --dry-run -C packages/ai_sdk_google
@@ -138,6 +172,7 @@ dry-run:
 publish:
 	$(DART) pub publish -C packages/ai_sdk_provider
 	$(DART) pub publish -C packages/ai_sdk_dart
+	$(DART) pub publish -C packages/ai_sdk_openai_compatible
 	$(DART) pub publish -C packages/ai_sdk_openai
 	$(DART) pub publish -C packages/ai_sdk_anthropic
 	$(DART) pub publish -C packages/ai_sdk_google
@@ -161,6 +196,7 @@ help:
 	@echo "  make run-advanced      Run advanced app on default device"
 	@echo "  make run-advanced-web  Run advanced app on Chrome"
 	@echo "  make run-basic         Run Dart CLI example"
+	@echo "  make run-mcp           Run the MCP CLI demo (works without a key)"
 	@echo "  make test              Run all package tests"
 	@echo "  make analyze           Run dart analyze across all packages"
 	@echo "  make format            Format all Dart source files"

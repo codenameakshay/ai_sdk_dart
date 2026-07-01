@@ -3,13 +3,19 @@ import 'dart:convert';
 
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
-import '../errors/ai_errors.dart';
 import '../messages/model_message.dart';
 import '../output/output.dart';
 import '../stop_conditions/stop_conditions.dart';
 import '../telemetry/telemetry.dart';
 import '../tools/tool.dart';
 import 'generate_text.dart';
+
+extension _CompleteIfPending<T> on Completer<T> {
+  /// Completes with [value] only if not already completed.
+  void completeIfPending(T value) {
+    if (!isCompleted) complete(value);
+  }
+}
 
 /// Callback invoked for each stream chunk.
 typedef StreamTextOnChunk = void Function(StreamTextChunk chunk);
@@ -73,8 +79,7 @@ StreamTextTransform smoothStream({int chunkSize = 12, int delayInMs = 0}) {
       if (!first && delayInMs > 0) {
         await Future<void>.delayed(Duration(milliseconds: delayInMs));
       }
-      final end =
-          (i + chunkSize) > delta.length ? delta.length : i + chunkSize;
+      final end = (i + chunkSize) > delta.length ? delta.length : i + chunkSize;
       yield delta.substring(i, end);
       first = false;
     }
@@ -577,6 +582,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   unawaited(
     Future<void>(() async {
       final steps = <GenerateTextStep>[];
+      var aborted = false;
       final overallTextBuffer = StringBuffer();
       var emittedArrayElements = 0;
       StreamPartFinish? lastFinishPart;
@@ -626,16 +632,15 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
       try {
         fullController.add(const StreamTextStartEvent());
 
-        // Merge stopWhen + stopConditions.
-        final _stopWhenList = switch (stopWhen) {
-          null => <StopCondition>[],
-          final StopCondition fn => [fn],
-          final List<Object?> lst => lst.whereType<StopCondition>().toList(),
-          _ => <StopCondition>[],
-        };
-        final _allStopConditions = [..._stopWhenList, ...stopConditions];
-
-        final totalSteps = tools.isEmpty ? 1 : (maxSteps < 1 ? 1 : maxSteps);
+        final _allStopConditions = resolveStopConditions(
+          stopWhen,
+          stopConditions,
+        );
+        final totalSteps = resolveStepBudget(
+          hasTools: tools.isNotEmpty,
+          stopWhen: stopWhen,
+          maxSteps: maxSteps,
+        );
         for (var stepNumber = 0; stepNumber < totalSteps; stepNumber++) {
           fullController.add(StreamTextStartStepEvent(stepNumber: stepNumber));
 
@@ -736,6 +741,13 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
           StreamPartFinish? stepFinishPart;
 
           await for (final part in response.stream) {
+            // Honor cancellation: break the read loop (which cancels the
+            // underlying subscription, stopping the in-flight provider read)
+            // instead of merely firing the onAbort callback.
+            if (abortSignal?.isCancelled ?? false) {
+              aborted = true;
+              break;
+            }
             rawController.add(part);
             fullController.add(StreamTextRawEvent(part: part));
             onChunk?.call(StreamTextRawChunk(part: part));
@@ -891,6 +903,11 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
             }
           }
 
+          // Cancelled mid-stream: skip tool execution and step finalization
+          // and fall through to the run finalizer (completes the result
+          // futures with partial content so consumers never hang).
+          if (aborted) break;
+
           if (inReasoning && !reasoningClosed) {
             stepContent.add(
               LanguageModelV3ReasoningPart(text: reasoningBuffer.toString()),
@@ -1030,20 +1047,18 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
           _safeInvoke(() => onStepFinish?.call(stepFinish));
           fullController.add(StreamTextFinishStepEvent(step: stepFinish));
 
-          final shouldStop =
-              stepToolResults.isEmpty ||
-              stepApprovalRequests.isNotEmpty ||
-              _allStopConditions.any(
-                (condition) => condition(
-                  StepSnapshot(
-                    stepCount: stepNumber + 1,
-                    toolCallNames: stepToolCalls
-                        .map((call) => call.toolName)
-                        .toList(),
-                    finishReason: stepFinish.finishReason,
-                  ),
-                ),
-              );
+          final shouldStop = shouldStopAfterStep(
+            toolResultsEmpty: stepToolResults.isEmpty,
+            hasApprovalRequests: stepApprovalRequests.isNotEmpty,
+            snapshot: StepSnapshot(
+              stepCount: stepNumber + 1,
+              toolCallNames: stepToolCalls
+                  .map((call) => call.toolName)
+                  .toList(),
+              finishReason: stepFinish.finishReason,
+            ),
+            conditions: _allStopConditions,
+          );
           if (shouldStop) {
             break;
           }
@@ -1133,82 +1148,44 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
         fullController.add(finishEvent);
         _safeInvoke(() => onFinish?.call(finishEvent));
 
-        if (!textCompleter.isCompleted) {
-          textCompleter.complete(finalText);
-        }
-        if (!outputCompleter.isCompleted) {
-          outputCompleter.complete(finalOutput);
-        }
-        if (!finishCompleter.isCompleted) {
-          finishCompleter.complete(lastFinishPart);
-        }
-        if (!contentCompleter.isCompleted) {
-          contentCompleter.complete(List.unmodifiable(lastContent));
-        }
-        if (!reasoningCompleter.isCompleted) {
-          reasoningCompleter.complete(List.unmodifiable(reasoning));
-        }
-        if (!reasoningTextCompleter.isCompleted) {
-          reasoningTextCompleter.complete(resolvedReasoningText);
-        }
-        if (!filesCompleter.isCompleted) {
-          filesCompleter.complete(List.unmodifiable(files));
-        }
-        if (!sourcesCompleter.isCompleted) {
-          sourcesCompleter.complete(List.unmodifiable(sources));
-        }
-        if (!toolCallsCompleter.isCompleted) {
-          toolCallsCompleter.complete(
-            List.unmodifiable(
-              lastContent.whereType<LanguageModelV3ToolCallPart>().toList(),
-            ),
-          );
-        }
-        if (!toolResultsCompleter.isCompleted) {
-          toolResultsCompleter.complete(
-            List.unmodifiable(
-              lastContent.whereType<LanguageModelV3ToolResultPart>().toList(),
-            ),
-          );
-        }
-        if (!finishReasonCompleter.isCompleted) {
-          finishReasonCompleter.complete(resolvedFinish.finishReason);
-        }
-        if (!rawFinishReasonCompleter.isCompleted) {
-          rawFinishReasonCompleter.complete(resolvedFinish.rawFinishReason);
-        }
-        if (!usageCompleter.isCompleted) {
-          usageCompleter.complete(resolvedFinish.usage);
-        }
-        if (!totalUsageCompleter.isCompleted) {
-          totalUsageCompleter.complete(totalUsage);
-        }
-        if (!warningsCompleter.isCompleted) {
-          warningsCompleter.complete(List.unmodifiable(lastWarnings));
-        }
-        if (!stepsCompleter.isCompleted) {
-          stepsCompleter.complete(List.unmodifiable(steps));
-        }
-        if (!requestCompleter.isCompleted) {
-          requestCompleter.complete(requestInfo);
-        }
-        if (!responseCompleter.isCompleted) {
-          responseCompleter.complete(responseInfo);
-        }
-        if (!providerMetadataCompleter.isCompleted) {
-          providerMetadataCompleter.complete(resolvedFinish.providerMetadata);
-        }
+        textCompleter.completeIfPending(finalText);
+        outputCompleter.completeIfPending(finalOutput);
+        finishCompleter.completeIfPending(lastFinishPart);
+        contentCompleter.completeIfPending(List.unmodifiable(lastContent));
+        reasoningCompleter.completeIfPending(List.unmodifiable(reasoning));
+        reasoningTextCompleter.completeIfPending(resolvedReasoningText);
+        filesCompleter.completeIfPending(List.unmodifiable(files));
+        sourcesCompleter.completeIfPending(List.unmodifiable(sources));
+        toolCallsCompleter.completeIfPending(
+          List.unmodifiable(
+            lastContent.whereType<LanguageModelV3ToolCallPart>().toList(),
+          ),
+        );
+        toolResultsCompleter.completeIfPending(
+          List.unmodifiable(
+            lastContent.whereType<LanguageModelV3ToolResultPart>().toList(),
+          ),
+        );
+        finishReasonCompleter.completeIfPending(resolvedFinish.finishReason);
+        rawFinishReasonCompleter.completeIfPending(
+          resolvedFinish.rawFinishReason,
+        );
+        usageCompleter.completeIfPending(resolvedFinish.usage);
+        totalUsageCompleter.completeIfPending(totalUsage);
+        warningsCompleter.completeIfPending(List.unmodifiable(lastWarnings));
+        stepsCompleter.completeIfPending(List.unmodifiable(steps));
+        requestCompleter.completeIfPending(requestInfo);
+        responseCompleter.completeIfPending(responseInfo);
+        providerMetadataCompleter.completeIfPending(
+          resolvedFinish.providerMetadata,
+        );
       } catch (error, stackTrace) {
         refreshEnvelopeFromRaw();
-        if (!textCompleter.isCompleted) {
-          textCompleter.complete(overallTextBuffer.toString());
-        }
+        textCompleter.completeIfPending(overallTextBuffer.toString());
         if (!outputCompleter.isCompleted) {
           outputCompleter.completeError(error, stackTrace);
         }
-        if (!finishCompleter.isCompleted) {
-          finishCompleter.complete(lastFinishPart);
-        }
+        finishCompleter.completeIfPending(lastFinishPart);
         final reasoning = lastContent
             .whereType<LanguageModelV3ReasoningPart>()
             .toList();
@@ -1235,77 +1212,53 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
           metadata: lastResponseMetadata,
         );
 
-        if (!contentCompleter.isCompleted) {
-          contentCompleter.complete(List.unmodifiable(lastContent));
-        }
-        if (!reasoningCompleter.isCompleted) {
-          reasoningCompleter.complete(List.unmodifiable(reasoning));
-        }
-        if (!reasoningTextCompleter.isCompleted) {
-          reasoningTextCompleter.complete(
-            lastContent
-                .where(
-                  (part) =>
-                      part is LanguageModelV3ReasoningPart ||
-                      part is LanguageModelV3RedactedReasoningPart,
-                )
-                .map(
-                  (part) => part is LanguageModelV3ReasoningPart
-                      ? part.text
-                      : '[REDACTED]',
-                )
-                .join(),
-          );
-        }
-        if (!filesCompleter.isCompleted) {
-          filesCompleter.complete(List.unmodifiable(files));
-        }
-        if (!sourcesCompleter.isCompleted) {
-          sourcesCompleter.complete(List.unmodifiable(sources));
-        }
-        if (!toolCallsCompleter.isCompleted) {
-          toolCallsCompleter.complete(
-            List.unmodifiable(
-              lastContent.whereType<LanguageModelV3ToolCallPart>().toList(),
-            ),
-          );
-        }
-        if (!toolResultsCompleter.isCompleted) {
-          toolResultsCompleter.complete(
-            List.unmodifiable(
-              lastContent.whereType<LanguageModelV3ToolResultPart>().toList(),
-            ),
-          );
-        }
-        if (!finishReasonCompleter.isCompleted) {
-          finishReasonCompleter.complete(lastFinishPart?.finishReason);
-        }
-        if (!rawFinishReasonCompleter.isCompleted) {
-          rawFinishReasonCompleter.complete(lastFinishPart?.rawFinishReason);
-        }
-        if (!usageCompleter.isCompleted) {
-          usageCompleter.complete(lastFinishPart?.usage);
-        }
-        if (!totalUsageCompleter.isCompleted) {
-          totalUsageCompleter.complete(
-            _sumUsage(steps.map((step) => step.usage)),
-          );
-        }
-        if (!warningsCompleter.isCompleted) {
-          warningsCompleter.complete(List.unmodifiable(lastWarnings));
-        }
-        if (!stepsCompleter.isCompleted) {
-          stepsCompleter.complete(List.unmodifiable(steps));
-        }
-        if (!requestCompleter.isCompleted) {
-          requestCompleter.complete(fallbackRequest);
-        }
-        if (!responseCompleter.isCompleted) {
-          responseCompleter.complete(fallbackResponse);
-        }
-        if (!providerMetadataCompleter.isCompleted) {
-          providerMetadataCompleter.complete(lastFinishPart?.providerMetadata);
-        }
+        contentCompleter.completeIfPending(List.unmodifiable(lastContent));
+        reasoningCompleter.completeIfPending(List.unmodifiable(reasoning));
+        reasoningTextCompleter.completeIfPending(
+          lastContent
+              .where(
+                (part) =>
+                    part is LanguageModelV3ReasoningPart ||
+                    part is LanguageModelV3RedactedReasoningPart,
+              )
+              // coverage:ignore-start
+              // Streaming never produces redacted reasoning parts, so the
+              // '[REDACTED]' arm in this error-path mapping is unreachable.
+              .map(
+                (part) => part is LanguageModelV3ReasoningPart
+                    ? part.text
+                    : '[REDACTED]',
+              )
+              // coverage:ignore-end
+              .join(),
+        );
+        filesCompleter.completeIfPending(List.unmodifiable(files));
+        sourcesCompleter.completeIfPending(List.unmodifiable(sources));
+        toolCallsCompleter.completeIfPending(
+          List.unmodifiable(
+            lastContent.whereType<LanguageModelV3ToolCallPart>().toList(),
+          ),
+        );
+        toolResultsCompleter.completeIfPending(
+          List.unmodifiable(
+            lastContent.whereType<LanguageModelV3ToolResultPart>().toList(),
+          ),
+        );
+        finishReasonCompleter.completeIfPending(lastFinishPart?.finishReason);
+        rawFinishReasonCompleter.completeIfPending(
+          lastFinishPart?.rawFinishReason,
+        );
+        usageCompleter.completeIfPending(lastFinishPart?.usage);
+        totalUsageCompleter.completeIfPending(
+          _sumUsage(steps.map((step) => step.usage)),
+        );
+        warningsCompleter.completeIfPending(List.unmodifiable(lastWarnings));
+        stepsCompleter.completeIfPending(List.unmodifiable(steps));
+        requestCompleter.completeIfPending(fallbackRequest);
+        responseCompleter.completeIfPending(fallbackResponse);
+        providerMetadataCompleter.completeIfPending(
+          lastFinishPart?.providerMetadata,
+        );
         onError?.call(error);
         fullController.add(StreamTextErrorEvent(error: error));
       } finally {
@@ -1319,18 +1272,25 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   );
 
   // End the telemetry span when the stream fully finishes.
-  finishCompleter.future.then((_) {
-    totalUsageCompleter.future.then((usage) {
+  finishCompleter.future.then(
+    (_) {
+      totalUsageCompleter.future.then((usage) {
+        telemetrySpan
+          ..setAttribute('ai.usage.promptTokens', usage?.inputTokens ?? 0)
+          ..setAttribute('ai.usage.completionTokens', usage?.outputTokens ?? 0)
+          ..end();
+        // Defensive: totalUsageCompleter never completes with an error.
+      }, onError: (_) => telemetrySpan.end()); // coverage:ignore-line
+    },
+    // Defensive: finishCompleter never completes with an error.
+    // coverage:ignore-start
+    onError: (Object e, StackTrace st) {
       telemetrySpan
-        ..setAttribute('ai.usage.promptTokens', usage?.inputTokens ?? 0)
-        ..setAttribute('ai.usage.completionTokens', usage?.outputTokens ?? 0)
-        ..end();
-    }, onError: (_) => telemetrySpan.end());
-  }, onError: (Object e, StackTrace st) {
-    telemetrySpan
-      ..recordException(e, stackTrace: st)
-      ..end(error: e);
-  });
+        ..recordException(e, stackTrace: st)
+        ..end(error: e);
+    },
+    // coverage:ignore-end
+  );
 
   return StreamTextResult<TOutput>(
     stream: rawController.stream,
@@ -1425,7 +1385,8 @@ _ToolSelection _resolveToolSelection({
       toolChoice: choice,
     );
   }
-  return _ToolSelection(exposedTools: tools, toolChoice: choice);
+  // Defensive: every ToolChoice subtype is handled above.
+  return _ToolSelection(exposedTools: tools, toolChoice: choice); // coverage:ignore-line
 }
 
 void _validateToolChoiceInStreamingStep({
@@ -1475,6 +1436,9 @@ Future<_ToolExecutionResult> _executeToolCall({
   GenerateTextExperimentalOnToolCallFinish? onToolCallFinish,
 }) async {
   final tool = tools[call.toolName];
+  // Defensive: unknown tool names are rejected by tool-choice validation
+  // before any call reaches here.
+  // coverage:ignore-start
   if (tool == null) {
     final error = 'Tool not found.';
     return _ToolExecutionResult(
@@ -1487,6 +1451,7 @@ Future<_ToolExecutionResult> _executeToolCall({
       toolError: error,
     );
   }
+  // coverage:ignore-end
 
   final approvalId = 'approval_${call.toolCallId}';
   final rawInput = call.input;
@@ -1533,6 +1498,9 @@ Future<_ToolExecutionResult> _executeToolCall({
       );
     }
 
+    // Defensive: an approval-requiring tool with no response is already
+    // short-circuited by the earlier `approvalResponse == null` guard.
+    // coverage:ignore-start
     if (tool.requiresApproval && needsApproval && approvalResponse == null) {
       return _ToolExecutionResult(
         approvalRequest: LanguageModelV3ToolApprovalRequestPart(
@@ -1541,6 +1509,7 @@ Future<_ToolExecutionResult> _executeToolCall({
         ),
       );
     }
+    // coverage:ignore-end
 
     final executor = tool.executeDynamic;
     if (executor == null) {
@@ -1679,10 +1648,13 @@ int _emitArrayElementsIfAny({
       if (item is Map<String, dynamic>) {
         onElement(output.element.fromJson(item));
         emittedCount++;
+        // Defensive: jsonDecode always yields Map<String, dynamic> objects.
+        // coverage:ignore-start
       } else if (item is Map) {
         onElement(output.element.fromJson(item.cast<String, dynamic>()));
         emittedCount++;
       }
+      // coverage:ignore-end
     } catch (_) {}
   }
   return emittedCount;
@@ -1697,11 +1669,14 @@ TOutput? _tryParsePartialOutput<TOutput>(Output<TOutput> output, String text) {
       try {
         if (item is Map<String, dynamic>) {
           values.add(arrayOutput.element.fromJson(item));
+          // Defensive: jsonDecode always yields Map<String, dynamic> objects.
+          // coverage:ignore-start
         } else if (item is Map) {
           values.add(
             arrayOutput.element.fromJson(item.cast<String, dynamic>()),
           );
         }
+        // coverage:ignore-end
       } catch (_) {}
     }
     return values as TOutput;
@@ -1871,8 +1846,11 @@ TOutput _parseOutput<TOutput>(Output<TOutput> output, String text) {
       for (final item in jsonValue) {
         if (item is Map<String, dynamic>) {
           list.add(element.fromJson(item));
+          // Defensive: jsonDecode always yields Map<String, dynamic> objects.
+          // coverage:ignore-start
         } else if (item is Map) {
           list.add(element.fromJson(item.cast<String, dynamic>()));
+          // coverage:ignore-end
         } else {
           throw AiInvalidToolInputError(
             'Array element is not a JSON object: $item',
@@ -1924,9 +1902,12 @@ Map<String, dynamic> _extractJsonObject(String text) {
   if (parsed is Map<String, dynamic>) {
     return parsed;
   }
+  // Defensive: jsonDecode always yields Map<String, dynamic> for objects.
+  // coverage:ignore-start
   if (parsed is Map) {
     return parsed.cast<String, dynamic>();
   }
+  // coverage:ignore-end
   throw AiInvalidToolInputError('Model did not return a JSON object: $text');
 }
 

@@ -8,6 +8,7 @@ environment:
 workspace:
   - packages/ai_sdk_provider
   - packages/ai_sdk_dart
+  - packages/ai_sdk_openai_compatible
   - packages/ai_sdk_openai
   - packages/ai_sdk_anthropic
   - packages/ai_sdk_google

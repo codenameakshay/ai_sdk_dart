@@ -2,8 +2,8 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
 /// A registry mapping `'provider:modelId'` strings to model factories.
 ///
-/// Supports all model types: language, embedding, image, speech, transcription,
-/// and video. Modeled after the JS SDK's `createProviderRegistry()`.
+/// Supports five model types: language, embedding, image, speech, and
+/// transcription. Modeled after the JS SDK's `createProviderRegistry()`.
 ///
 /// ```dart
 /// final registry = createProviderRegistry({
@@ -53,12 +53,6 @@ class ProviderRegistry {
     return _resolve(provider).transcriptionModel(modelId);
   }
 
-  /// Resolve a video model by `'provider:modelId'`.
-  VideoModelV1 videoModel(String id) {
-    final (provider, modelId) = _splitId(id);
-    return _resolve(provider).videoModel(modelId);
-  }
-
   _ProviderLike _resolve(String provider) {
     final p = _providers[provider];
     if (p == null) {
@@ -88,7 +82,6 @@ abstract interface class _ProviderLike {
   ImageModelV3 imageModel(String modelId);
   SpeechModelV1 speechModel(String modelId);
   TranscriptionModelV1 transcriptionModel(String modelId);
-  VideoModelV1 videoModel(String modelId);
 }
 
 class _CallableProvider implements _ProviderLike {
@@ -98,7 +91,6 @@ class _CallableProvider implements _ProviderLike {
     this.imageModelFactory,
     this.speechModelFactory,
     this.transcriptionModelFactory,
-    this.videoModelFactory,
   });
 
   final LanguageModelV3 Function(String) languageModelFactory;
@@ -106,7 +98,6 @@ class _CallableProvider implements _ProviderLike {
   final ImageModelV3 Function(String)? imageModelFactory;
   final SpeechModelV1 Function(String)? speechModelFactory;
   final TranscriptionModelV1 Function(String)? transcriptionModelFactory;
-  final VideoModelV1 Function(String)? videoModelFactory;
 
   @override
   LanguageModelV3 languageModel(String modelId) =>
@@ -145,23 +136,13 @@ class _CallableProvider implements _ProviderLike {
     }
     return transcriptionModelFactory!(modelId);
   }
-
-  @override
-  VideoModelV1 videoModel(String modelId) {
-    if (videoModelFactory == null) {
-      throw UnsupportedError(
-        'This provider does not expose a videoModelFactory.',
-      );
-    }
-    return videoModelFactory!(modelId);
-  }
 }
 
 /// Creates a [ProviderRegistry] from a map of provider name → [RegistrableProvider].
 ///
-/// Supports all six model types: language, embedding, image, speech,
-/// transcription, and video. Only [languageModelFactory] and
-/// [embeddingModelFactory] are required; the rest are optional.
+/// Supports five model types: language, embedding, image, speech, and
+/// transcription. Only [languageModelFactory] and [embeddingModelFactory]
+/// are required; the rest are optional.
 ///
 /// Example:
 /// ```dart
@@ -188,7 +169,6 @@ ProviderRegistry createProviderRegistry(
           imageModelFactory: provider.imageModelFactory,
           speechModelFactory: provider.speechModelFactory,
           transcriptionModelFactory: provider.transcriptionModelFactory,
-          videoModelFactory: provider.videoModelFactory,
         ),
       ),
     ),
@@ -198,7 +178,7 @@ ProviderRegistry createProviderRegistry(
 /// Describes a provider that can be registered in a [ProviderRegistry].
 ///
 /// [languageModelFactory] and [embeddingModelFactory] are required.
-/// Image, speech, transcription, and video factories are optional; calling
+/// Image, speech, and transcription factories are optional; calling
 /// the corresponding [ProviderRegistry] method on a provider that lacks
 /// the factory throws [UnsupportedError].
 class RegistrableProvider {
@@ -208,7 +188,6 @@ class RegistrableProvider {
     this.imageModelFactory,
     this.speechModelFactory,
     this.transcriptionModelFactory,
-    this.videoModelFactory,
   });
 
   final LanguageModelV3 Function(String modelId) languageModelFactory;
@@ -216,5 +195,4 @@ class RegistrableProvider {
   final ImageModelV3 Function(String modelId)? imageModelFactory;
   final SpeechModelV1 Function(String modelId)? speechModelFactory;
   final TranscriptionModelV1 Function(String modelId)? transcriptionModelFactory;
-  final VideoModelV1 Function(String modelId)? videoModelFactory;
 }

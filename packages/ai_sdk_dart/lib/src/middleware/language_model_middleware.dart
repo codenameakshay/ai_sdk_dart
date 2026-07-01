@@ -442,8 +442,12 @@ class _SimulateStreamingMiddleware extends LanguageModelMiddlewareBase {
               providerMetadata: generateResult.providerMetadata,
             ),
           );
+          // Defensive: fanning out an already-resolved generate result over
+          // the controller cannot throw (a doGenerate error surfaces earlier).
+          // coverage:ignore-start
         } catch (e, st) {
           controller.addError(e, st);
+          // coverage:ignore-end
         } finally {
           await controller.close();
         }

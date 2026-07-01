@@ -119,12 +119,16 @@ class ToolLoopAgent {
       return _toGenerateTextResult(lastResponse);
     }
 
+    // Defensive: the loop above always runs at least once (maxSteps > 1 and
+    // tools is non-empty to reach here), so lastResponse is never null.
+    // coverage:ignore-start
     return generateText(
       model: model,
       system: instructions,
       prompt: prompt,
       messages: messages,
     );
+    // coverage:ignore-end
   }
 
   /// Runs the agent in streaming mode.

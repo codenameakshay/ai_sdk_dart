@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
-import '../errors/ai_errors.dart';
 import '../messages/model_message.dart';
 import '../tools/tool.dart';
 
@@ -133,9 +132,12 @@ Map<String, dynamic> _extractJsonObject(
   if (parsed is Map<String, dynamic>) {
     return parsed;
   }
+  // Defensive: jsonDecode always yields Map<String, dynamic> for objects.
+  // coverage:ignore-start
   if (parsed is Map) {
     return parsed.cast<String, dynamic>();
   }
+  // coverage:ignore-end
 
   throw AiInvalidToolInputError('Model did not return a JSON object: $text');
 }

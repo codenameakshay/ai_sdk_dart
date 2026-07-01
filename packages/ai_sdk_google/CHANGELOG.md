@@ -1,3 +1,11 @@
+## 1.2.0
+
+- **Errors:** non-2xx API responses now throw a typed **`AiApiCallError`** (carrying Google's error
+  `message` / `status` / `code` and the `statusCode`) instead of a raw `DioException`.
+- Version aligned with the rest of the monorepo (1.2.0).
+
+---
+
 ## 1.1.0
 
 - Bumped `ai_sdk_provider` constraint to `^1.1.0` to pick up `LanguageModelV3CallOptions.outputSchema`.

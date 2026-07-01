@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../config.dart';
 
-/// Image generation via [generateImage] with DALL-E 3.
+/// Image generation via [generateImage] with gpt-image-1.
 class ImageGenPage extends StatefulWidget {
   const ImageGenPage({super.key});
 
@@ -19,6 +19,7 @@ class _ImageGenPageState extends State<ImageGenPage> {
   bool _loading = false;
   Uint8List? _imageBytes;
   String? _error;
+  String? _emptyMessage;
 
   Future<void> _generate() async {
     if (openAiApiKey.isEmpty) {
@@ -34,21 +35,31 @@ class _ImageGenPageState extends State<ImageGenPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _emptyMessage = null;
       _imageBytes = null;
     });
 
     try {
       final result = await generateImage(
-        model: OpenAIProvider(apiKey: openAiApiKey).image('dall-e-3'),
+        model: OpenAIProvider(apiKey: openAiApiKey).image('gpt-image-1'),
         prompt: prompt,
       );
       setState(() {
-        _imageBytes = result.image.bytes;
+        if (result.images.isEmpty) {
+          // Avoid touching result.image (images.first), which throws on an
+          // empty list. Show a calm empty state instead of crashing.
+          _emptyMessage =
+              'The model returned an empty response — no image was '
+              'generated. (Image generation may be unavailable for this '
+              'API key.)';
+        } else {
+          _imageBytes = result.images.first.bytes;
+        }
         _loading = false;
       });
     } catch (e) {
       setState(() {
-        _error = e.toString();
+        _error = 'Image generation failed: $e';
         _loading = false;
       });
     }
@@ -73,7 +84,7 @@ class _ImageGenPageState extends State<ImageGenPage> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'Generate images with DALL-E 3 (OpenAI).',
+              'Generate images with gpt-image-1 (OpenAI).',
               style: textTheme.bodySmall?.copyWith(
                 color: scheme.onSurfaceVariant,
               ),
@@ -110,6 +121,33 @@ class _ImageGenPageState extends State<ImageGenPage> {
               ClipRRect(
                 borderRadius: BorderRadius.circular(12),
                 child: Image.memory(_imageBytes!, fit: BoxFit.contain),
+              ),
+            ],
+            if (_emptyMessage != null) ...[
+              const SizedBox(height: 16),
+              Card(
+                color: scheme.surfaceContainerHighest,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.image_not_supported_outlined,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          _emptyMessage!,
+                          style: textTheme.bodyMedium?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ],
             if (_error != null) ...[

@@ -1,3 +1,12 @@
+## 1.2.0
+
+- **Errors:** non-2xx API responses now throw a typed **`AiApiCallError`** (carrying Anthropic's
+  error `message` / `type` and the `statusCode`) instead of a raw `DioException`, on both the
+  generate and stream paths.
+- Version aligned with the rest of the monorepo (1.2.0).
+
+---
+
 ## 1.1.0
 
 ### New Features

@@ -1,3 +1,35 @@
+## 1.2.0
+
+> **Behavior change:** `SseClientTransport` now performs real SSE streaming instead of a plain
+> request/response POST. If you relied on the old single-endpoint POST behavior, switch to the new
+> `HttpClientTransport`.
+
+- **Flutter-web compatible.** The package no longer imports `dart:io` at the
+  top level. `StdioMCPTransport` (which spawns a process) now lives behind a
+  conditional import: the real `dart:io` implementation is used on native
+  platforms, and a stub that throws `UnsupportedError` is used on web. The
+  HTTP/SSE transports rely only on web-safe `package:http`, so the package now
+  compiles and runs on Flutter web.
+- **Real SSE transport.** `SseClientTransport` now performs genuine
+  Server-Sent-Events streaming (MCP HTTP+SSE, protocol 2024-11-05): it opens a
+  long-lived streaming `GET`, parses the `text/event-stream` wire format,
+  resolves the POST endpoint from the server's `endpoint` event, POSTs
+  client→server requests there, and surfaces server→client messages
+  (responses, notifications, and requests) over the stream. Server-pushed
+  `notifications/resources/updated` now reach `subscribeResource` listeners
+  automatically. Previously this class did a plain request/response HTTP POST
+  despite its name.
+- **New `HttpClientTransport`.** The previous plain request/response POST
+  behaviour is preserved under this honestly-named transport for servers that
+  expose a single JSON-RPC endpoint without SSE.
+- `MCPTransport` gained a `notifications` stream for server-initiated messages
+  (empty for transports without server push).
+- **Fixed** a secondary unhandled async error that could leak from the SSE transport when the
+  initial connection failed.
+- **100%** line coverage.
+
+---
+
 ## 1.1.0
 
 - Bumped `ai_sdk_dart` constraint to `^1.1.0`.

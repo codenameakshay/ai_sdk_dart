@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
+import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
 /// Flutter controller for single-turn completion — mirrors the JS `useCompletion` hook.
 ///
@@ -34,12 +35,18 @@ class CompletionController extends ChangeNotifier {
   bool _isStreaming = false;
   bool get isStreaming => _isStreaming;
 
+  /// Token usage reported by the most recent completion, if any.
+  LanguageModelV3Usage? get lastUsage => _lastUsage;
+  LanguageModelV3Usage? _lastUsage;
+
   StreamSubscription<String>? _activeSubscription;
+  StreamSubscription<StreamTextEvent>? _errorSubscription;
 
   /// Submit [prompt] and stream the completion.
   Future<void> complete(String prompt) async {
     _completion = '';
     _error = null;
+    _lastUsage = null;
     _isLoading = true;
     _isStreaming = false;
     notifyListeners();
@@ -49,46 +56,78 @@ class CompletionController extends ChangeNotifier {
       _isStreaming = true;
       notifyListeners();
 
+      // The result's `text`/`output` futures reject on a streaming error; we
+      // surface errors via [fullStream] instead, so swallow those completions
+      // to keep them from becoming unhandled async errors.
+      streamResult.text.then((_) {}, onError: (_) {});
+      streamResult.output.then((_) {}, onError: (_) {});
+
+      // Streaming errors surface on the full event stream (not the text
+      // stream), so watch both: text for content, fullStream for errors.
+      _errorSubscription = streamResult.fullStream.listen((event) {
+        if (event is StreamTextErrorEvent) _handleError(event.error);
+      }, onError: _handleError);
+
       _activeSubscription = streamResult.textStream.listen(
         (delta) {
           _completion += delta;
           notifyListeners();
         },
-        onDone: () {
+        onDone: () async {
+          unawaited(_errorSubscription?.cancel());
+          _errorSubscription = null;
+          if (_error != null) return; // an error already terminated us
+          try {
+            _lastUsage =
+                await streamResult.totalUsage ?? await streamResult.usage;
+          } catch (_) {
+            // Usage is best-effort.
+          }
+          if (_error != null) return; // a late error may have arrived
           _isLoading = false;
           _isStreaming = false;
           notifyListeners();
           onFinish?.call(_completion);
         },
-        onError: (Object err) {
-          _error = err;
-          _isLoading = false;
-          _isStreaming = false;
-          notifyListeners();
-          onError?.call(err);
-        },
+        onError: _handleError,
         cancelOnError: true,
       );
     } catch (err) {
-      _error = err;
-      _isLoading = false;
-      _isStreaming = false;
-      notifyListeners();
-      onError?.call(err);
+      _handleError(err);
     }
+  }
+
+  void _handleError(Object err) {
+    if (_error != null) return; // first error wins
+    unawaited(_activeSubscription?.cancel());
+    _activeSubscription = null;
+    unawaited(_errorSubscription?.cancel());
+    _errorSubscription = null;
+    _error = err;
+    _isLoading = false;
+    _isStreaming = false;
+    notifyListeners();
+    onError?.call(err);
   }
 
   Future<void> stop() async {
     await _activeSubscription?.cancel();
     _activeSubscription = null;
+    await _errorSubscription?.cancel();
+    _errorSubscription = null;
     _isLoading = false;
     _isStreaming = false;
     notifyListeners();
   }
 
   void clear() {
+    unawaited(_activeSubscription?.cancel());
+    _activeSubscription = null;
+    unawaited(_errorSubscription?.cancel());
+    _errorSubscription = null;
     _completion = '';
     _error = null;
+    _lastUsage = null;
     _isLoading = false;
     _isStreaming = false;
     notifyListeners();
@@ -97,6 +136,7 @@ class CompletionController extends ChangeNotifier {
   @override
   void dispose() {
     _activeSubscription?.cancel();
+    _errorSubscription?.cancel();
     super.dispose();
   }
 }

@@ -105,6 +105,7 @@ run-mcp:
 test:
 	$(DART) test packages/ai_sdk_dart/test/
 	$(DART) test packages/ai_sdk_provider/test/
+	$(DART) test packages/ai_sdk_openai_compatible/test/
 	$(DART) test packages/ai_sdk_openai/test/
 	$(DART) test packages/ai_sdk_anthropic/test/
 	$(DART) test packages/ai_sdk_google/test/
@@ -121,6 +122,7 @@ test:
 analyze:
 	$(DART) analyze packages/ai_sdk_dart/
 	$(DART) analyze packages/ai_sdk_provider/
+	$(DART) analyze packages/ai_sdk_openai_compatible/
 	$(DART) analyze packages/ai_sdk_openai/
 	$(DART) analyze packages/ai_sdk_anthropic/
 	$(DART) analyze packages/ai_sdk_google/
@@ -154,6 +156,7 @@ format:
 dry-run:
 	$(DART) pub publish --dry-run -C packages/ai_sdk_provider
 	$(DART) pub publish --dry-run -C packages/ai_sdk_dart
+	$(DART) pub publish --dry-run -C packages/ai_sdk_openai_compatible
 	$(DART) pub publish --dry-run -C packages/ai_sdk_openai
 	$(DART) pub publish --dry-run -C packages/ai_sdk_anthropic
 	$(DART) pub publish --dry-run -C packages/ai_sdk_google
@@ -169,6 +172,7 @@ dry-run:
 publish:
 	$(DART) pub publish -C packages/ai_sdk_provider
 	$(DART) pub publish -C packages/ai_sdk_dart
+	$(DART) pub publish -C packages/ai_sdk_openai_compatible
 	$(DART) pub publish -C packages/ai_sdk_openai
 	$(DART) pub publish -C packages/ai_sdk_anthropic
 	$(DART) pub publish -C packages/ai_sdk_google

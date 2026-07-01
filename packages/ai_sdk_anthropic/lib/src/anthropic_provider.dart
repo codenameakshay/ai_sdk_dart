@@ -521,7 +521,11 @@ Stream<String> _readSseDataLines(Stream<Uint8List> bytesStream) async* {
 Map<String, dynamic>? _safeParseMap(String input) {
   final parsed = _safeParseJson(input);
   if (parsed is Map<String, dynamic>) return parsed;
-  if (parsed is Map) return parsed.cast<String, dynamic>();
+  // Defensive: `jsonDecode` of a JSON object always yields a
+  // `Map<String, dynamic>`, so the first guard above always wins. This cast
+  // path only exists for a hypothetical non-`<String, dynamic>` Map and is
+  // unreachable via the SSE data-line input that calls this.
+  if (parsed is Map) return parsed.cast<String, dynamic>(); // coverage:ignore-line
   return null;
 }
 
@@ -625,7 +629,10 @@ String? _toBase64(LanguageModelV3DataContent data) {
   return switch (data) {
     DataContentBytes(:final bytes) => base64Encode(bytes),
     DataContentBase64(:final base64) => base64,
-    DataContentUrl() => null,
+    // Required for switch exhaustiveness over the sealed data-content type, but
+    // unreachable in practice: both call sites (`_toAnthropicImagePart` and
+    // `_toAnthropicFilePart`) handle `DataContentUrl` before reaching here.
+    DataContentUrl() => null, // coverage:ignore-line
   };
 }
 

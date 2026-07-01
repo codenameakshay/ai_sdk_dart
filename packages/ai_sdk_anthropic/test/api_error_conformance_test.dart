@@ -91,5 +91,43 @@ void main() {
         ),
       );
     });
+
+    test(
+      'doGenerate falls back to the Dio message when there is no response body',
+      () async {
+        // A connection abruptly closed before any HTTP response yields a
+        // DioException with no `response` — so `_apiCallError` has no body and
+        // falls back to `error.message` for the AiApiCallError body.
+        final s = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        server = s;
+        unawaited(() async {
+          await for (final request in s) {
+            // Tear down the socket without writing any HTTP response at all.
+            final socket = await request.response.detachSocket(
+              writeHeaders: false,
+            );
+            socket.destroy();
+          }
+        }());
+        final baseUrl = 'http://${s.address.host}:${s.port}';
+
+        final model = AnthropicProvider(
+          apiKey: 'bad',
+          baseUrl: baseUrl,
+        ).call('claude-3');
+
+        await expectLater(
+          model.doGenerate(opts()),
+          throwsA(
+            isA<AiApiCallError>()
+                // No response body → message comes from the Dio error itself,
+                // and is therefore non-empty.
+                .having((e) => e.message, 'message', isNotEmpty)
+                // No HTTP response was ever received.
+                .having((e) => e.statusCode, 'statusCode', isNull),
+          ),
+        );
+      },
+    );
   });
 }

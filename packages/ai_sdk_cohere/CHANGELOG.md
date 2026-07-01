@@ -3,7 +3,8 @@
 - Added **tool use** and **multimodal image input** to the Cohere v2 implementation. Cohere uses a
   bespoke wire format rather than the OpenAI Chat Completions one, so these were implemented
   natively rather than via `ai_sdk_openai_compatible`.
-- **100%** line coverage.
+- **Errors:** non-2xx API responses now throw a typed **`AiApiCallError`** (carrying Cohere's error
+  `message` and the `statusCode`) instead of a raw `DioException`.
 
 ---
 

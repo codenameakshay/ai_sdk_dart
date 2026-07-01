@@ -1234,6 +1234,208 @@ void main() {
       expect(parts.whereType<StreamPartError>(), isNotEmpty);
     });
 
+    test('doStream forwards extra providerOptions into request body', () async {
+      // providerOptions carrying a key beyond thinking/speed leaves a non-null
+      // cleaned map, which the stream request body spreads via `...?cleanedPo`.
+      late Map<String, dynamic> captured;
+      final server = await _TestServer.start((request) async {
+        final body = await utf8.decoder.bind(request).join();
+        captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+        request.response.statusCode = 200;
+        request.response.headers.set('content-type', 'text/event-stream');
+        request.response.write(
+          'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n',
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = AnthropicProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).call('claude-sonnet-4-5');
+
+      final streamResult = await model.doStream(
+        LanguageModelV3CallOptions(
+          prompt: LanguageModelV3Prompt(
+            messages: [
+              LanguageModelV3Message(
+                role: LanguageModelV3Role.user,
+                content: [LanguageModelV3TextPart(text: 'hi')],
+              ),
+            ],
+          ),
+          providerOptions: const {
+            'anthropic': {
+              'metadata': {'trace_id': 'stream-abc'},
+            },
+          },
+        ),
+      );
+
+      await streamResult.stream.toList();
+      expect(captured['metadata'], {'trace_id': 'stream-abc'});
+    });
+
+    test('doStream tolerates content_block_delta with no delta field',
+        () async {
+      // A content_block_delta event missing its `delta` falls back to the empty
+      // map, so the unknown delta type is simply ignored.
+      final server = await _TestServer.start((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.set('content-type', 'text/event-stream');
+        request.response.write(
+          'data: {"type":"content_block_start","index":0,"content_block":{"type":"text"}}\n\n',
+        );
+        // Delta event without a `delta` object → defaults to empty map.
+        request.response.write(
+          'data: {"type":"content_block_delta","index":0}\n\n',
+        );
+        request.response.write(
+          'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}\n\n',
+        );
+        request.response.write(
+          'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n',
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = AnthropicProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).call('claude-sonnet-4-5');
+
+      final streamResult = await model.doStream(
+        LanguageModelV3CallOptions(
+          prompt: LanguageModelV3Prompt(
+            messages: [
+              LanguageModelV3Message(
+                role: LanguageModelV3Role.user,
+                content: [LanguageModelV3TextPart(text: 'hi')],
+              ),
+            ],
+          ),
+        ),
+      );
+
+      final parts = await streamResult.stream.toList();
+      // The delta-less event produced no output; only the real text delta did.
+      expect(
+        parts.whereType<StreamPartTextDelta>().map((e) => e.delta).join(),
+        'Hi',
+      );
+      expect(
+        parts.whereType<StreamPartFinish>().single.finishReason,
+        LanguageModelV3FinishReason.stop,
+      );
+    });
+
+    test(
+      'doStream message_delta without delta still applies usage and finishes',
+      () async {
+        // A message_delta carrying usage but no `delta` exercises the empty-map
+        // fallback for `delta`; a later message_delta supplies the stop reason.
+        final server = await _TestServer.start((request) async {
+          request.response.statusCode = 200;
+          request.response.headers.set('content-type', 'text/event-stream');
+          request.response.write(
+            'data: {"type":"message_start","message":{"id":"msg_9","model":"claude-sonnet-4-5","usage":{"input_tokens":4,"output_tokens":1}}}\n\n',
+          );
+          // message_delta with usage only (no `delta`, and no output_tokens):
+          // exercises both the empty-map delta fallback and the
+          // `streamUsage?.outputTokens` carry-over fallback.
+          request.response.write(
+            'data: {"type":"message_delta","usage":{"input_tokens":9}}\n\n',
+          );
+          request.response.write(
+            'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n',
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = AnthropicProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('claude-sonnet-4-5');
+
+        final streamResult = await model.doStream(
+          LanguageModelV3CallOptions(
+            prompt: LanguageModelV3Prompt(
+              messages: [
+                LanguageModelV3Message(
+                  role: LanguageModelV3Role.user,
+                  content: [LanguageModelV3TextPart(text: 'hi')],
+                ),
+              ],
+            ),
+          ),
+        );
+
+        final finish = (await streamResult.stream.toList())
+            .whereType<StreamPartFinish>()
+            .single;
+        // input_tokens updated from the usage-only delta...
+        expect(finish.usage?.inputTokens, 9);
+        // ...while output_tokens carries over from message_start (1) because the
+        // usage-only delta omitted it.
+        expect(finish.usage?.outputTokens, 1);
+        expect(finish.finishReason, LanguageModelV3FinishReason.stop);
+      },
+    );
+
+    test('doGenerate synthesizes a tool call id when none is provided',
+        () async {
+      // A tool_use content block with no `id` forces the `_generateId` fallback.
+      final server = await _TestServer.start((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'id': 'msg_1',
+            'model': 'claude-sonnet-4-5',
+            'stop_reason': 'tool_use',
+            'content': [
+              {
+                'type': 'tool_use',
+                // No `id` → provider must synthesize one.
+                'name': 'weather',
+                'input': {'city': 'Paris'},
+              },
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = AnthropicProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).call('claude-sonnet-4-5');
+
+      final result = await model.doGenerate(
+        LanguageModelV3CallOptions(
+          prompt: LanguageModelV3Prompt(
+            messages: [
+              LanguageModelV3Message(
+                role: LanguageModelV3Role.user,
+                content: [LanguageModelV3TextPart(text: 'weather?')],
+              ),
+            ],
+          ),
+        ),
+      );
+
+      final call = result.content
+          .whereType<LanguageModelV3ToolCallPart>()
+          .single;
+      expect(call.toolName, 'weather');
+      // The synthesized id uses the `tool-<micros>` shape from _generateId.
+      expect(call.toolCallId, startsWith('tool-'));
+    });
+
     runProviderContractTests(
       providerName: 'anthropic',
       captureRequestBody: _captureAnthropicRequestBody,

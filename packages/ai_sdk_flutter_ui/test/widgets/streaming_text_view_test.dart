@@ -52,6 +52,28 @@ void main() {
       );
     });
 
+    testWidgets('renders a plain Text when not selectable', (tester) async {
+      await tester.pumpWidget(
+        _wrap(
+          const StreamingTextView(
+            text: 'static',
+            isStreaming: false,
+            selectable: false,
+          ),
+        ),
+      );
+      expect(find.text('static'), findsOneWidget);
+      // The non-selectable branch uses a plain Text, not SelectableText.
+      expect(find.byType(SelectableText), findsNothing);
+      expect(
+        find.descendant(
+          of: find.byType(StreamingTextView),
+          matching: find.byType(Text),
+        ),
+        findsOneWidget,
+      );
+    });
+
     testWidgets('updates as text grows', (tester) async {
       await tester.pumpWidget(
         _wrap(const StreamingTextView(text: 'Hel', isStreaming: false)),

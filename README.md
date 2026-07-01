@@ -140,11 +140,17 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
 - **Web-safe** — `dart:io` is isolated behind conditional imports, so the client runs on Flutter web
 - Discovered tools are directly compatible with `generateText`/`streamText`
 
+### 🚨 Typed Errors
+- Sealed `AiSdkError` hierarchy — `AiApiCallError`, `AiNoObjectGeneratedError`, `AiRetryError`, and more
+- **Provider API errors are typed** — a non-2xx response throws `AiApiCallError` carrying the
+  provider's `message`, `type`, `code`, `statusCode`, raw body, and an `isRetryable` flag,
+  consistently across every provider
+
 ### 🧪 Conformance Suite
-- **999 tests** (878 Dart + 121 Flutter) covering every public API
-- **99.6% line coverage** overall — 9 of 12 packages at 100%, enforced by a CI coverage gate
+- **1,057 tests** (924 Dart + 133 Flutter) covering every public API
+- **99.9% line coverage** overall — 11 of 12 packages at 100%, enforced by a CI coverage gate
 - Spec-driven JSON fixtures as the source of truth
-- Provider wire-format conformance tests for every provider
+- Provider wire-format conformance tests for every provider (plus a typed-error conformance test per provider)
 - `MockEmbeddingModelV3` testing utility for embedding model conformance
 
 ---
@@ -250,6 +256,20 @@ final result = await generateText(
   },
 );
 print(result.text);
+```
+
+### Error handling
+
+```dart
+try {
+  final result = await generateText(
+    model: openai('gpt-4.1-mini'),
+    prompt: 'Hello',
+  );
+} on AiApiCallError catch (e) {
+  // Typed provider error — message, status, and retryability are all available.
+  print('${e.statusCode}: ${e.message} (retryable: ${e.isRetryable})');
+}
 ```
 
 ### Flutter Chat UI
@@ -431,9 +451,10 @@ Flutter web.
 - ✅ Multi-step agentic loops with tool approval
 - ✅ Flutter UI controllers (Chat, Completion, ObjectStream) + 19 prebuilt Material widgets
 - ✅ MCP client (real SSE + HTTP + stdio transports, prompts, resources, web-safe)
+- ✅ Typed provider API errors (`AiApiCallError` with status / type / code / body) across all providers
 - ✅ OpenAI (with reasoning options), Anthropic (with thinking options), Google providers
 - ✅ Cohere, Mistral, Groq, Ollama, Azure OpenAI providers — all with tools + multimodal
-- ✅ 999 tests, 99.6% line coverage with a CI coverage gate
+- ✅ 1,057 tests, 99.9% line coverage with a CI coverage gate
 
 ### 🔜 Planned
 

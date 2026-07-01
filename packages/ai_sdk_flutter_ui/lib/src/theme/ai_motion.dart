@@ -103,10 +103,18 @@ class PressableScale extends StatefulWidget {
 
 class _PressableScaleState extends State<PressableScale>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: AiMotion.press,
-  );
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    // Create the controller eagerly rather than lazily in build(): under reduced
+    // motion build() returns the child and never touches it, and a lazy
+    // `late final` would otherwise be constructed for the first time inside
+    // dispose() — creating a Ticker against a defunct element and throwing
+    // "Looking up a deactivated widget's ancestor is unsafe."
+    _controller = AnimationController(vsync: this, duration: AiMotion.press);
+  }
 
   void _press() => _controller.forward();
   void _release() => _controller.reverse();

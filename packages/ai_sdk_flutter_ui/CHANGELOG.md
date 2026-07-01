@@ -3,9 +3,17 @@
 Turns `ai_sdk_flutter_ui` into a one-stop Flutter UI hub: prebuilt widgets, hardened controllers,
 and full test coverage.
 
+### Visual design
+
+- Reworked the widget set toward a restrained Material 3 look: a **bubbleless assistant transcript**
+  (user turns keep a bubble; assistant turns are plain text with a subtle marker), a shared motion +
+  haptics vocabulary (`AiMotion`, built only from core Flutter primitives — no animation
+  dependency), gentle ease-out curves over bounce, and a first-class **reduced-motion** path. The
+  design system is documented in `DESIGN.md`.
+
 ### Prebuilt widget library (new)
 
-18 composable, themeable Material widgets that read only the controllers' public state and
+19 composable, themeable Material widgets that read only the controllers' public state and
 `Theme.of(context)`. No heavy platform dependencies — attachment rendering and link-opening are
 exposed as callbacks.
 
@@ -61,10 +69,17 @@ exposed as callbacks.
 
 ### Tests
 
-- Added the package's first test suite: **121 tests** (controller + widget) covering state
+- Added the package's first test suite: **133 tests** (controller + widget) covering state
   transitions, `streamingContent`, `append`/`reload`/`clear`/`stop`, `onFinish`/`onError`,
   `isStreaming`, `ObjectStreamController.submit`/`bind`, and a `testWidgets` pass for every widget.
-  **99.6%** line coverage.
+  **99.5%** line coverage.
+
+### Fixes
+
+- **`PressableScale`** no longer throws when disposed after being built under reduced motion. Its
+  animation controller is now created in `initState` instead of lazily in `build`, so tearing the
+  widget down (when it never built the animated path) no longer constructs a `Ticker` against a
+  defunct element ("Looking up a deactivated widget's ancestor is unsafe").
 
 ## 1.1.0
 

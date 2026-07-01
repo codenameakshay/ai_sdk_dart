@@ -26,5 +26,29 @@ void main() {
       expect(find.text('Assistant is typing'), findsOneWidget);
       await tester.pump(const Duration(milliseconds: 200));
     });
+
+    testWidgets('dots hold steady under reduced motion', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MediaQuery(
+            data: const MediaQueryData(disableAnimations: true),
+            child: const Scaffold(body: TypingIndicator()),
+          ),
+        ),
+      );
+
+      expect(find.byKey(const ValueKey('typing-dot-0')), findsOneWidget);
+      // Under reduced motion each dot is a static, dimmed Opacity (0.55)
+      // rather than the animated wave.
+      final opacity = tester.widget<Opacity>(
+        find.descendant(
+          of: find.byKey(const ValueKey('typing-dot-0')),
+          matching: find.byType(Opacity),
+        ),
+      );
+      expect(opacity.opacity, 0.55);
+      // No repeating ticker is running, so settling completes immediately.
+      await tester.pumpAndSettle();
+    });
   });
 }

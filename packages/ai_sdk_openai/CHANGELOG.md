@@ -4,6 +4,10 @@
   format (multimodal content parts, `tools` / `tool_choice`, `response_format` JSON schema, SSE
   streaming + usage, non-streaming tool-call parsing) now lives in one place that the OpenAI
   provider configures. No public API or behavior change.
+- **Errors:** non-2xx responses on the embeddings / image / speech / transcription endpoints (and
+  chat, via the shared base) now throw a typed **`AiApiCallError`** instead of a raw `DioException`.
+- **Fixed:** no longer sends `response_format` when generating images with `gpt-image-1` (the model
+  rejects the parameter with a 400).
 - Now requires `ai_sdk_openai_compatible ^1.2.0`.
 - **100%** line coverage.
 

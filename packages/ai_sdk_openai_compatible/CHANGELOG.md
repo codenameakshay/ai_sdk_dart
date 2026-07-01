@@ -8,6 +8,10 @@ First release (versioned 1.2.0 to align with the AI SDK Dart monorepo).
   `response_format` JSON-schema, SSE streaming (text deltas + index-based
   tool-call delta state machine + finish + usage), non-streaming tool-call
   parsing, and finish-reason mapping.
+- `apiErrorFromDioException(...)` — a shared Dio→`AiApiCallError` bridge (delegating to
+  `AiApiCallError.fromResponse`) so non-2xx responses surface as a typed `AiApiCallError` on both
+  the non-streaming and stream-setup paths. Imported by the OpenAI / Azure / Groq / Mistral
+  providers.
 - `OpenAICompatibleConfig` — a small config object parameterizing the
   per-provider quirks: auth header scheme, base URL, query parameters
   (e.g. Azure `api-version`), body field name overrides (`seed` vs

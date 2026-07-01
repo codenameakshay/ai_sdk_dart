@@ -1,5 +1,13 @@
 ## 1.2.0
 
+### Errors
+
+- Provider HTTP failures now surface as a typed **`AiApiCallError`** carrying the provider's
+  `message` / `type` / `code` / `statusCode` (and the raw response body), instead of a raw
+  `DioException`. The `AiSdkError` hierarchy was relocated into `ai_sdk_provider` so all provider
+  packages can throw it; `ai_sdk_dart`'s public surface is unchanged via a re-export shim, and
+  existing `import`s keep working.
+
 ### Bug Fixes
 
 - **`onAbort` now interrupts streaming.** Cancelling the `CancellationToken` during a `streamText`

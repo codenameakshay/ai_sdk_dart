@@ -2,7 +2,8 @@
 
 - Added **tool use** and **multimodal image input** to the Ollama implementation, and fixed
   prompt / completion **usage token** reporting.
-- **100%** line coverage.
+- **Errors:** non-2xx API responses now throw a typed **`AiApiCallError`** (carrying Ollama's
+  `error` string and the `statusCode`) instead of a raw `DioException`.
 
 ---
 

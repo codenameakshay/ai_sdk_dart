@@ -552,7 +552,9 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
         'parts': output.parts.map(_toGenericContentPartJson).toList(),
       };
     }
-    return {'type': 'unknown'};
+    // Unreachable: LanguageModelV3ToolResultOutput is a sealed class with only
+    // ToolResultOutputText and ToolResultOutputContent, both handled above.
+    return {'type': 'unknown'}; // coverage:ignore-line
   }
 
   Map<String, dynamic> _toGenericContentPartJson(
@@ -641,7 +643,10 @@ Stream<String> _readSseDataLines(Stream<Uint8List> bytesStream) async* {
 Map<String, dynamic>? _safeParseJsonMap(String input) {
   final parsed = _safeParseJson(input);
   if (parsed is Map<String, dynamic>) return parsed;
-  if (parsed is Map) return parsed.cast<String, dynamic>();
+  // Unreachable: jsonDecode always produces a Map<String, dynamic> for JSON
+  // objects, so the typed check above always matches first; this guards a
+  // hypothetical differently-typed Map without crashing.
+  if (parsed is Map) return parsed.cast<String, dynamic>(); // coverage:ignore-line
   return null;
 }
 

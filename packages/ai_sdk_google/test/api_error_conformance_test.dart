@@ -71,5 +71,98 @@ void main() {
         ),
       );
     });
+
+    test('doStream surfaces the provider message from a streamed body',
+        () async {
+      // The streaming endpoint uses ResponseType.stream, so the non-2xx error
+      // body arrives as a Dio ResponseBody. The error mapper must drain that
+      // stream to recover the message/status/code, then throw AiApiCallError.
+      final baseUrl = await startErrorServer();
+      final model = GoogleGenerativeAIProvider(
+        apiKey: 'bad',
+        baseUrl: baseUrl,
+      ).call('gemini-2.0-flash');
+      await expectLater(
+        model.doStream(
+          LanguageModelV3CallOptions(
+            prompt: LanguageModelV3Prompt(
+              messages: [
+                LanguageModelV3Message(
+                  role: LanguageModelV3Role.user,
+                  content: [LanguageModelV3TextPart(text: 'hi')],
+                ),
+              ],
+            ),
+          ),
+        ),
+        throwsA(
+          isA<AiApiCallError>()
+              .having(
+                (e) => e.message,
+                'message',
+                contains('API key not valid'),
+              )
+              .having((e) => e.statusCode, 'statusCode', 400)
+              .having((e) => e.type, 'type', 'INVALID_ARGUMENT'),
+        ),
+      );
+    });
+
+    test('connection error (no HTTP response) falls back to error.message',
+        () async {
+      // A transport-level failure (connection refused) yields a DioException
+      // whose response is null, so there is no body to parse. The mapper must
+      // fall back to error.message. Bind then immediately close a server to
+      // obtain a definitely-free port to connect to.
+      final probe = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final deadPort = probe.port;
+      await probe.close(force: true);
+      final model = GoogleGenerativeAIProvider(
+        apiKey: 'bad',
+        baseUrl: 'http://${InternetAddress.loopbackIPv4.host}:$deadPort',
+      ).call('gemini-2.0-flash');
+      await expectLater(
+        model.doGenerate(
+          LanguageModelV3CallOptions(
+            prompt: LanguageModelV3Prompt(
+              messages: [
+                LanguageModelV3Message(
+                  role: LanguageModelV3Role.user,
+                  content: [LanguageModelV3TextPart(text: 'hi')],
+                ),
+              ],
+            ),
+          ),
+        ),
+        throwsA(
+          isA<AiApiCallError>()
+              .having((e) => e.statusCode, 'statusCode', isNull)
+              .having((e) => e.message, 'message', isNotEmpty),
+        ),
+      );
+    });
+
+    test('doEmbed surfaces the provider message', () async {
+      final baseUrl = await startErrorServer();
+      final model = GoogleGenerativeAIProvider(
+        apiKey: 'bad',
+        baseUrl: baseUrl,
+      ).embedding('text-embedding-004');
+      await expectLater(
+        model.doEmbed(
+          const EmbeddingModelV2CallOptions(values: ['hi']),
+        ),
+        throwsA(
+          isA<AiApiCallError>()
+              .having(
+                (e) => e.message,
+                'message',
+                contains('API key not valid'),
+              )
+              .having((e) => e.statusCode, 'statusCode', 400)
+              .having((e) => e.type, 'type', 'INVALID_ARGUMENT'),
+        ),
+      );
+    });
   });
 }

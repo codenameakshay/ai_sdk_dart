@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:ai_sdk_openai_compatible/ai_sdk_openai_compatible.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -1161,6 +1162,139 @@ void main() {
           .single;
       expect(call.toolCallId, startsWith('call-'));
     });
+
+    // ── stream: choice with no `delta` key falls back to {} ──────────────
+    test('doStream tolerates a choice with no delta object', () async {
+      final server = await _TestServer.start((request) async {
+        _writeSse(request, [
+          // A choice carrying only a finish_reason, with no `delta` key at all,
+          // exercises the `?? <String, dynamic>{}` delta fallback.
+          '{"choices":[{"finish_reason":"stop"}]}',
+          '[DONE]',
+        ]);
+      });
+      addTearDown(server.close);
+
+      final model = _bearerModel(server.baseUrl);
+      final streamResult = await model.doStream(
+        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+      );
+
+      final parts = await streamResult.stream.toList();
+      // No text/tool parts (delta was empty), but a Finish part is emitted.
+      expect(parts.whereType<StreamPartTextStart>(), isEmpty);
+      final finish = parts.whereType<StreamPartFinish>().single;
+      expect(finish.finishReason, LanguageModelV3FinishReason.stop);
+    });
+
+    // ── stream: malformed chunk surfaces a StreamPartError deterministically ─
+    test('doStream emits StreamPartError when a chunk choice is not a map',
+        () async {
+      final server = await _TestServer.start((request) async {
+        _writeSse(request, [
+          // `choices.first` is a string, so `(choices.first as Map)` throws and
+          // the loop's catch converts it into a StreamPartError.
+          '{"choices":["not-a-map"]}',
+          '[DONE]',
+        ]);
+      });
+      addTearDown(server.close);
+
+      final model = _bearerModel(server.baseUrl);
+      final streamResult = await model.doStream(
+        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+      );
+
+      final parts = await streamResult.stream.toList();
+      final error = parts.whereType<StreamPartError>().single;
+      expect(error.error, isA<TypeError>());
+    });
+
+    // ── stream tool result: image part carrying a DataContentUrl ─────────
+    test('serializes a url-backed image inside tool result content',
+        () async {
+      late Map<String, dynamic> captured;
+      final server = await _TestServer.start((request) async {
+        captured = await _captureBody(request);
+        _writeOk(request);
+      });
+      addTearDown(server.close);
+
+      final model = _bearerModel(server.baseUrl);
+      await model.doGenerate(
+        LanguageModelV3CallOptions(
+          prompt: LanguageModelV3Prompt(
+            messages: [
+              LanguageModelV3Message(
+                role: LanguageModelV3Role.tool,
+                content: [
+                  LanguageModelV3ToolResultPart(
+                    toolCallId: 'call_1',
+                    toolName: 'lookup',
+                    isError: true,
+                    output: ToolResultOutputContent([
+                      // An image whose data is a URL (not bytes) exercises the
+                      // `if (part.image is DataContentUrl) 'url': ...` branch.
+                      LanguageModelV3ImagePart(
+                        image: DataContentUrl(
+                          Uri.parse('https://img.example/a.png'),
+                        ),
+                        mediaType: 'image/png',
+                      ),
+                    ]),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+
+      final toolMessage = (captured['messages'] as List).last
+          as Map<String, dynamic>;
+      final decoded = (jsonDecode(toolMessage['content'] as String) as Map)
+          .cast<String, dynamic>();
+      final output = (decoded['output'] as Map).cast<String, dynamic>();
+      final outParts = (output['parts'] as List).cast<Map<String, dynamic>>();
+      expect(outParts.single['type'], 'image');
+      expect(outParts.single['mediaType'], 'image/png');
+      expect(outParts.single['url'], 'https://img.example/a.png');
+      // A DataContentUrl has no inline bytes, so no base64 is emitted.
+      expect(outParts.single.containsKey('base64'), isFalse);
+    });
+
+    // ── stream: a null response body surfaces a clear StateError ─────────
+    test('doStream throws StateError when the stream body is null', () async {
+      // A misbehaving client factory whose interceptor resolves the request
+      // with a null-bodied Response leaves `response.data == null`; the model
+      // must surface a descriptive StateError rather than crash later.
+      final model = OpenAICompatibleChatLanguageModel(
+        modelId: 'm',
+        config: OpenAICompatibleConfig(
+          provider: 'test',
+          baseUrl: 'http://localhost/v1',
+          headers: () => const {},
+          clientFactory: ({required baseUrl, required headers}) {
+            final dio = Dio(BaseOptions(baseUrl: baseUrl, headers: headers));
+            dio.interceptors.add(_NullStreamBodyInterceptor());
+            return dio;
+          },
+        ),
+      );
+
+      await expectLater(
+        model.doStream(
+          LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('stream response body is null'),
+          ),
+        ),
+      );
+    });
   });
 }
 
@@ -1191,6 +1325,17 @@ LanguageModelV3Prompt _userPrompt(String text) {
 Future<Map<String, dynamic>> _captureBody(HttpRequest request) async {
   final body = await utf8.decoder.bind(request).join();
   return (jsonDecode(body) as Map).cast<String, dynamic>();
+}
+
+/// Resolves every request with a 200 Response whose `data` is null, simulating
+/// a client/adapter that yields no stream body.
+class _NullStreamBodyInterceptor extends Interceptor {
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    handler.resolve(
+      Response<dynamic>(requestOptions: options, statusCode: 200),
+    );
+  }
 }
 
 void _writeJson(HttpRequest request, Object payload) {

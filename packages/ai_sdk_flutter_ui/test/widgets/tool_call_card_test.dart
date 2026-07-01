@@ -71,5 +71,69 @@ void main() {
       expect(find.text('network failure'), findsOneWidget);
       expect(find.text('Result'), findsNothing);
     });
+
+    testWidgets('falls back to toString when args are not JSON-encodable', (
+      tester,
+    ) async {
+      // A non-JSON value makes JsonEncoder.convert throw, exercising the
+      // _prettyJson catch branch that falls back to value.toString().
+      final input = <String, dynamic>{'fn': const _Unencodable()};
+      await tester.pumpWidget(
+        _wrap(
+          ToolCallCard(
+            call: LanguageModelV3ToolCallPart(
+              toolCallId: 'c1',
+              toolName: 'runFn',
+              input: input,
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('runFn'), findsOneWidget);
+      // The raw Map.toString() output is shown instead of pretty JSON.
+      expect(find.textContaining('UNENCODABLE'), findsOneWidget);
+    });
+
+    testWidgets('stringifies a multi-part content result', (tester) async {
+      // ToolResultOutputContent goes through the parts.map(...).join branch,
+      // joining the runtimeType of each content part.
+      await tester.pumpWidget(
+        _wrap(
+          const ToolCallCard(
+            call: LanguageModelV3ToolCallPart(
+              toolCallId: 'c1',
+              toolName: 'render',
+              input: {},
+            ),
+            result: LanguageModelV3ToolResultPart(
+              toolCallId: 'c1',
+              toolName: 'render',
+              output: ToolResultOutputContent([
+                LanguageModelV3TextPart(text: 'hi'),
+              ]),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('Result'), findsOneWidget);
+      // The body lists the runtimeType of the single content part.
+      expect(
+        find.textContaining('LanguageModelV3TextPart'),
+        findsOneWidget,
+      );
+    });
   });
+}
+
+/// A value that always throws when JSON-encoded, to drive the _prettyJson
+/// fallback, but has a recognizable toString().
+class _Unencodable {
+  const _Unencodable();
+
+  @override
+  String toString() => 'UNENCODABLE';
+
+  Map<String, dynamic> toJson() => throw StateError('not encodable');
 }

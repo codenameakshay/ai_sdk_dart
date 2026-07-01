@@ -287,9 +287,11 @@ class _GoogleLanguageModel implements LanguageModelV3 {
     final body = response.data;
     if (body == null) {
       // Defensive; Dio stream body is never null on a 200 streaming response.
+      // coverage:ignore-start
       throw StateError(
         'Google stream response body is null.',
-      ); // coverage:ignore-line
+      );
+      // coverage:ignore-end
     }
 
     final controller = StreamController<LanguageModelV3StreamPart>();

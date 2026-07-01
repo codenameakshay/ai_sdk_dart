@@ -56,6 +56,45 @@ void main() {
       expect(controller.position.pixels, controller.position.maxScrollExtent);
     });
 
+    testWidgets('jumps to the bottom under reduced motion on tap', (
+      tester,
+    ) async {
+      Widget reducedHarness() => MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(disableAnimations: true),
+          child: Scaffold(
+            body: Stack(
+              children: [
+                ListView.builder(
+                  controller: controller,
+                  itemCount: 40,
+                  itemBuilder: (_, i) =>
+                      SizedBox(height: 50, child: Text('item $i')),
+                ),
+                Positioned(
+                  right: 8,
+                  bottom: 8,
+                  child: ScrollToBottomButton(controller: controller),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(reducedHarness());
+      await tester.pump();
+      expect(find.byKey(const ValueKey('scroll-to-bottom')), findsOneWidget);
+      expect(controller.position.pixels, 0);
+
+      // The reduced-motion path uses jumpTo, so the position lands at the
+      // bottom synchronously (no animation to settle).
+      await tester.tap(find.byKey(const ValueKey('scroll-to-bottom')));
+      await tester.pump();
+
+      expect(controller.position.pixels, controller.position.maxScrollExtent);
+    });
+
     testWidgets('re-wires its listener when the controller changes', (
       tester,
     ) async {

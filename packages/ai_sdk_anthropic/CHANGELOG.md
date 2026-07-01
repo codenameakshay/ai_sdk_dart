@@ -1,7 +1,8 @@
 ## 1.2.0
 
-- Coverage hardening only — annotated an unreachable defensive null-check on the streamed response
-  body. No behavior change.
+- **Errors:** non-2xx API responses now throw a typed **`AiApiCallError`** (carrying Anthropic's
+  error `message` / `type` and the `statusCode`) instead of a raw `DioException`, on both the
+  generate and stream paths.
 - Version aligned with the rest of the monorepo (1.2.0).
 
 ---

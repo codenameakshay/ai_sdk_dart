@@ -2,6 +2,7 @@
 
 - Rebuilt on the shared **`ai_sdk_openai_compatible`** base; Groq models now get real **tool use**
   and **multimodal image input** in addition to streaming + usage reporting.
+- **Errors:** non-2xx responses now surface as a typed **`AiApiCallError`** (via the shared base).
 - Now requires `ai_sdk_openai_compatible ^1.2.0`.
 - **100%** line coverage.
 

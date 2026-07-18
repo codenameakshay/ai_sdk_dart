@@ -41,6 +41,7 @@ class OpenAICompatibleConfig {
     this.supportsMultimodal = true,
     this.supportsResponseFormatJsonSchema = true,
     this.includeStreamUsageOption = true,
+    this.reasoningKeys = const ['reasoning_content', 'reasoning', 'thinking'],
     this.extraBody,
     this.clientFactory = defaultClientFactory,
   });
@@ -92,6 +93,18 @@ class OpenAICompatibleConfig {
   /// Whether to send `stream_options: {include_usage: true}` on streaming
   /// requests so usage is reported in the final SSE chunk. Defaults to `true`.
   final bool includeStreamUsageOption;
+
+  /// Response field names that carry the model's reasoning/thinking text,
+  /// checked in order until a non-empty string is found.
+  ///
+  /// OpenAI-compatible providers disagree on the field name: DeepSeek emits
+  /// `reasoning_content`, OpenRouter emits `reasoning`, and some hosts use
+  /// `thinking`. The first match on a streaming `delta` is emitted as a
+  /// [StreamPartReasoningDelta]; on a non-streaming `message` it becomes a
+  /// [LanguageModelV3ReasoningPart]. Defaults to
+  /// `['reasoning_content', 'reasoning', 'thinking']`; set to `const []` to
+  /// disable reasoning extraction entirely.
+  final List<String> reasoningKeys;
 
   /// Hook for provider-specific request-body fields derived from the call
   /// options (e.g. OpenAI's `reasoning_effort`). The returned map is merged

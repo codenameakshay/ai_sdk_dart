@@ -1,3 +1,12 @@
+## Unreleased
+
+- **Fixed:** streaming and non-streaming reasoning/thinking is now surfaced
+  (via the shared `ai_sdk_openai_compatible` base). When an OpenAI-compatible
+  endpoint returns reasoning deltas (`reasoning_content` / `reasoning` /
+  `thinking`), they are emitted as reasoning parts, so `streamText`'s
+  `fullStream` reasoning events, `result.reasoning`, and
+  `generateText(...).reasoning` are populated. Fixes #3.
+
 ## 1.2.0
 
 - Refactored onto the shared **`ai_sdk_openai_compatible`** base. The OpenAI Chat Completions wire

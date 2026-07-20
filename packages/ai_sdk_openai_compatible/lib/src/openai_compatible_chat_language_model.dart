@@ -604,10 +604,23 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
 // ── shared helpers ────────────────────────────────────────────────────────
 
 LanguageModelV3Usage _usageFrom(Map<String, dynamic> usage) {
+  final inputTokens = _intOrNull(usage['prompt_tokens']);
+  // OpenAI's `prompt_tokens` already includes cache hits; `cached_tokens` is a
+  // subset of it, so `inputTokens` is left as the total and the uncached
+  // remainder is surfaced via `noCacheTokens`.
+  final promptDetails = (usage['prompt_tokens_details'] as Map?)
+      ?.cast<String, dynamic>();
+  final cacheRead = _intOrNull(promptDetails?['cached_tokens']);
   return LanguageModelV3Usage(
-    inputTokens: _intOrNull(usage['prompt_tokens']),
+    inputTokens: inputTokens,
     outputTokens: _intOrNull(usage['completion_tokens']),
     totalTokens: _intOrNull(usage['total_tokens']),
+    inputTokenDetails: cacheRead == null
+        ? null
+        : LanguageModelV3InputTokenDetails(
+            noCacheTokens: inputTokens == null ? null : inputTokens - cacheRead,
+            cacheReadTokens: cacheRead,
+          ),
   );
 }
 

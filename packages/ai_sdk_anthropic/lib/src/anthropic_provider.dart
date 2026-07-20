@@ -166,12 +166,7 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
       content: content,
       finishReason: _mapAnthropicFinishReason(data['stop_reason']?.toString()),
       rawFinishReason: data['stop_reason']?.toString(),
-      usage: usage == null
-          ? null
-          : LanguageModelV3Usage(
-              inputTokens: _intOrNull(usage['input_tokens']),
-              outputTokens: _intOrNull(usage['output_tokens']),
-            ),
+      usage: usage == null ? null : _anthropicUsageFrom(usage),
       warnings: warnings,
       response: LanguageModelV3ResponseMetadata(
         id: data['id']?.toString(),
@@ -279,10 +274,7 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
               final usage =
                   (message['usage'] as Map?)?.cast<String, dynamic>() ??
                   <String, dynamic>{};
-              streamUsage = LanguageModelV3Usage(
-                inputTokens: _intOrNull(usage['input_tokens']),
-                outputTokens: _intOrNull(usage['output_tokens']),
-              );
+              streamUsage = _anthropicUsageFrom(usage, previous: streamUsage);
               break;
             case 'content_block_start':
               final index = _intOrNull(json['index']) ?? 0;
@@ -362,14 +354,7 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
                   (json['usage'] as Map?)?.cast<String, dynamic>() ??
                   <String, dynamic>{};
               if (usage.isNotEmpty) {
-                streamUsage = LanguageModelV3Usage(
-                  inputTokens:
-                      _intOrNull(usage['input_tokens']) ??
-                      streamUsage?.inputTokens,
-                  outputTokens:
-                      _intOrNull(usage['output_tokens']) ??
-                      streamUsage?.outputTokens,
-                );
+                streamUsage = _anthropicUsageFrom(usage, previous: streamUsage);
               }
               final stopReason = delta['stop_reason']?.toString();
               if (stopReason != null) {
@@ -543,6 +528,49 @@ int? _intOrNull(Object? value) => switch (value) {
   String v => int.tryParse(v),
   _ => null,
 };
+
+/// Builds a [LanguageModelV3Usage] from an Anthropic `usage` object, mapping the
+/// prompt-cache token fields into [LanguageModelV3InputTokenDetails].
+///
+/// Anthropic reports cache tokens *separately* from `input_tokens` (unlike
+/// OpenAI/Google, where cached tokens are a subset of the prompt count), so the
+/// reported [LanguageModelV3Usage.inputTokens] is the sum of the fresh input,
+/// cache-read, and cache-creation tokens. When the response carries no cache
+/// fields the total collapses back to `input_tokens`, preserving prior
+/// behaviour.
+///
+/// [previous] carries usage forward across streaming events: `message_start`
+/// reports the input/cache breakdown while later `message_delta` events report
+/// only `output_tokens`.
+LanguageModelV3Usage _anthropicUsageFrom(
+  Map<String, dynamic> usage, {
+  LanguageModelV3Usage? previous,
+}) {
+  final inputTokens = _intOrNull(usage['input_tokens']);
+  final outputTokens = _intOrNull(usage['output_tokens']);
+  final cacheRead = _intOrNull(usage['cache_read_input_tokens']);
+  final cacheWrite = _intOrNull(usage['cache_creation_input_tokens']);
+  final hasCache = cacheRead != null || cacheWrite != null;
+
+  final int? totalInput;
+  if (inputTokens != null || hasCache) {
+    totalInput = (inputTokens ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0);
+  } else {
+    totalInput = previous?.inputTokens;
+  }
+
+  return LanguageModelV3Usage(
+    inputTokens: totalInput,
+    outputTokens: outputTokens ?? previous?.outputTokens,
+    inputTokenDetails: hasCache
+        ? LanguageModelV3InputTokenDetails(
+            noCacheTokens: inputTokens,
+            cacheReadTokens: cacheRead,
+            cacheWriteTokens: cacheWrite,
+          )
+        : previous?.inputTokenDetails,
+  );
+}
 
 String _generateId(String prefix) {
   final micros = DateTime.now().microsecondsSinceEpoch;

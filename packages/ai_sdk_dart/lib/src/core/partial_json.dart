@@ -57,6 +57,20 @@ class PartialJsonCadence {
   final bool shouldAttemptArrayElements;
 }
 
+class PartialJsonArrayUpdate {
+  const PartialJsonArrayUpdate({
+    required this.newElements,
+    required this.elements,
+    required this.sawBoundary,
+    required this.isClosed,
+  });
+
+  final List<Object?> newElements;
+  final List<Object?> elements;
+  final bool sawBoundary;
+  final bool isClosed;
+}
+
 class PartialJsonTracker {
   bool _inString = false;
   bool _escaped = false;
@@ -131,6 +145,120 @@ class PartialJsonTracker {
   }
 }
 
+class PartialJsonArrayTracker {
+  final List<Object?> _elements = [];
+  StringBuffer _currentToken = StringBuffer();
+
+  bool _seenRootArray = false;
+  bool _closed = false;
+  bool _inString = false;
+  bool _escaped = false;
+  var _nestedDepth = 0;
+
+  PartialJsonArrayUpdate append(
+    String delta, {
+    required PartialJsonParsePhase phase,
+    required PartialJsonParseTrigger trigger,
+  }) {
+    final newElements = <Object?>[];
+    var sawBoundary = false;
+
+    for (final codeUnit in delta.codeUnits) {
+      final char = String.fromCharCode(codeUnit);
+
+      if (_closed) {
+        continue;
+      }
+
+      if (!_seenRootArray) {
+        if (char == '[') {
+          _seenRootArray = true;
+        }
+        continue;
+      }
+
+      if (_escaped) {
+        _currentToken.write(char);
+        _escaped = false;
+        continue;
+      }
+
+      if (char == '\\' && _inString) {
+        _currentToken.write(char);
+        _escaped = true;
+        continue;
+      }
+
+      if (char == '"') {
+        _currentToken.write(char);
+        _inString = !_inString;
+        continue;
+      }
+
+      if (_inString) {
+        _currentToken.write(char);
+        continue;
+      }
+
+      if (char == ',' && _nestedDepth == 0) {
+        final decoded = _flushCurrentToken(phase: phase, trigger: trigger);
+        if (decoded != null) {
+          newElements.add(decoded);
+        }
+        sawBoundary = true;
+        continue;
+      }
+
+      if (char == ']' && _nestedDepth == 0) {
+        final decoded = _flushCurrentToken(phase: phase, trigger: trigger);
+        if (decoded != null) {
+          newElements.add(decoded);
+        }
+        sawBoundary = true;
+        _closed = true;
+        continue;
+      }
+
+      if (char == '{' || char == '[') {
+        _nestedDepth++;
+      } else if ((char == '}' || char == ']') && _nestedDepth > 0) {
+        _nestedDepth--;
+      }
+
+      _currentToken.write(char);
+    }
+
+    return PartialJsonArrayUpdate(
+      newElements: List<Object?>.unmodifiable(newElements),
+      elements: List<Object?>.unmodifiable(_elements),
+      sawBoundary: sawBoundary,
+      isClosed: _closed,
+    );
+  }
+
+  Object? _flushCurrentToken({
+    required PartialJsonParsePhase phase,
+    required PartialJsonParseTrigger trigger,
+  }) {
+    final token = _currentToken.toString().trim();
+    _currentToken = StringBuffer();
+    if (token.isEmpty) {
+      return null;
+    }
+
+    partialJsonDebugCounters?.recordParseAttempt(
+      phase: phase,
+      trigger: trigger,
+    );
+
+    final decoded = _tryJsonDecode(token);
+    if (decoded != null) {
+      _elements.add(decoded);
+    }
+    return decoded;
+  }
+}
+
 Object? tryParsePartialJsonValue(
   String text, {
   required PartialJsonParsePhase phase,
@@ -139,80 +267,6 @@ Object? tryParsePartialJsonValue(
 }) {
   partialJsonDebugCounters?.recordParseAttempt(phase: phase, trigger: trigger);
   return _tryParsePartialJsonValue(text, fallbackCandidate: fallbackCandidate);
-}
-
-List<Object?> parsePartialArrayElements(
-  String text, {
-  required PartialJsonParsePhase phase,
-  required PartialJsonParseTrigger trigger,
-}) {
-  partialJsonDebugCounters?.recordParseAttempt(phase: phase, trigger: trigger);
-
-  final fullJson = _tryParsePartialJsonValue(text);
-  if (fullJson is List) {
-    return fullJson.cast<Object?>();
-  }
-
-  final start = text.indexOf('[');
-  if (start < 0) {
-    return const [];
-  }
-  final body = text.substring(start + 1);
-  final elements = <Object?>[];
-  var inString = false;
-  var escaped = false;
-  var depth = 0;
-  var tokenStart = 0;
-
-  void flushToken(int endExclusive) {
-    final token = body.substring(tokenStart, endExclusive).trim();
-    if (token.isEmpty) {
-      tokenStart = endExclusive + 1;
-      return;
-    }
-    final decoded = _tryJsonDecode(token);
-    if (decoded != null) {
-      elements.add(decoded);
-    }
-    tokenStart = endExclusive + 1;
-  }
-
-  for (var i = 0; i < body.length; i++) {
-    final char = body[i];
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (char == '\\') {
-      escaped = true;
-      continue;
-    }
-    if (char == '"') {
-      inString = !inString;
-      continue;
-    }
-    if (inString) {
-      continue;
-    }
-    if (char == '{' || char == '[') {
-      depth++;
-      continue;
-    }
-    if (char == '}' || char == ']') {
-      if (depth > 0) {
-        depth--;
-      } else if (char == ']') {
-        flushToken(i);
-        break;
-      }
-      continue;
-    }
-    if (char == ',' && depth == 0) {
-      flushToken(i);
-    }
-  }
-
-  return elements;
 }
 
 String? extractJsonCandidate(String text) {

@@ -648,7 +648,10 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
     final steps = <GenerateTextStep>[];
     final overallTextBuffer = StringBuffer();
     final partialJsonTracker = PartialJsonTracker();
-    var emittedArrayElements = 0;
+    final partialArrayTracker = outputSpec is ArrayOutput
+        ? PartialJsonArrayTracker()
+        : null;
+    final partialArrayValues = <dynamic>[];
     String? lastPartialFingerprint;
     StreamPartFinish? lastFinishPart;
     var lastContent = <LanguageModelV3ContentPart>[];
@@ -859,34 +862,40 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                       StreamTextTextChunk(id: id, text: transformedDelta),
                     );
 
-                    if (outputSpec is! TextOutput) {
+                    if (outputSpec is! TextOutput &&
+                        partialArrayTracker != null) {
+                      final update = partialArrayTracker.append(
+                        transformedDelta,
+                        phase: PartialJsonParsePhase.streamTextArrayElements,
+                        trigger: PartialJsonParseTrigger.arrayElementBoundary,
+                      );
+
+                      if (update.newElements.isNotEmpty) {
+                        _emitTrackedArrayElements(
+                          output: outputSpec as ArrayOutput<dynamic>,
+                          elements: update.newElements,
+                          partialValues: partialArrayValues,
+                          onElement: elementController.add,
+                        );
+                      }
+
+                      if (update.sawBoundary) {
+                        final partial = List<dynamic>.unmodifiable(
+                          partialArrayValues,
+                        );
+                        final fingerprint = partialJsonFingerprint(partial);
+                        if (fingerprint != lastPartialFingerprint) {
+                          lastPartialFingerprint = fingerprint;
+                          partialController.add(partial);
+                        }
+                      }
+                    } else if (outputSpec is! TextOutput) {
                       final cadence = partialJsonTracker.append(
                         transformedDelta,
                       );
                       final fullText = overallTextBuffer.toString();
 
                       if (cadence.shouldAttemptValue) {
-                        final partial = _tryParsePartialOutput(
-                          outputSpec,
-                          fullText,
-                        );
-                        if (partial != null) {
-                          final fingerprint = partialJsonFingerprint(partial);
-                          if (fingerprint != lastPartialFingerprint) {
-                            lastPartialFingerprint = fingerprint;
-                            partialController.add(partial);
-                          }
-                        }
-                      }
-                      if (cadence.shouldAttemptArrayElements) {
-                        final nextCount = _emitArrayElementsIfAny(
-                          output: outputSpec,
-                          text: fullText,
-                          alreadyEmittedCount: emittedArrayElements,
-                          onElement: elementController.add,
-                        );
-                        emittedArrayElements = nextCount;
-
                         final partial = _tryParsePartialOutput(
                           outputSpec,
                           fullText,
@@ -1733,69 +1742,31 @@ dynamic _parseToolInput({
   return tool.inputSchema.fromJson(rawInput.cast<String, dynamic>());
 }
 
-int _emitArrayElementsIfAny({
-  required Output<dynamic> output,
-  required String text,
-  required int alreadyEmittedCount,
+void _emitTrackedArrayElements({
+  required ArrayOutput<dynamic> output,
+  required List<Object?> elements,
+  required List<dynamic> partialValues,
   required void Function(Object? element) onElement,
 }) {
-  if (output is! ArrayOutput) {
-    return alreadyEmittedCount;
-  }
-  final parsedElements = parsePartialArrayElements(
-    text,
-    phase: PartialJsonParsePhase.streamTextArrayElements,
-    trigger: PartialJsonParseTrigger.arrayElementBoundary,
-  );
-  var emittedCount = alreadyEmittedCount;
-
-  for (
-    var index = alreadyEmittedCount;
-    index < parsedElements.length;
-    index++
-  ) {
-    final item = parsedElements[index];
+  for (final item in elements) {
     try {
       if (item is Map<String, dynamic>) {
-        onElement(output.element.fromJson(item));
-        emittedCount++;
+        final value = output.element.fromJson(item);
+        partialValues.add(value);
+        onElement(value);
         // Defensive: jsonDecode always yields Map<String, dynamic> objects.
         // coverage:ignore-start
       } else if (item is Map) {
-        onElement(output.element.fromJson(item.cast<String, dynamic>()));
-        emittedCount++;
+        final value = output.element.fromJson(item.cast<String, dynamic>());
+        partialValues.add(value);
+        onElement(value);
       }
       // coverage:ignore-end
     } catch (_) {}
   }
-  return emittedCount;
 }
 
 TOutput? _tryParsePartialOutput<TOutput>(Output<TOutput> output, String text) {
-  if (output is ArrayOutput) {
-    final arrayOutput = output as ArrayOutput<dynamic>;
-    final parsedElements = parsePartialArrayElements(
-      text,
-      phase: PartialJsonParsePhase.streamTextPartial,
-      trigger: PartialJsonParseTrigger.arrayElementBoundary,
-    );
-    final values = <dynamic>[];
-    for (final item in parsedElements) {
-      try {
-        if (item is Map<String, dynamic>) {
-          values.add(arrayOutput.element.fromJson(item));
-          // Defensive: jsonDecode always yields Map<String, dynamic> objects.
-          // coverage:ignore-start
-        } else if (item is Map) {
-          values.add(
-            arrayOutput.element.fromJson(item.cast<String, dynamic>()),
-          );
-        }
-        // coverage:ignore-end
-      } catch (_) {}
-    }
-    return values as TOutput;
-  }
   try {
     return _parseOutput(output, text);
   } catch (_) {

@@ -4,47 +4,30 @@ void main() {
   const sizes = [('1KiB', 1024), ('64KiB', 64 * 1024), ('1MiB', 1024 * 1024)];
 
   for (final (label, targetBytes) in sizes) {
-    for (final scenario in [
-      ('object', _buildObjectPayload(targetBytes)),
-      ('array', _buildArrayPayload(targetBytes)),
-    ]) {
-      final (kind, payload) = scenario;
-      final result = _runBenchmark(payload);
-      print(
-        '$kind $label bytes=${result.bytes} '
-        'parseAttempts=${result.parseAttempts} '
-        'decodeAttempts=${result.decodeAttempts} '
-        'elements=${result.elements} '
-        'elapsedMs=${result.elapsedMicroseconds / 1000}',
-      );
-    }
+    final objectResult = _runObjectBenchmark(_buildObjectPayload(targetBytes));
+    _assertLinear(objectResult);
+    print(objectResult.describe(label));
+
+    final arrayResult = _runArrayBenchmark(_buildArrayPayload(targetBytes));
+    _assertLinear(arrayResult);
+    print(arrayResult.describe(label));
   }
 }
 
-_BenchmarkResult _runBenchmark(String payload) {
+_BenchmarkResult _runObjectBenchmark(String payload) {
   final previousCounters = partialJsonDebugCounters;
   final counters = PartialJsonDebugCounters();
   partialJsonDebugCounters = counters;
 
   final tracker = PartialJsonTracker();
-  final buffer = StringBuffer();
-  var elements = 0;
   final stopwatch = Stopwatch()..start();
 
   try {
     for (final char in payload.split('')) {
-      buffer.write(char);
       final cadence = tracker.append(char);
-      if (cadence.shouldAttemptArrayElements) {
-        elements = parsePartialArrayElements(
-          buffer.toString(),
-          phase: PartialJsonParsePhase.streamTextArrayElements,
-          trigger: PartialJsonParseTrigger.arrayElementBoundary,
-        ).length;
-      }
       if (cadence.shouldAttemptValue) {
         tryParsePartialJsonValue(
-          buffer.toString(),
+          payload,
           phase: PartialJsonParsePhase.streamTextPartial,
           trigger: PartialJsonParseTrigger.candidateClosed,
         );
@@ -56,12 +39,69 @@ _BenchmarkResult _runBenchmark(String payload) {
   }
 
   return _BenchmarkResult(
+    kind: 'object',
+    bytes: payload.length,
+    parseAttempts: counters.parseAttempts,
+    decodeAttempts: counters.decodeAttempts,
+    elements: 0,
+    elapsedMicroseconds: stopwatch.elapsedMicroseconds,
+  );
+}
+
+_BenchmarkResult _runArrayBenchmark(String payload) {
+  final previousCounters = partialJsonDebugCounters;
+  final counters = PartialJsonDebugCounters();
+  partialJsonDebugCounters = counters;
+
+  final tracker = PartialJsonArrayTracker();
+  var elements = 0;
+  final stopwatch = Stopwatch()..start();
+
+  try {
+    for (final char in payload.split('')) {
+      final update = tracker.append(
+        char,
+        phase: PartialJsonParsePhase.streamTextArrayElements,
+        trigger: PartialJsonParseTrigger.arrayElementBoundary,
+      );
+      if (update.sawBoundary) {
+        elements = update.elements.length;
+      }
+    }
+  } finally {
+    stopwatch.stop();
+    partialJsonDebugCounters = previousCounters;
+  }
+
+  return _BenchmarkResult(
+    kind: 'array',
     bytes: payload.length,
     parseAttempts: counters.parseAttempts,
     decodeAttempts: counters.decodeAttempts,
     elements: elements,
     elapsedMicroseconds: stopwatch.elapsedMicroseconds,
   );
+}
+
+void _assertLinear(_BenchmarkResult result) {
+  final maxAttempts = switch (result.kind) {
+    'object' => 1,
+    'array' => result.elements + 1,
+    _ => throw StateError('Unknown benchmark kind: ${result.kind}'),
+  };
+
+  if (result.parseAttempts > maxAttempts) {
+    throw StateError(
+      '${result.kind} parse attempts grew nonlinearly: '
+      '${result.parseAttempts} > $maxAttempts',
+    );
+  }
+  if (result.decodeAttempts > maxAttempts) {
+    throw StateError(
+      '${result.kind} decode attempts grew nonlinearly: '
+      '${result.decodeAttempts} > $maxAttempts',
+    );
+  }
 }
 
 String _buildObjectPayload(int targetBytes) {
@@ -107,6 +147,7 @@ String _buildArrayPayload(int targetBytes) {
 
 class _BenchmarkResult {
   const _BenchmarkResult({
+    required this.kind,
     required this.bytes,
     required this.parseAttempts,
     required this.decodeAttempts,
@@ -114,9 +155,18 @@ class _BenchmarkResult {
     required this.elapsedMicroseconds,
   });
 
+  final String kind;
   final int bytes;
   final int parseAttempts;
   final int decodeAttempts;
   final int elements;
   final int elapsedMicroseconds;
+
+  String describe(String label) {
+    return '$kind $label bytes=$bytes '
+        'parseAttempts=$parseAttempts '
+        'decodeAttempts=$decodeAttempts '
+        'elements=$elements '
+        'elapsedMs=${elapsedMicroseconds / 1000}';
+  }
 }

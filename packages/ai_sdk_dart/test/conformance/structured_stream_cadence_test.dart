@@ -23,6 +23,20 @@ void main() {
     ]);
   }
 
+  String largeArrayPayload(int elementCount) {
+    final buffer = StringBuffer('[');
+    for (var index = 0; index < elementCount; index++) {
+      if (index > 0) {
+        buffer.write(',');
+      }
+      buffer.write(
+        '{"id":$index,"label":"item-$index","nested":{"value":"abcdefghijklmno"}}',
+      );
+    }
+    buffer.write(']');
+    return buffer.toString();
+  }
+
   late PartialJsonDebugCounters counters;
 
   setUp(() {
@@ -132,6 +146,32 @@ void main() {
         expect(
           counters.parseAttemptsFor(PartialJsonParsePhase.streamObjectSnapshot),
           lessThan(8),
+        );
+      },
+    );
+
+    test(
+      'streamText large top-level arrays scale decode attempts with element count',
+      () async {
+        const elementCount = 128;
+        final result = await streamText<List<dynamic>>(
+          model: characterStream(largeArrayPayload(elementCount)),
+          output: Output.array(element: objectSchema()),
+        );
+
+        final elements = await result.elementStream
+            .cast<Map<String, dynamic>>()
+            .toList();
+        final output = await result.output;
+
+        expect(elements, hasLength(elementCount));
+        expect(output, hasLength(elementCount));
+        expect(counters.decodeAttempts, lessThanOrEqualTo(elementCount + 4));
+        expect(
+          counters.parseAttemptsFor(
+            PartialJsonParsePhase.streamTextArrayElements,
+          ),
+          lessThanOrEqualTo(elementCount + 2),
         );
       },
     );

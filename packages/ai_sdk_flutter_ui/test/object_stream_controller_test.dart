@@ -1,10 +1,89 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:ai_sdk_dart/test.dart';
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
+import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'helpers.dart';
+
+class _ControlledObjectStreamInvocation {
+  _ControlledObjectStreamInvocation();
+
+  final String _textId = 'object-text';
+  bool _started = false;
+  bool _ended = false;
+  bool cancelled = false;
+  final StreamController<LanguageModelV3StreamPart> _controller =
+      StreamController<LanguageModelV3StreamPart>(
+        onCancel: () {
+          // Mark that streamText cancelled the upstream provider stream.
+        },
+      );
+
+  Stream<LanguageModelV3StreamPart> get stream {
+    _controller.onCancel = () {
+      cancelled = true;
+    };
+    return _controller.stream;
+  }
+
+  void emitObject(Map<String, dynamic> value) {
+    if (!_started) {
+      _started = true;
+      _controller.add(StreamPartTextStart(id: _textId));
+    }
+    _controller.add(StreamPartTextDelta(id: _textId, delta: jsonEncode(value)));
+    if (!_ended) {
+      _ended = true;
+      _controller.add(StreamPartTextEnd(id: _textId));
+    }
+  }
+
+  void emitError(Object error) {
+    _controller.addError(error);
+  }
+
+  Future<void> finish() async {
+    _controller.add(
+      const StreamPartFinish(
+        finishReason: LanguageModelV3FinishReason.stop,
+        rawFinishReason: 'stop',
+      ),
+    );
+    await _controller.close();
+  }
+}
+
+class _ControlledObjectModel implements LanguageModelV3 {
+  final List<_ControlledObjectStreamInvocation> invocations = [];
+
+  @override
+  String get provider => 'mock';
+
+  @override
+  String get modelId => 'controlled-object';
+
+  @override
+  String get specificationVersion => 'v3';
+
+  @override
+  Future<LanguageModelV3GenerateResult> doGenerate(
+    LanguageModelV3CallOptions options,
+  ) async {
+    throw UnimplementedError('submit() only exercises doStream');
+  }
+
+  @override
+  Future<LanguageModelV3StreamResult> doStream(
+    LanguageModelV3CallOptions options,
+  ) async {
+    final invocation = _ControlledObjectStreamInvocation();
+    invocations.add(invocation);
+    return LanguageModelV3StreamResult(stream: invocation.stream);
+  }
+}
 
 void main() {
   group('ObjectStreamController', () {
@@ -196,6 +275,51 @@ void main() {
       await Future<void>.delayed(Duration.zero);
 
       expect(notifications, beforeDispose);
+    });
+
+    test('second submit cancels the first upstream stream and ignores stale '
+        'first partials, errors, and finish', () async {
+      final model = _ControlledObjectModel();
+      final controller = ObjectStreamController<Map<String, dynamic>>(
+        model: model,
+        schema: mapSchema,
+      );
+
+      unawaited(controller.submit('first'));
+      await pumpUntil(() => model.invocations.length == 1);
+      final first = model.invocations.first;
+
+      first.emitObject(const {'title': 'old'});
+      await pumpUntil(() => controller.value?['title'] == 'old');
+      expect(controller.isStreaming, isTrue);
+
+      unawaited(controller.submit('second'));
+      await pumpUntil(() => model.invocations.length == 2);
+      await pumpUntil(() => first.cancelled);
+      final second = model.invocations.last;
+
+      expect(first.cancelled, isTrue);
+      expect(controller.value, isNull);
+      expect(controller.error, isNull);
+
+      second.emitObject(const {'title': 'new'});
+      await pumpUntil(() => controller.value?['title'] == 'new');
+
+      first.emitObject(const {'title': 'stale'});
+      first.emitError(StateError('stale'));
+      await first.finish();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.value?['title'], 'new');
+      expect(controller.error, isNull);
+      expect(controller.isLoading, isTrue);
+
+      await second.finish();
+      await pumpUntil(() => !controller.isLoading && !controller.isStreaming);
+
+      expect(controller.value?['title'], 'new');
+      expect(controller.error, isNull);
+      controller.dispose();
     });
   });
 }

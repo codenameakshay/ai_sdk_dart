@@ -1,10 +1,14 @@
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
+import 'package:ai_sdk_dart/src/core/retry_helper.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
 
 import 'helpers/fake_models.dart';
 
 void main() {
+  setUp(debugResetRetryHooksForTests);
+  tearDown(debugResetRetryHooksForTests);
+
   // ---------------------------------------------------------------------------
   // generateText – new generation parameters
   // ---------------------------------------------------------------------------
@@ -84,6 +88,94 @@ void main() {
       );
     });
 
+    test(
+      'does not retry non-retryable API errors such as auth failures',
+      () async {
+        var callCount = 0;
+        final model = _CountingFakeModel(
+          onCall: () {
+            callCount++;
+            throw const AiApiCallError(
+              'Unauthorized',
+              statusCode: 401,
+              type: 'authentication_error',
+              isRetryable: false,
+            );
+          },
+        );
+
+        await expectLater(
+          () => generateText(model: model, prompt: 'hi', maxRetries: 3),
+          throwsA(isA<AiApiCallError>()),
+        );
+        expect(callCount, 1);
+      },
+    );
+
+    test('does not retry after cancellation is requested', () async {
+      final token = CancellationToken();
+      var callCount = 0;
+      final model = _CountingFakeModel(
+        onCall: () {
+          callCount++;
+          token.cancel();
+          throw const AiApiCallError(
+            'Cancelled upstream request',
+            statusCode: 429,
+            isRetryable: true,
+          );
+        },
+      );
+
+      await expectLater(
+        () => generateText(
+          model: model,
+          prompt: 'hi',
+          maxRetries: 3,
+          abortSignal: token,
+        ),
+        throwsA(isA<AiApiCallError>()),
+      );
+      expect(callCount, 1);
+    });
+
+    test('honors Retry-After headers before retrying', () async {
+      final slept = <Duration>[];
+      debugConfigureRetryHooksForTests(
+        sleep: (duration) async => slept.add(duration),
+        randomDouble: () => throw StateError('backoff jitter should not run'),
+      );
+
+      var callCount = 0;
+      final model = _CountingFakeModel(
+        onCall: () {
+          callCount++;
+          if (callCount == 1) {
+            throw const AiApiCallError(
+              'Rate limited',
+              statusCode: 429,
+              isRetryable: true,
+              responseHeaders: {'Retry-After': '3'},
+            );
+          }
+          return LanguageModelV3GenerateResult(
+            content: [LanguageModelV3TextPart(text: 'success')],
+            finishReason: LanguageModelV3FinishReason.stop,
+          );
+        },
+      );
+
+      final result = await generateText(
+        model: model,
+        prompt: 'hi',
+        maxRetries: 2,
+      );
+
+      expect(result.text, 'success');
+      expect(callCount, 2);
+      expect(slept, [const Duration(seconds: 3)]);
+    });
+
     test('activeToolNames filters tools passed to provider', () async {
       final model = FakeCapturingModel(responseText: 'ok');
       final tools = {
@@ -104,8 +196,9 @@ void main() {
         activeToolNames: ['tool_a'],
       );
 
-      final passedToolNames =
-          model.capturedOptions.last.tools.map((t) => t.name).toList();
+      final passedToolNames = model.capturedOptions.last.tools
+          .map((t) => t.name)
+          .toList();
       expect(passedToolNames, contains('tool_a'));
       expect(passedToolNames, isNot(contains('tool_b')));
     });
@@ -188,11 +281,71 @@ void main() {
         isStream: true,
       );
 
-      final result = await streamText(model: model, prompt: 'hi', maxRetries: 2);
+      final result = await streamText(
+        model: model,
+        prompt: 'hi',
+        maxRetries: 2,
+      );
       final text = await result.text;
       expect(text, 'streamed');
       expect(callCount, 2);
     });
+
+    test(
+      'retries retryable API errors with capped exponential jitter',
+      () async {
+        final slept = <Duration>[];
+        final attempts = <RetryAttemptObservation>[];
+        final jitterValues = <double>[0.25, 1.0, 1.0, 1.0];
+        debugConfigureRetryHooksForTests(
+          sleep: (duration) async => slept.add(duration),
+          randomDouble: () => jitterValues.removeAt(0),
+          onAttempt: attempts.add,
+        );
+
+        var callCount = 0;
+        final model = _CountingFakeModel(
+          onCall: () {
+            callCount++;
+            if (callCount < 5) {
+              throw const AiApiCallError(
+                'Transient upstream failure',
+                statusCode: 503,
+                isRetryable: true,
+              );
+            }
+            return LanguageModelV3GenerateResult(
+              content: [LanguageModelV3TextPart(text: 'streamed')],
+              finishReason: LanguageModelV3FinishReason.stop,
+            );
+          },
+          isStream: true,
+        );
+
+        final result = await streamText(
+          model: model,
+          prompt: 'hi',
+          maxRetries: 4,
+        );
+        final text = await result.text;
+
+        expect(text, 'streamed');
+        expect(callCount, 5);
+        expect(slept, [
+          const Duration(milliseconds: 25),
+          const Duration(milliseconds: 200),
+          const Duration(milliseconds: 400),
+          const Duration(milliseconds: 500),
+        ]);
+        expect(attempts.map((attempt) => attempt.attemptNumber), [
+          1,
+          2,
+          3,
+          4,
+          5,
+        ]);
+      },
+    );
 
     test('activeToolNames filters tools passed to provider', () async {
       final model = FakeCapturingModel(responseText: 'ok');
@@ -215,8 +368,9 @@ void main() {
       );
       await result.text;
 
-      final passedToolNames =
-          model.capturedOptions.last.tools.map((t) => t.name).toList();
+      final passedToolNames = model.capturedOptions.last.tools
+          .map((t) => t.name)
+          .toList();
       expect(passedToolNames, contains('tool_a'));
       expect(passedToolNames, isNot(contains('tool_b')));
     });
@@ -233,7 +387,10 @@ void main() {
     });
 
     test('jsonSchema field matches the provided map', () {
-      final map = {'type': 'string', 'enum': ['a', 'b']};
+      final map = {
+        'type': 'string',
+        'enum': ['a', 'b'],
+      };
       final schema = jsonSchema(map);
       expect(schema.jsonSchema, map);
     });

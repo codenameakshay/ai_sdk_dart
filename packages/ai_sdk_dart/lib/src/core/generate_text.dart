@@ -8,6 +8,7 @@ import '../output/output.dart';
 import '../stop_conditions/stop_conditions.dart';
 import '../telemetry/telemetry.dart';
 import '../tools/tool.dart';
+import 'retry_helper.dart';
 
 /// Callback invoked after each step finishes in multi-step generation.
 typedef GenerateTextOnStepFinish =
@@ -379,312 +380,319 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
   );
 
   try {
-  final outputSpec = output ?? (Output.text() as Output<TOutput>);
-  var normalizedMessages = <LanguageModelV3Message>[
-    if (prompt != null)
-      LanguageModelV3Message(
-        role: LanguageModelV3Role.user,
-        content: [LanguageModelV3TextPart(text: prompt)],
-      ),
-    ...?messages?.map(_toLanguageModelMessage),
-  ];
-
-  final systemInstruction = _buildOutputSystemInstruction(system, outputSpec);
-  final approvalById = {
-    for (final approval in toolApprovalResponses) approval.approvalId: approval,
-  };
-
-  _safeInvoke(
-    () => experimentalOnStart?.call(
-      GenerateTextExperimentalStartEvent(
-        model: model,
-        system: systemInstruction,
-        prompt: prompt,
-        messages: List.unmodifiable(normalizedMessages),
-        experimentalContext: experimentalContext,
-      ),
-    ),
-  );
-
-  final steps = <GenerateTextStep>[];
-  var lastContent = <LanguageModelV3ContentPart>[];
-  List<LanguageModelV3Message>? firstRequestMessages;
-  LanguageModelV3GenerateResult? lastResponse;
-
-  final _allStopConditions = resolveStopConditions(stopWhen, stopConditions);
-  final totalSteps = resolveStepBudget(
-    hasTools: tools.isNotEmpty,
-    stopWhen: stopWhen,
-    maxSteps: maxSteps,
-  );
-
-  for (var stepNumber = 0; stepNumber < totalSteps; stepNumber++) {
-    final prepareResult = await Future.value(
-      prepareStep?.call(
-        GenerateTextPrepareStepContext(
-          model: model,
-          stepNumber: stepNumber,
-          steps: List.unmodifiable(steps),
-          messages: List.unmodifiable(normalizedMessages),
-          stopConditions: _allStopConditions,
-          experimentalContext: experimentalContext,
+    final outputSpec = output ?? (Output.text() as Output<TOutput>);
+    var normalizedMessages = <LanguageModelV3Message>[
+      if (prompt != null)
+        LanguageModelV3Message(
+          role: LanguageModelV3Role.user,
+          content: [LanguageModelV3TextPart(text: prompt)],
         ),
-      ),
-    );
-
-    final stepModel = prepareResult?.model ?? model;
-    final stepToolChoice = prepareResult?.toolChoice ?? toolChoice;
-    final stepMessages = prepareResult?.messages ?? normalizedMessages;
-    firstRequestMessages ??= List<LanguageModelV3Message>.from(stepMessages);
-    final stepProviderOptions =
-        prepareResult?.providerOptions ?? providerOptions;
-    final activeTools = _selectActiveTools(
-      tools,
-      prepareResult?.activeTools ??
-          (activeToolNames.isNotEmpty ? activeToolNames : null),
-    );
-    final toolSelection = _resolveToolSelection(
-      tools: activeTools,
-      toolChoice: stepToolChoice,
-    );
-
-    _safeInvoke(
-      () => experimentalOnStepStart?.call(
-        GenerateTextExperimentalStepStartEvent(
-          stepNumber: stepNumber,
-          model: stepModel,
-          messages: List.unmodifiable(stepMessages),
-          steps: List.unmodifiable(steps),
-        ),
-      ),
-    );
-
-    final callOptions = LanguageModelV3CallOptions(
-      prompt: LanguageModelV3Prompt(
-        system: systemInstruction,
-        messages: stepMessages,
-      ),
-      tools: toolSelection.exposedTools.entries
-          .map(
-            (entry) => LanguageModelV3FunctionTool(
-              name: entry.key,
-              description: entry.value.description,
-              inputSchema: entry.value.inputSchema.jsonSchema,
-              strict: entry.value.strict,
-              inputExamples: entry.value.inputExamples
-                  .map((example) => example.input)
-                  .toList(),
-            ),
-          )
-          .toList(),
-      providerDefinedTools: providerDefinedTools,
-      toolChoice: toolSelection.toolChoice,
-      maxOutputTokens: maxOutputTokens,
-      temperature: temperature,
-      topP: topP,
-      topK: topK,
-      presencePenalty: presencePenalty,
-      frequencyPenalty: frequencyPenalty,
-      stopSequences: stopSequences,
-      seed: seed,
-      headers: headers,
-      providerOptions: stepProviderOptions,
-    );
-    final response = await _withRetry(
-      maxRetries: maxRetries,
-      fn: () {
-        final call = stepModel.doGenerate(callOptions);
-        return timeout != null ? call.timeout(timeout) : call;
-      },
-    );
-
-    _validateToolChoiceInResponse(
-      response: response,
-      tools: toolSelection.exposedTools,
-      toolChoice: toolSelection.toolChoice,
-      stepNumber: stepNumber,
-    );
-
-    lastResponse = response;
-    final toolCalls = response.content.whereType<LanguageModelV3ToolCallPart>();
-    final toolResults = <LanguageModelV3ToolResultPart>[];
-    final approvalRequests = <LanguageModelV3ToolApprovalRequestPart>[];
-    final stepContent = <LanguageModelV3ContentPart>[...response.content];
-
-    normalizedMessages = [
-      ...stepMessages,
-      LanguageModelV3Message(
-        role: LanguageModelV3Role.assistant,
-        content: response.content,
-      ),
+      ...?messages?.map(_toLanguageModelMessage),
     ];
 
-    if (toolCalls.isNotEmpty) {
-      for (final call in toolCalls) {
-        final execution = await _executeToolCall(
-          tools: toolSelection.exposedTools,
-          call: call,
-          messages: normalizedMessages,
-          approvalById: approvalById,
-          abortSignal: abortSignal,
+    final systemInstruction = _buildOutputSystemInstruction(system, outputSpec);
+    final approvalById = {
+      for (final approval in toolApprovalResponses)
+        approval.approvalId: approval,
+    };
+
+    _safeInvoke(
+      () => experimentalOnStart?.call(
+        GenerateTextExperimentalStartEvent(
+          model: model,
+          system: systemInstruction,
+          prompt: prompt,
+          messages: List.unmodifiable(normalizedMessages),
           experimentalContext: experimentalContext,
-          onToolCallStart: experimentalOnToolCallStart,
-          onToolCallFinish: experimentalOnToolCallFinish,
-        );
-        if (execution.approvalRequest != null) {
-          approvalRequests.add(execution.approvalRequest!);
-          stepContent.add(execution.approvalRequest!);
+        ),
+      ),
+    );
+
+    final steps = <GenerateTextStep>[];
+    var lastContent = <LanguageModelV3ContentPart>[];
+    List<LanguageModelV3Message>? firstRequestMessages;
+    LanguageModelV3GenerateResult? lastResponse;
+
+    final _allStopConditions = resolveStopConditions(stopWhen, stopConditions);
+    final totalSteps = resolveStepBudget(
+      hasTools: tools.isNotEmpty,
+      stopWhen: stopWhen,
+      maxSteps: maxSteps,
+    );
+
+    for (var stepNumber = 0; stepNumber < totalSteps; stepNumber++) {
+      final prepareResult = await Future.value(
+        prepareStep?.call(
+          GenerateTextPrepareStepContext(
+            model: model,
+            stepNumber: stepNumber,
+            steps: List.unmodifiable(steps),
+            messages: List.unmodifiable(normalizedMessages),
+            stopConditions: _allStopConditions,
+            experimentalContext: experimentalContext,
+          ),
+        ),
+      );
+
+      final stepModel = prepareResult?.model ?? model;
+      final stepToolChoice = prepareResult?.toolChoice ?? toolChoice;
+      final stepMessages = prepareResult?.messages ?? normalizedMessages;
+      firstRequestMessages ??= List<LanguageModelV3Message>.from(stepMessages);
+      final stepProviderOptions =
+          prepareResult?.providerOptions ?? providerOptions;
+      final activeTools = _selectActiveTools(
+        tools,
+        prepareResult?.activeTools ??
+            (activeToolNames.isNotEmpty ? activeToolNames : null),
+      );
+      final toolSelection = _resolveToolSelection(
+        tools: activeTools,
+        toolChoice: stepToolChoice,
+      );
+
+      _safeInvoke(
+        () => experimentalOnStepStart?.call(
+          GenerateTextExperimentalStepStartEvent(
+            stepNumber: stepNumber,
+            model: stepModel,
+            messages: List.unmodifiable(stepMessages),
+            steps: List.unmodifiable(steps),
+          ),
+        ),
+      );
+
+      final callOptions = LanguageModelV3CallOptions(
+        prompt: LanguageModelV3Prompt(
+          system: systemInstruction,
+          messages: stepMessages,
+        ),
+        tools: toolSelection.exposedTools.entries
+            .map(
+              (entry) => LanguageModelV3FunctionTool(
+                name: entry.key,
+                description: entry.value.description,
+                inputSchema: entry.value.inputSchema.jsonSchema,
+                strict: entry.value.strict,
+                inputExamples: entry.value.inputExamples
+                    .map((example) => example.input)
+                    .toList(),
+              ),
+            )
+            .toList(),
+        providerDefinedTools: providerDefinedTools,
+        toolChoice: toolSelection.toolChoice,
+        maxOutputTokens: maxOutputTokens,
+        temperature: temperature,
+        topP: topP,
+        topK: topK,
+        presencePenalty: presencePenalty,
+        frequencyPenalty: frequencyPenalty,
+        stopSequences: stopSequences,
+        seed: seed,
+        headers: headers,
+        providerOptions: stepProviderOptions,
+      );
+      final response = await withRetry(
+        maxRetries: maxRetries,
+        timeout: timeout,
+        abortSignal: abortSignal,
+        fn: (attemptTimeout) {
+          final call = stepModel.doGenerate(callOptions);
+          return attemptTimeout != null ? call.timeout(attemptTimeout) : call;
+        },
+      );
+
+      _validateToolChoiceInResponse(
+        response: response,
+        tools: toolSelection.exposedTools,
+        toolChoice: toolSelection.toolChoice,
+        stepNumber: stepNumber,
+      );
+
+      lastResponse = response;
+      final toolCalls = response.content
+          .whereType<LanguageModelV3ToolCallPart>();
+      final toolResults = <LanguageModelV3ToolResultPart>[];
+      final approvalRequests = <LanguageModelV3ToolApprovalRequestPart>[];
+      final stepContent = <LanguageModelV3ContentPart>[...response.content];
+
+      normalizedMessages = [
+        ...stepMessages,
+        LanguageModelV3Message(
+          role: LanguageModelV3Role.assistant,
+          content: response.content,
+        ),
+      ];
+
+      if (toolCalls.isNotEmpty) {
+        for (final call in toolCalls) {
+          final execution = await _executeToolCall(
+            tools: toolSelection.exposedTools,
+            call: call,
+            messages: normalizedMessages,
+            approvalById: approvalById,
+            abortSignal: abortSignal,
+            experimentalContext: experimentalContext,
+            onToolCallStart: experimentalOnToolCallStart,
+            onToolCallFinish: experimentalOnToolCallFinish,
+          );
+          if (execution.approvalRequest != null) {
+            approvalRequests.add(execution.approvalRequest!);
+            stepContent.add(execution.approvalRequest!);
+          }
+          if (execution.toolResult != null) {
+            toolResults.add(execution.toolResult!);
+          }
         }
-        if (execution.toolResult != null) {
-          toolResults.add(execution.toolResult!);
-        }
+      }
+
+      if (toolResults.isNotEmpty) {
+        normalizedMessages = [
+          ...normalizedMessages,
+          LanguageModelV3Message(
+            role: LanguageModelV3Role.tool,
+            content: toolResults,
+          ),
+        ];
+      }
+
+      final stepText = _contentToText(stepContent);
+      final step = GenerateTextStep(
+        stepNumber: stepNumber,
+        content: stepContent,
+        toolCalls: toolCalls.toList(),
+        toolResults: toolResults,
+        toolApprovalRequests: approvalRequests,
+        response: response,
+        text: stepText,
+        finishReason: response.finishReason,
+        usage: response.usage,
+      );
+      steps.add(step);
+
+      _safeInvoke(
+        () => onStepFinish?.call(
+          GenerateTextStepFinishEvent(
+            stepNumber: stepNumber,
+            text: stepText,
+            toolCalls: step.toolCalls,
+            toolResults: step.toolResults,
+            finishReason: step.finishReason,
+            usage: step.usage,
+          ),
+        ),
+      );
+
+      lastContent = stepContent;
+      final snapshot = StepSnapshot(
+        stepCount: stepNumber + 1,
+        toolCallNames: toolCalls.map((call) => call.toolName).toList(),
+        finishReason: response.finishReason,
+      );
+      final shouldStop = shouldStopAfterStep(
+        toolResultsEmpty: toolResults.isEmpty,
+        hasApprovalRequests: approvalRequests.isNotEmpty,
+        snapshot: snapshot,
+        conditions: _allStopConditions,
+      );
+      if (shouldStop) {
+        break;
       }
     }
 
-    if (toolResults.isNotEmpty) {
-      normalizedMessages = [
-        ...normalizedMessages,
-        LanguageModelV3Message(
-          role: LanguageModelV3Role.tool,
-          content: toolResults,
-        ),
-      ];
-    }
-
-    final stepText = _contentToText(stepContent);
-    final step = GenerateTextStep(
-      stepNumber: stepNumber,
-      content: stepContent,
-      toolCalls: toolCalls.toList(),
-      toolResults: toolResults,
-      toolApprovalRequests: approvalRequests,
-      response: response,
-      text: stepText,
-      finishReason: response.finishReason,
-      usage: response.usage,
+    final text = _contentToText(lastContent);
+    final parsedOutput = _parseOutputWithNoObjectError(
+      output: outputSpec,
+      text: text,
+      response: lastResponse,
     );
-    steps.add(step);
+    final totalUsage = _sumUsage(steps.map((step) => step.usage));
+    final responseMessages = normalizedMessages
+        .where(
+          (message) =>
+              message.role == LanguageModelV3Role.assistant ||
+              message.role == LanguageModelV3Role.tool,
+        )
+        .toList(growable: false);
+    final request = GenerateTextRequest(
+      system: systemInstruction,
+      messages: List.unmodifiable(firstRequestMessages ?? normalizedMessages),
+      body: lastResponse?.response?.requestBody,
+    );
+    final responseInfo = GenerateTextResponse(
+      messages: List.unmodifiable(responseMessages),
+      body: lastResponse?.response?.body,
+      metadata: lastResponse?.response,
+    );
+
+    final result = GenerateTextResult<TOutput>(
+      text: text,
+      output: parsedOutput,
+      content: lastContent,
+      toolCalls: lastContent.whereType<LanguageModelV3ToolCallPart>().toList(),
+      toolResults: lastContent
+          .whereType<LanguageModelV3ToolResultPart>()
+          .toList(),
+      toolApprovalRequests: lastContent
+          .whereType<LanguageModelV3ToolApprovalRequestPart>()
+          .toList(),
+      steps: steps,
+      sources: lastContent.whereType<LanguageModelV3SourcePart>().toList(),
+      files: lastContent.whereType<LanguageModelV3FilePart>().toList(),
+      reasoning: lastContent.whereType<LanguageModelV3ReasoningPart>().toList(),
+      reasoningText: lastContent
+          .where(
+            (part) =>
+                part is LanguageModelV3ReasoningPart ||
+                part is LanguageModelV3RedactedReasoningPart,
+          )
+          .map(
+            (part) =>
+                part is LanguageModelV3ReasoningPart ? part.text : '[REDACTED]',
+          )
+          .join(),
+      requestMessages: List.unmodifiable(
+        firstRequestMessages ?? normalizedMessages,
+      ),
+      responseMessages: List.unmodifiable(responseMessages),
+      request: request,
+      responseInfo: responseInfo,
+      response: lastResponse,
+      usage: lastResponse?.usage,
+      totalUsage: totalUsage,
+      finishReason: lastResponse?.finishReason,
+      rawFinishReason: lastResponse?.rawFinishReason,
+      warnings: lastResponse?.warnings ?? const [],
+      providerMetadata: lastResponse?.providerMetadata,
+    );
 
     _safeInvoke(
-      () => onStepFinish?.call(
-        GenerateTextStepFinishEvent(
-          stepNumber: stepNumber,
-          text: stepText,
-          toolCalls: step.toolCalls,
-          toolResults: step.toolResults,
-          finishReason: step.finishReason,
-          usage: step.usage,
+      () => onFinish?.call(
+        GenerateTextFinishEvent<TOutput>(
+          text: result.text,
+          output: result.output,
+          steps: List.unmodifiable(result.steps),
+          usage: result.usage,
+          totalUsage: result.totalUsage,
+          finishReason: result.finishReason,
+          response: result.responseInfo,
         ),
       ),
     );
 
-    lastContent = stepContent;
-    final snapshot = StepSnapshot(
-      stepCount: stepNumber + 1,
-      toolCallNames: toolCalls.map((call) => call.toolName).toList(),
-      finishReason: response.finishReason,
-    );
-    final shouldStop = shouldStopAfterStep(
-      toolResultsEmpty: toolResults.isEmpty,
-      hasApprovalRequests: approvalRequests.isNotEmpty,
-      snapshot: snapshot,
-      conditions: _allStopConditions,
-    );
-    if (shouldStop) {
-      break;
-    }
-  }
-
-  final text = _contentToText(lastContent);
-  final parsedOutput = _parseOutputWithNoObjectError(
-    output: outputSpec,
-    text: text,
-    response: lastResponse,
-  );
-  final totalUsage = _sumUsage(steps.map((step) => step.usage));
-  final responseMessages = normalizedMessages
-      .where(
-        (message) =>
-            message.role == LanguageModelV3Role.assistant ||
-            message.role == LanguageModelV3Role.tool,
+    telemetrySpan
+      ..setAttribute(
+        'ai.usage.promptTokens',
+        result.totalUsage?.inputTokens ?? 0,
       )
-      .toList(growable: false);
-  final request = GenerateTextRequest(
-    system: systemInstruction,
-    messages: List.unmodifiable(firstRequestMessages ?? normalizedMessages),
-    body: lastResponse?.response?.requestBody,
-  );
-  final responseInfo = GenerateTextResponse(
-    messages: List.unmodifiable(responseMessages),
-    body: lastResponse?.response?.body,
-    metadata: lastResponse?.response,
-  );
+      ..setAttribute(
+        'ai.usage.completionTokens',
+        result.totalUsage?.outputTokens ?? 0,
+      )
+      ..setAttribute('ai.finishReason', result.finishReason?.name ?? 'unknown')
+      ..end();
 
-  final result = GenerateTextResult<TOutput>(
-    text: text,
-    output: parsedOutput,
-    content: lastContent,
-    toolCalls: lastContent.whereType<LanguageModelV3ToolCallPart>().toList(),
-    toolResults: lastContent
-        .whereType<LanguageModelV3ToolResultPart>()
-        .toList(),
-    toolApprovalRequests: lastContent
-        .whereType<LanguageModelV3ToolApprovalRequestPart>()
-        .toList(),
-    steps: steps,
-    sources: lastContent.whereType<LanguageModelV3SourcePart>().toList(),
-    files: lastContent.whereType<LanguageModelV3FilePart>().toList(),
-    reasoning: lastContent.whereType<LanguageModelV3ReasoningPart>().toList(),
-    reasoningText: lastContent
-        .where(
-          (part) =>
-              part is LanguageModelV3ReasoningPart ||
-              part is LanguageModelV3RedactedReasoningPart,
-        )
-        .map(
-          (part) =>
-              part is LanguageModelV3ReasoningPart ? part.text : '[REDACTED]',
-        )
-        .join(),
-    requestMessages: List.unmodifiable(
-      firstRequestMessages ?? normalizedMessages,
-    ),
-    responseMessages: List.unmodifiable(responseMessages),
-    request: request,
-    responseInfo: responseInfo,
-    response: lastResponse,
-    usage: lastResponse?.usage,
-    totalUsage: totalUsage,
-    finishReason: lastResponse?.finishReason,
-    rawFinishReason: lastResponse?.rawFinishReason,
-    warnings: lastResponse?.warnings ?? const [],
-    providerMetadata: lastResponse?.providerMetadata,
-  );
-
-  _safeInvoke(
-    () => onFinish?.call(
-      GenerateTextFinishEvent<TOutput>(
-        text: result.text,
-        output: result.output,
-        steps: List.unmodifiable(result.steps),
-        usage: result.usage,
-        totalUsage: result.totalUsage,
-        finishReason: result.finishReason,
-        response: result.responseInfo,
-      ),
-    ),
-  );
-
-  telemetrySpan
-    ..setAttribute('ai.usage.promptTokens', result.totalUsage?.inputTokens ?? 0)
-    ..setAttribute(
-      'ai.usage.completionTokens',
-      result.totalUsage?.outputTokens ?? 0,
-    )
-    ..setAttribute('ai.finishReason', result.finishReason?.name ?? 'unknown')
-    ..end();
-
-  return result;
+    return result;
   } catch (e, st) {
     telemetrySpan
       ..recordException(e, stackTrace: st)
@@ -760,7 +768,10 @@ _ToolSelection _resolveToolSelection({
     );
   }
   // Defensive: every ToolChoice subtype is handled above.
-  return _ToolSelection(exposedTools: tools, toolChoice: choice); // coverage:ignore-line
+  return _ToolSelection(
+    exposedTools: tools,
+    toolChoice: choice,
+  ); // coverage:ignore-line
 }
 
 void _validateToolChoiceInResponse({
@@ -1001,23 +1012,6 @@ void _safeInvoke(void Function() action) {
   try {
     action();
   } catch (_) {}
-}
-
-/// Retries [fn] up to [maxRetries] times on exception.
-/// If all attempts fail, the last exception is rethrown.
-Future<T> _withRetry<T>({
-  required int maxRetries,
-  required Future<T> Function() fn,
-}) async {
-  var attempts = 0;
-  while (true) {
-    try {
-      return await fn();
-    } catch (e) {
-      attempts++;
-      if (attempts > maxRetries) rethrow;
-    }
-  }
 }
 
 String _contentToText(List<LanguageModelV3ContentPart> content) {

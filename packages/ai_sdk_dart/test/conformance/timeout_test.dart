@@ -3,10 +3,14 @@ import 'dart:typed_data';
 // ignore_for_file: avoid_dynamic_calls
 
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
+import 'package:ai_sdk_dart/src/core/retry_helper.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
 
 void main() {
+  setUp(debugResetRetryHooksForTests);
+  tearDown(debugResetRetryHooksForTests);
+
   group('timeout parameter', () {
     // ── generateText ─────────────────────────────────────────────────────
 
@@ -38,6 +42,59 @@ void main() {
         // Should not throw
         await generateText(model: model, prompt: 'hi');
       });
+
+      test(
+        'retry backoff and attempt timeout stay within remaining budget',
+        () async {
+          final attemptTimeouts = <Duration?>[];
+          final slept = <Duration>[];
+          var now = DateTime(2026, 1, 1, 0, 0, 0);
+
+          debugConfigureRetryHooksForTests(
+            now: () => now,
+            randomDouble: () => 0.5,
+            sleep: (duration) async {
+              slept.add(duration);
+              now = now.add(duration);
+            },
+            onAttempt: (attempt) => attemptTimeouts.add(attempt.timeout),
+          );
+
+          var callCount = 0;
+          final model = _BudgetAwareRetryModel(
+            onGenerate: () async {
+              callCount++;
+              if (callCount == 1) {
+                now = now.add(const Duration(milliseconds: 50));
+                throw const AiApiCallError(
+                  'Transient upstream failure',
+                  statusCode: 503,
+                  isRetryable: true,
+                );
+              }
+              return LanguageModelV3GenerateResult(
+                content: [LanguageModelV3TextPart(text: 'ok')],
+                finishReason: LanguageModelV3FinishReason.stop,
+              );
+            },
+          );
+
+          final result = await generateText(
+            model: model,
+            prompt: 'hi',
+            timeout: const Duration(milliseconds: 200),
+            maxRetries: 1,
+          );
+
+          expect(result.text, 'ok');
+          expect(callCount, 2);
+          expect(slept, [const Duration(milliseconds: 50)]);
+          expect(attemptTimeouts, [
+            const Duration(milliseconds: 200),
+            const Duration(milliseconds: 100),
+          ]);
+        },
+      );
     });
 
     // ── streamText ───────────────────────────────────────────────────────
@@ -76,8 +133,8 @@ void main() {
               await result.text
                   .timeout(const Duration(seconds: 2))
                   .whenComplete(() {
-                if (!completer.isCompleted) completer.complete();
-              });
+                    if (!completer.isCompleted) completer.complete();
+                  });
             },
             (error, stack) {
               errors.add(error);
@@ -112,9 +169,7 @@ void main() {
       });
 
       test('throws TimeoutException when model is too slow', () async {
-        final model = _SlowEmbeddingModel(
-          delay: const Duration(seconds: 10),
-        );
+        final model = _SlowEmbeddingModel(delay: const Duration(seconds: 10));
         expect(
           () => embed(
             model: model,
@@ -140,9 +195,7 @@ void main() {
       });
 
       test('throws TimeoutException when model is too slow', () async {
-        final model = _SlowEmbeddingModel(
-          delay: const Duration(seconds: 10),
-        );
+        final model = _SlowEmbeddingModel(delay: const Duration(seconds: 10));
         expect(
           () => embedMany(
             model: model,
@@ -228,8 +281,7 @@ class _SlowStreamModel implements LanguageModelV3 {
   @override
   Future<LanguageModelV3GenerateResult> doGenerate(
     LanguageModelV3CallOptions options,
-  ) async =>
-      throw UnimplementedError();
+  ) async => throw UnimplementedError();
 
   @override
   Future<LanguageModelV3StreamResult> doStream(
@@ -293,5 +345,34 @@ class _SlowImageModel implements ImageModelV3 {
     return ImageModelV3GenerateResult(
       images: [GeneratedImage(bytes: Uint8List(4), mediaType: 'image/png')],
     );
+  }
+}
+
+class _BudgetAwareRetryModel implements LanguageModelV3 {
+  _BudgetAwareRetryModel({required this.onGenerate});
+
+  final Future<LanguageModelV3GenerateResult> Function() onGenerate;
+
+  @override
+  String get provider => 'fake';
+
+  @override
+  String get modelId => 'budget-aware-retry-model';
+
+  @override
+  String get specificationVersion => 'v3';
+
+  @override
+  Future<LanguageModelV3GenerateResult> doGenerate(
+    LanguageModelV3CallOptions options,
+  ) {
+    return onGenerate();
+  }
+
+  @override
+  Future<LanguageModelV3StreamResult> doStream(
+    LanguageModelV3CallOptions options,
+  ) async {
+    throw UnimplementedError();
   }
 }

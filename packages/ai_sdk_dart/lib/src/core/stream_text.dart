@@ -9,6 +9,7 @@ import '../stop_conditions/stop_conditions.dart';
 import '../telemetry/telemetry.dart';
 import '../tools/tool.dart';
 import 'generate_text.dart';
+import 'retry_helper.dart';
 
 extension _CompleteIfPending<T> on Completer<T> {
   /// Completes with [value] only if not already completed.
@@ -714,11 +715,15 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
             headers: headers,
             providerOptions: stepProviderOptions,
           );
-          final response = await _withRetry(
+          final response = await withRetry(
             maxRetries: maxRetries,
-            fn: () {
+            timeout: timeout,
+            abortSignal: abortSignal,
+            fn: (attemptTimeout) {
               final call = stepModel.doStream(streamCallOptions);
-              return timeout != null ? call.timeout(timeout) : call;
+              return attemptTimeout != null
+                  ? call.timeout(attemptTimeout)
+                  : call;
             },
           );
           if (response.rawResponse is Map) {
@@ -1386,7 +1391,10 @@ _ToolSelection _resolveToolSelection({
     );
   }
   // Defensive: every ToolChoice subtype is handled above.
-  return _ToolSelection(exposedTools: tools, toolChoice: choice); // coverage:ignore-line
+  return _ToolSelection(
+    exposedTools: tools,
+    toolChoice: choice,
+  ); // coverage:ignore-line
 }
 
 void _validateToolChoiceInStreamingStep({
@@ -1776,23 +1784,6 @@ void _safeInvoke(void Function() action) {
   try {
     action();
   } catch (_) {}
-}
-
-/// Retries [fn] up to [maxRetries] times on exception.
-/// If all attempts fail, the last exception is rethrown.
-Future<T> _withRetry<T>({
-  required int maxRetries,
-  required Future<T> Function() fn,
-}) async {
-  var attempts = 0;
-  while (true) {
-    try {
-      return await fn();
-    } catch (e) {
-      attempts++;
-      if (attempts > maxRetries) rethrow;
-    }
-  }
 }
 
 String _buildOutputSystemInstruction<T>(String? system, Output<T> output) {

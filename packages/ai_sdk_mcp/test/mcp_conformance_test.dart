@@ -209,6 +209,142 @@ void main() {
           );
         },
       );
+
+      test(
+        'concurrent cold starts share one initialize handshake and one initialized notification',
+        () async {
+          final server = await FakeStreamableHttpServer.start();
+          addTearDown(server.close);
+          final releaseInitialize = Completer<void>();
+          server.queueInitializeResponse(
+            sessionId: 'session-1',
+            waitFor: releaseInitialize.future,
+          );
+          server.queueJsonResponse({
+            'jsonrpc': '2.0',
+            'result': {
+              'tools': [
+                {
+                  'name': 'ping',
+                  'inputSchema': {'type': 'object'},
+                },
+              ],
+            },
+          });
+          server.queueJsonResponse({
+            'jsonrpc': '2.0',
+            'result': {'resources': []},
+          });
+
+          final client = MCPClient(
+            transport: StreamableHttpClientTransport(url: server.uri),
+          );
+          addTearDown(client.close);
+
+          final toolsFuture = client.tools();
+          final resourcesFuture = client.listResources();
+          await Future<void>.delayed(const Duration(milliseconds: 30));
+          releaseInitialize.complete();
+
+          final tools = await toolsFuture;
+          final resources = await resourcesFuture;
+          expect(tools.keys, contains('ping'));
+          expect(resources, isEmpty);
+
+          final initializeCount = server.requestLog
+              .where((request) => request.body?['method'] == 'initialize')
+              .length;
+          final initializedCount = server.requestLog
+              .where(
+                (request) =>
+                    request.body?['method'] == 'notifications/initialized',
+              )
+              .length;
+          expect(initializeCount, 1);
+          expect(initializedCount, 1);
+        },
+      );
+
+      test(
+        'missing protocolVersion fails handshake before initialized and does not retain session',
+        () async {
+          final server = await FakeStreamableHttpServer.start();
+          addTearDown(server.close);
+          server.queueJsonResponse(
+            {
+              'jsonrpc': '2.0',
+              'result': {
+                'capabilities': {'tools': {}},
+                'serverInfo': {'name': 'bad-server', 'version': '1.0.0'},
+              },
+            },
+            headers: const {'Mcp-Session-Id': 'session-1'},
+          );
+
+          final client = MCPClient(
+            transport: StreamableHttpClientTransport(url: server.uri),
+          );
+          addTearDown(client.close);
+
+          await expectLater(
+            client.initialize(),
+            throwsA(
+              isA<MCPException>().having(
+                (e) => e.message,
+                'message',
+                contains('protocolVersion'),
+              ),
+            ),
+          );
+
+          expect(
+            server.requestLog.any(
+              (request) =>
+                  request.body?['method'] == 'notifications/initialized',
+            ),
+            isFalse,
+          );
+
+          await client.close();
+          expect(server.deleteRequestCount, 0);
+        },
+      );
+
+      test(
+        'unsupported protocolVersion fails handshake before initialized',
+        () async {
+          final server = await FakeStreamableHttpServer.start();
+          addTearDown(server.close);
+          server.queueInitializeResponse(
+            protocolVersion: '2024-11-05',
+            sessionId: 'session-1',
+          );
+
+          final client = MCPClient(
+            transport: StreamableHttpClientTransport(url: server.uri),
+          );
+          addTearDown(client.close);
+
+          await expectLater(
+            client.initialize(),
+            throwsA(
+              isA<MCPException>().having(
+                (e) => e.message,
+                'message',
+                contains('Unsupported protocolVersion'),
+              ),
+            ),
+          );
+
+          expect(
+            server.requestLog.any(
+              (request) =>
+                  request.body?['method'] == 'notifications/initialized',
+            ),
+            isFalse,
+          );
+        },
+      );
     });
 
     // ── tools() ─────────────────────────────────────────────────────────────
@@ -1086,6 +1222,162 @@ void main() {
         );
         expect(lastToolsRequest.headers['mcp-session-id'], 'session-2');
       });
+
+      test(
+        'concurrent session-expired requests share one recovery handshake and one initialized notification',
+        () async {
+          final server = await FakeStreamableHttpServer.start();
+          addTearDown(server.close);
+          server.queueInitializeResponse(sessionId: 'session-1');
+
+          final client = MCPClient(
+            transport: StreamableHttpClientTransport(url: server.uri),
+          );
+          addTearDown(client.close);
+
+          await client.initialize();
+          server.expireCurrentSession();
+
+          final releaseRecovery = Completer<void>();
+          server.queueInitializeResponse(
+            sessionId: 'session-2',
+            waitFor: releaseRecovery.future,
+          );
+          server.queueJsonResponse({
+            'jsonrpc': '2.0',
+            'result': {
+              'tools': [
+                {
+                  'name': 'ping',
+                  'inputSchema': {'type': 'object'},
+                },
+              ],
+            },
+          });
+          server.queueJsonResponse({
+            'jsonrpc': '2.0',
+            'result': {'resources': []},
+          });
+
+          final toolsFuture = client.tools();
+          final resourcesFuture = client.listResources();
+          await Future<void>.delayed(const Duration(milliseconds: 30));
+          releaseRecovery.complete();
+
+          final tools = await toolsFuture;
+          final resources = await resourcesFuture;
+          expect(tools.keys, contains('ping'));
+          expect(resources, isEmpty);
+
+          final initializeCount = server.requestLog
+              .where((request) => request.body?['method'] == 'initialize')
+              .length;
+          final initializedCount = server.requestLog
+              .where(
+                (request) =>
+                    request.body?['method'] == 'notifications/initialized',
+              )
+              .length;
+          expect(initializeCount, 2);
+          expect(initializedCount, 2);
+        },
+      );
+
+      test(
+        'listener 404 triggers background reinitialize and replays subscriptions before listener resumes',
+        () async {
+          final server = await FakeStreamableHttpServer.start();
+          addTearDown(server.close);
+          server.getListenerSupported = true;
+          server.queueInitializeResponse(sessionId: 'session-1');
+          server.queueJsonResponse({'jsonrpc': '2.0', 'result': {}});
+
+          final client = MCPClient(
+            transport: StreamableHttpClientTransport(
+              url: server.uri,
+              listenerReconnectDelay: const Duration(milliseconds: 25),
+            ),
+          );
+          addTearDown(client.close);
+
+          final updates = <MCPResourceContent>[];
+          final sub = client
+              .subscribeResource('file:///watched.txt')
+              .listen(updates.add);
+          addTearDown(sub.cancel);
+
+          await server.waitForListenerConnection();
+          server.queueGetStatusCode(404);
+          server.queueInitializeResponse(sessionId: 'session-2');
+          server.queueJsonResponse({'jsonrpc': '2.0', 'result': {}});
+          server.queueJsonResponse({
+            'jsonrpc': '2.0',
+            'result': {
+              'contents': [
+                {
+                  'uri': 'file:///watched.txt',
+                  'mimeType': 'text/plain',
+                  'text': 'replayed update',
+                },
+              ],
+            },
+          });
+
+          await server.disconnectActiveListener();
+
+          for (var attempt = 0; attempt < 40; attempt++) {
+            final initializeCount = server.requestLog
+                .where((request) => request.body?['method'] == 'initialize')
+                .length;
+            final subscribeCount = server.requestLog
+                .where(
+                  (request) => request.body?['method'] == 'resources/subscribe',
+                )
+                .length;
+            if (initializeCount >= 2 &&
+                subscribeCount >= 2 &&
+                server.listenerConnectionCount >= 3) {
+              break;
+            }
+            await Future<void>.delayed(const Duration(milliseconds: 25));
+          }
+
+          await server.pushListenerJson({
+            'jsonrpc': '2.0',
+            'method': 'notifications/resources/updated',
+            'params': {'uri': 'file:///watched.txt'},
+          });
+
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+          expect(updates.map((update) => update.text), ['replayed update']);
+
+          final methods = server.requestLog
+              .map(
+                (request) => request.method == 'GET'
+                    ? 'GET'
+                    : (request.body?['method']?.toString() ?? request.method),
+              )
+              .toList();
+          final secondInitializeIndex = methods.indexOf(
+            'initialize',
+            methods.indexOf('initialize') + 1,
+          );
+          final secondInitializedIndex = methods.indexOf(
+            'notifications/initialized',
+            methods.indexOf('notifications/initialized') + 1,
+          );
+          final secondSubscribeIndex = methods.indexOf(
+            'resources/subscribe',
+            methods.indexOf('resources/subscribe') + 1,
+          );
+          final resumedListenerIndex = methods.lastIndexOf('GET');
+
+          expect(secondInitializeIndex, greaterThanOrEqualTo(0));
+          expect(secondInitializedIndex, greaterThan(secondInitializeIndex));
+          expect(secondSubscribeIndex, greaterThan(secondInitializedIndex));
+          expect(resumedListenerIndex, greaterThan(secondSubscribeIndex));
+        },
+      );
 
       test('operations after close throw MCPException', () async {
         final server = await FakeStreamableHttpServer.start();

@@ -39,6 +39,7 @@ class StreamableHttpClientTransport implements MCPTransport {
   bool _listenerUnsupported = false;
 
   String? _sessionId;
+  String? _pendingSessionId;
   String? _protocolVersion;
   String? _lastEventId;
   bool _sessionExpired = false;
@@ -49,8 +50,21 @@ class StreamableHttpClientTransport implements MCPTransport {
 
   /// Called by [MCPClient] after initialize negotiation succeeds.
   void setProtocolVersion(String protocolVersion) {
+    _sessionId = _pendingSessionId;
+    _pendingSessionId = null;
     _protocolVersion = protocolVersion;
     _sessionExpired = false;
+  }
+
+  Future<void> resetHandshakeState() async {
+    _pendingSessionId = null;
+    _sessionId = null;
+    _protocolVersion = null;
+    _lastEventId = null;
+    _sessionExpired = false;
+    _listenerStarted = false;
+    _listenerUnsupported = false;
+    await _stopListener();
   }
 
   /// Called by [MCPClient] after `notifications/initialized` is sent.
@@ -153,9 +167,10 @@ class StreamableHttpClientTransport implements MCPTransport {
     }
   }
 
-  void _captureSessionId(http.StreamedResponse response) {
+  void _capturePendingSessionId(http.StreamedResponse response) {
     final sessionId = _responseHeader(response.headers, 'mcp-session-id');
     if (sessionId == null) {
+      _pendingSessionId = null;
       return;
     }
     if (!_isVisibleAscii(sessionId)) {
@@ -163,8 +178,7 @@ class StreamableHttpClientTransport implements MCPTransport {
         'Invalid Mcp-Session-Id header: expected visible ASCII characters only',
       );
     }
-    _sessionId = sessionId;
-    _sessionExpired = false;
+    _pendingSessionId = sessionId;
   }
 
   bool _isVisibleAscii(String value) {
@@ -180,6 +194,7 @@ class StreamableHttpClientTransport implements MCPTransport {
   }
 
   void _markSessionExpired() {
+    _pendingSessionId = null;
     _sessionExpired = true;
     _listenerStarted = false;
     _listenerUnsupported = false;
@@ -224,7 +239,9 @@ class StreamableHttpClientTransport implements MCPTransport {
     if (decoded is! Map) {
       throw MCPException('Unexpected MCP response format: $decoded');
     }
-    return JsonRpcResponse.fromJson(decoded.cast<String, dynamic>());
+    final message = decoded.cast<String, dynamic>();
+    _validateResponseMessage(message, expectedId: expectedId);
+    return JsonRpcResponse.fromJson(message);
   }
 
   void _dispatchMessage(Map<String, dynamic> message) {
@@ -258,10 +275,18 @@ class StreamableHttpClientTransport implements MCPTransport {
           return;
         }
         final message = decoded.cast<String, dynamic>();
-        if (message['id'] == request.id &&
-            (message.containsKey('result') || message.containsKey('error'))) {
-          if (!completer.isCompleted) {
-            completer.complete(JsonRpcResponse.fromJson(message));
+        final isResponseLike =
+            message.containsKey('result') || message.containsKey('error');
+        if (isResponseLike) {
+          try {
+            _validateResponseMessage(message, expectedId: request.id);
+            if (!completer.isCompleted) {
+              completer.complete(JsonRpcResponse.fromJson(message));
+            }
+          } catch (error, stackTrace) {
+            if (!completer.isCompleted) {
+              completer.completeError(error, stackTrace);
+            }
           }
           unawaited(subscription.cancel());
           return;
@@ -351,7 +376,7 @@ class StreamableHttpClientTransport implements MCPTransport {
     }
 
     if (isInitialize) {
-      _captureSessionId(response);
+      _capturePendingSessionId(response);
     }
 
     final contentType = _responseHeader(response.headers, 'content-type');
@@ -423,6 +448,11 @@ class StreamableHttpClientTransport implements MCPTransport {
       if (_sessionId != null && response.statusCode == 404) {
         await _drainResponse(response);
         _markSessionExpired();
+        if (!_notifications.isClosed) {
+          _notifications.addError(
+            _sessionExpiredError(method: 'GET', uri: url),
+          );
+        }
         return;
       }
 
@@ -538,6 +568,7 @@ class StreamableHttpClientTransport implements MCPTransport {
     }
 
     _sessionId = null;
+    _pendingSessionId = null;
     _protocolVersion = null;
     _lastEventId = null;
     _sessionExpired = false;
@@ -557,6 +588,27 @@ class StreamableHttpClientTransport implements MCPTransport {
       byteStream.transform(utf8.decoder).transform(const LineSplitter()),
       (sink) => _SseLineSink(sink),
     );
+  }
+
+  void _validateResponseMessage(
+    Map<String, dynamic> message, {
+    required int expectedId,
+  }) {
+    if (message['jsonrpc'] != '2.0') {
+      throw MCPException('Unexpected JSON-RPC response format: $message');
+    }
+
+    final hasResult = message.containsKey('result');
+    final hasError = message.containsKey('error');
+    if (hasResult == hasError) {
+      throw MCPException('Unexpected JSON-RPC response format: $message');
+    }
+
+    if (message['id'] != expectedId) {
+      throw MCPException(
+        'Unexpected JSON-RPC response id: ${message['id']} (expected $expectedId)',
+      );
+    }
   }
 }
 

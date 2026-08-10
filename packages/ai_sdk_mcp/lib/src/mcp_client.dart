@@ -200,6 +200,7 @@ class MCPClient {
   int get _id => _nextId++;
 
   bool _initialized = false;
+  Future<void>? _initializeFuture;
 
   /// Resource subscription controllers keyed by resource URI.
   final _resourceSubscriptions = <String, _ResourceSubscription>{};
@@ -221,8 +222,16 @@ class MCPClient {
     _notificationSub?.cancel();
     _notificationSub = transport.notifications.listen(
       _handleServerMessage,
-      onError: (_) {}, // Transport-level errors handled by _send/reconnect.
+      onError: _handleTransportError,
     );
+  }
+
+  void _handleTransportError(Object error, [StackTrace? stackTrace]) {
+    if (_closed) return;
+    if (error is! MCPSessionExpiredException) {
+      return;
+    }
+    unawaited(_recoverFromSessionExpiry().catchError((_) {}));
   }
 
   void _handleServerMessage(Map<String, dynamic> json) {
@@ -321,11 +330,57 @@ class MCPClient {
   /// Must be called before any other method.  Safe to call multiple times —
   /// subsequent calls are no-ops.
   Future<void> initialize() async {
-    if (_initialized) return;
-    await _doInitialize();
+    await _ensureInitialized();
   }
 
-  Future<void> _doInitialize() async {
+  Future<void> _ensureInitialized({
+    bool forceReinitialize = false,
+    bool replayResourceSubscriptions = false,
+  }) {
+    if (_closed) {
+      throw const MCPException('MCP client is closed');
+    }
+    if (_initialized && !forceReinitialize) {
+      return Future.value();
+    }
+    final existing = _initializeFuture;
+    if (existing != null) {
+      return existing;
+    }
+
+    final future = _runInitialize(
+      replayResourceSubscriptions: replayResourceSubscriptions,
+    );
+    _initializeFuture = future;
+    return future.whenComplete(() {
+      if (identical(_initializeFuture, future)) {
+        _initializeFuture = null;
+      }
+    });
+  }
+
+  Future<void> _runInitialize({
+    required bool replayResourceSubscriptions,
+  }) async {
+    _initialized = false;
+    try {
+      await _doInitialize(
+        replayResourceSubscriptions: replayResourceSubscriptions,
+      );
+      _initialized = true;
+    } catch (_) {
+      _initialized = false;
+      if (transport
+          case final StreamableHttpClientTransport streamableTransport) {
+        await streamableTransport.resetHandshakeState();
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _doInitialize({
+    required bool replayResourceSubscriptions,
+  }) async {
     final response = await transport.send(
       JsonRpcRequest(
         method: 'initialize',
@@ -346,25 +401,71 @@ class MCPClient {
     }
 
     final result = response.result;
-    final negotiatedProtocolVersion =
-        result is Map && result['protocolVersion'] is String
-        ? result['protocolVersion'] as String
-        : '2025-06-18';
+    if (result is! Map) {
+      throw const MCPException(
+        'Initialize failed: result must contain protocolVersion',
+      );
+    }
+    final protocolVersion = result['protocolVersion'];
+    if (protocolVersion is! String) {
+      throw const MCPException(
+        'Initialize failed: result.protocolVersion must be a string',
+      );
+    }
+    if (protocolVersion != '2025-06-18') {
+      throw MCPException(
+        'Unsupported protocolVersion "$protocolVersion" from initialize',
+      );
+    }
 
     if (transport
         case final StreamableHttpClientTransport streamableTransport) {
-      streamableTransport.setProtocolVersion(negotiatedProtocolVersion);
+      streamableTransport.setProtocolVersion(protocolVersion);
     }
 
     await transport.sendNotification(
       JsonRpcNotification(method: 'notifications/initialized'),
     );
 
+    if (replayResourceSubscriptions) {
+      await _replayActiveResourceSubscriptions();
+    }
+
     if (transport
         case final StreamableHttpClientTransport streamableTransport) {
       await streamableTransport.startNotificationListener();
     }
-    _initialized = true;
+  }
+
+  Future<void> _replayActiveResourceSubscriptions() async {
+    for (final entry in _resourceSubscriptions.entries.toList()) {
+      final subscription = entry.value;
+      if (subscription.controller.isClosed) {
+        continue;
+      }
+      final response = await transport.send(
+        JsonRpcRequest(
+          method: 'resources/subscribe',
+          id: _id,
+          params: {'uri': entry.key},
+        ),
+      );
+      if (response.isError) {
+        throw MCPException(
+          'resources/subscribe "${entry.key}" failed: ${response.error}',
+        );
+      }
+    }
+  }
+
+  Future<void> _recoverFromSessionExpiry() {
+    if (_closed) {
+      return Future.value();
+    }
+    return _ensureInitialized(
+      forceReinitialize: true,
+      replayResourceSubscriptions: true,
+    );
   }
 
   /// Send a request, retrying with reconnect if the policy allows.
@@ -374,8 +475,7 @@ class MCPClient {
       try {
         return await transport.send(request);
       } on MCPSessionExpiredException {
-        _initialized = false;
-        await _doInitialize();
+        await _recoverFromSessionExpiry();
         return transport.send(request);
       }
     }
@@ -383,8 +483,7 @@ class MCPClient {
       try {
         return await transport.send(request);
       } on MCPSessionExpiredException {
-        _initialized = false;
-        await _doInitialize();
+        await _recoverFromSessionExpiry();
         return transport.send(request);
       } catch (e) {
         if (attempt >= policy.maxAttempts) rethrow;
@@ -397,7 +496,7 @@ class MCPClient {
           _listenToTransport();
           _initialized = false;
           try {
-            await _doInitialize();
+            await _ensureInitialized();
           } catch (_) {
             // Will retry on the next loop iteration.
           }

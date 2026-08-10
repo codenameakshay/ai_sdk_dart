@@ -41,6 +41,8 @@ class _QueuedResponse {
     required this.statusCode,
     required this.jsonBody,
     this.headers = const {},
+    this.waitFor,
+    this.injectRequestId = true,
   }) : sseFrames = const [],
        closeSseStream = true;
 
@@ -49,6 +51,8 @@ class _QueuedResponse {
     required this.sseFrames,
     this.headers = const {},
     this.closeSseStream = true,
+    this.waitFor,
+    this.injectRequestId = true,
   }) : jsonBody = null;
 
   final int statusCode;
@@ -56,6 +60,8 @@ class _QueuedResponse {
   final Map<String, dynamic>? jsonBody;
   final List<FakeSseFrame> sseFrames;
   final bool closeSseStream;
+  final Future<void>? waitFor;
+  final bool injectRequestId;
 }
 
 class FakeStreamableHttpServer {
@@ -63,6 +69,7 @@ class FakeStreamableHttpServer {
 
   final HttpServer _server;
   final _queuedResponses = <_QueuedResponse>[];
+  final _queuedGetStatusCodes = <int>[];
   final _requestLog = <RecordedHttpRequest>[];
   final _listenerEventHistory = <FakeSseFrame>[];
   final _listenerReconnectHeaders = <String?>[];
@@ -113,27 +120,36 @@ class FakeStreamableHttpServer {
       'name': 'test-server',
       'version': '1.0.0',
     },
+    Future<void>? waitFor,
   }) {
-    queueJsonResponse({
-      'jsonrpc': '2.0',
-      'result': {
-        'protocolVersion': protocolVersion,
-        'capabilities': capabilities,
-        'serverInfo': serverInfo,
+    queueJsonResponse(
+      {
+        'jsonrpc': '2.0',
+        'result': {
+          'protocolVersion': protocolVersion,
+          'capabilities': capabilities,
+          'serverInfo': serverInfo,
+        },
       },
-    }, headers: sessionId == null ? const {} : {'Mcp-Session-Id': sessionId});
+      headers: sessionId == null ? const {} : {'Mcp-Session-Id': sessionId},
+      waitFor: waitFor,
+    );
   }
 
   void queueJsonResponse(
     Map<String, dynamic> jsonBody, {
     int statusCode = 200,
     Map<String, String> headers = const {},
+    Future<void>? waitFor,
+    bool injectRequestId = true,
   }) {
     _queuedResponses.add(
       _QueuedResponse.json(
         statusCode: statusCode,
         jsonBody: jsonBody,
         headers: headers,
+        waitFor: waitFor,
+        injectRequestId: injectRequestId,
       ),
     );
   }
@@ -143,6 +159,8 @@ class FakeStreamableHttpServer {
     int statusCode = 200,
     Map<String, String> headers = const {},
     bool closeStream = true,
+    Future<void>? waitFor,
+    bool injectRequestId = true,
   }) {
     _queuedResponses.add(
       _QueuedResponse.sse(
@@ -150,8 +168,14 @@ class FakeStreamableHttpServer {
         sseFrames: frames,
         headers: headers,
         closeSseStream: closeStream,
+        waitFor: waitFor,
+        injectRequestId: injectRequestId,
       ),
     );
+  }
+
+  void queueGetStatusCode(int statusCode) {
+    _queuedGetStatusCodes.add(statusCode);
   }
 
   void expireCurrentSession() {
@@ -260,6 +284,13 @@ class FakeStreamableHttpServer {
   }
 
   Future<void> _handleGet(HttpRequest request) async {
+    if (_queuedGetStatusCodes.isNotEmpty) {
+      final statusCode = _queuedGetStatusCodes.removeAt(0);
+      request.response.statusCode = statusCode;
+      await request.response.close();
+      return;
+    }
+
     if (!getListenerSupported) {
       request.response.statusCode = 405;
       await request.response.close();
@@ -317,6 +348,8 @@ class FakeStreamableHttpServer {
           )
         : _queuedResponses.removeAt(0);
 
+    await queued.waitFor;
+
     for (final entry in queued.headers.entries) {
       request.response.headers.set(entry.key, entry.value);
     }
@@ -331,7 +364,7 @@ class FakeStreamableHttpServer {
     if (queued.jsonBody != null) {
       request.response.headers.contentType = ContentType.json;
       final jsonBody = Map<String, dynamic>.of(queued.jsonBody!);
-      if (!jsonBody.containsKey('id')) {
+      if (queued.injectRequestId && !jsonBody.containsKey('id')) {
         jsonBody['id'] = body['id'];
       }
       request.response.write(jsonEncode(jsonBody));
@@ -347,7 +380,8 @@ class FakeStreamableHttpServer {
     for (final frame in queued.sseFrames) {
       _writeSseFrame(
         request.response,
-        frame.id == null &&
+        queued.injectRequestId &&
+                frame.id == null &&
                 frame.dataLines.length == 1 &&
                 _looksLikeJsonObject(frame.dataLines.single)
             ? _injectRequestId(frame, body['id'])

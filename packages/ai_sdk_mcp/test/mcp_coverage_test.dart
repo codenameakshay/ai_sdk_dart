@@ -173,6 +173,9 @@ class _DefaultNotificationsTransport extends MCPTransport {
 
   @override
   Future<JsonRpcResponse> send(JsonRpcRequest request) async {
+    if (request.method == 'initialize') {
+      return _initResult(request);
+    }
     return const JsonRpcResponse(result: {});
   }
 
@@ -468,6 +471,65 @@ void main() {
         );
         expect((cancelled.body?['params'] as Map)['requestId'], isA<int>());
         expect((cancelled.body?['params'] as Map)['reason'], isNotEmpty);
+      },
+    );
+
+    test(
+      'rejects JSON responses whose id does not match the request id',
+      () async {
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueJsonResponse({
+          'jsonrpc': '2.0',
+          'id': 999,
+          'result': {'ok': true},
+        }, injectRequestId: false);
+
+        final transport = StreamableHttpClientTransport(url: server.uri);
+        addTearDown(transport.close);
+
+        await expectLater(
+          transport.send(JsonRpcRequest(method: 'ping', id: 1)),
+          throwsA(
+            isA<MCPException>().having(
+              (e) => e.message,
+              'message',
+              contains('Unexpected JSON-RPC response id'),
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'rejects SSE responses whose id does not match the request id',
+      () async {
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueSseResponse([
+          FakeSseFrame.json({
+            'jsonrpc': '2.0',
+            'id': 999,
+            'result': {'ok': true},
+          }, id: 'evt-1'),
+        ], injectRequestId: false);
+
+        final transport = StreamableHttpClientTransport(
+          url: server.uri,
+          requestTimeout: const Duration(milliseconds: 200),
+        );
+        addTearDown(transport.close);
+
+        await expectLater(
+          transport.send(JsonRpcRequest(method: 'ping', id: 1)),
+          throwsA(
+            isA<MCPException>().having(
+              (e) => e.message,
+              'message',
+              contains('Unexpected JSON-RPC response id'),
+            ),
+          ),
+        );
       },
     );
 

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_dart/src/core/retry_helper.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
@@ -63,7 +65,13 @@ void main() {
       final model = _CountingFakeModel(
         onCall: () {
           callCount++;
-          if (callCount < 3) throw Exception('transient error');
+          if (callCount < 3) {
+            throw const AiApiCallError(
+              'Transient upstream failure',
+              statusCode: 503,
+              isRetryable: true,
+            );
+          }
           return LanguageModelV3GenerateResult(
             content: [LanguageModelV3TextPart(text: 'success')],
             finishReason: LanguageModelV3FinishReason.stop,
@@ -79,6 +87,25 @@ void main() {
       expect(result.text, 'success');
       expect(callCount, 3);
     });
+
+    test(
+      'does not retry generic exceptions even when maxRetries is set',
+      () async {
+        var callCount = 0;
+        final model = _CountingFakeModel(
+          onCall: () {
+            callCount++;
+            throw Exception('non-provider failure');
+          },
+        );
+
+        await expectLater(
+          () => generateText(model: model, prompt: 'hi', maxRetries: 3),
+          throwsA(isA<Exception>()),
+        );
+        expect(callCount, 1);
+      },
+    );
 
     test('maxRetries rethrows after exhausting retries', () async {
       final model = FakeErrorModel(Exception('permanent error'));
@@ -272,7 +299,13 @@ void main() {
       final model = _CountingFakeModel(
         onCall: () {
           callCount++;
-          if (callCount < 2) throw Exception('transient');
+          if (callCount < 2) {
+            throw const AiApiCallError(
+              'Transient upstream failure',
+              statusCode: 503,
+              isRetryable: true,
+            );
+          }
           return LanguageModelV3GenerateResult(
             content: [LanguageModelV3TextPart(text: 'streamed')],
             finishReason: LanguageModelV3FinishReason.stop,
@@ -290,6 +323,43 @@ void main() {
       expect(text, 'streamed');
       expect(callCount, 2);
     });
+
+    test(
+      'does not retry generic stream exceptions even when maxRetries is set',
+      () async {
+        var callCount = 0;
+        final zoneErrors = <Object>[];
+        final completer = Completer<void>();
+        final model = _CountingFakeModel(
+          onCall: () {
+            callCount++;
+            throw Exception('non-provider stream failure');
+          },
+          isStream: true,
+        );
+
+        await runZonedGuarded(
+          () async {
+            final result = await streamText(
+              model: model,
+              prompt: 'hi',
+              maxRetries: 3,
+            );
+            await result.text.whenComplete(() {
+              if (!completer.isCompleted) completer.complete();
+            });
+          },
+          (error, stackTrace) {
+            zoneErrors.add(error);
+            if (!completer.isCompleted) completer.complete();
+          },
+        );
+
+        await completer.future;
+        expect(zoneErrors.single, isA<Exception>());
+        expect(callCount, 1);
+      },
+    );
 
     test(
       'retries retryable API errors with capped exponential jitter',

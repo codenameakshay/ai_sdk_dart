@@ -119,7 +119,7 @@ bool _shouldRetry(
   if (abortSignal?.isCancelled ?? false) return false;
   if (error is TimeoutException) return false;
   if (error is AiApiCallError) return error.isRetryable;
-  return true;
+  return false;
 }
 
 Duration _retryDelayFor({required int retryAttempt, required Object error}) {

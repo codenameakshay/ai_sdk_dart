@@ -94,23 +94,20 @@ void main() {
       expect(out['n'], 3);
     });
 
-    test(
-      'invalid object output completes output future with error',
-      () async {
-        final model = chunkedText('not json at all');
-        final result = await streamText<Map<String, dynamic>>(
-          model: model,
-          prompt: 'json',
-          output: Output.object(schema: objectSchema()),
-        );
-        final expectation = expectLater(
-          result.output,
-          throwsA(isA<AiNoObjectGeneratedError>()),
-        );
-        await result.fullStream.toList();
-        await expectation;
-      },
-    );
+    test('invalid object output completes output future with error', () async {
+      final model = chunkedText('not json at all');
+      final result = await streamText<Map<String, dynamic>>(
+        model: model,
+        prompt: 'json',
+        output: Output.object(schema: objectSchema()),
+      );
+      final expectation = expectLater(
+        result.output,
+        throwsA(isA<AiNoObjectGeneratedError>()),
+      );
+      await result.fullStream.toList();
+      await expectation;
+    });
 
     test('system instruction is combined with object output schema', () async {
       final model = _CapturingStreamModel('{"a":1}');
@@ -126,27 +123,29 @@ void main() {
       expect(system, contains('JSON object'));
     });
 
-    test('system instruction combines with array/choice/json outputs',
-        () async {
-      final cases = <Output<Object?>, String>{
-        Output.array(element: objectSchema()): '[]',
-        Output.choice(options: const ['a', 'b']): '"a"',
-        Output.json(): '{}',
-      };
-      for (final entry in cases.entries) {
-        final model = _CapturingStreamModel(entry.value);
-        final result = await streamText<Object?>(
-          model: model,
-          system: 'guidance',
-          prompt: 'go',
-          output: entry.key,
-        );
-        await result.fullStream.toList();
-        // Drain output so any rejection is observed rather than unhandled.
-        await result.output;
-        expect(model.lastOptions!.prompt.system, contains('guidance'));
-      }
-    });
+    test(
+      'system instruction combines with array/choice/json outputs',
+      () async {
+        final cases = <Output<Object?>, String>{
+          Output.array(element: objectSchema()): '[]',
+          Output.choice(options: const ['a', 'b']): '"a"',
+          Output.json(): '{}',
+        };
+        for (final entry in cases.entries) {
+          final model = _CapturingStreamModel(entry.value);
+          final result = await streamText<Object?>(
+            model: model,
+            system: 'guidance',
+            prompt: 'go',
+            output: entry.key,
+          );
+          await result.fullStream.toList();
+          // Drain output so any rejection is observed rather than unhandled.
+          await result.output;
+          expect(model.lastOptions!.prompt.system, contains('guidance'));
+        }
+      },
+    );
   });
 
   group('streamText tool execution', () {
@@ -219,9 +218,7 @@ void main() {
         model: model,
         prompt: 'go',
         maxSteps: 3,
-        tools: {
-          'boom': echoTool((_) => throw StateError('tool failed')),
-        },
+        tools: {'boom': echoTool((_) => throw StateError('tool failed'))},
       );
 
       final events = await result.fullStream.toList();
@@ -269,9 +266,7 @@ void main() {
         model: model,
         prompt: 'go',
         maxSteps: 3,
-        tools: {
-          'danger': echoTool((_) => 'ran', needsApproval: (_) => true),
-        },
+        tools: {'danger': echoTool((_) => 'ran', needsApproval: (_) => true)},
       );
       // Drain stream.
       await result.fullStream.toList();
@@ -377,21 +372,23 @@ void main() {
       await outputExpectation;
     });
 
-    test('toolChoice required without tools throws AiNoSuchToolError',
-        () async {
-      final model = FakeTextModel('text');
-      final result = await streamText(
-        model: model,
-        prompt: 'go',
-        toolChoice: const ToolChoiceRequired(),
-      );
-      final outputExpectation = expectLater(
-        result.output,
-        throwsA(isA<AiNoSuchToolError>()),
-      );
-      await result.fullStream.toList();
-      await outputExpectation;
-    });
+    test(
+      'toolChoice required without tools throws AiNoSuchToolError',
+      () async {
+        final model = FakeTextModel('text');
+        final result = await streamText(
+          model: model,
+          prompt: 'go',
+          toolChoice: const ToolChoiceRequired(),
+        );
+        final outputExpectation = expectLater(
+          result.output,
+          throwsA(isA<AiNoSuchToolError>()),
+        );
+        await result.fullStream.toList();
+        await outputExpectation;
+      },
+    );
 
     test('toolChoice specific mismatch throws', () async {
       final model = _StreamSingleToolModel(toolName: 'echo', input: const {});
@@ -399,10 +396,7 @@ void main() {
         model: model,
         prompt: 'go',
         toolChoice: const ToolChoiceSpecific(toolName: 'other'),
-        tools: {
-          'echo': echoTool((_) => 'x'),
-          'other': echoTool((_) => 'y'),
-        },
+        tools: {'echo': echoTool((_) => 'x'), 'other': echoTool((_) => 'y')},
       );
       final outputExpectation = expectLater(
         result.output,
@@ -412,22 +406,24 @@ void main() {
       await outputExpectation;
     });
 
-    test('toolChoice specific naming an absent tool throws AiNoSuchToolError',
-        () async {
-      final model = FakeTextModel('text');
-      final result = await streamText(
-        model: model,
-        prompt: 'go',
-        toolChoice: const ToolChoiceSpecific(toolName: 'ghost'),
-        tools: {'echo': echoTool((_) => 'x')},
-      );
-      final outputExpectation = expectLater(
-        result.output,
-        throwsA(isA<AiNoSuchToolError>()),
-      );
-      await result.fullStream.toList();
-      await outputExpectation;
-    });
+    test(
+      'toolChoice specific naming an absent tool throws AiNoSuchToolError',
+      () async {
+        final model = FakeTextModel('text');
+        final result = await streamText(
+          model: model,
+          prompt: 'go',
+          toolChoice: const ToolChoiceSpecific(toolName: 'ghost'),
+          tools: {'echo': echoTool((_) => 'x')},
+        );
+        final outputExpectation = expectLater(
+          result.output,
+          throwsA(isA<AiNoSuchToolError>()),
+        );
+        await result.fullStream.toList();
+        await outputExpectation;
+      },
+    );
 
     test('toolChoice specific exposes only the named tool', () async {
       final model = _CapturingStreamModel('hi');
@@ -435,10 +431,7 @@ void main() {
         model: model,
         prompt: 'go',
         toolChoice: const ToolChoiceSpecific(toolName: 'echo'),
-        tools: {
-          'echo': echoTool((_) => 'x'),
-          'other': echoTool((_) => 'y'),
-        },
+        tools: {'echo': echoTool((_) => 'x'), 'other': echoTool((_) => 'y')},
       );
       await result.fullStream.toList();
       expect(model.lastOptions!.tools.map((t) => t.name), ['echo']);
@@ -452,10 +445,7 @@ void main() {
         model: model,
         prompt: 'go',
         activeToolNames: const ['a'],
-        tools: {
-          'a': echoTool((_) => '1'),
-          'b': echoTool((_) => '2'),
-        },
+        tools: {'a': echoTool((_) => '1'), 'b': echoTool((_) => '2')},
       );
       await result.fullStream.toList();
       expect(model.lastOptions!.tools.map((t) => t.name), ['a']);
@@ -570,7 +560,7 @@ void main() {
       // observed while the stream drains and the error event fires.
       final outputExpectation = expectLater(
         result.output,
-        throwsA(isA<StateError>()),
+        throwsA(isA<AiApiCallError>()),
       );
       final events = await result.fullStream.toList();
       expect(events.whereType<StreamTextErrorEvent>(), isNotEmpty);
@@ -818,8 +808,7 @@ class _StreamToolThenText implements LanguageModelV3 {
   @override
   Future<LanguageModelV3GenerateResult> doGenerate(
     LanguageModelV3CallOptions options,
-  ) async =>
-      throw UnimplementedError();
+  ) async => throw UnimplementedError();
 
   @override
   Future<LanguageModelV3StreamResult> doStream(
@@ -881,8 +870,7 @@ class _StreamSingleToolModel implements LanguageModelV3 {
   @override
   Future<LanguageModelV3GenerateResult> doGenerate(
     LanguageModelV3CallOptions options,
-  ) async =>
-      throw UnimplementedError();
+  ) async => throw UnimplementedError();
 
   @override
   Future<LanguageModelV3StreamResult> doStream(
@@ -901,9 +889,7 @@ class _StreamSingleToolModel implements LanguageModelV3 {
           toolName: toolName,
           input: input,
         ),
-        StreamPartFinish(
-          finishReason: LanguageModelV3FinishReason.toolCalls,
-        ),
+        StreamPartFinish(finishReason: LanguageModelV3FinishReason.toolCalls),
       ]),
     );
   }
@@ -925,8 +911,7 @@ class _FlakyStreamModel implements LanguageModelV3 {
   @override
   Future<LanguageModelV3GenerateResult> doGenerate(
     LanguageModelV3CallOptions options,
-  ) async =>
-      throw UnimplementedError();
+  ) async => throw UnimplementedError();
 
   @override
   Future<LanguageModelV3StreamResult> doStream(
@@ -934,7 +919,11 @@ class _FlakyStreamModel implements LanguageModelV3 {
   ) async {
     attempts++;
     if (attempts <= failuresBeforeSuccess) {
-      throw StateError('flaky failure $attempts');
+      throw AiApiCallError(
+        'flaky failure $attempts',
+        statusCode: 503,
+        isRetryable: true,
+      );
     }
     return LanguageModelV3StreamResult(
       stream: Stream<LanguageModelV3StreamPart>.fromIterable([
@@ -962,8 +951,7 @@ class _SlowStartStreamModel implements LanguageModelV3 {
   @override
   Future<LanguageModelV3GenerateResult> doGenerate(
     LanguageModelV3CallOptions options,
-  ) async =>
-      throw UnimplementedError();
+  ) async => throw UnimplementedError();
 
   @override
   Future<LanguageModelV3StreamResult> doStream(

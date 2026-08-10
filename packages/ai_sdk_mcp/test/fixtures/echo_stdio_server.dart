@@ -117,6 +117,17 @@ Future<void> main() async {
       continue;
     }
 
+    if (method == 'ack_then_stall') {
+      final params =
+          (req['params'] as Map?)?.cast<String, dynamic>() ?? const {};
+      writeMessage({
+        'jsonrpc': '2.0',
+        'method': 'notifications/message',
+        'params': {'ack': params['ack'] ?? 'stall-ready'},
+      });
+      await Completer<void>().future;
+    }
+
     if (method == 'stall') {
       await Completer<void>().future;
     }
@@ -135,6 +146,13 @@ Future<void> main() async {
         ..write(List.filled(6000, 'A').join())
         ..writeln('stderr-tail-marker');
       exit(23);
+    }
+
+    if (method == 'exit_with_secret_stderr') {
+      stderr
+        ..writeln('Authorization: Bearer sk-live-stdio-token')
+        ..writeln('refresh_token=rt-secret-value');
+      exit(29);
     }
 
     writeMessage({

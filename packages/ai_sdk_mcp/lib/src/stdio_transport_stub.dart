@@ -12,7 +12,11 @@ import 'json_rpc.dart';
 /// On non-web platforms the real implementation in `stdio_transport_io.dart` is
 /// selected via a conditional import.
 class StdioMCPTransport implements MCPTransport {
-  StdioMCPTransport({required this.command, this.args = const []});
+  StdioMCPTransport({
+    required this.command,
+    this.args = const [],
+    Object? processStarter,
+  });
 
   final String command;
   final List<String> args;

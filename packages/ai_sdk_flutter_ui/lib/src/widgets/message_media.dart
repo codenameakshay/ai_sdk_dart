@@ -43,24 +43,39 @@ class MessageImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: borderRadius,
-      child: Image(
-        image: imageProviderFor(image.image),
-        width: width,
-        height: height,
-        fit: fit,
-        frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-          if (wasSynchronouslyLoaded || AiMotion.reduced(context)) return child;
-          return AnimatedOpacity(
-            opacity: frame == null ? 0 : 1,
-            duration: AiMotion.quick,
-            curve: AiMotion.standard,
-            child: child,
-          );
-        },
-        errorBuilder: (context, _, __) =>
-            _ImageError(width: width, height: height),
+    final mediaType = image.mediaType;
+    final semanticLabel = mediaType == null || mediaType.isEmpty
+        ? 'Attached image'
+        : 'Attached image, $mediaType';
+    return Semantics(
+      image: true,
+      label: semanticLabel,
+      child: ExcludeSemantics(
+        child: ClipRRect(
+          borderRadius: borderRadius,
+          child: Image(
+            image: imageProviderFor(image.image),
+            width: width,
+            height: height,
+            fit: fit,
+            frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+              if (wasSynchronouslyLoaded || AiMotion.reduced(context)) {
+                return child;
+              }
+              return AnimatedOpacity(
+                opacity: frame == null ? 0 : 1,
+                duration: AiMotion.quick,
+                curve: AiMotion.standard,
+                child: child,
+              );
+            },
+            errorBuilder: (context, _, __) => Semantics(
+              label: 'Image failed to load',
+              image: true,
+              child: _ImageError(width: width, height: height),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -120,46 +135,66 @@ class MessageAttachment extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
     final title = file.filename ?? file.mediaType;
     final showSubtitle = file.filename != null;
+    final canOpen = onTap != null;
 
-    return PressableScale(
-      child: Material(
-        color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap == null
-              ? null
-              : () {
-                  AiHaptics.selection();
-                  onTap!();
-                },
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(_iconFor(file.mediaType), color: scheme.onSurfaceVariant),
-                const SizedBox(width: 10),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      title,
-                      style: textTheme.bodyMedium?.copyWith(
-                        color: scheme.onSurface,
+    return Semantics(
+      container: true,
+      label: 'Attachment: $title',
+      value: file.mediaType,
+      button: canOpen,
+      hint: canOpen ? 'Open attachment' : null,
+      onTap: canOpen ? onTap : null,
+      child: ExcludeSemantics(
+        child: PressableScale(
+          child: Material(
+            color: scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(12),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: canOpen
+                  ? () {
+                      AiHaptics.selection();
+                      onTap!();
+                    }
+                  : null,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 12,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _iconFor(file.mediaType),
+                        color: scheme.onSurfaceVariant,
                       ),
-                    ),
-                    if (showSubtitle)
-                      Text(
-                        file.mediaType,
-                        style: textTheme.labelSmall?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                        ),
+                      const SizedBox(width: 10),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            title,
+                            style: textTheme.bodyMedium?.copyWith(
+                              color: scheme.onSurface,
+                            ),
+                          ),
+                          if (showSubtitle)
+                            Text(
+                              file.mediaType,
+                              style: textTheme.labelSmall?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                        ],
                       ),
-                  ],
+                    ],
+                  ),
                 ),
-              ],
+              ),
             ),
           ),
         ),

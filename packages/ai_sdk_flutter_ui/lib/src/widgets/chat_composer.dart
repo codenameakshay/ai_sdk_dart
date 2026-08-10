@@ -97,6 +97,7 @@ class _ChatComposerState extends State<ChatComposer> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final showStop = widget.isLoading && widget.onStop != null;
+    final sendEnabled = widget.enabled && !widget.isLoading;
 
     return SafeArea(
       top: false,
@@ -108,7 +109,7 @@ class _ChatComposerState extends State<ChatComposer> {
               PressableScale(
                 child: IconButton(
                   key: const ValueKey('chat-composer-attach'),
-                  tooltip: 'Attach',
+                  tooltip: 'Attach file',
                   onPressed: widget.enabled ? _attach : null,
                   icon: const Icon(Icons.add_rounded),
                 ),
@@ -152,20 +153,35 @@ class _ChatComposerState extends State<ChatComposer> {
               child: showStop
                   ? PressableScale(
                       key: const ValueKey('composer-trailing-stop'),
-                      child: IconButton.filled(
-                        key: const ValueKey('chat-composer-stop'),
-                        onPressed: _stop,
-                        icon: const Icon(Icons.stop_rounded),
+                      child: Semantics(
+                        button: true,
+                        label: 'Stop response',
+                        onTap: _stop,
+                        child: ExcludeSemantics(
+                          child: IconButton.filled(
+                            key: const ValueKey('chat-composer-stop'),
+                            tooltip: 'Stop response',
+                            onPressed: _stop,
+                            icon: const Icon(Icons.stop_rounded),
+                          ),
+                        ),
                       ),
                     )
                   : PressableScale(
                       key: const ValueKey('composer-trailing-send'),
-                      child: IconButton.filled(
-                        key: const ValueKey('chat-composer-send'),
-                        onPressed: (widget.enabled && !widget.isLoading)
-                            ? _send
-                            : null,
-                        icon: const Icon(Icons.arrow_upward_rounded),
+                      child: Semantics(
+                        button: true,
+                        enabled: sendEnabled,
+                        label: 'Send message',
+                        onTap: sendEnabled ? _send : null,
+                        child: ExcludeSemantics(
+                          child: IconButton.filled(
+                            key: const ValueKey('chat-composer-send'),
+                            tooltip: 'Send message',
+                            onPressed: sendEnabled ? _send : null,
+                            icon: const Icon(Icons.arrow_upward_rounded),
+                          ),
+                        ),
                       ),
                     ),
             ),

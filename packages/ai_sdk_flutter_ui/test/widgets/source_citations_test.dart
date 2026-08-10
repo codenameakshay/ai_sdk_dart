@@ -75,5 +75,35 @@ void main() {
       expect(tapped, isNotNull);
       expect(tapped!.id, 's1');
     });
+
+    testWidgets('exposes accessible source labels with touch-sized chips', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+
+      await tester.pumpWidget(
+        _wrap(
+          SourceCitations(
+            sources: const [
+              LanguageModelV3SourcePart(
+                id: 's1',
+                url: 'https://a.example',
+                title: 'Alpha',
+              ),
+            ],
+            onTap: (_) {},
+          ),
+        ),
+      );
+
+      final chipNode = tester
+          .getSemantics(find.byType(ActionChip))
+          .getSemanticsData();
+      expect(chipNode.label, 'Open source: Alpha');
+      final chipSize = tester.getSize(find.byType(ActionChip));
+      expect(chipSize.width, greaterThanOrEqualTo(44));
+      expect(chipSize.height, greaterThanOrEqualTo(44));
+      semantics.dispose();
+    });
   });
 }

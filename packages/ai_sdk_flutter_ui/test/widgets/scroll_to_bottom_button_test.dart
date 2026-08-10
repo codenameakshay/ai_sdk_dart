@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_dart/test.dart';
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
@@ -73,6 +75,26 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(controller.position.pixels, controller.position.maxScrollExtent);
+    });
+
+    testWidgets('uses an accessible label and touch target when visible', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+
+      await tester.pumpWidget(harness());
+      await tester.pump();
+
+      final node = tester
+          .getSemantics(find.byKey(const ValueKey('scroll-to-bottom')))
+          .getSemanticsData();
+      expect(node.label, 'Scroll to latest message');
+      final size = tester.getSize(
+        find.byKey(const ValueKey('scroll-to-bottom')),
+      );
+      expect(size.width, greaterThanOrEqualTo(48));
+      expect(size.height, greaterThanOrEqualTo(48));
+      semantics.dispose();
     });
 
     testWidgets('jumps to the bottom under reduced motion on tap', (

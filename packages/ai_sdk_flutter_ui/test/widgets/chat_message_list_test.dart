@@ -98,6 +98,36 @@ void main() {
       expect(find.text('first assistant'), findsOneWidget);
     });
 
+    testWidgets('announces user and assistant message roles', (tester) async {
+      final semantics = tester.ensureSemantics();
+      final controller = ChatController(
+        initialMessages: const [
+          ModelMessage(role: ModelMessageRole.user, content: 'first user'),
+          ModelMessage(
+            role: ModelMessageRole.assistant,
+            content: 'first assistant',
+          ),
+        ],
+      );
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(_wrap(ChatMessageList(controller: controller)));
+
+      final userNode = tester
+          .getSemantics(find.byType(ChatMessageBubble))
+          .getSemanticsData();
+      final assistantNode = tester
+          .getSemantics(
+            find.byKey(const ValueKey('assistant-message-semantics')),
+          )
+          .getSemanticsData();
+      expect(userNode.label, 'User message');
+      expect(userNode.value, 'first user');
+      expect(assistantNode.label, 'Assistant message');
+      expect(assistantNode.value, 'first assistant');
+      semantics.dispose();
+    });
+
     testWidgets('shows the optimistic streaming bubble', (tester) async {
       final controller = ChatController(
         initialMessages: const [

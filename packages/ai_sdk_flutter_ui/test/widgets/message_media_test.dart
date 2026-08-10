@@ -1,3 +1,4 @@
+import 'dart:ui' as ui;
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -131,6 +132,47 @@ void main() {
 
       await tester.tap(find.text('report.pdf'));
       expect(tapped, isTrue);
+    });
+
+    testWidgets('exposes accessible labels for images and attachments', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+
+      await tester.pumpWidget(
+        _wrap(
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const MessageImage(
+                image: LanguageModelV3ImagePart(
+                  image: DataContentBase64(_pngBase64),
+                  mediaType: 'image/png',
+                ),
+              ),
+              MessageAttachment(
+                file: LanguageModelV3FilePart(
+                  data: DataContentUrl(Uri.parse('https://example.com/r.pdf')),
+                  mediaType: 'application/pdf',
+                  filename: 'report.pdf',
+                ),
+                onTap: () {},
+              ),
+            ],
+          ),
+        ),
+      );
+
+      final imageNode = tester
+          .getSemantics(find.byType(MessageImage))
+          .getSemanticsData();
+      final attachmentNode = tester
+          .getSemantics(find.byType(MessageAttachment))
+          .getSemanticsData();
+      expect(imageNode.label, 'Attached image, image/png');
+      expect(attachmentNode.label, 'Attachment: report.pdf');
+      expect(attachmentNode.value, 'application/pdf');
+      semantics.dispose();
     });
   });
 }

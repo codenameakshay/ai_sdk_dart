@@ -94,79 +94,85 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
     final textTheme = Theme.of(context).textTheme;
     final call = widget.request.toolCall;
 
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      elevation: 0,
-      color: scheme.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: scheme.outlineVariant),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.shield_outlined, size: 18, color: scheme.tertiary),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    widget.title,
-                    style: textTheme.titleSmall?.copyWith(
-                      color: scheme.onSurface,
+    return Semantics(
+      container: true,
+      label: 'Tool approval required for ${call.toolName}',
+      child: Card(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        elevation: 0,
+        color: scheme.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: scheme.outlineVariant),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.shield_outlined, size: 18, color: scheme.tertiary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      widget.title,
+                      style: textTheme.titleSmall?.copyWith(
+                        color: scheme.onSurface,
+                      ),
                     ),
                   ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                call.toolName,
+                style: textTheme.titleSmall?.copyWith(
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+              const SizedBox(height: 6),
+              _CodeBlock(text: _prettyJson(call.input)),
+              if (widget.showReasonField) ...[
+                const SizedBox(height: 10),
+                TextField(
+                  key: const ValueKey('tool-approval-reason'),
+                  controller: _reason,
+                  minLines: 1,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    border: OutlineInputBorder(),
+                    labelText: 'Reason (optional)',
+                  ),
                 ),
               ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              call.toolName,
-              style: textTheme.titleSmall?.copyWith(
-                fontFeatures: const [FontFeature.tabularFigures()],
-              ),
-            ),
-            const SizedBox(height: 6),
-            _CodeBlock(text: _prettyJson(call.input)),
-            if (widget.showReasonField) ...[
-              const SizedBox(height: 10),
-              TextField(
-                key: const ValueKey('tool-approval-reason'),
-                controller: _reason,
-                minLines: 1,
-                maxLines: 3,
-                decoration: const InputDecoration(
-                  isDense: true,
-                  border: OutlineInputBorder(),
-                  hintText: 'Reason (optional)',
-                ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  PressableScale(
+                    child: TextButton(
+                      key: const ValueKey('tool-approval-deny'),
+                      onPressed: _deny,
+                      style: TextButton.styleFrom(
+                        foregroundColor: scheme.error,
+                      ),
+                      child: Text(widget.denyLabel),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  PressableScale(
+                    child: FilledButton(
+                      key: const ValueKey('tool-approval-approve'),
+                      onPressed: _approve,
+                      child: Text(widget.approveLabel),
+                    ),
+                  ),
+                ],
               ),
             ],
-            const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                PressableScale(
-                  child: TextButton(
-                    key: const ValueKey('tool-approval-deny'),
-                    onPressed: _deny,
-                    style: TextButton.styleFrom(foregroundColor: scheme.error),
-                    child: Text(widget.denyLabel),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                PressableScale(
-                  child: FilledButton(
-                    key: const ValueKey('tool-approval-approve'),
-                    onPressed: _approve,
-                    child: Text(widget.approveLabel),
-                  ),
-                ),
-              ],
-            ),
-          ],
+          ),
         ),
       ),
     );

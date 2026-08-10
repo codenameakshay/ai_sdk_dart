@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -49,6 +51,19 @@ void main() {
       expect(opacity.opacity, 0.55);
       // No repeating ticker is running, so settling completes immediately.
       await tester.pumpAndSettle();
+    });
+
+    testWidgets('announces typing as a live region', (tester) async {
+      final semantics = tester.ensureSemantics();
+
+      await tester.pumpWidget(_wrap(const TypingIndicator()));
+
+      expect(find.bySemanticsLabel('Assistant is typing'), findsOneWidget);
+      final node = tester
+          .getSemantics(find.bySemanticsLabel('Assistant is typing'))
+          .getSemanticsData();
+      expect(node.hasFlag(ui.SemanticsFlag.isLiveRegion), isTrue);
+      semantics.dispose();
     });
   });
 }

@@ -255,20 +255,39 @@ class _ChatMessageListState extends State<ChatMessageList> {
     if (message.role == ModelMessageRole.user) {
       return ChatMessageBubble(message: message);
     }
-    return _assistantTurn(context, AssistantMessageView(message: message));
+    final plainText = message.parts == null ? message.content?.trim() : null;
+    final assistantTurn = _assistantTurn(
+      context,
+      AssistantMessageView(message: message),
+    );
+    if (plainText != null && plainText.isNotEmpty) {
+      return Semantics(
+        container: true,
+        label: 'Assistant message',
+        value: plainText,
+        readOnly: true,
+        child: ExcludeSemantics(child: assistantTurn),
+      );
+    }
+    return assistantTurn;
   }
 
   /// Flush assistant layout: a small leading marker + the content column.
   Widget _assistantTurn(BuildContext context, Widget child) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const _AssistantMarker(),
-          const SizedBox(width: 10),
-          Expanded(child: child),
-        ],
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      label: 'Assistant message',
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const _AssistantMarker(),
+            const SizedBox(width: 10),
+            Expanded(child: child),
+          ],
+        ),
       ),
     );
   }

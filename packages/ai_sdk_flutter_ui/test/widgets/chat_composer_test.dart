@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -114,6 +116,37 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('chat-composer-attach')));
       await tester.pump();
       expect(attached, isTrue);
+    });
+
+    testWidgets('send and stop controls expose accessible labels', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+
+      await tester.pumpWidget(_wrap(ChatComposer(onSend: (_) {})));
+
+      final sendNode = tester
+          .getSemantics(find.byKey(const ValueKey('chat-composer-send')))
+          .getSemanticsData();
+      expect(sendNode.label, 'Send message');
+      expect(sendNode.hasAction(ui.SemanticsAction.tap), isTrue);
+      final sendSize = tester.getSize(
+        find.byKey(const ValueKey('chat-composer-send')),
+      );
+      expect(sendSize.width, greaterThanOrEqualTo(48));
+      expect(sendSize.height, greaterThanOrEqualTo(48));
+
+      await tester.pumpWidget(
+        _wrap(ChatComposer(onSend: (_) {}, isLoading: true, onStop: () {})),
+      );
+      await tester.pump();
+
+      final stopNode = tester
+          .getSemantics(find.byKey(const ValueKey('chat-composer-stop')))
+          .getSemanticsData();
+      expect(stopNode.label, 'Stop response');
+      expect(stopNode.hasAction(ui.SemanticsAction.tap), isTrue);
+      semantics.dispose();
     });
   });
 }

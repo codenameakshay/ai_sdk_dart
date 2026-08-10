@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -40,10 +42,7 @@ void main() {
 
       expect(copied, isTrue);
       expect(calls, hasLength(1));
-      expect(
-        (calls.single.arguments as Map)['text'],
-        'hello world',
-      );
+      expect((calls.single.arguments as Map)['text'], 'hello world');
     });
 
     testWidgets('regenerate button fires onRegenerate', (tester) async {
@@ -77,14 +76,50 @@ void main() {
     testWidgets('only renders actions whose inputs are provided', (
       tester,
     ) async {
-      await tester.pumpWidget(
-        _wrap(MessageActionsBar(onRegenerate: () {})),
-      );
+      await tester.pumpWidget(_wrap(MessageActionsBar(onRegenerate: () {})));
 
       expect(find.byKey(const ValueKey('message-regenerate')), findsOneWidget);
       expect(find.byKey(const ValueKey('message-copy')), findsNothing);
       expect(find.byKey(const ValueKey('message-thumb-up')), findsNothing);
       expect(find.byKey(const ValueKey('message-thumb-down')), findsNothing);
+    });
+
+    testWidgets('icon-only actions keep descriptive labels and touch targets', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+
+      await tester.pumpWidget(
+        _wrap(
+          MessageActionsBar(
+            copyText: 'hello world',
+            onRegenerate: () {},
+            onThumbUp: () {},
+            onThumbDown: () {},
+          ),
+        ),
+      );
+
+      final copyNode = tester
+          .getSemantics(find.byKey(const ValueKey('message-copy')))
+          .getSemanticsData();
+      final regenerateNode = tester
+          .getSemantics(find.byKey(const ValueKey('message-regenerate')))
+          .getSemanticsData();
+      expect(copyNode.label, 'Copy message');
+      expect(regenerateNode.label, 'Regenerate response');
+
+      for (final key in const [
+        ValueKey('message-copy'),
+        ValueKey('message-regenerate'),
+        ValueKey('message-thumb-up'),
+        ValueKey('message-thumb-down'),
+      ]) {
+        final size = tester.getSize(find.byKey(key));
+        expect(size.width, greaterThanOrEqualTo(44));
+        expect(size.height, greaterThanOrEqualTo(44));
+      }
+      semantics.dispose();
     });
   });
 }

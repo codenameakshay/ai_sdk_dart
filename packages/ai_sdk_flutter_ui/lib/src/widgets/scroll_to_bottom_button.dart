@@ -118,14 +118,22 @@ class _ScrollToBottomButtonState extends State<ScrollToBottomButton> {
   Widget build(BuildContext context) {
     if (!_visible) return const SizedBox.shrink();
 
-    final fab = FloatingActionButton.small(
-      key: const ValueKey('scroll-to-bottom'),
-      onPressed: _scrollToBottom,
-      tooltip: 'Scroll to latest',
-      child: Icon(widget.icon),
+    final button = Semantics(
+      button: true,
+      label: 'Scroll to latest message',
+      onTap: _scrollToBottom,
+      child: ExcludeSemantics(
+        child: IconButton.filledTonal(
+          key: const ValueKey('scroll-to-bottom'),
+          onPressed: _scrollToBottom,
+          tooltip: 'Scroll to latest message',
+          constraints: const BoxConstraints.tightFor(width: 48, height: 48),
+          icon: Icon(widget.icon),
+        ),
+      ),
     );
 
-    if (AiMotion.reduced(context)) return fab;
+    if (AiMotion.reduced(context)) return button;
 
     // Ease in on appear. Min scale stays well above zero so the tap target is
     // always hittable, even mid-animation.
@@ -137,7 +145,7 @@ class _ScrollToBottomButtonState extends State<ScrollToBottomButton> {
         opacity: t.clamp(0.0, 1.0),
         child: Transform.scale(scale: 0.85 + 0.15 * t, child: child),
       ),
-      child: fab,
+      child: button,
     );
   }
 }

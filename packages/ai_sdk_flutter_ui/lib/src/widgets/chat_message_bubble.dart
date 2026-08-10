@@ -64,43 +64,57 @@ class ChatMessageBubble extends StatelessWidget {
     }
 
     final text = message.content ?? '';
+    final semanticLabel = switch (message.role) {
+      ModelMessageRole.user => 'User message',
+      ModelMessageRole.assistant => 'Assistant message',
+      ModelMessageRole.system => 'System message',
+      ModelMessageRole.tool => 'Tool message',
+    };
 
-    return Align(
-      alignment: _isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 3),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.sizeOf(context).width * 0.78,
-        ),
-        decoration: BoxDecoration(
-          color: background,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(16),
-            topRight: const Radius.circular(16),
-            bottomLeft: Radius.circular(_isUser ? 16 : 4),
-            bottomRight: Radius.circular(_isUser ? 4 : 16),
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Flexible(
-              child: SelectableText(
-                text.isEmpty ? '…' : text,
-                style: TextStyle(color: foreground, height: 1.4),
+    return Semantics(
+      container: true,
+      label: semanticLabel,
+      value: text.isEmpty ? '…' : text,
+      readOnly: true,
+      child: ExcludeSemantics(
+        child: Align(
+          alignment: _isUser ? Alignment.centerRight : Alignment.centerLeft,
+          child: Container(
+            margin: const EdgeInsets.symmetric(vertical: 3),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.sizeOf(context).width * 0.78,
+            ),
+            decoration: BoxDecoration(
+              color: background,
+              borderRadius: BorderRadius.only(
+                topLeft: const Radius.circular(16),
+                topRight: const Radius.circular(16),
+                bottomLeft: Radius.circular(_isUser ? 16 : 4),
+                bottomRight: Radius.circular(_isUser ? 4 : 16),
               ),
             ),
-            if (isStreaming) ...[
-              const SizedBox(width: 2),
-              StreamingCursor(
-                key: const ValueKey('streaming-cursor'),
-                color: foreground,
-                height: 14,
-              ),
-            ],
-          ],
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Flexible(
+                  child: SelectableText(
+                    text.isEmpty ? '…' : text,
+                    style: TextStyle(color: foreground, height: 1.4),
+                  ),
+                ),
+                if (isStreaming) ...[
+                  const SizedBox(width: 2),
+                  StreamingCursor(
+                    key: const ValueKey('streaming-cursor'),
+                    color: foreground,
+                    height: 14,
+                  ),
+                ],
+              ],
+            ),
+          ),
         ),
       ),
     );

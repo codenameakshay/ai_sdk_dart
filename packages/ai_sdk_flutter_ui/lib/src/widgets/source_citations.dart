@@ -56,22 +56,31 @@ class SourceCitations extends StatelessWidget {
           runSpacing: 6,
           children: [
             for (final source in sources)
-              PressableScale(
-                child: ActionChip(
-                  avatar: Icon(
-                    Icons.link_rounded,
-                    size: 16,
-                    color: scheme.primary,
+              Semantics(
+                button: onTap != null,
+                link: onTap != null,
+                label: 'Open source: ${_chipLabel(source)}',
+                hint: source.url,
+                onTap: onTap == null ? null : () => onTap!(source),
+                child: ExcludeSemantics(
+                  child: PressableScale(
+                    child: ActionChip(
+                      avatar: Icon(
+                        Icons.link_rounded,
+                        size: 16,
+                        color: scheme.primary,
+                      ),
+                      label: Text(_chipLabel(source)),
+                      tooltip: 'Open source: ${_chipLabel(source)}',
+                      materialTapTargetSize: MaterialTapTargetSize.padded,
+                      onPressed: onTap == null
+                          ? null
+                          : () {
+                              AiHaptics.selection();
+                              onTap!(source);
+                            },
+                    ),
                   ),
-                  label: Text(_chipLabel(source)),
-                  tooltip: source.url,
-                  visualDensity: VisualDensity.compact,
-                  onPressed: onTap == null
-                      ? null
-                      : () {
-                          AiHaptics.selection();
-                          onTap!(source);
-                        },
                 ),
               ),
           ],

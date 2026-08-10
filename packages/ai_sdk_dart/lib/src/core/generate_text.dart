@@ -10,6 +10,9 @@ import '../stop_conditions/stop_conditions.dart';
 import '../telemetry/telemetry.dart';
 import '../tools/tool.dart';
 import 'retry_helper.dart';
+import 'shared/common_helpers.dart';
+import 'shared/output_instruction.dart';
+import 'shared/tool_selection.dart';
 
 /// Callback invoked after each step finishes in multi-step generation.
 typedef GenerateTextOnStepFinish =
@@ -388,16 +391,16 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
           role: LanguageModelV3Role.user,
           content: [LanguageModelV3TextPart(text: prompt)],
         ),
-      ...?messages?.map(_toLanguageModelMessage),
+      ...?messages?.map(toLanguageModelMessage),
     ];
 
-    final systemInstruction = _buildOutputSystemInstruction(system, outputSpec);
+    final systemInstruction = buildOutputSystemInstruction(system, outputSpec);
     final approvalById = {
       for (final approval in toolApprovalResponses)
         approval.approvalId: approval,
     };
 
-    _safeInvoke(
+    safeInvoke(
       () => experimentalOnStart?.call(
         GenerateTextExperimentalStartEvent(
           model: model,
@@ -442,17 +445,17 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
       firstRequestMessages ??= List<LanguageModelV3Message>.from(stepMessages);
       final stepProviderOptions =
           prepareResult?.providerOptions ?? providerOptions;
-      final activeTools = _selectActiveTools(
+      final activeTools = selectActiveTools(
         tools,
         prepareResult?.activeTools ??
             (activeToolNames.isNotEmpty ? activeToolNames : null),
       );
-      final toolSelection = _resolveToolSelection(
+      final toolSelection = resolveToolSelection(
         tools: activeTools,
         toolChoice: stepToolChoice,
       );
 
-      _safeInvoke(
+      safeInvoke(
         () => experimentalOnStepStart?.call(
           GenerateTextExperimentalStepStartEvent(
             stepNumber: stepNumber,
@@ -504,8 +507,8 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
         },
       );
 
-      _validateToolChoiceInResponse(
-        response: response,
+      validateToolChoiceForCalls(
+        toolCalls: response.content.whereType<LanguageModelV3ToolCallPart>(),
         tools: toolSelection.exposedTools,
         toolChoice: toolSelection.toolChoice,
         stepNumber: stepNumber,
@@ -573,7 +576,7 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
       );
       steps.add(step);
 
-      _safeInvoke(
+      safeInvoke(
         () => onStepFinish?.call(
           GenerateTextStepFinishEvent(
             stepNumber: stepNumber,
@@ -609,7 +612,7 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
       text: text,
       response: lastResponse,
     );
-    final totalUsage = _sumUsage(steps.map((step) => step.usage));
+    final totalUsage = sumUsage(steps.map((step) => step.usage));
     final responseMessages = normalizedMessages
         .where(
           (message) =>
@@ -669,7 +672,7 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
       providerMetadata: lastResponse?.providerMetadata,
     );
 
-    _safeInvoke(
+    safeInvoke(
       () => onFinish?.call(
         GenerateTextFinishEvent<TOutput>(
           text: result.text,
@@ -704,13 +707,6 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
   }
 }
 
-class _ToolSelection {
-  const _ToolSelection({required this.exposedTools, required this.toolChoice});
-
-  final ToolSet exposedTools;
-  final LanguageModelV3ToolChoice? toolChoice;
-}
-
 class _ToolExecutionResult {
   const _ToolExecutionResult({this.toolResult, this.approvalRequest});
 
@@ -722,95 +718,6 @@ class _ToolOutputResolution {
   const _ToolOutputResolution({required this.finalOutput});
 
   final Object? finalOutput;
-}
-
-ToolSet _selectActiveTools(ToolSet tools, List<String>? activeToolNames) {
-  if (activeToolNames == null) {
-    return tools;
-  }
-  final selected = <String, Tool<dynamic, dynamic>>{};
-  for (final toolName in activeToolNames) {
-    final tool = tools[toolName];
-    if (tool == null) {
-      throw AiNoSuchToolError('Active tool "$toolName" was not found.');
-    }
-    selected[toolName] = tool;
-  }
-  return selected;
-}
-
-_ToolSelection _resolveToolSelection({
-  required ToolSet tools,
-  required LanguageModelV3ToolChoice? toolChoice,
-}) {
-  final choice = toolChoice;
-  if (choice == null || choice is ToolChoiceAuto) {
-    return _ToolSelection(exposedTools: tools, toolChoice: choice);
-  }
-  if (choice is ToolChoiceNone) {
-    return const _ToolSelection(exposedTools: {}, toolChoice: ToolChoiceNone());
-  }
-  if (choice is ToolChoiceRequired) {
-    if (tools.isEmpty) {
-      throw const AiNoSuchToolError(
-        'toolChoice "required" cannot be used without tools.',
-      );
-    }
-    return _ToolSelection(exposedTools: tools, toolChoice: choice);
-  }
-  if (choice is ToolChoiceSpecific) {
-    final tool = tools[choice.toolName];
-    if (tool == null) {
-      throw AiNoSuchToolError(
-        'toolChoice requested unknown tool "${choice.toolName}".',
-      );
-    }
-    return _ToolSelection(
-      exposedTools: {choice.toolName: tool},
-      toolChoice: choice,
-    );
-  }
-  // Defensive: every ToolChoice subtype is handled above.
-  return _ToolSelection(
-    exposedTools: tools,
-    toolChoice: choice,
-  ); // coverage:ignore-line
-}
-
-void _validateToolChoiceInResponse({
-  required LanguageModelV3GenerateResult response,
-  required ToolSet tools,
-  required LanguageModelV3ToolChoice? toolChoice,
-  required int stepNumber,
-}) {
-  final toolCalls = response.content.whereType<LanguageModelV3ToolCallPart>();
-  if (toolChoice is ToolChoiceNone && toolCalls.isNotEmpty) {
-    throw AiApiCallError(
-      'Step $stepNumber produced tool calls while toolChoice is none.',
-    );
-  }
-  if (toolChoice is ToolChoiceRequired && toolCalls.isEmpty) {
-    throw AiApiCallError(
-      'Step $stepNumber produced no tool calls while toolChoice is required.',
-    );
-  }
-  if (toolChoice is ToolChoiceSpecific) {
-    for (final call in toolCalls) {
-      if (call.toolName != toolChoice.toolName) {
-        throw AiApiCallError(
-          'Step $stepNumber called "${call.toolName}" but toolChoice '
-          'requires "${toolChoice.toolName}".',
-        );
-      }
-    }
-  }
-  for (final call in toolCalls) {
-    if (!tools.containsKey(call.toolName)) {
-      throw AiNoSuchToolError(
-        'Step $stepNumber called unknown tool "${call.toolName}".',
-      );
-    }
-  }
 }
 
 Future<_ToolExecutionResult> _executeToolCall({
@@ -843,7 +750,7 @@ Future<_ToolExecutionResult> _executeToolCall({
   final rawInput = call.input;
 
   try {
-    final parsedInput = _parseToolInput(tool: tool, rawInput: rawInput);
+    final parsedInput = parseToolInput(tool: tool, rawInput: rawInput);
     final options = ToolExecutionOptions(
       toolCallId: call.toolCallId,
       messages: messages,
@@ -910,7 +817,7 @@ Future<_ToolExecutionResult> _executeToolCall({
       );
     }
 
-    _safeInvoke(
+    safeInvoke(
       () => onToolCallStart?.call(
         GenerateTextExperimentalToolCallStartEvent(
           toolCall: call,
@@ -930,7 +837,7 @@ Future<_ToolExecutionResult> _executeToolCall({
         abortSignal: abortSignal,
       );
       stopwatch.stop();
-      _safeInvoke(
+      safeInvoke(
         () => onToolCallFinish?.call(
           GenerateTextExperimentalToolCallFinishEvent(
             toolCall: call,
@@ -945,13 +852,13 @@ Future<_ToolExecutionResult> _executeToolCall({
           toolCallId: call.toolCallId,
           toolName: call.toolName,
           output: ToolResultOutputText(
-            _stringifyToolOutput(resolved.finalOutput),
+            stringifyToolOutput(resolved.finalOutput),
           ),
         ),
       );
     } catch (error) {
       stopwatch.stop();
-      _safeInvoke(
+      safeInvoke(
         () => onToolCallFinish?.call(
           GenerateTextExperimentalToolCallFinishEvent(
             toolCall: call,
@@ -999,89 +906,8 @@ Future<_ToolOutputResolution> _resolveFinalToolOutput(
   return _ToolOutputResolution(finalOutput: output);
 }
 
-dynamic _parseToolInput({
-  required Tool<dynamic, dynamic> tool,
-  required Object rawInput,
-}) {
-  if (tool.dynamic) {
-    if (tool.strict == true && rawInput is! Map) {
-      throw const AiInvalidToolInputError(
-        'Strict dynamic tools require JSON object input.',
-      );
-    }
-    return rawInput;
-  }
-  if (rawInput is! Map) {
-    throw const AiInvalidToolInputError('Tool input is not a JSON object.');
-  }
-  return tool.inputSchema.fromJson(rawInput.cast<String, dynamic>());
-}
-
-LanguageModelV3Message _toLanguageModelMessage(ModelMessage message) {
-  return LanguageModelV3Message(
-    role: switch (message.role) {
-      ModelMessageRole.system => LanguageModelV3Role.system,
-      ModelMessageRole.user => LanguageModelV3Role.user,
-      ModelMessageRole.assistant => LanguageModelV3Role.assistant,
-      ModelMessageRole.tool => LanguageModelV3Role.tool,
-    },
-    content:
-        message.parts ?? [LanguageModelV3TextPart(text: message.content ?? '')],
-  );
-}
-
-void _safeInvoke(void Function() action) {
-  try {
-    action();
-  } catch (_) {}
-}
-
 String _contentToText(List<LanguageModelV3ContentPart> content) {
   return content.whereType<LanguageModelV3TextPart>().map((p) => p.text).join();
-}
-
-String _stringifyToolOutput(Object? output) {
-  if (output == null) return 'null';
-  if (output is String) return output;
-  if (output is num || output is bool) return output.toString();
-  try {
-    return jsonEncode(output);
-  } catch (_) {
-    return output.toString();
-  }
-}
-
-String _buildOutputSystemInstruction<T>(String? system, Output<T> output) {
-  switch (output) {
-    case TextOutput():
-      return system ?? '';
-    case ObjectOutput<T>(:final schema):
-      return [
-        if (system != null && system.isNotEmpty) system,
-        'Return a single JSON object that matches this schema exactly:',
-        jsonEncode(schema.jsonSchema),
-        'Do not include markdown fences or extra text.',
-      ].join('\n');
-    case ArrayOutput(:final element):
-      return [
-        if (system != null && system.isNotEmpty) system,
-        'Return a single JSON array where each element matches this schema exactly:',
-        jsonEncode(element.jsonSchema),
-        'Do not include markdown fences or extra text.',
-      ].join('\n');
-    case ChoiceOutput(:final options):
-      return [
-        if (system != null && system.isNotEmpty) system,
-        'Return exactly one of these values:',
-        options.join(', '),
-        'Do not include markdown fences or extra text.',
-      ].join('\n');
-    case JsonOutput():
-      return [
-        if (system != null && system.isNotEmpty) system,
-        'Return valid JSON only. Do not include markdown fences or extra text.',
-      ].join('\n');
-  }
 }
 
 TOutput _parseOutput<TOutput>(Output<TOutput> output, String text) {
@@ -1196,31 +1022,4 @@ Object? _safeParseJson(String text) {
     }
     return null;
   }
-}
-
-LanguageModelV3Usage? _sumUsage(Iterable<LanguageModelV3Usage?> usages) {
-  var input = 0;
-  var output = 0;
-  var total = 0;
-  var hasAny = false;
-
-  for (final usage in usages) {
-    if (usage == null) {
-      continue;
-    }
-    hasAny = true;
-    input += usage.inputTokens ?? 0;
-    output += usage.outputTokens ?? 0;
-    total += usage.totalTokens ?? 0;
-  }
-
-  if (!hasAny) {
-    return null;
-  }
-
-  return LanguageModelV3Usage(
-    inputTokens: input == 0 ? null : input,
-    outputTokens: output == 0 ? null : output,
-    totalTokens: total == 0 ? null : total,
-  );
 }

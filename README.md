@@ -134,8 +134,7 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
 
 ### 🔌 MCP Client (Model Context Protocol)
 - `MCPClient` — connect to MCP servers, discover tools, invoke them
-- `SseClientTransport` — real Server-Sent-Events streaming transport (MCP HTTP+SSE 2024-11-05)
-- `HttpClientTransport` — plain request/response POST transport for single-endpoint servers
+- `StreamableHttpClientTransport` — MCP Streamable HTTP transport (`2025-06-18`) for remote servers
 - `StdioMCPTransport` — stdio process transport (native platforms)
 - **Web-safe** — `dart:io` is isolated behind conditional imports, so the client runs on Flutter web
 - Discovered tools are directly compatible with `generateText`/`streamText`
@@ -169,7 +168,7 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
 | [`ai_sdk_mistral`](https://pub.dev/packages/ai_sdk_mistral) | `dart pub add ai_sdk_mistral` | `mistral('mistral-large-latest')`, embeddings |
 | [`ai_sdk_ollama`](https://pub.dev/packages/ai_sdk_ollama) | `dart pub add ai_sdk_ollama` | `ollama('llama3')`, local inference, embeddings |
 | [`ai_sdk_flutter_ui`](https://pub.dev/packages/ai_sdk_flutter_ui) | `dart pub add ai_sdk_flutter_ui` | `ChatController`, `CompletionController`, `ObjectStreamController` + 19 prebuilt chat widgets |
-| [`ai_sdk_mcp`](https://pub.dev/packages/ai_sdk_mcp) | `dart pub add ai_sdk_mcp` | `MCPClient`, `SseClientTransport`, `HttpClientTransport`, `StdioMCPTransport` (web-safe) |
+| [`ai_sdk_mcp`](https://pub.dev/packages/ai_sdk_mcp) | `dart pub add ai_sdk_mcp` | `MCPClient`, `StreamableHttpClientTransport`, `StdioMCPTransport` (web-safe) |
 | [`ai_sdk_provider`](https://pub.dev/packages/ai_sdk_provider) | *(transitive)* | Provider interfaces for building custom providers |
 | `ai_sdk_openai_compatible` | *(transitive)* | Shared OpenAI Chat Completions base — powers the OpenAI/Azure/Groq/Mistral language models |
 
@@ -397,8 +396,9 @@ Connect to any [Model Context Protocol](https://modelcontextprotocol.io) server 
 import 'package:ai_sdk_mcp/ai_sdk_mcp.dart';
 
 final client = MCPClient(
-  transport: SseClientTransport(
+  transport: StreamableHttpClientTransport(
     url: Uri.parse('http://localhost:3000/mcp'),
+    headers: {'Authorization': 'Bearer <short-lived-token>'},
   ),
 );
 
@@ -424,11 +424,16 @@ final client = MCPClient(
 );
 ```
 
-`SseClientTransport` does real Server-Sent-Events streaming (and surfaces server-pushed
-notifications); for servers that expose a single JSON-RPC POST endpoint without SSE, use
-`HttpClientTransport`. The HTTP/SSE transports are web-safe — `dart:io` is only pulled in by
-`StdioMCPTransport` on native platforms, behind a conditional import — so the client also runs on
-Flutter web.
+`StreamableHttpClientTransport` speaks the MCP Streamable HTTP transport
+(`2025-06-18`) against a single endpoint. It negotiates the protocol version
+during `initialize()`, sends `notifications/initialized`, accepts JSON or SSE
+responses to each `POST`, starts the optional `GET` SSE listener for
+server-pushed notifications, reconnects that listener with `Last-Event-ID`, and
+sends `DELETE` on shutdown when the server assigned `Mcp-Session-Id`. Put
+required auth or routing headers in `headers`, but avoid embedding long-lived
+secrets in shipped browser or mobile clients. The HTTP transport is web-safe —
+`dart:io` is only pulled in by `StdioMCPTransport` on native platforms, behind
+a conditional import — so the client also runs on Flutter web.
 
 ---
 
@@ -450,7 +455,7 @@ Flutter web.
 - ✅ Provider registry (`createProviderRegistry`) — 5 model categories
 - ✅ Multi-step agentic loops with tool approval
 - ✅ Flutter UI controllers (Chat, Completion, ObjectStream) + 19 prebuilt Material widgets
-- ✅ MCP client (real SSE + HTTP + stdio transports, prompts, resources, web-safe)
+- ✅ MCP client (Streamable HTTP + stdio transports, prompts, resources, web-safe)
 - ✅ Typed provider API errors (`AiApiCallError` with status / type / code / body) across all providers
 - ✅ OpenAI (with reasoning options), Anthropic (with thinking options), Google providers
 - ✅ Cohere, Mistral, Groq, Ollama, Azure OpenAI providers — all with tools + multimodal

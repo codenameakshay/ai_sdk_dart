@@ -1,32 +1,60 @@
 ## 1.2.0
 
-> **Behavior change:** `SseClientTransport` now performs real SSE streaming instead of a plain
-> request/response POST. If you relied on the old single-endpoint POST behavior, switch to the new
-> `HttpClientTransport`.
+### Breaking
+
+- Removed the legacy HTTP transport exports `SseClientTransport` and
+  `HttpClientTransport`. Use `StreamableHttpClientTransport` for remote MCP
+  servers.
+- The HTTP client now negotiates and enforces MCP protocol `2025-06-18`.
+  Deprecated HTTP+SSE servers that only speak `2024-11-05` are no longer a
+  supported target.
+
+### Transport behavior
+
+- `StreamableHttpClientTransport` speaks the Streamable HTTP transport against
+  a single MCP endpoint.
+- Each client message is sent as an HTTP `POST`, and the server may answer with
+  either JSON or SSE for that request.
+- After initialize succeeds, the client sends
+  `notifications/initialized`, reuses `MCP-Protocol-Version` on later HTTP
+  requests, and starts the optional `GET` SSE listener for server-pushed
+  notifications.
+- If the server returns `Mcp-Session-Id`, the transport reuses it on later
+  `POST` / `GET` / `DELETE` requests, reconnects the optional listener with
+  `Last-Event-ID` after disconnects, and sends `DELETE` on `close()`.
+- Request timeouts send a best-effort `notifications/cancelled` notification
+  before the call fails locally.
+- Custom headers and an injected `http.Client` are supported. Injected clients
+  remain caller-owned; the transport closes only the client it creates.
+
+### Web / native
 
 - **Flutter-web compatible.** The package no longer imports `dart:io` at the
   top level. `StdioMCPTransport` (which spawns a process) now lives behind a
   conditional import: the real `dart:io` implementation is used on native
-  platforms, and a stub that throws `UnsupportedError` is used on web. The
-  HTTP/SSE transports rely only on web-safe `package:http`, so the package now
-  compiles and runs on Flutter web.
-- **Real SSE transport.** `SseClientTransport` now performs genuine
-  Server-Sent-Events streaming (MCP HTTP+SSE, protocol 2024-11-05): it opens a
-  long-lived streaming `GET`, parses the `text/event-stream` wire format,
-  resolves the POST endpoint from the server's `endpoint` event, POSTs
-  client→server requests there, and surfaces server→client messages
-  (responses, notifications, and requests) over the stream. Server-pushed
-  `notifications/resources/updated` now reach `subscribeResource` listeners
-  automatically. Previously this class did a plain request/response HTTP POST
-  despite its name.
-- **New `HttpClientTransport`.** The previous plain request/response POST
-  behaviour is preserved under this honestly-named transport for servers that
-  expose a single JSON-RPC endpoint without SSE.
-- `MCPTransport` gained a `notifications` stream for server-initiated messages
-  (empty for transports without server push).
-- **Fixed** a secondary unhandled async error that could leak from the SSE transport when the
-  initial connection failed.
-- **100%** line coverage.
+  platforms, and a stub that throws `UnsupportedError` is used on web.
+- `MCPTransport` exposes a `notifications` stream for server-initiated
+  messages. `notifications/resources/updated` continue to drive
+  `subscribeResource()` listeners automatically.
+
+### Migration
+
+Replace remote transport construction like this:
+
+```dart
+final transport = StreamableHttpClientTransport(
+  url: Uri.parse('https://mcp.example.com/mcp'),
+  headers: {'Authorization': 'Bearer <token>'},
+);
+```
+
+Notes:
+
+- Point the transport at the MCP endpoint itself, not a legacy `/sse` endpoint.
+- Keep required credential headers in `headers`, but avoid embedding
+  long-lived secrets inside distributed browser or mobile clients.
+- If you need a shared `http.Client`, inject it and close it yourself after the
+  MCP client shuts down.
 
 ---
 

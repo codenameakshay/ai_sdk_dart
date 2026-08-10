@@ -1,20 +1,22 @@
 {
   "version": "6.0",
   "feature": "MCPClient",
-  "description": "V6 contract for MCPClient: initialize handshake, tool discovery, tool invocation, and error handling",
+  "description": "V6 contract for MCPClient: MCP 2025-06-18 initialize negotiation, tool discovery, tool invocation, and error handling",
   "cases": [
     {
       "id": "initialize-sends-protocol-version",
-      "description": "initialize() sends the MCP protocol version and capabilities",
+      "description": "initialize() sends the MCP 2025-06-18 protocol version and advertised capabilities",
       "method": "initialize",
       "expectedRequest": {
         "method": "initialize",
-        "params.protocolVersion": "2024-11-05",
-        "params.capabilities.tools": {}
+        "params.protocolVersion": "2025-06-18",
+        "params.capabilities.tools": {},
+        "params.capabilities.prompts": {},
+        "params.capabilities.resources.subscribe": true
       },
       "serverResponse": {
         "result": {
-          "protocolVersion": "2024-11-05",
+          "protocolVersion": "2025-06-18",
           "capabilities": { "tools": {} },
           "serverInfo": { "name": "test-server", "version": "1.0.0" }
         }
@@ -120,10 +122,17 @@
       }
     },
     {
-      "id": "sse-transport-exists",
-      "description": "SseClientTransport is exported with url constructor parameter",
+      "id": "streamable-http-transport-exists",
+      "description": "StreamableHttpClientTransport is exported with URL, headers, timeout, and injectable client parameters",
       "expected": {
-        "constructor": "SseClientTransport(url: Uri)"
+        "constructor": "StreamableHttpClientTransport(url: Uri, headers?: Map<String, String>, requestTimeout?: Duration, client?: http.Client)"
+      }
+    },
+    {
+      "id": "legacy-http-transports-removed",
+      "description": "The legacy remote HTTP transport aliases are no longer exported",
+      "expected": {
+        "notExported": ["SseClientTransport", "HttpClientTransport"]
       }
     }
   ]

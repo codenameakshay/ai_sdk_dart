@@ -180,24 +180,90 @@ void main() {
   // =========================================================================
 
   group('HttpClientTransport', () {
-    test('throws MCPException on non-2xx HTTP status', () async {
+    test(
+      'throws a typed transport error on non-2xx HTTP status without leaking the response body',
+      () async {
+        final mock = await _MockHttpServer.start();
+        addTearDown(mock.close);
+        mock.enqueueRaw(
+          status: 503,
+          body: 'service unavailable token=super-secret body=${'x' * 256}',
+        );
+        mock.enqueueRaw(
+          status: 503,
+          body: 'service unavailable token=super-secret body=${'x' * 256}',
+        );
+
+        final transport = HttpClientTransport(url: mock.uri);
+        addTearDown(transport.close);
+
+        final future = transport.send(JsonRpcRequest(method: 'ping', id: 1));
+
+        await expectLater(
+          future,
+          throwsA(
+            isA<MCPTransportException>()
+                .having((e) => e.statusCode, 'statusCode', 503)
+                .having((e) => e.method, 'method', 'POST')
+                .having((e) => e.uri, 'uri', mock.uri),
+          ),
+        );
+
+        MCPTransportException? error;
+        try {
+          await transport.send(JsonRpcRequest(method: 'ping', id: 2));
+          fail('Expected MCPTransportException');
+        } on MCPTransportException catch (caught) {
+          error = caught;
+        }
+
+        expect(error, isNotNull);
+        expect(error.toString(), contains('HTTP 503'));
+        expect(error.toString(), contains('POST'));
+        expect(error.toString(), contains(mock.uri.toString()));
+        expect(error.toString(), isNot(contains('super-secret')));
+        expect(error.toString(), isNot(contains('service unavailable')));
+        expect(error.toString(), isNot(contains('token=')));
+        expect(error.toString().length, lessThan(220));
+      },
+    );
+
+    test('sendNotification redacts transport errors the same way', () async {
       final mock = await _MockHttpServer.start();
       addTearDown(mock.close);
-      mock.enqueueRaw(status: 503, body: 'service unavailable');
+      mock.enqueueRaw(status: 401, body: 'Bearer top-secret should never leak');
+      mock.enqueueRaw(status: 401, body: 'Bearer top-secret should never leak');
 
       final transport = HttpClientTransport(url: mock.uri);
       addTearDown(transport.close);
 
+      final future = transport.sendNotification(
+        JsonRpcNotification(method: 'notifications/initialized'),
+      );
+
       await expectLater(
-        transport.send(JsonRpcRequest(method: 'ping', id: 1)),
+        future,
         throwsA(
-          isA<MCPException>().having(
-            (e) => e.message,
-            'message',
-            allOf(contains('HTTP 503'), contains('service unavailable')),
-          ),
+          isA<MCPTransportException>()
+              .having((e) => e.statusCode, 'statusCode', 401)
+              .having((e) => e.method, 'method', 'POST')
+              .having((e) => e.uri, 'uri', mock.uri),
         ),
       );
+
+      MCPTransportException? error;
+      try {
+        await transport.sendNotification(
+          JsonRpcNotification(method: 'notifications/initialized'),
+        );
+        fail('Expected MCPTransportException');
+      } on MCPTransportException catch (caught) {
+        error = caught;
+      }
+
+      expect(error, isNotNull);
+      expect(error.toString(), isNot(contains('top-secret')));
+      expect(error.toString(), isNot(contains('Bearer')));
     });
 
     test('throws MCPException when body is not a JSON object', () async {
@@ -1087,6 +1153,176 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 30));
       // Client is still usable.
       expect(transport.closed, isFalse);
+    });
+
+    test(
+      'resource update bursts coalesce per URI while distinct URIs refresh independently',
+      () async {
+        final readA1 = Completer<JsonRpcResponse>();
+        final readA2 = Completer<JsonRpcResponse>();
+        final readB1 = Completer<JsonRpcResponse>();
+        var readARequests = 0;
+        var readBRequests = 0;
+
+        final transport = _ScriptedTransport((req) {
+          if (req.method == 'initialize') return _initResult(req);
+          if (req.method == 'notifications/initialized') return _ok(req, {});
+          if (req.method == 'resources/subscribe') return _ok(req, {});
+          if (req.method != 'resources/read') return _ok(req, {});
+
+          final uri = req.params?['uri'];
+          if (uri == 'file:///a') {
+            readARequests++;
+            if (readARequests == 1) return readA1.future;
+            if (readARequests == 2) return readA2.future;
+          }
+          if (uri == 'file:///b') {
+            readBRequests++;
+            if (readBRequests == 1) return readB1.future;
+          }
+          fail(
+            'Unexpected resources/read for $uri (#${uri == 'file:///a' ? readARequests : readBRequests})',
+          );
+        });
+
+        final client = MCPClient(transport: transport);
+        addTearDown(client.close);
+
+        final updatesA = <MCPResourceContent>[];
+        final updatesB = <MCPResourceContent>[];
+        final subA = client.subscribeResource('file:///a').listen(updatesA.add);
+        final subB = client.subscribeResource('file:///b').listen(updatesB.add);
+        addTearDown(subA.cancel);
+        addTearDown(subB.cancel);
+
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+
+        transport.pushNotification({
+          'jsonrpc': '2.0',
+          'method': 'notifications/resources/updated',
+          'params': {'uri': 'file:///a'},
+        });
+        transport.pushNotification({
+          'jsonrpc': '2.0',
+          'method': 'notifications/resources/updated',
+          'params': {'uri': 'file:///a'},
+        });
+        transport.pushNotification({
+          'jsonrpc': '2.0',
+          'method': 'notifications/resources/updated',
+          'params': {'uri': 'file:///a'},
+        });
+        transport.pushNotification({
+          'jsonrpc': '2.0',
+          'method': 'notifications/resources/updated',
+          'params': {'uri': 'file:///b'},
+        });
+
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        expect(readARequests, 1);
+        expect(readBRequests, 1);
+
+        readB1.complete(
+          JsonRpcResponse(
+            id: 100,
+            result: {
+              'contents': [
+                {'uri': 'file:///b', 'mimeType': 'text/plain', 'text': 'b-1'},
+              ],
+            },
+          ),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        expect(updatesB.map((it) => it.text), ['b-1']);
+
+        readA1.complete(
+          JsonRpcResponse(
+            id: 101,
+            result: {
+              'contents': [
+                {'uri': 'file:///a', 'mimeType': 'text/plain', 'text': 'a-1'},
+              ],
+            },
+          ),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        expect(readARequests, 2);
+        expect(updatesA.map((it) => it.text), ['a-1']);
+
+        readA2.complete(
+          JsonRpcResponse(
+            id: 102,
+            result: {
+              'contents': [
+                {'uri': 'file:///a', 'mimeType': 'text/plain', 'text': 'a-2'},
+              ],
+            },
+          ),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        expect(readARequests, 2);
+        expect(updatesA.map((it) => it.text), ['a-1', 'a-2']);
+      },
+    );
+
+    test('close prevents a queued trailing refresh from starting', () async {
+      final firstRead = Completer<JsonRpcResponse>();
+      var readRequests = 0;
+
+      final transport = _ScriptedTransport((req) {
+        if (req.method == 'initialize') return _initResult(req);
+        if (req.method == 'notifications/initialized') return _ok(req, {});
+        if (req.method == 'resources/subscribe') return _ok(req, {});
+        if (req.method == 'resources/read') {
+          readRequests++;
+          if (readRequests == 1) return firstRead.future;
+        }
+        fail('Unexpected ${req.method} request #$readRequests');
+      });
+
+      final client = MCPClient(transport: transport);
+
+      final updates = <MCPResourceContent>[];
+      final sub = client.subscribeResource('file:///close').listen(updates.add);
+      addTearDown(sub.cancel);
+
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+
+      transport.pushNotification({
+        'jsonrpc': '2.0',
+        'method': 'notifications/resources/updated',
+        'params': {'uri': 'file:///close'},
+      });
+      transport.pushNotification({
+        'jsonrpc': '2.0',
+        'method': 'notifications/resources/updated',
+        'params': {'uri': 'file:///close'},
+      });
+
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(readRequests, 1);
+
+      final closeFuture = client.close();
+      firstRead.complete(
+        JsonRpcResponse(
+          id: 103,
+          result: {
+            'contents': [
+              {
+                'uri': 'file:///close',
+                'mimeType': 'text/plain',
+                'text': 'stale',
+              },
+            ],
+          },
+        ),
+      );
+
+      await closeFuture;
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+
+      expect(readRequests, 1);
+      expect(updates, isEmpty);
     });
   });
 

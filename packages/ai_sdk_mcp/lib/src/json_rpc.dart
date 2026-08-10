@@ -84,6 +84,52 @@ class MCPException implements Exception {
   String toString() => 'MCPException: $message';
 }
 
+/// Exception thrown when an MCP transport fails at the HTTP layer.
+class MCPTransportException extends MCPException {
+  MCPTransportException({
+    required this.method,
+    required this.uri,
+    this.statusCode,
+    this.context,
+  }) : super(
+         _buildMessage(
+           method: method,
+           uri: uri,
+           statusCode: statusCode,
+           context: context,
+         ),
+       );
+
+  final String method;
+  final Uri uri;
+  final int? statusCode;
+
+  /// Optional, bounded context string that avoids echoing raw response bodies.
+  final String? context;
+
+  @override
+  String toString() => 'MCPTransportException: $message';
+
+  static String _buildMessage({
+    required String method,
+    required Uri uri,
+    int? statusCode,
+    String? context,
+  }) {
+    final buffer = StringBuffer();
+    if (statusCode != null) {
+      buffer.write('HTTP $statusCode');
+    } else {
+      buffer.write('Transport error');
+    }
+    buffer.write(' for $method $uri');
+    if (context != null && context.isNotEmpty) {
+      buffer.write(' ($context)');
+    }
+    return buffer.toString();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Transport interface
 // ---------------------------------------------------------------------------

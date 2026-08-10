@@ -12,7 +12,8 @@ export 'json_rpc.dart'
         JsonRpcResponse,
         JsonRpcNotification,
         MCPTransport,
-        MCPException;
+        MCPException,
+        MCPTransportException;
 
 // Web-safe HTTP/SSE transports (no dart:io).
 export 'http_transport.dart' show HttpClientTransport, SseClientTransport;
@@ -199,9 +200,11 @@ class MCPClient {
   /// Resource subscription controllers keyed by resource URI.
   final _resourceSubscriptions =
       <String, StreamController<MCPResourceContent>>{};
+  final _resourceRefreshStates = <String, _ResourceRefreshState>{};
 
   /// Subscription to the active transport's server-initiated message stream.
   StreamSubscription<Map<String, dynamic>>? _notificationSub;
+  bool _closed = false;
 
   // ---------------------------------------------------------------------------
   // Transport notifications (server push)
@@ -229,15 +232,64 @@ class MCPClient {
     final controller = _resourceSubscriptions[uri];
     if (controller == null || controller.isClosed) return;
 
-    // The notification only carries the uri; fetch the fresh content and push
-    // it to subscribers.
-    unawaited(
-      readResource(uri)
-          .then((content) {
-            if (!controller.isClosed) controller.add(content);
-          })
-          .catchError((_) {}),
+    _queueResourceRefresh(uri);
+  }
+
+  void _queueResourceRefresh(String uri) {
+    if (_closed) return;
+    final controller = _resourceSubscriptions[uri];
+    if (controller == null || controller.isClosed) return;
+
+    final state = _resourceRefreshStates.putIfAbsent(
+      uri,
+      _ResourceRefreshState.new,
     );
+    state.trailingRefreshQueued = true;
+    if (state.inFlight) return;
+
+    state.inFlight = true;
+    unawaited(_drainResourceRefreshQueue(uri, state));
+  }
+
+  Future<void> _drainResourceRefreshQueue(
+    String uri,
+    _ResourceRefreshState state,
+  ) async {
+    try {
+      while (state.trailingRefreshQueued && !_closed) {
+        state.trailingRefreshQueued = false;
+
+        final controller = _resourceSubscriptions[uri];
+        if (controller == null || controller.isClosed) break;
+
+        try {
+          final content = await readResource(uri);
+          if (_closed) break;
+
+          final current = _resourceSubscriptions[uri];
+          if (current == null || current.isClosed) break;
+          current.add(content);
+        } catch (_) {
+          if (_closed) break;
+        }
+      }
+    } finally {
+      state.inFlight = false;
+
+      final controller = _resourceSubscriptions[uri];
+      if (_closed || controller == null || controller.isClosed) {
+        _resourceRefreshStates.remove(uri);
+        return;
+      }
+
+      if (state.trailingRefreshQueued) {
+        state.inFlight = true;
+        unawaited(_drainResourceRefreshQueue(uri, state));
+        return;
+      }
+
+      _resourceRefreshStates.remove(uri);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -575,6 +627,7 @@ class MCPClient {
 
   Future<void> _unsubscribeResource(String uri) async {
     _resourceSubscriptions.remove(uri);
+    _resourceRefreshStates.remove(uri);
     try {
       await initialize();
       await _send(
@@ -604,14 +657,21 @@ class MCPClient {
 
   /// Close the transport connection and all resource subscriptions.
   Future<void> close() async {
+    _closed = true;
     await _notificationSub?.cancel();
-    for (final controller in _resourceSubscriptions.values) {
+    for (final controller in _resourceSubscriptions.values.toList()) {
       await controller.close();
     }
     _resourceSubscriptions.clear();
+    _resourceRefreshStates.clear();
     await transport.close();
   }
 }
 
 /// Factory function that creates a fresh [MCPTransport] for reconnection.
 typedef MCPTransportFactory = MCPTransport Function();
+
+class _ResourceRefreshState {
+  bool inFlight = false;
+  bool trailingRefreshQueued = false;
+}

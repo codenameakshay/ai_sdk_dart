@@ -38,6 +38,25 @@ class HttpClientTransport implements MCPTransport {
     ...?headers,
   };
 
+  Never _throwHttpStatusError({
+    required int statusCode,
+    required String method,
+    required Uri uri,
+    required String responseBody,
+  }) {
+    throw MCPTransportException(
+      method: method,
+      uri: uri,
+      statusCode: statusCode,
+      context: _safeResponseContext(responseBody),
+    );
+  }
+
+  String? _safeResponseContext(String responseBody) {
+    if (responseBody.trim().isEmpty) return 'empty response body';
+    return null;
+  }
+
   @override
   Stream<Map<String, dynamic>> get notifications => const Stream.empty();
 
@@ -49,7 +68,12 @@ class HttpClientTransport implements MCPTransport {
       body: jsonEncode(request.toJson()),
     );
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw MCPException('HTTP ${response.statusCode}: ${response.body}');
+      _throwHttpStatusError(
+        statusCode: response.statusCode,
+        method: 'POST',
+        uri: postUrl,
+        responseBody: response.body,
+      );
     }
     final body = jsonDecode(response.body);
     if (body is! Map) {
@@ -66,7 +90,12 @@ class HttpClientTransport implements MCPTransport {
       body: jsonEncode(notification.toJson()),
     );
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw MCPException('HTTP ${response.statusCode}: ${response.body}');
+      _throwHttpStatusError(
+        statusCode: response.statusCode,
+        method: 'POST',
+        uri: postUrl,
+        responseBody: response.body,
+      );
     }
   }
 

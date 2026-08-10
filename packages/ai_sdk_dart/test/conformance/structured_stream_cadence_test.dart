@@ -23,6 +23,15 @@ void main() {
     ]);
   }
 
+  FakeStreamModel deltaStream(List<String> deltas) {
+    return FakeStreamModel([
+      const StreamPartTextStart(id: 't1'),
+      for (final delta in deltas) StreamPartTextDelta(id: 't1', delta: delta),
+      const StreamPartTextEnd(id: 't1'),
+      StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+    ]);
+  }
+
   String largeArrayPayload(int elementCount) {
     final buffer = StringBuffer('[');
     for (var index = 0; index < elementCount; index++) {
@@ -78,6 +87,31 @@ void main() {
     );
 
     test(
+      'streamText object output handles raw astral unicode split across deltas',
+      () async {
+        const highSurrogate = '\uD83D';
+        const lowSurrogate = '\uDE00';
+        final result = await streamText<Map<String, dynamic>>(
+          model: deltaStream([
+            '{"emoji":"',
+            highSurrogate,
+            lowSurrogate,
+            '","done":true}',
+          ]),
+          output: Output.object(schema: objectSchema()),
+        );
+
+        final partials = await result.partialOutputStream
+            .cast<Map<String, dynamic>>()
+            .toList();
+
+        expect(partials, hasLength(1));
+        expect(partials.single['emoji'], '😀');
+        expect((await result.output)['emoji'], '😀');
+      },
+    );
+
+    test(
       'streamText array output emits unique partials and elements for incomplete nested values',
       () async {
         const text =
@@ -121,6 +155,21 @@ void main() {
         );
       },
     );
+
+    test('streamText empty arrays emit one empty partial snapshot', () async {
+      final result = await streamText<List<dynamic>>(
+        model: characterStream('[]'),
+        output: Output.array(element: objectSchema()),
+      );
+
+      final partials = await result.partialOutputStream
+          .cast<List<dynamic>>()
+          .toList();
+
+      expect(partials, hasLength(1));
+      expect(partials.single, isEmpty);
+      expect(await result.output, isEmpty);
+    });
 
     test(
       'streamObject emits unique snapshots and parse attempts scale with completed objects',

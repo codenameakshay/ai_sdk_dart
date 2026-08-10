@@ -652,6 +652,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
         ? PartialJsonArrayTracker()
         : null;
     final partialArrayValues = <dynamic>[];
+    var lastArraySnapshotLength = -1;
     String? lastPartialFingerprint;
     StreamPartFinish? lastFinishPart;
     var lastContent = <LanguageModelV3ContentPart>[];
@@ -878,10 +879,17 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                           onElement: elementController.add,
                         );
                         if (acceptedCount > 0) {
+                          lastArraySnapshotLength = partialArrayValues.length;
                           partialController.add(
                             createTrackedImmutableSnapshot(partialArrayValues),
                           );
                         }
+                      } else if (update.isClosed &&
+                          lastArraySnapshotLength != partialArrayValues.length) {
+                        lastArraySnapshotLength = partialArrayValues.length;
+                        partialController.add(
+                          createTrackedImmutableSnapshot(partialArrayValues),
+                        );
                       }
                     } else if (outputSpec is! TextOutput) {
                       final cadence = partialJsonTracker.append(

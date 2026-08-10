@@ -376,5 +376,74 @@ void main() {
       expect(scheduler.pendingCallbackCount, 0);
       controller.dispose();
     });
+
+    test(
+      'stop flushes queued content immediately without a next-frame duplicate',
+      () async {
+        final scheduler = FakeFrameNotificationScheduler();
+        final source = StreamController<int>();
+        addTearDown(source.close);
+        final controller = ObjectStreamController<int>(
+          notificationScheduler: scheduler,
+        );
+        final events = <String>[];
+        controller.addListener(() => events.add('root'));
+        controller.statusListenable.addListener(() => events.add('status'));
+        controller.contentListenable.addListener(() => events.add('content'));
+
+        unawaited(controller.bind(source.stream));
+        source.add(1);
+        await pumpUntil(() => controller.value == 1 && controller.isStreaming);
+
+        events.clear();
+        source.add(2);
+        await pumpUntil(() => controller.value == 2);
+        expect(scheduler.pendingCallbackCount, 2);
+
+        await controller.stop();
+
+        expect(events, ['root', 'status', 'content']);
+        expect(scheduler.pendingCallbackCount, 0);
+
+        scheduler.flush();
+
+        expect(events, ['root', 'status', 'content']);
+        controller.dispose();
+      },
+    );
+
+    test('stream error flushes queued content immediately without a next-frame '
+        'duplicate', () async {
+      final scheduler = FakeFrameNotificationScheduler();
+      final source = StreamController<int>();
+      addTearDown(source.close);
+      final controller = ObjectStreamController<int>(
+        notificationScheduler: scheduler,
+      );
+      final events = <String>[];
+      controller.addListener(() => events.add('root'));
+      controller.statusListenable.addListener(() => events.add('status'));
+      controller.contentListenable.addListener(() => events.add('content'));
+
+      unawaited(controller.bind(source.stream));
+      source.add(1);
+      await pumpUntil(() => controller.value == 1 && controller.isStreaming);
+
+      events.clear();
+      source.add(2);
+      await pumpUntil(() => controller.value == 2);
+      expect(scheduler.pendingCallbackCount, 2);
+
+      source.addError(StateError('boom'));
+      await pumpUntil(() => controller.error != null);
+
+      expect(events, ['root', 'status', 'content']);
+      expect(scheduler.pendingCallbackCount, 0);
+
+      scheduler.flush();
+
+      expect(events, ['root', 'status', 'content']);
+      controller.dispose();
+    });
   });
 }

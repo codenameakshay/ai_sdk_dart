@@ -88,6 +88,15 @@ class ObjectStreamController<T> extends ChangeNotifier {
   bool _isCurrentRequest(int requestId) =>
       !_isDisposed && _activeRequestId == requestId;
 
+  void _notifyTerminalListeners({required bool statusChanged}) {
+    if (_isDisposed) return;
+    _rootListenable.notifyImmediately();
+    if (statusChanged) _statusListenable.notifyImmediately();
+    if (_contentListenable.hasPendingNotification) {
+      _contentListenable.notifyImmediately();
+    }
+  }
+
   void _notifyListenersSafely({
     required bool immediate,
     bool status = false,
@@ -166,7 +175,7 @@ class ObjectStreamController<T> extends ChangeNotifier {
         _error = err;
         _isLoading = false;
         _isStreaming = false;
-        _notifyListenersSafely(immediate: true, status: true);
+        _notifyTerminalListeners(statusChanged: true);
         onError?.call(err);
       },
       cancelOnError: true,
@@ -216,7 +225,7 @@ class ObjectStreamController<T> extends ChangeNotifier {
       _error = err;
       _isLoading = false;
       _isStreaming = false;
-      _notifyListenersSafely(immediate: true, status: true);
+      _notifyTerminalListeners(statusChanged: true);
       onError?.call(err);
     }
   }
@@ -231,7 +240,7 @@ class ObjectStreamController<T> extends ChangeNotifier {
     await _cancelActiveRequest();
     _isLoading = false;
     _isStreaming = false;
-    _notifyListenersSafely(immediate: true, status: true);
+    _notifyTerminalListeners(statusChanged: true);
   }
 
   /// Clear the current value and error.

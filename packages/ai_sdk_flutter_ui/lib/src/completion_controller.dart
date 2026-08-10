@@ -68,6 +68,15 @@ class CompletionController extends ChangeNotifier {
   bool _isCurrentRequest(int requestId) =>
       !_isDisposed && _activeRequestId == requestId;
 
+  void _notifyTerminalListeners({required bool statusChanged}) {
+    if (_isDisposed) return;
+    _rootListenable.notifyImmediately();
+    if (statusChanged) _statusListenable.notifyImmediately();
+    if (_contentListenable.hasPendingNotification) {
+      _contentListenable.notifyImmediately();
+    }
+  }
+
   void _notifyListenersSafely({
     required bool immediate,
     bool status = false,
@@ -187,7 +196,7 @@ class CompletionController extends ChangeNotifier {
     _error = err;
     _isLoading = false;
     _isStreaming = false;
-    _notifyListenersSafely(immediate: true, status: true);
+    _notifyTerminalListeners(statusChanged: true);
     onError?.call(err);
   }
 
@@ -195,7 +204,7 @@ class CompletionController extends ChangeNotifier {
     await _cancelActiveRequest();
     _isLoading = false;
     _isStreaming = false;
-    _notifyListenersSafely(immediate: true, status: true);
+    _notifyTerminalListeners(statusChanged: true);
   }
 
   void clear() {

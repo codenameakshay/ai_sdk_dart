@@ -44,6 +44,9 @@ class FrameNotifier extends ChangeNotifier {
   CancelFrameNotification? _cancelScheduledNotification;
   bool _isDisposed = false;
 
+  /// Whether a coalesced frame notification is currently queued.
+  bool get hasPendingNotification => _cancelScheduledNotification != null;
+
   /// Notify listeners on the next frame, collapsing repeated calls into one.
   void notifyInFrame() {
     if (_isDisposed || _cancelScheduledNotification != null) return;

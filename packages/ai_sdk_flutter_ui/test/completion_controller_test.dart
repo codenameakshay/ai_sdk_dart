@@ -326,5 +326,76 @@ void main() {
 
       expect(notifications, 0);
     });
+
+    test(
+      'stop flushes queued content immediately without a next-frame duplicate',
+      () async {
+        final scheduler = FakeFrameNotificationScheduler();
+        final agent = RecordingStreamAgent();
+        final controller = CompletionController(
+          agent: agent,
+          notificationScheduler: scheduler,
+        );
+        final events = <String>[];
+        controller.addListener(() => events.add('root'));
+        controller.statusListenable.addListener(() => events.add('status'));
+        controller.contentListenable.addListener(() => events.add('content'));
+
+        unawaited(controller.complete('go'));
+        await pumpUntil(() => agent.invocations.length == 1);
+        await pumpUntil(() => controller.isStreaming);
+        final invocation = agent.invocations.single;
+
+        events.clear();
+        invocation.emitText('queued');
+        await pumpUntil(() => controller.completion == 'queued');
+        expect(scheduler.pendingCallbackCount, 2);
+
+        await controller.stop();
+
+        expect(events, ['root', 'status', 'content']);
+        expect(scheduler.pendingCallbackCount, 0);
+
+        scheduler.flush();
+
+        expect(events, ['root', 'status', 'content']);
+        controller.dispose();
+      },
+    );
+
+    test('stream error flushes queued content immediately without a next-frame '
+        'duplicate', () async {
+      final scheduler = FakeFrameNotificationScheduler();
+      final agent = RecordingStreamAgent();
+      final controller = CompletionController(
+        agent: agent,
+        notificationScheduler: scheduler,
+      );
+      final events = <String>[];
+      controller.addListener(() => events.add('root'));
+      controller.statusListenable.addListener(() => events.add('status'));
+      controller.contentListenable.addListener(() => events.add('content'));
+
+      unawaited(controller.complete('go'));
+      await pumpUntil(() => agent.invocations.length == 1);
+      await pumpUntil(() => controller.isStreaming);
+      final invocation = agent.invocations.single;
+
+      events.clear();
+      invocation.emitText('queued');
+      await pumpUntil(() => controller.completion == 'queued');
+      expect(scheduler.pendingCallbackCount, 2);
+
+      invocation.emitError(StateError('boom'));
+      await pumpUntil(() => controller.error != null);
+
+      expect(events, ['root', 'status', 'content']);
+      expect(scheduler.pendingCallbackCount, 0);
+
+      scheduler.flush();
+
+      expect(events, ['root', 'status', 'content']);
+      controller.dispose();
+    });
   });
 }

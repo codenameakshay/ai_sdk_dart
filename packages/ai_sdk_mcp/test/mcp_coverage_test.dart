@@ -223,7 +223,7 @@ void main() {
             isA<MCPTransportException>()
                 .having((e) => e.statusCode, 'statusCode', 503)
                 .having((e) => e.method, 'method', 'POST')
-                .having((e) => e.uri, 'uri', secretUri),
+                .having((e) => e.uri, 'uri', safeUri),
           ),
         );
 
@@ -245,6 +245,14 @@ void main() {
         expect(error.toString(), isNot(contains('query-secret')));
         expect(error.toString(), isNot(contains('frag-secret')));
         expect(error.toString(), isNot(contains('alice:')));
+        expect(error.uri, safeUri);
+        expect(error.uri.userInfo, isEmpty);
+        expect(error.uri.query, isEmpty);
+        expect(error.uri.fragment, isEmpty);
+        expect(error.uri.toString(), contains(safeUri.toString()));
+        expect(error.uri.toString(), isNot(contains('super-secret')));
+        expect(error.uri.toString(), isNot(contains('query-secret')));
+        expect(error.uri.toString(), isNot(contains('frag-secret')));
         expect(error.message, isNot(contains('?')));
         expect(error.message, isNot(contains('#')));
         expect(error.message, isNot(contains('@')));
@@ -286,7 +294,7 @@ void main() {
           isA<MCPTransportException>()
               .having((e) => e.statusCode, 'statusCode', 401)
               .having((e) => e.method, 'method', 'POST')
-              .having((e) => e.uri, 'uri', secretUri),
+              .having((e) => e.uri, 'uri', safeUri),
         ),
       );
 
@@ -307,6 +315,13 @@ void main() {
       expect(error.toString(), isNot(contains('notify:')));
       expect(error.toString(), isNot(contains('notify-query-secret')));
       expect(error.toString(), isNot(contains('notify-frag-secret')));
+      expect(error.uri, safeUri);
+      expect(error.uri.userInfo, isEmpty);
+      expect(error.uri.query, isEmpty);
+      expect(error.uri.fragment, isEmpty);
+      expect(error.uri.toString(), isNot(contains('top-secret')));
+      expect(error.uri.toString(), isNot(contains('notify-query-secret')));
+      expect(error.uri.toString(), isNot(contains('notify-frag-secret')));
     });
 
     test('throws MCPException when body is not a JSON object', () async {

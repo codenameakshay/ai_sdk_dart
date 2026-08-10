@@ -88,13 +88,14 @@ class MCPException implements Exception {
 class MCPTransportException extends MCPException {
   MCPTransportException({
     required this.method,
-    required this.uri,
+    required Uri uri,
     this.statusCode,
     this.context,
-  }) : super(
+  }) : uri = _sanitizeUri(uri),
+       super(
          _buildMessage(
            method: method,
-           uri: uri,
+           uri: _sanitizeUri(uri),
            statusCode: statusCode,
            context: context,
          ),
@@ -110,25 +111,28 @@ class MCPTransportException extends MCPException {
   @override
   String toString() => 'MCPTransportException: $message';
 
+  static Uri _sanitizeUri(Uri uri) {
+    return Uri(
+      scheme: uri.scheme,
+      host: uri.host,
+      port: uri.hasPort ? uri.port : null,
+      path: uri.path,
+    );
+  }
+
   static String _buildMessage({
     required String method,
     required Uri uri,
     int? statusCode,
     String? context,
   }) {
-    final safeUri = Uri(
-      scheme: uri.scheme,
-      host: uri.host,
-      port: uri.hasPort ? uri.port : null,
-      path: uri.path,
-    );
     final buffer = StringBuffer();
     if (statusCode != null) {
       buffer.write('HTTP $statusCode');
     } else {
       buffer.write('Transport error');
     }
-    buffer.write(' for $method $safeUri');
+    buffer.write(' for $method $uri');
     if (context != null && context.isNotEmpty) {
       buffer.write(' ($context)');
     }

@@ -136,7 +136,7 @@ class _GoogleLanguageModel implements LanguageModelV3 {
         final toolCall = _parseGoogleFunctionCall(functionCall);
         content.add(
           LanguageModelV3ToolCallPart(
-            toolCallId: toolCall.toolCallId,
+            toolCallId: _generateId('tool'),
             toolName: toolCall.toolName,
             input: toolCall.input,
           ),
@@ -294,6 +294,7 @@ class _GoogleLanguageModel implements LanguageModelV3 {
 
     final controller = StreamController<LanguageModelV3StreamPart>();
     var textStarted = false;
+    final activeToolCalls = <int, _GoogleStreamFunctionCallState>{};
     LanguageModelV3Usage? streamUsage;
     final warnings = <String>[];
     Map<String, dynamic>? lastChunk;
@@ -332,7 +333,8 @@ class _GoogleLanguageModel implements LanguageModelV3 {
               (first['content'] as Map?)?.cast<String, dynamic>() ??
               <String, dynamic>{};
           final parts = (content['parts'] as List?) ?? const [];
-          for (final part in parts) {
+          for (var partIndex = 0; partIndex < parts.length; partIndex++) {
+            final part = parts[partIndex];
             final map = (part as Map).cast<String, dynamic>();
             final text = map['text']?.toString();
             if (text != null && text.isNotEmpty) {
@@ -347,26 +349,47 @@ class _GoogleLanguageModel implements LanguageModelV3 {
                 ?.cast<String, dynamic>();
             if (functionCall != null) {
               final toolCall = _parseGoogleFunctionCall(functionCall);
-              controller.add(
-                StreamPartToolCallStart(
-                  toolCallId: toolCall.toolCallId,
-                  toolName: toolCall.toolName,
-                ),
-              );
-              controller.add(
-                StreamPartToolCallDelta(
-                  toolCallId: toolCall.toolCallId,
-                  toolName: toolCall.toolName,
-                  argsTextDelta: toolCall.argsText,
-                ),
-              );
-              controller.add(
-                StreamPartToolCallEnd(
-                  toolCallId: toolCall.toolCallId,
+              var state = activeToolCalls[partIndex];
+              if (state == null || state.toolName != toolCall.toolName) {
+                if (state != null) {
+                  controller.add(
+                    StreamPartToolCallEnd(
+                      toolCallId: state.toolCallId,
+                      toolName: state.toolName,
+                      input: state.input,
+                    ),
+                  );
+                }
+                state = _GoogleStreamFunctionCallState(
+                  toolCallId: _generateId('tool'),
                   toolName: toolCall.toolName,
                   input: toolCall.input,
-                ),
+                );
+                activeToolCalls[partIndex] = state;
+                controller.add(
+                  StreamPartToolCallStart(
+                    toolCallId: state.toolCallId,
+                    toolName: state.toolName,
+                  ),
+                );
+              }
+
+              final argsDelta = _googleFunctionArgsDelta(
+                previous: state.argsText,
+                current: toolCall.argsText,
               );
+              state
+                ..input = toolCall.input
+                ..argsText = toolCall.argsText;
+              if (argsDelta.isNotEmpty) {
+                controller.add(
+                  StreamPartToolCallDelta(
+                    toolCallId: state.toolCallId,
+                    toolName: state.toolName,
+                    argsTextDelta: argsDelta,
+                  ),
+                );
+              }
             }
 
             final fileData = (map['fileData'] as Map?)?.cast<String, dynamic>();
@@ -435,6 +458,16 @@ class _GoogleLanguageModel implements LanguageModelV3 {
             if (textStarted) {
               controller.add(const StreamPartTextEnd(id: 'text-0'));
             }
+            for (final state in activeToolCalls.values.toList()) {
+              controller.add(
+                StreamPartToolCallEnd(
+                  toolCallId: state.toolCallId,
+                  toolName: state.toolName,
+                  input: state.input,
+                ),
+              );
+            }
+            activeToolCalls.clear();
             controller.add(
               StreamPartFinish(
                 finishReason: _mapGoogleFinishReason(finishReason),
@@ -673,11 +706,28 @@ _GoogleFunctionCall _parseGoogleFunctionCall(
       ? rawArgs.cast<String, dynamic>()
       : (rawArgs ?? const {});
   return _GoogleFunctionCall(
-    toolCallId: _generateId('tool'),
     toolName: functionCall['name']?.toString() ?? 'unknown_tool',
     input: input,
-    argsText: jsonEncode(input),
+    argsText: _googleFunctionArgsText(rawArgs, input),
   );
+}
+
+String _googleFunctionArgsText(Object? rawArgs, Object input) =>
+    switch (rawArgs) {
+      String value => value,
+      null => jsonEncode(input),
+      _ => jsonEncode(rawArgs),
+    };
+
+String _googleFunctionArgsDelta({
+  required String previous,
+  required String current,
+}) {
+  if (current.isEmpty || current == previous) return '';
+  if (current.startsWith(previous)) {
+    return current.substring(previous.length);
+  }
+  return current;
 }
 
 String _generateId(String prefix) {
@@ -687,16 +737,27 @@ String _generateId(String prefix) {
 
 class _GoogleFunctionCall {
   const _GoogleFunctionCall({
-    required this.toolCallId,
     required this.toolName,
     required this.input,
     required this.argsText,
   });
 
-  final String toolCallId;
   final String toolName;
   final Object input;
   final String argsText;
+}
+
+class _GoogleStreamFunctionCallState {
+  _GoogleStreamFunctionCallState({
+    required this.toolCallId,
+    required this.toolName,
+    required this.input,
+  });
+
+  final String toolCallId;
+  final String toolName;
+  Object input;
+  String argsText = '';
 }
 
 Map<String, dynamic>? _toGoogleInlinePart(

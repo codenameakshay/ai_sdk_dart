@@ -1165,6 +1165,106 @@ void main() {
       );
     });
 
+    test(
+      'doStream reuses one tool call ID for cumulative functionCall args and ends once',
+      () async {
+        final server = await _TestServer.start((request) async {
+          request.response.statusCode = 200;
+          request.response.headers.set('content-type', 'text/event-stream');
+          request.response.write(
+            'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"weather","args":"{\\"city\\":\\"N"}}]}}]}\n\n',
+          );
+          request.response.write(
+            'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"weather","args":"{\\"city\\":\\"NY\\"}"}}]}}]}\n\n',
+          );
+          request.response.write(
+            'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"weather","args":"{\\"city\\":\\"NY\\"}"}}]}}]}\n\n',
+          );
+          request.response.write(
+            'data: {"candidates":[{"content":{"parts":[]},"finishReason":"STOP"}]}\n\n',
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = GoogleGenerativeAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('gemini-2.0-flash');
+
+        final stream = await model.doStream(
+          LanguageModelV3CallOptions(
+            prompt: LanguageModelV3Prompt(
+              messages: [
+                LanguageModelV3Message(
+                  role: LanguageModelV3Role.user,
+                  content: [LanguageModelV3TextPart(text: 'hi')],
+                ),
+              ],
+            ),
+          ),
+        );
+
+        final parts = await stream.stream.toList();
+        final starts = parts.whereType<StreamPartToolCallStart>().toList();
+        expect(starts, hasLength(1));
+        expect(starts.single.toolName, 'weather');
+
+        final deltas = parts.whereType<StreamPartToolCallDelta>().toList();
+        expect(deltas, hasLength(2));
+        expect(deltas.first.toolCallId, starts.single.toolCallId);
+        expect(deltas.first.argsTextDelta, '{"city":"N');
+        expect(deltas.last.toolCallId, starts.single.toolCallId);
+        expect(deltas.last.argsTextDelta, 'Y"}');
+
+        final ends = parts.whereType<StreamPartToolCallEnd>().toList();
+        expect(ends, hasLength(1));
+        expect(ends.single.toolCallId, starts.single.toolCallId);
+        expect(ends.single.toolName, 'weather');
+        expect(ends.single.input, '{"city":"NY"}');
+      },
+    );
+
+    test(
+      'doStream preserves raw non-object functionCall args verbatim',
+      () async {
+        final server = await _TestServer.start((request) async {
+          request.response.statusCode = 200;
+          request.response.headers.set('content-type', 'text/event-stream');
+          request.response.write(
+            'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"weather","args":"not-json"}}]},"finishReason":"STOP"}]}\n\n',
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = GoogleGenerativeAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('gemini-2.0-flash');
+
+        final stream = await model.doStream(
+          LanguageModelV3CallOptions(
+            prompt: LanguageModelV3Prompt(
+              messages: [
+                LanguageModelV3Message(
+                  role: LanguageModelV3Role.user,
+                  content: [LanguageModelV3TextPart(text: 'hi')],
+                ),
+              ],
+            ),
+          ),
+        );
+
+        final parts = await stream.stream.toList();
+        final delta = parts.whereType<StreamPartToolCallDelta>().single;
+        expect(delta.argsTextDelta, 'not-json');
+
+        final end = parts.whereType<StreamPartToolCallEnd>().single;
+        expect(end.input, 'not-json');
+      },
+    );
+
     test('doStream sends stopSequences in generationConfig', () async {
       late Map<String, dynamic> captured;
       final server = await _TestServer.start((request) async {

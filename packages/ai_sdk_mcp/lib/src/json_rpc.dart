@@ -116,13 +116,19 @@ class MCPTransportException extends MCPException {
     int? statusCode,
     String? context,
   }) {
+    final safeUri = Uri(
+      scheme: uri.scheme,
+      host: uri.host,
+      port: uri.hasPort ? uri.port : null,
+      path: uri.path,
+    );
     final buffer = StringBuffer();
     if (statusCode != null) {
       buffer.write('HTTP $statusCode');
     } else {
       buffer.write('Transport error');
     }
-    buffer.write(' for $method $uri');
+    buffer.write(' for $method $safeUri');
     if (context != null && context.isNotEmpty) {
       buffer.write(' ($context)');
     }

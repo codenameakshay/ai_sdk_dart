@@ -198,9 +198,9 @@ class MCPClient {
   bool _initialized = false;
 
   /// Resource subscription controllers keyed by resource URI.
-  final _resourceSubscriptions =
-      <String, StreamController<MCPResourceContent>>{};
+  final _resourceSubscriptions = <String, _ResourceSubscription>{};
   final _resourceRefreshStates = <String, _ResourceRefreshState>{};
+  int _nextResourceSubscriptionGeneration = 1;
 
   /// Subscription to the active transport's server-initiated message stream.
   StreamSubscription<Map<String, dynamic>>? _notificationSub;
@@ -229,21 +229,22 @@ class MCPClient {
     final uri = params['uri']?.toString();
     if (uri == null) return;
 
-    final controller = _resourceSubscriptions[uri];
-    if (controller == null || controller.isClosed) return;
+    final subscription = _resourceSubscriptions[uri];
+    if (subscription == null || subscription.controller.isClosed) return;
 
     _queueResourceRefresh(uri);
   }
 
   void _queueResourceRefresh(String uri) {
     if (_closed) return;
-    final controller = _resourceSubscriptions[uri];
-    if (controller == null || controller.isClosed) return;
+    final subscription = _resourceSubscriptions[uri];
+    if (subscription == null || subscription.controller.isClosed) return;
 
-    final state = _resourceRefreshStates.putIfAbsent(
-      uri,
-      _ResourceRefreshState.new,
-    );
+    var state = _resourceRefreshStates[uri];
+    if (state == null || !identical(state.subscription, subscription)) {
+      state = _ResourceRefreshState(subscription);
+      _resourceRefreshStates[uri] = state;
+    }
     state.trailingRefreshQueued = true;
     if (state.inFlight) return;
 
@@ -259,16 +260,24 @@ class MCPClient {
       while (state.trailingRefreshQueued && !_closed) {
         state.trailingRefreshQueued = false;
 
-        final controller = _resourceSubscriptions[uri];
-        if (controller == null || controller.isClosed) break;
+        final currentSubscription = _resourceSubscriptions[uri];
+        if (currentSubscription == null ||
+            currentSubscription.controller.isClosed ||
+            !identical(currentSubscription, state.subscription)) {
+          break;
+        }
 
         try {
           final content = await readResource(uri);
           if (_closed) break;
 
-          final current = _resourceSubscriptions[uri];
-          if (current == null || current.isClosed) break;
-          current.add(content);
+          final currentSubscription = _resourceSubscriptions[uri];
+          if (currentSubscription == null ||
+              currentSubscription.controller.isClosed ||
+              !identical(currentSubscription, state.subscription)) {
+            break;
+          }
+          currentSubscription.controller.add(content);
         } catch (_) {
           if (_closed) break;
         }
@@ -276,9 +285,16 @@ class MCPClient {
     } finally {
       state.inFlight = false;
 
-      final controller = _resourceSubscriptions[uri];
-      if (_closed || controller == null || controller.isClosed) {
-        _resourceRefreshStates.remove(uri);
+      final currentState = _resourceRefreshStates[uri];
+      final currentSubscription = _resourceSubscriptions[uri];
+      if (_closed ||
+          currentSubscription == null ||
+          currentSubscription.controller.isClosed ||
+          !identical(currentState, state) ||
+          !identical(currentSubscription, state.subscription)) {
+        if (identical(currentState, state)) {
+          _resourceRefreshStates.remove(uri);
+        }
         return;
       }
 
@@ -590,14 +606,17 @@ class MCPClient {
   /// (e.g. [HttpClientTransport]), call [notifyResourceUpdated] yourself.
   Stream<MCPResourceContent> subscribeResource(String uri) {
     final existing = _resourceSubscriptions[uri];
-    if (existing != null && !existing.isClosed) {
-      return existing.stream;
+    if (existing != null && !existing.controller.isClosed) {
+      return existing.controller.stream;
     }
 
     final controller = StreamController<MCPResourceContent>.broadcast(
       onCancel: () => _unsubscribeResource(uri),
     );
-    _resourceSubscriptions[uri] = controller;
+    _resourceSubscriptions[uri] = _ResourceSubscription(
+      controller: controller,
+      generation: _nextResourceSubscriptionGeneration++,
+    );
 
     // Send subscribe request (best-effort; server may not support it).
     unawaited(
@@ -648,7 +667,7 @@ class MCPClient {
   /// `notifications/resources/updated` message. Call it manually when using a
   /// transport without server push.
   void notifyResourceUpdated(String uri, MCPResourceContent content) {
-    _resourceSubscriptions[uri]?.add(content);
+    _resourceSubscriptions[uri]?.controller.add(content);
   }
 
   // ---------------------------------------------------------------------------
@@ -659,8 +678,8 @@ class MCPClient {
   Future<void> close() async {
     _closed = true;
     await _notificationSub?.cancel();
-    for (final controller in _resourceSubscriptions.values.toList()) {
-      await controller.close();
+    for (final subscription in _resourceSubscriptions.values.toList()) {
+      await subscription.controller.close();
     }
     _resourceSubscriptions.clear();
     _resourceRefreshStates.clear();
@@ -672,6 +691,19 @@ class MCPClient {
 typedef MCPTransportFactory = MCPTransport Function();
 
 class _ResourceRefreshState {
+  _ResourceRefreshState(this.subscription);
+
+  final _ResourceSubscription subscription;
   bool inFlight = false;
   bool trailingRefreshQueued = false;
+}
+
+class _ResourceSubscription {
+  const _ResourceSubscription({
+    required this.controller,
+    required this.generation,
+  });
+
+  final StreamController<MCPResourceContent> controller;
+  final int generation;
 }

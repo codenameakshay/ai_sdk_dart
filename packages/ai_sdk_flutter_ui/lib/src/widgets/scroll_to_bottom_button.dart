@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/ai_motion.dart';
+import 'scroll_bottom_policy.dart';
 
 /// A small floating button that appears when a scroll view is scrolled away
 /// from its bottom edge, and eases back to the bottom when tapped.
@@ -24,7 +25,7 @@ class ScrollToBottomButton extends StatefulWidget {
   const ScrollToBottomButton({
     super.key,
     required this.controller,
-    this.threshold = 120,
+    this.threshold = ScrollBottomPolicy.threshold,
     this.icon = Icons.keyboard_arrow_down_rounded,
     this.duration = AiMotion.scroll,
     this.curve = AiMotion.standard,
@@ -69,6 +70,13 @@ class _ScrollToBottomButtonState extends State<ScrollToBottomButton> {
       oldWidget.controller.removeListener(_update);
       widget.controller.addListener(_update);
     }
+    if (oldWidget.controller != widget.controller ||
+        oldWidget.threshold != widget.threshold) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _update();
+      });
+    }
   }
 
   @override
@@ -85,11 +93,10 @@ class _ScrollToBottomButtonState extends State<ScrollToBottomButton> {
   }
 
   bool _shouldShow() {
-    final controller = widget.controller;
-    if (!controller.hasClients) return false;
-    final position = controller.position;
-    if (!position.hasContentDimensions) return false;
-    return position.maxScrollExtent - position.pixels > widget.threshold;
+    return !ScrollBottomPolicy.isNearBottomController(
+      widget.controller,
+      threshold: widget.threshold,
+    );
   }
 
   void _scrollToBottom() {

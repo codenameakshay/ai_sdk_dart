@@ -7,6 +7,73 @@ import '../helpers.dart';
 
 Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
 
+class _TrackingScrollController extends ScrollController {
+  int animateCallCount = 0;
+  int jumpCallCount = 0;
+
+  void resetCounts() {
+    animateCallCount = 0;
+    jumpCallCount = 0;
+  }
+
+  @override
+  Future<void> animateTo(
+    double offset, {
+    required Duration duration,
+    required Curve curve,
+  }) {
+    animateCallCount += 1;
+    return super.animateTo(offset, duration: duration, curve: curve);
+  }
+
+  @override
+  void jumpTo(double value) {
+    jumpCallCount += 1;
+    super.jumpTo(value);
+  }
+}
+
+Widget _scrollHarness({
+  required ChatController controller,
+  required ScrollController scrollController,
+  bool disableAnimations = false,
+}) {
+  return MaterialApp(
+    home: MediaQuery(
+      data: MediaQueryData(disableAnimations: disableAnimations),
+      child: Scaffold(
+        body: SizedBox(
+          height: 240,
+          child: ChatMessageList(
+            controller: controller,
+            scrollController: scrollController,
+            messageBuilder: (context, message, isStreaming) => SizedBox(
+              height: 72,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '${isStreaming ? 'stream:' : 'msg:'}${message.content}',
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+Future<void> _pumpUntilStreamingStarts(
+  WidgetTester tester,
+  ChatController controller,
+) async {
+  for (var i = 0; i < 30; i++) {
+    await tester.pump(const Duration(milliseconds: 10));
+    if (controller.streamingContent.isNotEmpty) return;
+  }
+  fail('streaming did not start');
+}
+
 void main() {
   group('ChatMessageList', () {
     testWidgets('renders existing messages', (tester) async {
@@ -137,5 +204,302 @@ void main() {
       await tester.pump();
       expect(find.text('later'), findsOneWidget);
     });
+
+    testWidgets('keeps pinned readers at the bottom while streaming', (
+      tester,
+    ) async {
+      final controller = ChatController(
+        initialMessages: List.generate(
+          14,
+          (index) => ModelMessage(
+            role: ModelMessageRole.user,
+            content: 'message $index',
+          ),
+        ),
+      );
+      addTearDown(controller.dispose);
+      final scrollController = _TrackingScrollController();
+      addTearDown(scrollController.dispose);
+      final model = HoldingTextModel('streamed reply');
+
+      await tester.pumpWidget(
+        _scrollHarness(
+          controller: controller,
+          scrollController: scrollController,
+        ),
+      );
+
+      scrollController.jumpTo(scrollController.position.maxScrollExtent);
+      await tester.pump();
+      scrollController.resetCounts();
+
+      controller.sendMessage(
+        agent: ToolLoopAgent(model: model),
+        text: 'ask',
+      );
+      await _pumpUntilStreamingStarts(tester, controller);
+      await tester.pumpAndSettle();
+
+      expect(
+        scrollController.position.pixels,
+        scrollController.position.maxScrollExtent,
+      );
+      expect(
+        scrollController.animateCallCount + scrollController.jumpCallCount,
+        greaterThan(0),
+      );
+
+      model.finish();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('does not yank scrolled-up readers during streaming', (
+      tester,
+    ) async {
+      final controller = ChatController(
+        initialMessages: List.generate(
+          16,
+          (index) => ModelMessage(
+            role: ModelMessageRole.user,
+            content: 'message $index',
+          ),
+        ),
+      );
+      addTearDown(controller.dispose);
+      final scrollController = _TrackingScrollController();
+      addTearDown(scrollController.dispose);
+      final model = HoldingTextModel('streamed reply');
+
+      await tester.pumpWidget(
+        _scrollHarness(
+          controller: controller,
+          scrollController: scrollController,
+        ),
+      );
+
+      final maxExtent = scrollController.position.maxScrollExtent;
+      final initialOffset = (maxExtent - 220).clamp(0.0, maxExtent);
+      scrollController.jumpTo(initialOffset);
+      await tester.pump();
+      scrollController.resetCounts();
+
+      controller.sendMessage(
+        agent: ToolLoopAgent(model: model),
+        text: 'ask',
+      );
+      await _pumpUntilStreamingStarts(tester, controller);
+      await tester.pump();
+
+      expect(scrollController.position.pixels, initialOffset);
+      expect(scrollController.animateCallCount, 0);
+      expect(scrollController.jumpCallCount, 0);
+
+      model.finish();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('manual return to bottom resumes auto-pinning', (tester) async {
+      final controller = ChatController(
+        initialMessages: List.generate(
+          16,
+          (index) => ModelMessage(
+            role: ModelMessageRole.user,
+            content: 'message $index',
+          ),
+        ),
+      );
+      addTearDown(controller.dispose);
+      final scrollController = _TrackingScrollController();
+      addTearDown(scrollController.dispose);
+      final firstModel = HoldingTextModel('first reply');
+      final secondModel = HoldingTextModel('second reply');
+
+      await tester.pumpWidget(
+        _scrollHarness(
+          controller: controller,
+          scrollController: scrollController,
+        ),
+      );
+
+      final maxExtent = scrollController.position.maxScrollExtent;
+      scrollController.jumpTo((maxExtent - 220).clamp(0.0, maxExtent));
+      await tester.pump();
+
+      controller.sendMessage(
+        agent: ToolLoopAgent(model: firstModel),
+        text: 'first ask',
+      );
+      await _pumpUntilStreamingStarts(tester, controller);
+      await tester.pump();
+
+      expect(
+        scrollController.position.pixels,
+        lessThan(scrollController.position.maxScrollExtent),
+      );
+
+      scrollController.jumpTo(scrollController.position.maxScrollExtent);
+      await tester.pump();
+      scrollController.resetCounts();
+
+      firstModel.finish();
+      await tester.pumpAndSettle();
+
+      controller.sendMessage(
+        agent: ToolLoopAgent(model: secondModel),
+        text: 'second ask',
+      );
+      await _pumpUntilStreamingStarts(tester, controller);
+      await tester.pumpAndSettle();
+
+      expect(
+        scrollController.position.pixels,
+        scrollController.position.maxScrollExtent,
+      );
+      expect(
+        scrollController.animateCallCount + scrollController.jumpCallCount,
+        greaterThan(0),
+      );
+
+      secondModel.finish();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('uses an instant jump for auto-pin when motion is reduced', (
+      tester,
+    ) async {
+      final controller = ChatController(
+        initialMessages: List.generate(
+          14,
+          (index) => ModelMessage(
+            role: ModelMessageRole.user,
+            content: 'message $index',
+          ),
+        ),
+      );
+      addTearDown(controller.dispose);
+      final scrollController = _TrackingScrollController();
+      addTearDown(scrollController.dispose);
+
+      await tester.pumpWidget(
+        _scrollHarness(
+          controller: controller,
+          scrollController: scrollController,
+          disableAnimations: true,
+        ),
+      );
+
+      scrollController.jumpTo(scrollController.position.maxScrollExtent);
+      await tester.pump();
+      scrollController.resetCounts();
+
+      controller.append(
+        const ModelMessage(role: ModelMessageRole.user, content: 'newest'),
+      );
+      await tester.pump();
+
+      expect(scrollController.jumpCallCount, 1);
+      expect(scrollController.animateCallCount, 0);
+      expect(
+        scrollController.position.pixels,
+        scrollController.position.maxScrollExtent,
+      );
+    });
+
+    testWidgets(
+      'coalesces multiple content changes into one scroll per frame',
+      (tester) async {
+        final controller = ChatController(
+          initialMessages: List.generate(
+            14,
+            (index) => ModelMessage(
+              role: ModelMessageRole.user,
+              content: 'message $index',
+            ),
+          ),
+        );
+        addTearDown(controller.dispose);
+        final scrollController = _TrackingScrollController();
+        addTearDown(scrollController.dispose);
+
+        await tester.pumpWidget(
+          _scrollHarness(
+            controller: controller,
+            scrollController: scrollController,
+            disableAnimations: true,
+          ),
+        );
+
+        scrollController.jumpTo(scrollController.position.maxScrollExtent);
+        await tester.pump();
+        scrollController.resetCounts();
+
+        controller.append(
+          const ModelMessage(role: ModelMessageRole.user, content: 'one'),
+        );
+        controller.append(
+          const ModelMessage(role: ModelMessageRole.user, content: 'two'),
+        );
+        controller.append(
+          const ModelMessage(role: ModelMessageRole.user, content: 'three'),
+        );
+        await tester.pump();
+
+        expect(scrollController.jumpCallCount, 1);
+        expect(scrollController.animateCallCount, 0);
+      },
+    );
+
+    testWidgets(
+      'uses a replacement scroll controller for future auto-scrolls',
+      (tester) async {
+        final controller = ChatController(
+          initialMessages: List.generate(
+            14,
+            (index) => ModelMessage(
+              role: ModelMessageRole.user,
+              content: 'message $index',
+            ),
+          ),
+        );
+        addTearDown(controller.dispose);
+        final firstScrollController = _TrackingScrollController();
+        final secondScrollController = _TrackingScrollController();
+        addTearDown(firstScrollController.dispose);
+        addTearDown(secondScrollController.dispose);
+
+        await tester.pumpWidget(
+          _scrollHarness(
+            controller: controller,
+            scrollController: firstScrollController,
+            disableAnimations: true,
+          ),
+        );
+        await tester.pumpWidget(
+          _scrollHarness(
+            controller: controller,
+            scrollController: secondScrollController,
+            disableAnimations: true,
+          ),
+        );
+
+        secondScrollController.jumpTo(
+          secondScrollController.position.maxScrollExtent,
+        );
+        await tester.pump();
+        firstScrollController.resetCounts();
+        secondScrollController.resetCounts();
+
+        controller.append(
+          const ModelMessage(
+            role: ModelMessageRole.user,
+            content: 'replacement',
+          ),
+        );
+        await tester.pump();
+
+        expect(secondScrollController.jumpCallCount, 1);
+        expect(firstScrollController.jumpCallCount, 0);
+      },
+    );
   });
 }

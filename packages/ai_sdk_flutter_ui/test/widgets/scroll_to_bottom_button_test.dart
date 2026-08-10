@@ -16,7 +16,8 @@ void main() {
             ListView.builder(
               controller: controller,
               itemCount: 40,
-              itemBuilder: (_, i) => SizedBox(height: 50, child: Text('item $i')),
+              itemBuilder: (_, i) =>
+                  SizedBox(height: 50, child: Text('item $i')),
             ),
             Positioned(
               right: 8,

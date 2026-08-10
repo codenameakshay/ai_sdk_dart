@@ -17,7 +17,16 @@ import 'package:dio/dio.dart';
 /// `ai_sdk_openai_compatible` base, so tool calling and multimodal content are
 /// supported. Mistral's `random_seed` and `max_tokens` field names are applied.
 class MistralProvider {
-  const MistralProvider({this.apiKey, this.baseUrl});
+  MistralProvider({
+    this.apiKey,
+    this.baseUrl,
+    CredentialProvider? credentialProvider,
+    Dio? client,
+  }) : _credentialProvider =
+           credentialProvider ??
+           (() => apiKey ?? const String.fromEnvironment('MISTRAL_API_KEY')),
+       _client = client ?? _mistralDio(baseUrl: baseUrl),
+       _ownsClient = client == null;
 
   /// Mistral API key (defaults to `MISTRAL_API_KEY` env variable).
   final String? apiKey;
@@ -25,16 +34,29 @@ class MistralProvider {
   /// Base URL — defaults to `https://api.mistral.ai/v1`.
   final String? baseUrl;
 
+  final CredentialProvider _credentialProvider;
+  final Dio _client;
+  final bool _ownsClient;
+
+  Future<Map<String, String>> _headers() async {
+    final key = await Future.value(_credentialProvider());
+    return {if (key != null && key.isNotEmpty) 'Authorization': 'Bearer $key'};
+  }
+
+  void dispose({bool force = true}) {
+    if (_ownsClient) {
+      _client.close(force: force);
+    }
+  }
+
   /// Returns a language model for the given [modelId].
   LanguageModelV3 call(String modelId) => OpenAICompatibleChatLanguageModel(
     modelId: modelId,
     config: OpenAICompatibleConfig(
       provider: 'mistral',
       baseUrl: baseUrl ?? 'https://api.mistral.ai/v1',
-      headers: () {
-        final key = apiKey ?? const String.fromEnvironment('MISTRAL_API_KEY');
-        return {'Authorization': 'Bearer $key'};
-      },
+      headers: _headers,
+      client: _client,
       // Mistral names the seed field `random_seed` and uses `max_tokens`.
       seedKey: 'random_seed',
       maxTokensKey: 'max_tokens',
@@ -44,27 +66,25 @@ class MistralProvider {
   /// Returns an embedding model for the given [modelId].
   EmbeddingModelV2<String> embedding(String modelId) => _MistralEmbeddingModel(
     modelId: modelId,
-    apiKey: apiKey,
     baseUrl: baseUrl,
+    client: _client,
+    headers: _headers,
   );
 }
 
 /// Default Mistral provider instance.
-const mistral = MistralProvider();
+final mistral = MistralProvider();
 
 // ---------------------------------------------------------------------------
 // HTTP helper (embedding model only)
 // ---------------------------------------------------------------------------
 
-Dio _mistralDio({String? apiKey, String? baseUrl}) {
-  final key = apiKey ?? const String.fromEnvironment('MISTRAL_API_KEY');
+Dio _mistralDio({String? baseUrl}) {
   return Dio(
     BaseOptions(
       baseUrl: baseUrl ?? 'https://api.mistral.ai/v1',
-      headers: {
-        'Authorization': 'Bearer $key',
-        'Content-Type': 'application/json',
-      },
+      headers: {'Content-Type': 'application/json'},
+      responseType: ResponseType.json,
     ),
   );
 }
@@ -74,16 +94,18 @@ Dio _mistralDio({String? apiKey, String? baseUrl}) {
 // ---------------------------------------------------------------------------
 
 class _MistralEmbeddingModel implements EmbeddingModelV2<String> {
-  const _MistralEmbeddingModel({
+  _MistralEmbeddingModel({
     required this.modelId,
-    this.apiKey,
-    this.baseUrl,
+    required this.baseUrl,
+    required this.client,
+    required this.headers,
   });
 
   @override
   final String modelId;
-  final String? apiKey;
   final String? baseUrl;
+  final Dio client;
+  final RequestHeadersProvider headers;
 
   @override
   String get provider => 'mistral';
@@ -95,15 +117,15 @@ class _MistralEmbeddingModel implements EmbeddingModelV2<String> {
   Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
     EmbeddingModelV2CallOptions<String> options,
   ) async {
-    final client = _mistralDio(apiKey: apiKey, baseUrl: baseUrl);
-
+    final resolvedHeaders = await Future.value(headers());
     final body = <String, dynamic>{'model': modelId, 'input': options.values};
 
     final Response<Map<String, dynamic>> response;
     try {
       response = await client.post<Map<String, dynamic>>(
-        '/embeddings',
+        '${baseUrl ?? 'https://api.mistral.ai/v1'}/embeddings',
         data: body,
+        options: Options(headers: {...resolvedHeaders, ...?options.headers}),
       );
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);

@@ -5,7 +5,10 @@ import 'dart:typed_data';
 
 import 'package:ai_sdk_azure/ai_sdk_azure.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+import 'package:dio/dio.dart';
 import 'package:test/test.dart';
+
+import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
   group('AzureOpenAIProvider', () {
@@ -157,6 +160,74 @@ void main() {
     });
 
     test(
+      'chat credentials are resolved immediately before each request',
+      () async {
+        final apiKeys = <String?>[];
+        final server = await _TestServer.start((request) async {
+          apiKeys.add(request.headers.value('api-key'));
+          _writeOk(request);
+        });
+        addTearDown(server.close);
+
+        var token = 'first-key';
+        final provider = AzureOpenAIProvider(
+          endpoint: server.endpoint,
+          credentialProvider: () async => token,
+        );
+
+        await provider(
+          'gpt-4-deployment',
+        ).doGenerate(LanguageModelV3CallOptions(prompt: _userPrompt('first')));
+        token = 'second-key';
+        await provider(
+          'gpt-4-deployment',
+        ).doGenerate(LanguageModelV3CallOptions(prompt: _userPrompt('second')));
+
+        expect(apiKeys, ['first-key', 'second-key']);
+      },
+    );
+
+    test(
+      'dispose closes owned clients and leaves injected clients open',
+      () async {
+        final server = await _TestServer.start((request) async {
+          _writeOk(request);
+        });
+        addTearDown(server.close);
+
+        final ownedProvider = AzureOpenAIProvider(
+          endpoint: server.endpoint,
+          apiKey: 'test',
+        );
+        ownedProvider.dispose();
+        await expectLater(
+          ownedProvider('gpt-4-deployment').doGenerate(
+            LanguageModelV3CallOptions(prompt: _userPrompt('after-dispose')),
+          ),
+          throwsA(anything),
+        );
+
+        final client = Dio(BaseOptions(baseUrl: server.endpoint));
+        final adapter = attachTrackingAdapter(client);
+        final injectedProvider = AzureOpenAIProvider(
+          endpoint: server.endpoint,
+          apiKey: 'test',
+          client: client,
+        );
+
+        injectedProvider.dispose(force: false);
+        await injectedProvider('gpt-4-deployment').doGenerate(
+          LanguageModelV3CallOptions(prompt: _userPrompt('still-open')),
+        );
+
+        expect(adapter.closeCount, 0);
+        client.close(force: true);
+        expect(adapter.closeCount, 1);
+        expect(adapter.lastForce, true);
+      },
+    );
+
+    test(
       'response_format json_schema is serialized from outputSchema',
       () async {
         late Map<String, dynamic> captured;
@@ -184,71 +255,63 @@ void main() {
   });
 
   group('Azure embedding doEmbed wire format', () {
-    test(
-      'posts to deployment /embeddings with api-key header and api-version '
-      'query, parses embeddings in input order',
-      () async {
-        late Map<String, dynamic> captured;
-        String? path;
-        String? apiKeyHeader;
-        String? query;
-        final server = await _TestServer.start((request) async {
-          path = request.uri.path;
-          apiKeyHeader = request.headers.value('api-key');
-          query = request.uri.query;
-          captured = await _captureBody(request);
+    test('posts to deployment /embeddings with api-key header and api-version '
+        'query, parses embeddings in input order', () async {
+      late Map<String, dynamic> captured;
+      String? path;
+      String? apiKeyHeader;
+      String? query;
+      final server = await _TestServer.start((request) async {
+        path = request.uri.path;
+        apiKeyHeader = request.headers.value('api-key');
+        query = request.uri.query;
+        captured = await _captureBody(request);
 
-          request.response.statusCode = 200;
-          request.response.headers.contentType = ContentType.json;
-          request.response.write(
-            jsonEncode({
-              'data': [
-                {
-                  'index': 0,
-                  'embedding': [0.1, 0.2, 0.3],
-                },
-                {
-                  'index': 1,
-                  'embedding': [0.4, 0.5, 0.6],
-                },
-              ],
-            }),
-          );
-          await request.response.close();
-        });
-        addTearDown(server.close);
-
-        final model = AzureOpenAIProvider(
-          endpoint: server.endpoint,
-          apiKey: 'secret-key',
-          apiVersion: '2024-05-01-preview',
-        ).embedding('text-embedding-ada-002');
-
-        final result = await model.doEmbed(
-          const EmbeddingModelV2CallOptions<String>(
-            values: ['hello', 'world'],
-          ),
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'data': [
+              {
+                'index': 0,
+                'embedding': [0.1, 0.2, 0.3],
+              },
+              {
+                'index': 1,
+                'embedding': [0.4, 0.5, 0.6],
+              },
+            ],
+          }),
         );
+        await request.response.close();
+      });
+      addTearDown(server.close);
 
-        // Routed to the deployment-scoped embeddings endpoint.
-        expect(
-          path,
-          '/openai/deployments/text-embedding-ada-002/embeddings',
-        );
-        // Azure auth wiring on the embedding path.
-        expect(apiKeyHeader, 'secret-key');
-        expect(query, contains('api-version=2024-05-01-preview'));
-        // Request body carries input and the deployment as model.
-        expect(captured['input'], ['hello', 'world']);
-        expect(captured['model'], 'text-embedding-ada-002');
-        // Embeddings parsed and paired with their source values, in order.
-        expect(result.embeddings, hasLength(2));
-        expect(result.embeddings[0].value, 'hello');
-        expect(result.embeddings[0].embedding, [0.1, 0.2, 0.3]);
-        expect(result.embeddings[1].value, 'world');
-        expect(result.embeddings[1].embedding, [0.4, 0.5, 0.6]);
-      },
-    );
+      final model = AzureOpenAIProvider(
+        endpoint: server.endpoint,
+        apiKey: 'secret-key',
+        apiVersion: '2024-05-01-preview',
+      ).embedding('text-embedding-ada-002');
+
+      final result = await model.doEmbed(
+        const EmbeddingModelV2CallOptions<String>(values: ['hello', 'world']),
+      );
+
+      // Routed to the deployment-scoped embeddings endpoint.
+      expect(path, '/openai/deployments/text-embedding-ada-002/embeddings');
+      // Azure auth wiring on the embedding path.
+      expect(apiKeyHeader, 'secret-key');
+      expect(query, contains('api-version=2024-05-01-preview'));
+      // Request body carries input and the deployment as model.
+      expect(captured['input'], ['hello', 'world']);
+      expect(captured['model'], 'text-embedding-ada-002');
+      // Embeddings parsed and paired with their source values, in order.
+      expect(result.embeddings, hasLength(2));
+      expect(result.embeddings[0].value, 'hello');
+      expect(result.embeddings[0].embedding, [0.1, 0.2, 0.3]);
+      expect(result.embeddings[1].value, 'world');
+      expect(result.embeddings[1].embedding, [0.4, 0.5, 0.6]);
+    });
 
     test('tolerates a response with no data list', () async {
       final server = await _TestServer.start((request) async {
@@ -270,6 +333,47 @@ void main() {
       );
       expect(result.embeddings, isEmpty);
     });
+
+    test(
+      'embedding credentials are resolved immediately before each request',
+      () async {
+        final apiKeys = <String?>[];
+        final server = await _TestServer.start((request) async {
+          apiKeys.add(request.headers.value('api-key'));
+          await _captureBody(request);
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'data': [
+                {
+                  'index': 0,
+                  'embedding': [0.1, 0.2],
+                },
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        var token = 'first-key';
+        final model = AzureOpenAIProvider(
+          endpoint: server.endpoint,
+          credentialProvider: () async => token,
+        ).embedding('text-embedding-ada-002');
+
+        await model.doEmbed(
+          const EmbeddingModelV2CallOptions<String>(values: ['first']),
+        );
+        token = 'second-key';
+        await model.doEmbed(
+          const EmbeddingModelV2CallOptions<String>(values: ['second']),
+        );
+
+        expect(apiKeys, ['first-key', 'second-key']);
+      },
+    );
   });
 }
 

@@ -5,7 +5,10 @@ import 'dart:typed_data';
 
 import 'package:ai_sdk_mistral/ai_sdk_mistral.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+import 'package:dio/dio.dart';
 import 'package:test/test.dart';
+
+import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
   group('MistralProvider', () {
@@ -37,6 +40,74 @@ void main() {
       final model = provider('mistral-small');
       expect(model.modelId, 'mistral-small');
     });
+
+    test(
+      'chat credentials are resolved immediately before each request',
+      () async {
+        final authorizations = <String?>[];
+        final server = await _TestServer.start((request) async {
+          authorizations.add(request.headers.value('authorization'));
+          _writeOk(request);
+        });
+        addTearDown(server.close);
+
+        var token = 'first-token';
+        final provider = MistralProvider(
+          baseUrl: server.baseUrl,
+          credentialProvider: () async => token,
+        );
+
+        await provider(
+          'mistral-small',
+        ).doGenerate(LanguageModelV3CallOptions(prompt: _userPrompt('first')));
+        token = 'second-token';
+        await provider(
+          'mistral-small',
+        ).doGenerate(LanguageModelV3CallOptions(prompt: _userPrompt('second')));
+
+        expect(authorizations, ['Bearer first-token', 'Bearer second-token']);
+      },
+    );
+
+    test(
+      'dispose closes owned clients and leaves injected clients open',
+      () async {
+        final server = await _TestServer.start((request) async {
+          _writeOk(request);
+        });
+        addTearDown(server.close);
+
+        final ownedProvider = MistralProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        );
+        ownedProvider.dispose();
+        await expectLater(
+          ownedProvider('mistral-small').doGenerate(
+            LanguageModelV3CallOptions(prompt: _userPrompt('after-dispose')),
+          ),
+          throwsA(anything),
+        );
+
+        final client = Dio(BaseOptions(baseUrl: server.baseUrl));
+        final adapter = attachTrackingAdapter(client);
+        final injectedProvider = MistralProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+          client: client,
+        );
+
+        injectedProvider.dispose(force: false);
+        await injectedProvider('mistral-small').doGenerate(
+          LanguageModelV3CallOptions(prompt: _userPrompt('still-open')),
+        );
+
+        expect(adapter.closeCount, 0);
+        client.close(force: true);
+        expect(adapter.closeCount, 1);
+        expect(adapter.lastForce, true);
+      },
+    );
   });
 
   group('LanguageModelV3 interface', () {
@@ -205,6 +276,47 @@ void main() {
       );
       expect(result.embeddings, isEmpty);
     });
+
+    test(
+      'embedding credentials are resolved immediately before each request',
+      () async {
+        final authorizations = <String?>[];
+        final server = await _TestServer.start((request) async {
+          authorizations.add(request.headers.value('authorization'));
+          await _captureBody(request);
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'data': [
+                {
+                  'index': 0,
+                  'embedding': [0.1, 0.2],
+                },
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        var token = 'first-token';
+        final model = MistralProvider(
+          baseUrl: server.baseUrl,
+          credentialProvider: () async => token,
+        ).embedding('mistral-embed');
+
+        await model.doEmbed(
+          const EmbeddingModelV2CallOptions<String>(values: ['first']),
+        );
+        token = 'second-token';
+        await model.doEmbed(
+          const EmbeddingModelV2CallOptions<String>(values: ['second']),
+        );
+
+        expect(authorizations, ['Bearer first-token', 'Bearer second-token']);
+      },
+    );
   });
 }
 

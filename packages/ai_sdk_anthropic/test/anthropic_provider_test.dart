@@ -9,6 +9,7 @@ import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
 import '../../ai_sdk_provider/test/contract/language_model_contract.dart';
+import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
   group('AnthropicProvider', () {
@@ -157,13 +158,15 @@ void main() {
         credentialProvider: () async => token,
       );
 
-      await provider.call('claude-sonnet-4-5').doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('first')),
-      );
+      await provider
+          .call('claude-sonnet-4-5')
+          .doGenerate(LanguageModelV3CallOptions(prompt: _userPrompt('first')));
       token = 'second-key';
-      await provider.call('claude-sonnet-4-5').doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('second')),
-      );
+      await provider
+          .call('claude-sonnet-4-5')
+          .doGenerate(
+            LanguageModelV3CallOptions(prompt: _userPrompt('second')),
+          );
 
       expect(apiKeys, ['first-key', 'second-key']);
     });
@@ -202,15 +205,73 @@ void main() {
         client: client,
       );
 
-      await provider.call('claude-sonnet-4-5').doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('first')),
-      );
-      await provider.call('claude-sonnet-4-5').doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('second')),
-      );
+      await provider
+          .call('claude-sonnet-4-5')
+          .doGenerate(LanguageModelV3CallOptions(prompt: _userPrompt('first')));
+      await provider
+          .call('claude-sonnet-4-5')
+          .doGenerate(
+            LanguageModelV3CallOptions(prompt: _userPrompt('second')),
+          );
 
       expect(interceptedRequests, 2);
     });
+
+    test(
+      'dispose closes owned clients and leaves injected clients open',
+      () async {
+        final server = await _TestServer.start((request) async {
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'stop_reason': 'end_turn',
+              'content': [
+                {'type': 'text', 'text': 'ok'},
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final ownedProvider = AnthropicProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        );
+        ownedProvider.dispose();
+        await expectLater(
+          ownedProvider
+              .call('claude-sonnet-4-5')
+              .doGenerate(
+                LanguageModelV3CallOptions(
+                  prompt: _userPrompt('after-dispose'),
+                ),
+              ),
+          throwsA(anything),
+        );
+
+        final client = Dio(BaseOptions(baseUrl: server.baseUrl));
+        final adapter = attachTrackingAdapter(client);
+        final injectedProvider = AnthropicProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+          client: client,
+        );
+
+        injectedProvider.dispose(force: false);
+        await injectedProvider
+            .call('claude-sonnet-4-5')
+            .doGenerate(
+              LanguageModelV3CallOptions(prompt: _userPrompt('still-open')),
+            );
+
+        expect(adapter.closeCount, 0);
+        client.close(force: true);
+        expect(adapter.closeCount, 1);
+        expect(adapter.lastForce, true);
+      },
+    );
 
     test('maps tool choice modes to anthropic wire format', () async {
       final seenBodies = <Map<String, dynamic>>[];
@@ -660,53 +721,55 @@ void main() {
         expect(map['thinking'], {'type': 'enabled', 'budget_tokens': 2000});
       });
 
-      test('doGenerate sends thinking object when passed via providerOptions',
-          () async {
-        late Map<String, dynamic> captured;
-        final server = await _TestServer.start((request) async {
-          final body = await utf8.decoder.bind(request).join();
-          captured = (jsonDecode(body) as Map).cast<String, dynamic>();
-          request.response.statusCode = 200;
-          request.response.headers.contentType = ContentType.json;
-          request.response.write(
-            jsonEncode({
-              'stop_reason': 'end_turn',
-              'content': [
-                {'type': 'text', 'text': 'ok'},
-              ],
-            }),
-          );
-          await request.response.close();
-        });
-        addTearDown(server.close);
+      test(
+        'doGenerate sends thinking object when passed via providerOptions',
+        () async {
+          late Map<String, dynamic> captured;
+          final server = await _TestServer.start((request) async {
+            final body = await utf8.decoder.bind(request).join();
+            captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+            request.response.statusCode = 200;
+            request.response.headers.contentType = ContentType.json;
+            request.response.write(
+              jsonEncode({
+                'stop_reason': 'end_turn',
+                'content': [
+                  {'type': 'text', 'text': 'ok'},
+                ],
+              }),
+            );
+            await request.response.close();
+          });
+          addTearDown(server.close);
 
-        final model = AnthropicProvider(
-          apiKey: 'test',
-          baseUrl: server.baseUrl,
-        ).call('claude-3-7-sonnet-20250219');
-        await model.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
-              messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
-                  content: [LanguageModelV3TextPart(text: 'think')],
-                ),
-              ],
+          final model = AnthropicProvider(
+            apiKey: 'test',
+            baseUrl: server.baseUrl,
+          ).call('claude-3-7-sonnet-20250219');
+          await model.doGenerate(
+            LanguageModelV3CallOptions(
+              prompt: LanguageModelV3Prompt(
+                messages: [
+                  LanguageModelV3Message(
+                    role: LanguageModelV3Role.user,
+                    content: [LanguageModelV3TextPart(text: 'think')],
+                  ),
+                ],
+              ),
+              providerOptions: {
+                'anthropic': const AnthropicThinkingOptions(
+                  budgetTokens: 4096,
+                ).toMap(),
+              },
             ),
-            providerOptions: {
-              'anthropic': const AnthropicThinkingOptions(
-                budgetTokens: 4096,
-              ).toMap(),
-            },
-          ),
-        );
+          );
 
-        expect(captured['thinking'], {
-          'type': 'enabled',
-          'budget_tokens': 4096,
-        });
-      });
+          expect(captured['thinking'], {
+            'type': 'enabled',
+            'budget_tokens': 4096,
+          });
+        },
+      );
 
       test('doGenerate sends disabled thinking when speed=fast', () async {
         late Map<String, dynamic> captured;
@@ -1032,7 +1095,8 @@ void main() {
       final toolResult = (messages.single['content'] as List)
           .cast<Map<String, dynamic>>()
           .single;
-      final parts = (toolResult['content'] as List).cast<Map<String, dynamic>>();
+      final parts = (toolResult['content'] as List)
+          .cast<Map<String, dynamic>>();
       expect(parts[0], {'type': 'text', 'text': 'text part'});
       expect(parts[1]['type'], 'image');
       expect((parts[1]['source'] as Map)['data'], imageB64);
@@ -1096,8 +1160,7 @@ void main() {
       expect(toolResult['content'], 'sunny');
     });
 
-    test('drops image part with url data source unsupported by base64',
-        () async {
+    test('drops image part with url data source unsupported by base64', () async {
       // A base64-less data content (URL) for an image inside a file part with a
       // non-image media type goes through the document/base64 branch and is
       // dropped when no base64 is available — exercised via _toBase64 url path.
@@ -1157,13 +1220,13 @@ void main() {
       final toolResult = (messages.single['content'] as List)
           .cast<Map<String, dynamic>>()
           .single;
-      final parts = (toolResult['content'] as List).cast<Map<String, dynamic>>();
+      final parts = (toolResult['content'] as List)
+          .cast<Map<String, dynamic>>();
       expect(parts.single['type'], 'image');
       expect((parts.single['source'] as Map)['type'], 'url');
     });
 
-    test('stream handles message_start, thinking_delta, tools and errors',
-        () async {
+    test('stream handles message_start, thinking_delta, tools and errors', () async {
       late Map<String, dynamic> captured;
       final server = await _TestServer.start((request) async {
         final body = await utf8.decoder.bind(request).join();
@@ -1248,10 +1311,7 @@ void main() {
         parts.whereType<StreamPartReasoningDelta>().single.delta,
         'pondering',
       );
-      expect(
-        parts.whereType<StreamPartTextDelta>().single.delta,
-        'Hi',
-      );
+      expect(parts.whereType<StreamPartTextDelta>().single.delta, 'Hi');
       expect(parts.whereType<StreamPartError>(), isNotEmpty);
       expect(
         parts.whereType<StreamPartFinish>().single.finishReason,
@@ -1272,9 +1332,7 @@ void main() {
       // test flaky under different socket timing.
       final server = await _TestServer.start((request) async {
         await request.drain<void>();
-        final socket = await request.response.detachSocket(
-          writeHeaders: false,
-        );
+        final socket = await request.response.detachSocket(writeHeaders: false);
         socket.write(
           'HTTP/1.1 200 OK\r\n'
           'content-type: text/event-stream\r\n'
@@ -1357,8 +1415,7 @@ void main() {
       expect(captured['metadata'], {'trace_id': 'stream-abc'});
     });
 
-    test('doStream tolerates content_block_delta with no delta field',
-        () async {
+    test('doStream tolerates content_block_delta with no delta field', () async {
       // A content_block_delta event missing its `delta` falls back to the empty
       // map, so the unknown delta type is simply ignored.
       final server = await _TestServer.start((request) async {
@@ -1465,8 +1522,7 @@ void main() {
       },
     );
 
-    test('doGenerate synthesizes a tool call id when none is provided',
-        () async {
+    test('doGenerate synthesizes a tool call id when none is provided', () async {
       // A tool_use content block with no `id` forces the `_generateId` fallback.
       final server = await _TestServer.start((request) async {
         request.response.statusCode = 200;

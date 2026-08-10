@@ -9,6 +9,7 @@ import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
 import '../../ai_sdk_provider/test/contract/language_model_contract.dart';
+import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
   group('GoogleGenerativeAIProvider', () {
@@ -110,13 +111,15 @@ void main() {
         credentialProvider: () async => token,
       );
 
-      await provider.call('gemini-2.0-flash').doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('first')),
-      );
+      await provider
+          .call('gemini-2.0-flash')
+          .doGenerate(LanguageModelV3CallOptions(prompt: _userPrompt('first')));
       token = 'second-key';
-      await provider.call('gemini-2.0-flash').doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('second')),
-      );
+      await provider
+          .call('gemini-2.0-flash')
+          .doGenerate(
+            LanguageModelV3CallOptions(prompt: _userPrompt('second')),
+          );
 
       expect(apiKeys, ['first-key', 'second-key']);
     });
@@ -161,15 +164,141 @@ void main() {
         client: client,
       );
 
-      await provider.call('gemini-2.0-flash').doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('first')),
-      );
-      await provider.call('gemini-2.0-flash').doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('second')),
-      );
+      await provider
+          .call('gemini-2.0-flash')
+          .doGenerate(LanguageModelV3CallOptions(prompt: _userPrompt('first')));
+      await provider
+          .call('gemini-2.0-flash')
+          .doGenerate(
+            LanguageModelV3CallOptions(prompt: _userPrompt('second')),
+          );
 
       expect(interceptedRequests, 2);
     });
+
+    test(
+      'stream and embedding resolve api keys immediately before dispatch',
+      () async {
+        final apiKeys = <String, String?>{};
+        final server = await _TestServer.start((request) async {
+          apiKeys[request.uri.path] = request.uri.queryParameters['key'];
+          switch (request.uri.path) {
+            case '/v1beta/models/gemini-2.0-flash:streamGenerateContent':
+              request.response.statusCode = 200;
+              request.response.headers.set('content-type', 'text/event-stream');
+              request.response.write(
+                'data: {"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}\n\n',
+              );
+              request.response.write(
+                'data: {"candidates":[{"content":{"parts":[]},"finishReason":"STOP"}]}\n\n',
+              );
+              break;
+            case '/v1beta/models/text-embedding-004:batchEmbedContents':
+              request.response.statusCode = 200;
+              request.response.headers.contentType = ContentType.json;
+              request.response.write(
+                jsonEncode({
+                  'embeddings': [
+                    {
+                      'values': [0.1, 0.2],
+                    },
+                  ],
+                }),
+              );
+              break;
+            default:
+              fail('Unexpected path: ${request.uri.path}');
+          }
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        var token = 'stream-key';
+        final provider = GoogleGenerativeAIProvider(
+          baseUrl: server.baseUrl,
+          credentialProvider: () async => token,
+        );
+
+        final stream = await provider
+            .call('gemini-2.0-flash')
+            .doStream(
+              LanguageModelV3CallOptions(prompt: _userPrompt('stream')),
+            );
+        await stream.stream.drain<void>();
+
+        token = 'embed-key';
+        await provider
+            .embedding('text-embedding-004')
+            .doEmbed(const EmbeddingModelV2CallOptions(values: ['a']));
+
+        expect(apiKeys, {
+          '/v1beta/models/gemini-2.0-flash:streamGenerateContent': 'stream-key',
+          '/v1beta/models/text-embedding-004:batchEmbedContents': 'embed-key',
+        });
+      },
+    );
+
+    test(
+      'dispose closes owned clients and leaves injected clients open',
+      () async {
+        final server = await _TestServer.start((request) async {
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'candidates': [
+                {
+                  'finishReason': 'STOP',
+                  'content': {
+                    'parts': [
+                      {'text': 'ok'},
+                    ],
+                  },
+                },
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final ownedProvider = GoogleGenerativeAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        );
+        ownedProvider.dispose();
+        await expectLater(
+          ownedProvider
+              .call('gemini-2.0-flash')
+              .doGenerate(
+                LanguageModelV3CallOptions(
+                  prompt: _userPrompt('after-dispose'),
+                ),
+              ),
+          throwsA(anything),
+        );
+
+        final client = Dio(BaseOptions(baseUrl: server.baseUrl));
+        final adapter = attachTrackingAdapter(client);
+        final injectedProvider = GoogleGenerativeAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+          client: client,
+        );
+
+        injectedProvider.dispose(force: false);
+        await injectedProvider
+            .call('gemini-2.0-flash')
+            .doGenerate(
+              LanguageModelV3CallOptions(prompt: _userPrompt('still-open')),
+            );
+
+        expect(adapter.closeCount, 0);
+        client.close(force: true);
+        expect(adapter.closeCount, 1);
+        expect(adapter.lastForce, true);
+      },
+    );
 
     test('doGenerate extracts provider-native source and file parts', () async {
       final server = await _TestServer.start((request) async {

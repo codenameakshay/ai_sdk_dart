@@ -8,6 +8,8 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
+import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
+
 void main() {
   group('CohereProvider', () {
     test('creates language model with correct provider/spec', () {
@@ -271,13 +273,15 @@ void main() {
         credentialProvider: () async => token,
       );
 
-      await provider.call('command-r-plus').doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('first')),
-      );
+      await provider
+          .call('command-r-plus')
+          .doGenerate(LanguageModelV3CallOptions(prompt: _userPrompt('first')));
       token = 'second-key';
-      await provider.call('command-r-plus').doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('second')),
-      );
+      await provider
+          .call('command-r-plus')
+          .doGenerate(
+            LanguageModelV3CallOptions(prompt: _userPrompt('second')),
+          );
 
       expect(authorizations, ['Bearer first-key', 'Bearer second-key']);
     });
@@ -318,15 +322,172 @@ void main() {
         client: client,
       );
 
-      await provider.call('command-r-plus').doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('first')),
-      );
-      await provider.call('command-r-plus').doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('second')),
-      );
+      await provider
+          .call('command-r-plus')
+          .doGenerate(LanguageModelV3CallOptions(prompt: _userPrompt('first')));
+      await provider
+          .call('command-r-plus')
+          .doGenerate(
+            LanguageModelV3CallOptions(prompt: _userPrompt('second')),
+          );
 
       expect(interceptedRequests, 2);
     });
+
+    test(
+      'stream, embedding, and rerank resolve credentials per dispatch',
+      () async {
+        final authorizations = <String, String?>{};
+        final server = await _TestServer.start((request) async {
+          authorizations[request.uri.path] = request.headers.value(
+            'authorization',
+          );
+          switch (request.uri.path) {
+            case '/chat':
+              request.response.statusCode = 200;
+              request.response.headers.contentType = ContentType.json;
+              request.response.write(
+                '${jsonEncode({
+                  'type': 'message-start',
+                  'delta': {
+                    'message': {'role': 'assistant'},
+                  },
+                })}\n',
+              );
+              request.response.write(
+                '${jsonEncode({
+                  'type': 'text-generation',
+                  'delta': {'text': 'ok'},
+                })}\n',
+              );
+              request.response.write(
+                '${jsonEncode({
+                  'type': 'message-end',
+                  'delta': {'finish_reason': 'COMPLETE'},
+                })}\n',
+              );
+              break;
+            case '/embed':
+              request.response.statusCode = 200;
+              request.response.headers.contentType = ContentType.json;
+              request.response.write(
+                jsonEncode({
+                  'embeddings': {
+                    'float': [
+                      [0.1, 0.2],
+                    ],
+                  },
+                }),
+              );
+              break;
+            case '/rerank':
+              request.response.statusCode = 200;
+              request.response.headers.contentType = ContentType.json;
+              request.response.write(
+                jsonEncode({
+                  'results': [
+                    {'index': 0, 'relevance_score': 0.9},
+                  ],
+                }),
+              );
+              break;
+            default:
+              fail('Unexpected path: ${request.uri.path}');
+          }
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        var token = 'stream-token';
+        final provider = CohereProvider(
+          baseUrl: server.baseUrl,
+          credentialProvider: () async => token,
+        );
+
+        final stream = await provider
+            .call('command-r-plus')
+            .doStream(
+              LanguageModelV3CallOptions(prompt: _userPrompt('stream')),
+            );
+        await stream.stream.drain<void>();
+
+        token = 'embed-token';
+        await provider
+            .embedding('embed-v4.0')
+            .doEmbed(const EmbeddingModelV2CallOptions(values: ['a']));
+
+        token = 'rerank-token';
+        await provider
+            .rerank('rerank-v3.5')
+            .doRerank(
+              const RerankModelV1CallOptions(query: 'q', documents: ['doc']),
+            );
+
+        expect(authorizations, {
+          '/chat': 'Bearer stream-token',
+          '/embed': 'Bearer embed-token',
+          '/rerank': 'Bearer rerank-token',
+        });
+      },
+    );
+
+    test(
+      'dispose closes owned clients and leaves injected clients open',
+      () async {
+        final server = await _TestServer.start((request) async {
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'finish_reason': 'COMPLETE',
+              'message': {
+                'content': [
+                  {'type': 'text', 'text': 'ok'},
+                ],
+              },
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final ownedProvider = CohereProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        );
+        ownedProvider.dispose();
+        await expectLater(
+          ownedProvider
+              .call('command-r-plus')
+              .doGenerate(
+                LanguageModelV3CallOptions(
+                  prompt: _userPrompt('after-dispose'),
+                ),
+              ),
+          throwsA(anything),
+        );
+
+        final client = Dio(BaseOptions(baseUrl: server.baseUrl));
+        final adapter = attachTrackingAdapter(client);
+        final injectedProvider = CohereProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+          client: client,
+        );
+
+        injectedProvider.dispose(force: false);
+        await injectedProvider
+            .call('command-r-plus')
+            .doGenerate(
+              LanguageModelV3CallOptions(prompt: _userPrompt('still-open')),
+            );
+
+        expect(adapter.closeCount, 0);
+        client.close(force: true);
+        expect(adapter.closeCount, 1);
+        expect(adapter.lastForce, true);
+      },
+    );
 
     test('parses tool calls from the NDJSON stream', () async {
       final server = await _TestServer.start((request) async {

@@ -22,21 +22,40 @@ import 'package:dio/dio.dart';
 /// structured output are supported. Azure's `api-key` header and `api-version`
 /// query parameter are applied.
 class AzureOpenAIProvider {
-  const AzureOpenAIProvider({
+  AzureOpenAIProvider({
     required this.endpoint,
-    required this.apiKey,
+    this.apiKey,
+    CredentialProvider? credentialProvider,
+    Dio? client,
     this.apiVersion = '2024-02-15-preview',
-  });
+  }) : _credentialProvider = credentialProvider ?? (() => apiKey),
+       _client = client ?? _azureDio(endpoint: endpoint),
+       _ownsClient = client == null;
 
   /// The Azure OpenAI endpoint URL, e.g.
   /// `https://my-resource.openai.azure.com`.
   final String endpoint;
 
   /// The Azure OpenAI API key.
-  final String apiKey;
+  final String? apiKey;
 
   /// The API version to use for all requests.
   final String apiVersion;
+
+  final CredentialProvider _credentialProvider;
+  final Dio _client;
+  final bool _ownsClient;
+
+  Future<Map<String, String>> _headers() async {
+    final key = await Future.value(_credentialProvider());
+    return {if (key != null && key.isNotEmpty) 'api-key': key};
+  }
+
+  void dispose({bool force = true}) {
+    if (_ownsClient) {
+      _client.close(force: force);
+    }
+  }
 
   /// Returns a language model for the given Azure deployment [deploymentId].
   LanguageModelV3 call(String deploymentId) =>
@@ -45,7 +64,8 @@ class AzureOpenAIProvider {
         config: OpenAICompatibleConfig(
           provider: 'azure',
           baseUrl: '$endpoint/openai/deployments/$deploymentId',
-          headers: () => {'api-key': apiKey},
+          headers: _headers,
+          client: _client,
           queryParameters: {'api-version': apiVersion},
           // Azure (like classic OpenAI deployments) uses `max_tokens`.
           maxTokensKey: 'max_tokens',
@@ -57,28 +77,26 @@ class AzureOpenAIProvider {
       _AzureEmbeddingModel(
         deploymentId: deploymentId,
         endpoint: endpoint,
-        apiKey: apiKey,
+        client: _client,
+        headers: _headers,
         apiVersion: apiVersion,
       );
 }
 
 /// Default Azure OpenAI provider instance (endpoint and apiKey must be set
 /// before use).
-const azureOpenAI = AzureOpenAIProvider(endpoint: '', apiKey: '');
+final azureOpenAI = AzureOpenAIProvider(endpoint: '');
 
 // ---------------------------------------------------------------------------
 // HTTP helper
 // ---------------------------------------------------------------------------
 
-Dio _azureDio({
-  required String endpoint,
-  required String deploymentId,
-  required String apiKey,
-}) {
+Dio _azureDio({required String endpoint}) {
   return Dio(
     BaseOptions(
-      baseUrl: '$endpoint/openai/deployments/$deploymentId',
-      headers: {'api-key': apiKey, 'Content-Type': 'application/json'},
+      baseUrl: endpoint,
+      headers: {'Content-Type': 'application/json'},
+      responseType: ResponseType.json,
     ),
   );
 }
@@ -88,16 +106,18 @@ Dio _azureDio({
 // ---------------------------------------------------------------------------
 
 class _AzureEmbeddingModel implements EmbeddingModelV2<String> {
-  const _AzureEmbeddingModel({
+  _AzureEmbeddingModel({
     required this.deploymentId,
     required this.endpoint,
-    required this.apiKey,
+    required this.client,
+    required this.headers,
     required this.apiVersion,
   });
 
   final String deploymentId;
   final String endpoint;
-  final String apiKey;
+  final Dio client;
+  final RequestHeadersProvider headers;
   final String apiVersion;
 
   @override
@@ -113,12 +133,7 @@ class _AzureEmbeddingModel implements EmbeddingModelV2<String> {
   Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
     EmbeddingModelV2CallOptions<String> options,
   ) async {
-    final client = _azureDio(
-      endpoint: endpoint,
-      deploymentId: deploymentId,
-      apiKey: apiKey,
-    );
-
+    final resolvedHeaders = await Future.value(headers());
     final body = <String, dynamic>{
       'input': options.values,
       'model': deploymentId,
@@ -127,9 +142,10 @@ class _AzureEmbeddingModel implements EmbeddingModelV2<String> {
     final Response<Map<String, dynamic>> response;
     try {
       response = await client.post<Map<String, dynamic>>(
-        '/embeddings',
+        '$endpoint/openai/deployments/$deploymentId/embeddings',
         queryParameters: {'api-version': apiVersion},
         data: body,
+        options: Options(headers: {...resolvedHeaders, ...?options.headers}),
       );
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);

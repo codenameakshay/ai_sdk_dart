@@ -81,6 +81,7 @@ void main() {
         config: OpenAICompatibleConfig(
           provider: 'test',
           baseUrl: server.baseUrl,
+          client: _testClient(server.baseUrl),
           headers: () => {'Authorization': 'Bearer k'},
           supportsTools: false,
         ),
@@ -169,6 +170,7 @@ void main() {
         config: OpenAICompatibleConfig(
           provider: 'test',
           baseUrl: server.baseUrl,
+          client: _testClient(server.baseUrl),
           headers: () => {'Authorization': 'Bearer k'},
           supportsMultimodal: false,
         ),
@@ -243,6 +245,7 @@ void main() {
         config: OpenAICompatibleConfig(
           provider: 'test',
           baseUrl: server.baseUrl,
+          client: _testClient(server.baseUrl),
           headers: () => {'Authorization': 'Bearer k'},
           supportsResponseFormatJsonSchema: false,
         ),
@@ -422,6 +425,7 @@ void main() {
         config: OpenAICompatibleConfig(
           provider: 'mistral',
           baseUrl: server.baseUrl,
+          client: _testClient(server.baseUrl),
           headers: () => {'Authorization': 'Bearer k'},
           seedKey: 'random_seed',
           maxTokensKey: 'max_tokens',
@@ -475,6 +479,7 @@ void main() {
         config: OpenAICompatibleConfig(
           provider: 'azure',
           baseUrl: server.baseUrl,
+          client: _testClient(server.baseUrl),
           headers: () => {'api-key': 'k'},
           queryParameters: const {'api-version': '2024-02-15-preview'},
         ),
@@ -499,6 +504,7 @@ void main() {
         config: OpenAICompatibleConfig(
           provider: 'azure',
           baseUrl: apiKeyServer.baseUrl,
+          client: _testClient(apiKeyServer.baseUrl),
           headers: () => {'api-key': 'secret-key'},
         ),
       );
@@ -536,6 +542,7 @@ void main() {
         config: OpenAICompatibleConfig(
           provider: 'test',
           baseUrl: server.baseUrl,
+          client: _testClient(server.baseUrl),
           headers: () async => {'Authorization': 'Bearer $token'},
         ),
       );
@@ -549,6 +556,89 @@ void main() {
       );
 
       expect(authorizations, ['Bearer first-token', 'Bearer second-token']);
+    });
+
+    test(
+      'request headers override provider headers without mutating base options',
+      () async {
+        String? authorization;
+        final server = await _TestServer.start((request) async {
+          authorization = request.headers.value('authorization');
+          _writeOk(request);
+        });
+        addTearDown(server.close);
+
+        final client = _testClient(server.baseUrl);
+        final model = OpenAICompatibleChatLanguageModel(
+          modelId: 'm',
+          config: OpenAICompatibleConfig(
+            provider: 'test',
+            baseUrl: server.baseUrl,
+            client: client,
+            headers: () => {'Authorization': 'Bearer provider-token'},
+          ),
+        );
+
+        await model.doGenerate(
+          LanguageModelV3CallOptions(
+            prompt: _userPrompt('hi'),
+            headers: const {'Authorization': 'Bearer request-token'},
+          ),
+        );
+
+        expect(authorization, 'Bearer request-token');
+        expect(client.options.headers.containsKey('Authorization'), isFalse);
+      },
+    );
+
+    test('concurrent dispatches resolve independent request headers', () async {
+      final authByPrompt = <String, String?>{};
+      final server = await _TestServer.start((request) async {
+        final body = await _captureBody(request);
+        final content =
+            ((body['messages'] as List).first
+                as Map<String, dynamic>)['content'];
+        final prompt = switch (content) {
+          String text => text,
+          List parts => ((parts.first as Map)['text']).toString(),
+          _ => content.toString(),
+        };
+        authByPrompt[prompt] = request.headers.value('authorization');
+        _writeOk(request);
+      });
+      addTearDown(server.close);
+
+      final gates = [Completer<void>(), Completer<void>()];
+      var callCount = 0;
+      final model = OpenAICompatibleChatLanguageModel(
+        modelId: 'm',
+        config: OpenAICompatibleConfig(
+          provider: 'test',
+          baseUrl: server.baseUrl,
+          client: _testClient(server.baseUrl),
+          headers: () async {
+            final index = callCount++;
+            await gates[index].future;
+            return {'Authorization': 'Bearer token-$index'};
+          },
+        ),
+      );
+
+      final first = model.doGenerate(
+        LanguageModelV3CallOptions(prompt: _userPrompt('first')),
+      );
+      final second = model.doGenerate(
+        LanguageModelV3CallOptions(prompt: _userPrompt('second')),
+      );
+
+      gates[1].complete();
+      gates[0].complete();
+      await Future.wait([first, second]);
+
+      expect(authByPrompt, {
+        'first': 'Bearer token-0',
+        'second': 'Bearer token-1',
+      });
     });
 
     test('reuses an injected client across requests', () async {
@@ -602,6 +692,7 @@ void main() {
         config: OpenAICompatibleConfig(
           provider: 'openai',
           baseUrl: server.baseUrl,
+          client: _testClient(server.baseUrl),
           headers: () => {'Authorization': 'Bearer k'},
           extraBody: (options) {
             final po = options.providerOptions?['openai'];
@@ -685,45 +776,47 @@ void main() {
     });
 
     // ── sampling params + system prompt + stop sequences ─────────────────
-    test('serializes sampling params, stop sequences and system prompt',
-        () async {
-      late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
-        captured = await _captureBody(request);
-        _writeOk(request);
-      });
-      addTearDown(server.close);
+    test(
+      'serializes sampling params, stop sequences and system prompt',
+      () async {
+        late Map<String, dynamic> captured;
+        final server = await _TestServer.start((request) async {
+          captured = await _captureBody(request);
+          _writeOk(request);
+        });
+        addTearDown(server.close);
 
-      final model = _bearerModel(server.baseUrl);
-      await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
-            system: 'You are concise.',
-            messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
-              ),
-            ],
+        final model = _bearerModel(server.baseUrl);
+        await model.doGenerate(
+          LanguageModelV3CallOptions(
+            prompt: LanguageModelV3Prompt(
+              system: 'You are concise.',
+              messages: [
+                LanguageModelV3Message(
+                  role: LanguageModelV3Role.user,
+                  content: [LanguageModelV3TextPart(text: 'hi')],
+                ),
+              ],
+            ),
+            temperature: 0.3,
+            topP: 0.9,
+            presencePenalty: 0.5,
+            frequencyPenalty: 0.25,
+            stopSequences: const ['STOP'],
           ),
-          temperature: 0.3,
-          topP: 0.9,
-          presencePenalty: 0.5,
-          frequencyPenalty: 0.25,
-          stopSequences: const ['STOP'],
-        ),
-      );
+        );
 
-      expect(captured['temperature'], 0.3);
-      expect(captured['top_p'], 0.9);
-      expect(captured['presence_penalty'], 0.5);
-      expect(captured['frequency_penalty'], 0.25);
-      expect(captured['stop'], ['STOP']);
-      final messages = (captured['messages'] as List)
-          .cast<Map<String, dynamic>>();
-      expect(messages.first['role'], 'system');
-      expect(messages.first['content'], 'You are concise.');
-    });
+        expect(captured['temperature'], 0.3);
+        expect(captured['top_p'], 0.9);
+        expect(captured['presence_penalty'], 0.5);
+        expect(captured['frequency_penalty'], 0.25);
+        expect(captured['stop'], ['STOP']);
+        final messages = (captured['messages'] as List)
+            .cast<Map<String, dynamic>>();
+        expect(messages.first['role'], 'system');
+        expect(messages.first['content'], 'You are concise.');
+      },
+    );
 
     // ── empty / missing response shapes ──────────────────────────────────
     test('doGenerate tolerates empty choices and missing message', () async {
@@ -769,54 +862,57 @@ void main() {
     });
 
     // ── annotations → source/file parts (non-streaming) ──────────────────
-    test('doGenerate extracts url_citation and file_citation annotations',
-        () async {
-      final server = await _TestServer.start((request) async {
-        _writeJson(request, {
-          'choices': [
-            {
-              'finish_reason': 'stop',
-              'message': {
-                'content': 'see citations',
-                'annotations': [
-                  {
-                    'type': 'url_citation',
-                    'url': 'https://example.com',
-                    'title': 'Example',
-                  },
-                  {'type': 'file_citation', 'file_id': 'file_123'},
-                  // ignored: url_citation without a url
-                  {'type': 'url_citation'},
-                  // ignored: file_citation without a file_id
-                  {'type': 'file_citation'},
-                  // ignored: unknown annotation type
-                  {'type': 'other'},
-                ],
+    test(
+      'doGenerate extracts url_citation and file_citation annotations',
+      () async {
+        final server = await _TestServer.start((request) async {
+          _writeJson(request, {
+            'choices': [
+              {
+                'finish_reason': 'stop',
+                'message': {
+                  'content': 'see citations',
+                  'annotations': [
+                    {
+                      'type': 'url_citation',
+                      'url': 'https://example.com',
+                      'title': 'Example',
+                    },
+                    {'type': 'file_citation', 'file_id': 'file_123'},
+                    // ignored: url_citation without a url
+                    {'type': 'url_citation'},
+                    // ignored: file_citation without a file_id
+                    {'type': 'file_citation'},
+                    // ignored: unknown annotation type
+                    {'type': 'other'},
+                  ],
+                },
               },
-            },
-          ],
+            ],
+          });
         });
-      });
-      addTearDown(server.close);
+        addTearDown(server.close);
 
-      final model = _bearerModel(server.baseUrl);
-      final result = await model.doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
-      );
+        final model = _bearerModel(server.baseUrl);
+        final result = await model.doGenerate(
+          LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        );
 
-      final source = result.content
-          .whereType<LanguageModelV3SourcePart>()
-          .single;
-      expect(source.url, 'https://example.com');
-      expect(source.title, 'Example');
-      expect(source.id, 'test_source_0');
+        final source = result.content
+            .whereType<LanguageModelV3SourcePart>()
+            .single;
+        expect(source.url, 'https://example.com');
+        expect(source.title, 'Example');
+        expect(source.id, 'test_source_0');
 
-      final file = result.content
-          .whereType<LanguageModelV3FilePart>()
-          .single;
-      expect((file.data as DataContentUrl).url.toString(), 'test://file/file_123');
-      expect(file.filename, 'file_123');
-    });
+        final file = result.content.whereType<LanguageModelV3FilePart>().single;
+        expect(
+          (file.data as DataContentUrl).url.toString(),
+          'test://file/file_123',
+        );
+        expect(file.filename, 'file_123');
+      },
+    );
 
     // ── annotations during streaming ─────────────────────────────────────
     test('doStream emits source/file parts from delta annotations', () async {
@@ -846,34 +942,39 @@ void main() {
     });
 
     // ── reasoning/thinking deltas during streaming ───────────────────────
-    test('doStream emits reasoning deltas from delta.reasoning_content',
-        () async {
-      final server = await _TestServer.start((request) async {
-        _writeSse(request, [
-          '{"choices":[{"delta":{"reasoning_content":"Let me "}}]}',
-          '{"choices":[{"delta":{"reasoning_content":"think."}}]}',
-          '{"choices":[{"delta":{"content":"Answer."}}]}',
-          '{"choices":[{"delta":{},"finish_reason":"stop"}]}',
-          '[DONE]',
-        ]);
-      });
-      addTearDown(server.close);
+    test(
+      'doStream emits reasoning deltas from delta.reasoning_content',
+      () async {
+        final server = await _TestServer.start((request) async {
+          _writeSse(request, [
+            '{"choices":[{"delta":{"reasoning_content":"Let me "}}]}',
+            '{"choices":[{"delta":{"reasoning_content":"think."}}]}',
+            '{"choices":[{"delta":{"content":"Answer."}}]}',
+            '{"choices":[{"delta":{},"finish_reason":"stop"}]}',
+            '[DONE]',
+          ]);
+        });
+        addTearDown(server.close);
 
-      final model = _bearerModel(server.baseUrl);
-      final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
-      );
-      final parts = await streamResult.stream.toList();
+        final model = _bearerModel(server.baseUrl);
+        final streamResult = await model.doStream(
+          LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        );
+        final parts = await streamResult.stream.toList();
 
-      expect(
-        parts.whereType<StreamPartReasoningDelta>().map((p) => p.delta).join(),
-        'Let me think.',
-      );
-      expect(
-        parts.whereType<StreamPartTextDelta>().map((p) => p.delta).join(),
-        'Answer.',
-      );
-    });
+        expect(
+          parts
+              .whereType<StreamPartReasoningDelta>()
+              .map((p) => p.delta)
+              .join(),
+          'Let me think.',
+        );
+        expect(
+          parts.whereType<StreamPartTextDelta>().map((p) => p.delta).join(),
+          'Answer.',
+        );
+      },
+    );
 
     test('doStream emits reasoning deltas from delta.reasoning', () async {
       final server = await _TestServer.start((request) async {
@@ -916,26 +1017,28 @@ void main() {
       expect(parts.whereType<StreamPartReasoningDelta>().single.delta, 'Hmm.');
     });
 
-    test('doStream emits no reasoning delta when the field is absent or empty',
-        () async {
-      final server = await _TestServer.start((request) async {
-        _writeSse(request, [
-          '{"choices":[{"delta":{"reasoning_content":""}}]}',
-          '{"choices":[{"delta":{"content":"Hi"}}]}',
-          '{"choices":[{"delta":{},"finish_reason":"stop"}]}',
-          '[DONE]',
-        ]);
-      });
-      addTearDown(server.close);
+    test(
+      'doStream emits no reasoning delta when the field is absent or empty',
+      () async {
+        final server = await _TestServer.start((request) async {
+          _writeSse(request, [
+            '{"choices":[{"delta":{"reasoning_content":""}}]}',
+            '{"choices":[{"delta":{"content":"Hi"}}]}',
+            '{"choices":[{"delta":{},"finish_reason":"stop"}]}',
+            '[DONE]',
+          ]);
+        });
+        addTearDown(server.close);
 
-      final model = _bearerModel(server.baseUrl);
-      final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
-      );
-      final parts = await streamResult.stream.toList();
+        final model = _bearerModel(server.baseUrl);
+        final streamResult = await model.doStream(
+          LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        );
+        final parts = await streamResult.stream.toList();
 
-      expect(parts.whereType<StreamPartReasoningDelta>(), isEmpty);
-    });
+        expect(parts.whereType<StreamPartReasoningDelta>(), isEmpty);
+      },
+    );
 
     test('doStream honors custom config.reasoningKeys', () async {
       final server = await _TestServer.start((request) async {
@@ -952,6 +1055,7 @@ void main() {
         config: OpenAICompatibleConfig(
           provider: 'test',
           baseUrl: server.baseUrl,
+          client: _testClient(server.baseUrl),
           headers: () => {'Authorization': 'Bearer k'},
           reasoningKeys: const ['chain_of_thought'],
         ),
@@ -968,35 +1072,37 @@ void main() {
     });
 
     // ── reasoning/thinking part (non-streaming) ──────────────────────────
-    test('doGenerate extracts reasoning from message.reasoning_content',
-        () async {
-      final server = await _TestServer.start((request) async {
-        _writeJson(request, {
-          'choices': [
-            {
-              'finish_reason': 'stop',
-              'message': {
-                'reasoning_content': 'I reasoned about it.',
-                'content': 'Final answer.',
+    test(
+      'doGenerate extracts reasoning from message.reasoning_content',
+      () async {
+        final server = await _TestServer.start((request) async {
+          _writeJson(request, {
+            'choices': [
+              {
+                'finish_reason': 'stop',
+                'message': {
+                  'reasoning_content': 'I reasoned about it.',
+                  'content': 'Final answer.',
+                },
               },
-            },
-          ],
+            ],
+          });
         });
-      });
-      addTearDown(server.close);
+        addTearDown(server.close);
 
-      final model = _bearerModel(server.baseUrl);
-      final result = await model.doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
-      );
+        final model = _bearerModel(server.baseUrl);
+        final result = await model.doGenerate(
+          LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        );
 
-      final reasoning = result.content
-          .whereType<LanguageModelV3ReasoningPart>()
-          .single;
-      expect(reasoning.text, 'I reasoned about it.');
-      final text = result.content.whereType<LanguageModelV3TextPart>().single;
-      expect(text.text, 'Final answer.');
-    });
+        final reasoning = result.content
+            .whereType<LanguageModelV3ReasoningPart>()
+            .single;
+        expect(reasoning.text, 'I reasoned about it.');
+        final text = result.content.whereType<LanguageModelV3TextPart>().single;
+        expect(text.text, 'Final answer.');
+      },
+    );
 
     test('doGenerate emits no reasoning part when absent', () async {
       final server = await _TestServer.start((request) async {
@@ -1050,7 +1156,9 @@ void main() {
       final server = await _TestServer.start((request) async {
         request.response.statusCode = 200;
         request.response.headers.set('content-type', 'text/event-stream');
-        request.response.write('data: {"choices":[{"delta":{"content":"Hi"}}]}\n\n');
+        request.response.write(
+          'data: {"choices":[{"delta":{"content":"Hi"}}]}\n\n',
+        );
         // Abruptly destroy the connection mid-stream to trigger a read error.
         await request.response.flush();
         await request.response.close();
@@ -1064,7 +1172,10 @@ void main() {
       );
       // Just draining is enough; the finally{} closes the controller.
       final parts = await streamResult.stream.toList();
-      expect(parts.whereType<StreamPartTextDelta>().length, greaterThanOrEqualTo(0));
+      expect(
+        parts.whereType<StreamPartTextDelta>().length,
+        greaterThanOrEqualTo(0),
+      );
     });
 
     // ── file content parts: image-file + generic file ────────────────────
@@ -1108,8 +1219,10 @@ void main() {
         ),
       );
 
-      final content = ((captured['messages'] as List).first
-              as Map<String, dynamic>)['content'] as List;
+      final content =
+          ((captured['messages'] as List).first
+                  as Map<String, dynamic>)['content']
+              as List;
       final parts = content.cast<Map<String, dynamic>>();
       final imagePart = parts.firstWhere((p) => p['type'] == 'image_url');
       expect(
@@ -1152,8 +1265,10 @@ void main() {
         ),
       );
 
-      final content = ((captured['messages'] as List).first
-              as Map<String, dynamic>)['content'] as List;
+      final content =
+          ((captured['messages'] as List).first
+                  as Map<String, dynamic>)['content']
+              as List;
       final imagePart = content.cast<Map<String, dynamic>>().single;
       expect(
         (imagePart['image_url'] as Map)['url'],
@@ -1161,112 +1276,119 @@ void main() {
       );
     });
 
-    test('drops image content backed by a bare URL with no media type',
-        () async {
-      late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
-        captured = await _captureBody(request);
-        _writeOk(request);
-      });
-      addTearDown(server.close);
+    test(
+      'drops image content backed by a bare URL with no media type',
+      () async {
+        late Map<String, dynamic> captured;
+        final server = await _TestServer.start((request) async {
+          captured = await _captureBody(request);
+          _writeOk(request);
+        });
+        addTearDown(server.close);
 
-      final model = _bearerModel(server.baseUrl);
-      await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
-            messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [
-                  LanguageModelV3ImagePart(
-                    image: DataContentUrl(Uri.parse('https://img.example/a.png')),
-                    mediaType: 'image/png',
-                  ),
-                ],
-              ),
-            ],
+        final model = _bearerModel(server.baseUrl);
+        await model.doGenerate(
+          LanguageModelV3CallOptions(
+            prompt: LanguageModelV3Prompt(
+              messages: [
+                LanguageModelV3Message(
+                  role: LanguageModelV3Role.user,
+                  content: [
+                    LanguageModelV3ImagePart(
+                      image: DataContentUrl(
+                        Uri.parse('https://img.example/a.png'),
+                      ),
+                      mediaType: 'image/png',
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
-        ),
-      );
+        );
 
-      final content = ((captured['messages'] as List).first
-              as Map<String, dynamic>)['content'] as List;
-      final imagePart = content.cast<Map<String, dynamic>>().single;
-      expect(
-        (imagePart['image_url'] as Map)['url'],
-        'https://img.example/a.png',
-      );
-    });
+        final content =
+            ((captured['messages'] as List).first
+                    as Map<String, dynamic>)['content']
+                as List;
+        final imagePart = content.cast<Map<String, dynamic>>().single;
+        expect(
+          (imagePart['image_url'] as Map)['url'],
+          'https://img.example/a.png',
+        );
+      },
+    );
 
     // ── rich tool result outputs (content with image/file/text/source) ───
-    test('serializes rich tool result content (text, image, file, source)',
-        () async {
-      late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
-        captured = await _captureBody(request);
-        _writeOk(request);
-      });
-      addTearDown(server.close);
+    test(
+      'serializes rich tool result content (text, image, file, source)',
+      () async {
+        late Map<String, dynamic> captured;
+        final server = await _TestServer.start((request) async {
+          captured = await _captureBody(request);
+          _writeOk(request);
+        });
+        addTearDown(server.close);
 
-      final model = _bearerModel(server.baseUrl);
-      await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
-            messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.tool,
-                content: [
-                  LanguageModelV3ToolResultPart(
-                    toolCallId: 'call_1',
-                    toolName: 'lookup',
-                    isError: true,
-                    output: ToolResultOutputContent([
-                      LanguageModelV3TextPart(text: 'summary'),
-                      LanguageModelV3ImagePart(
-                        image: DataContentBytes(
-                          Uint8List.fromList(utf8.encode('img')),
+        final model = _bearerModel(server.baseUrl);
+        await model.doGenerate(
+          LanguageModelV3CallOptions(
+            prompt: LanguageModelV3Prompt(
+              messages: [
+                LanguageModelV3Message(
+                  role: LanguageModelV3Role.tool,
+                  content: [
+                    LanguageModelV3ToolResultPart(
+                      toolCallId: 'call_1',
+                      toolName: 'lookup',
+                      isError: true,
+                      output: ToolResultOutputContent([
+                        LanguageModelV3TextPart(text: 'summary'),
+                        LanguageModelV3ImagePart(
+                          image: DataContentBytes(
+                            Uint8List.fromList(utf8.encode('img')),
+                          ),
+                          mediaType: 'image/png',
                         ),
-                        mediaType: 'image/png',
-                      ),
-                      LanguageModelV3FilePart(
-                        data: DataContentUrl(
-                          Uri.parse('https://files.example/a.pdf'),
+                        LanguageModelV3FilePart(
+                          data: DataContentUrl(
+                            Uri.parse('https://files.example/a.pdf'),
+                          ),
+                          mediaType: 'application/pdf',
+                          filename: 'a.pdf',
                         ),
-                        mediaType: 'application/pdf',
-                        filename: 'a.pdf',
-                      ),
-                      // An unsupported-for-this-path part (source) -> 'unsupported'.
-                      LanguageModelV3SourcePart(
-                        id: 's1',
-                        url: 'https://src.example',
-                      ),
-                    ]),
-                  ),
-                ],
-              ),
-            ],
+                        // An unsupported-for-this-path part (source) -> 'unsupported'.
+                        LanguageModelV3SourcePart(
+                          id: 's1',
+                          url: 'https://src.example',
+                        ),
+                      ]),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
-        ),
-      );
+        );
 
-      final toolMessage = (captured['messages'] as List).last
-          as Map<String, dynamic>;
-      final decoded =
-          (jsonDecode(toolMessage['content'] as String) as Map)
-              .cast<String, dynamic>();
-      expect(decoded['isError'], true);
-      final output = (decoded['output'] as Map).cast<String, dynamic>();
-      expect(output['type'], 'content');
-      final outParts = (output['parts'] as List).cast<Map<String, dynamic>>();
-      expect(outParts[0]['type'], 'text');
-      expect(outParts[0]['text'], 'summary');
-      expect(outParts[1]['type'], 'image');
-      expect(outParts[1]['base64'], base64Encode(utf8.encode('img')));
-      expect(outParts[2]['type'], 'file');
-      expect(outParts[2]['url'], 'https://files.example/a.pdf');
-      expect(outParts[2]['filename'], 'a.pdf');
-      expect(outParts[3]['type'], 'unsupported');
-    });
+        final toolMessage =
+            (captured['messages'] as List).last as Map<String, dynamic>;
+        final decoded = (jsonDecode(toolMessage['content'] as String) as Map)
+            .cast<String, dynamic>();
+        expect(decoded['isError'], true);
+        final output = (decoded['output'] as Map).cast<String, dynamic>();
+        expect(output['type'], 'content');
+        final outParts = (output['parts'] as List).cast<Map<String, dynamic>>();
+        expect(outParts[0]['type'], 'text');
+        expect(outParts[0]['text'], 'summary');
+        expect(outParts[1]['type'], 'image');
+        expect(outParts[1]['base64'], base64Encode(utf8.encode('img')));
+        expect(outParts[2]['type'], 'file');
+        expect(outParts[2]['url'], 'https://files.example/a.pdf');
+        expect(outParts[2]['filename'], 'a.pdf');
+        expect(outParts[3]['type'], 'unsupported');
+      },
+    );
 
     test('passes plain text tool results through unwrapped', () async {
       late Map<String, dynamic> captured;
@@ -1296,8 +1418,8 @@ void main() {
         ),
       );
 
-      final toolMessage = (captured['messages'] as List).last
-          as Map<String, dynamic>;
+      final toolMessage =
+          (captured['messages'] as List).last as Map<String, dynamic>;
       // Non-error ToolResultOutputText is emitted verbatim (not JSON-wrapped).
       expect(toolMessage['content'], 'plain result');
     });
@@ -1331,8 +1453,8 @@ void main() {
         ),
       );
 
-      final toolMessage = (captured['messages'] as List).last
-          as Map<String, dynamic>;
+      final toolMessage =
+          (captured['messages'] as List).last as Map<String, dynamic>;
       final decoded = (jsonDecode(toolMessage['content'] as String) as Map)
           .cast<String, dynamic>();
       expect(decoded['isError'], true);
@@ -1373,8 +1495,7 @@ void main() {
     });
 
     // ── tool call id generation when none is returned ────────────────────
-    test('doGenerate generates a tool call id when none is returned',
-        () async {
+    test('doGenerate generates a tool call id when none is returned', () async {
       final server = await _TestServer.start((request) async {
         _writeJson(request, {
           'choices': [
@@ -1429,31 +1550,32 @@ void main() {
     });
 
     // ── stream: malformed chunk surfaces a StreamPartError deterministically ─
-    test('doStream emits StreamPartError when a chunk choice is not a map',
-        () async {
-      final server = await _TestServer.start((request) async {
-        _writeSse(request, [
-          // `choices.first` is a string, so `(choices.first as Map)` throws and
-          // the loop's catch converts it into a StreamPartError.
-          '{"choices":["not-a-map"]}',
-          '[DONE]',
-        ]);
-      });
-      addTearDown(server.close);
+    test(
+      'doStream emits StreamPartError when a chunk choice is not a map',
+      () async {
+        final server = await _TestServer.start((request) async {
+          _writeSse(request, [
+            // `choices.first` is a string, so `(choices.first as Map)` throws and
+            // the loop's catch converts it into a StreamPartError.
+            '{"choices":["not-a-map"]}',
+            '[DONE]',
+          ]);
+        });
+        addTearDown(server.close);
 
-      final model = _bearerModel(server.baseUrl);
-      final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
-      );
+        final model = _bearerModel(server.baseUrl);
+        final streamResult = await model.doStream(
+          LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        );
 
-      final parts = await streamResult.stream.toList();
-      final error = parts.whereType<StreamPartError>().single;
-      expect(error.error, isA<TypeError>());
-    });
+        final parts = await streamResult.stream.toList();
+        final error = parts.whereType<StreamPartError>().single;
+        expect(error.error, isA<TypeError>());
+      },
+    );
 
     // ── stream tool result: image part carrying a DataContentUrl ─────────
-    test('serializes a url-backed image inside tool result content',
-        () async {
+    test('serializes a url-backed image inside tool result content', () async {
       late Map<String, dynamic> captured;
       final server = await _TestServer.start((request) async {
         captured = await _captureBody(request);
@@ -1491,8 +1613,8 @@ void main() {
         ),
       );
 
-      final toolMessage = (captured['messages'] as List).last
-          as Map<String, dynamic>;
+      final toolMessage =
+          (captured['messages'] as List).last as Map<String, dynamic>;
       final decoded = (jsonDecode(toolMessage['content'] as String) as Map)
           .cast<String, dynamic>();
       final output = (decoded['output'] as Map).cast<String, dynamic>();
@@ -1514,19 +1636,14 @@ void main() {
         config: OpenAICompatibleConfig(
           provider: 'test',
           baseUrl: 'http://localhost/v1',
+          client: Dio(BaseOptions(baseUrl: 'http://localhost/v1'))
+            ..interceptors.add(_NullStreamBodyInterceptor()),
           headers: () => const {},
-          clientFactory: ({required baseUrl, required headers}) {
-            final dio = Dio(BaseOptions(baseUrl: baseUrl, headers: headers));
-            dio.interceptors.add(_NullStreamBodyInterceptor());
-            return dio;
-          },
         ),
       );
 
       await expectLater(
-        model.doStream(
-          LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
-        ),
+        model.doStream(LanguageModelV3CallOptions(prompt: _userPrompt('hi'))),
         throwsA(
           isA<StateError>().having(
             (e) => e.message,
@@ -1547,7 +1664,18 @@ OpenAICompatibleChatLanguageModel _bearerModel(String baseUrl) {
     config: OpenAICompatibleConfig(
       provider: 'test',
       baseUrl: baseUrl,
+      client: _testClient(baseUrl),
       headers: () => {'Authorization': 'Bearer test-token'},
+    ),
+  );
+}
+
+Dio _testClient(String baseUrl) {
+  return Dio(
+    BaseOptions(
+      baseUrl: baseUrl,
+      headers: {'Content-Type': 'application/json'},
+      responseType: ResponseType.json,
     ),
   );
 }

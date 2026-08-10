@@ -19,6 +19,7 @@ LanguageModelV3 myModel(String modelId) => OpenAICompatibleChatLanguageModel(
   config: OpenAICompatibleConfig(
     provider: 'groq',
     baseUrl: 'https://api.groq.com/openai/v1',
+    client: Dio(BaseOptions(baseUrl: 'https://api.groq.com/openai/v1')),
     headers: () => {'Authorization': 'Bearer $apiKey'},
   ),
   modelId: modelId,

@@ -8,6 +8,8 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
+import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
+
 void main() {
   group('OllamaProvider', () {
     test('creates language model with correct provider/spec/modelId', () {
@@ -67,15 +69,60 @@ void main() {
 
       final provider = OllamaProvider(baseUrl: server.baseUrl, client: client);
 
-      await provider('llama3').doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('first')),
-      );
-      await provider('llama3').doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('second')),
-      );
+      await provider(
+        'llama3',
+      ).doGenerate(LanguageModelV3CallOptions(prompt: _userPrompt('first')));
+      await provider(
+        'llama3',
+      ).doGenerate(LanguageModelV3CallOptions(prompt: _userPrompt('second')));
 
       expect(interceptedRequests, 2);
     });
+
+    test(
+      'dispose closes owned clients and leaves injected clients open',
+      () async {
+        final server = await _TestServer.start((request) async {
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'done': true,
+              'done_reason': 'stop',
+              'message': {'role': 'assistant', 'content': 'ok'},
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final ownedProvider = OllamaProvider(baseUrl: server.baseUrl);
+        ownedProvider.dispose();
+        await expectLater(
+          ownedProvider('llama3').doGenerate(
+            LanguageModelV3CallOptions(prompt: _userPrompt('after-dispose')),
+          ),
+          throwsA(anything),
+        );
+
+        final client = Dio(BaseOptions(baseUrl: server.baseUrl));
+        final adapter = attachTrackingAdapter(client);
+        final injectedProvider = OllamaProvider(
+          baseUrl: server.baseUrl,
+          client: client,
+        );
+
+        injectedProvider.dispose(force: false);
+        await injectedProvider('llama3').doGenerate(
+          LanguageModelV3CallOptions(prompt: _userPrompt('still-open')),
+        );
+
+        expect(adapter.closeCount, 0);
+        client.close(force: true);
+        expect(adapter.closeCount, 1);
+        expect(adapter.lastForce, true);
+      },
+    );
   });
 
   group('LanguageModelV3 interface', () {
@@ -244,87 +291,84 @@ void main() {
       },
     );
 
-    test(
-      'serializes system prompt, system message, assistant tool calls, '
-      'and generation options',
-      () async {
-        late Map<String, dynamic> captured;
-        final server = await _TestServer.start((request) async {
-          final body = await utf8.decoder.bind(request).join();
-          captured = (jsonDecode(body) as Map).cast<String, dynamic>();
-          request.response.statusCode = 200;
-          request.response.headers.contentType = ContentType.json;
-          request.response.write(
-            jsonEncode({
-              'done': true,
-              'done_reason': 'stop',
-              'message': {'role': 'assistant', 'content': 'ok'},
-            }),
-          );
-          await request.response.close();
-        });
-        addTearDown(server.close);
-
-        final model = OllamaProvider(baseUrl: server.baseUrl).call('llama3');
-
-        await model.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
-              system: 'be terse',
-              messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.system,
-                  content: [LanguageModelV3TextPart(text: 'extra system')],
-                ),
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.assistant,
-                  content: [
-                    LanguageModelV3TextPart(text: 'let me check'),
-                    LanguageModelV3ToolCallPart(
-                      toolCallId: 'call_1',
-                      toolName: 'weather',
-                      input: {'city': 'Paris'},
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            temperature: 0.5,
-            topP: 0.9,
-            topK: 40,
-            seed: 7,
-            maxOutputTokens: 128,
-            stopSequences: const ['STOP'],
-          ),
+    test('serializes system prompt, system message, assistant tool calls, '
+        'and generation options', () async {
+      late Map<String, dynamic> captured;
+      final server = await _TestServer.start((request) async {
+        final body = await utf8.decoder.bind(request).join();
+        captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'done': true,
+            'done_reason': 'stop',
+            'message': {'role': 'assistant', 'content': 'ok'},
+          }),
         );
+        await request.response.close();
+      });
+      addTearDown(server.close);
 
-        final messages = (captured['messages'] as List)
-            .cast<Map<String, dynamic>>();
-        // prompt.system becomes the first system message.
-        expect(messages[0]['role'], 'system');
-        expect(messages[0]['content'], 'be terse');
-        // An explicit system-role message is preserved.
-        expect(messages[1]['role'], 'system');
-        expect(messages[1]['content'], 'extra system');
-        // Assistant tool calls serialized into Ollama's tool_calls field.
-        final assistant = messages[2];
-        expect(assistant['role'], 'assistant');
-        expect(assistant['content'], 'let me check');
-        final toolCalls = (assistant['tool_calls'] as List)
-            .cast<Map<String, dynamic>>();
-        final fn = toolCalls.single['function'] as Map<String, dynamic>;
-        expect(fn['name'], 'weather');
-        expect(fn['arguments'], {'city': 'Paris'});
-        // Generation options serialized under the Ollama options field.
-        final options = captured['options'] as Map<String, dynamic>;
-        expect(options['temperature'], 0.5);
-        expect(options['top_p'], 0.9);
-        expect(options['top_k'], 40);
-        expect(options['seed'], 7);
-        expect(options['num_predict'], 128);
-        expect(options['stop'], ['STOP']);
-      },
-    );
+      final model = OllamaProvider(baseUrl: server.baseUrl).call('llama3');
+
+      await model.doGenerate(
+        LanguageModelV3CallOptions(
+          prompt: LanguageModelV3Prompt(
+            system: 'be terse',
+            messages: [
+              LanguageModelV3Message(
+                role: LanguageModelV3Role.system,
+                content: [LanguageModelV3TextPart(text: 'extra system')],
+              ),
+              LanguageModelV3Message(
+                role: LanguageModelV3Role.assistant,
+                content: [
+                  LanguageModelV3TextPart(text: 'let me check'),
+                  LanguageModelV3ToolCallPart(
+                    toolCallId: 'call_1',
+                    toolName: 'weather',
+                    input: {'city': 'Paris'},
+                  ),
+                ],
+              ),
+            ],
+          ),
+          temperature: 0.5,
+          topP: 0.9,
+          topK: 40,
+          seed: 7,
+          maxOutputTokens: 128,
+          stopSequences: const ['STOP'],
+        ),
+      );
+
+      final messages = (captured['messages'] as List)
+          .cast<Map<String, dynamic>>();
+      // prompt.system becomes the first system message.
+      expect(messages[0]['role'], 'system');
+      expect(messages[0]['content'], 'be terse');
+      // An explicit system-role message is preserved.
+      expect(messages[1]['role'], 'system');
+      expect(messages[1]['content'], 'extra system');
+      // Assistant tool calls serialized into Ollama's tool_calls field.
+      final assistant = messages[2];
+      expect(assistant['role'], 'assistant');
+      expect(assistant['content'], 'let me check');
+      final toolCalls = (assistant['tool_calls'] as List)
+          .cast<Map<String, dynamic>>();
+      final fn = toolCalls.single['function'] as Map<String, dynamic>;
+      expect(fn['name'], 'weather');
+      expect(fn['arguments'], {'city': 'Paris'});
+      // Generation options serialized under the Ollama options field.
+      final options = captured['options'] as Map<String, dynamic>;
+      expect(options['temperature'], 0.5);
+      expect(options['top_p'], 0.9);
+      expect(options['top_k'], 40);
+      expect(options['seed'], 7);
+      expect(options['num_predict'], 128);
+      expect(options['stop'], ['STOP']);
+    });
 
     test(
       'serializes base64 and file-part images and structured tool results',
@@ -604,37 +648,34 @@ void main() {
       },
     );
 
-    test(
-      'emits a StreamPartError when stream processing throws',
-      () async {
-        final server = await _TestServer.start((request) async {
-          // 200 response whose body is invalid UTF-8, so utf8.decode throws
-          // inside _processStream and is routed to a StreamPartError.
-          request.response.statusCode = 200;
-          request.response.headers.contentType = ContentType.json;
-          request.response.add([0xff, 0xfe, 0xfd]);
-          await request.response.close();
-        });
-        addTearDown(server.close);
+    test('emits a StreamPartError when stream processing throws', () async {
+      final server = await _TestServer.start((request) async {
+        // 200 response whose body is invalid UTF-8, so utf8.decode throws
+        // inside _processStream and is routed to a StreamPartError.
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.add([0xff, 0xfe, 0xfd]);
+        await request.response.close();
+      });
+      addTearDown(server.close);
 
-        final model = OllamaProvider(baseUrl: server.baseUrl).call('llama3');
-        final streamResult = await model.doStream(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
-              messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
-                  content: [LanguageModelV3TextPart(text: 'hi')],
-                ),
-              ],
-            ),
+      final model = OllamaProvider(baseUrl: server.baseUrl).call('llama3');
+      final streamResult = await model.doStream(
+        LanguageModelV3CallOptions(
+          prompt: LanguageModelV3Prompt(
+            messages: [
+              LanguageModelV3Message(
+                role: LanguageModelV3Role.user,
+                content: [LanguageModelV3TextPart(text: 'hi')],
+              ),
+            ],
           ),
-        );
+        ),
+      );
 
-        final parts = await streamResult.stream.toList();
-        expect(parts.whereType<StreamPartError>(), isNotEmpty);
-      },
-    );
+      final parts = await streamResult.stream.toList();
+      expect(parts.whereType<StreamPartError>(), isNotEmpty);
+    });
   });
 
   group('Ollama doEmbed wire format', () {

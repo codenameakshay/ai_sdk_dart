@@ -42,9 +42,12 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
     return Map<String, String>.unmodifiable(headers);
   }
 
-  Future<Dio> _client(Map<String, String> headers) async =>
-      config.client ??
-      config.clientFactory(baseUrl: config.baseUrl, headers: headers);
+  String _endpoint(String path) {
+    final baseUrl = config.baseUrl.endsWith('/')
+        ? config.baseUrl.substring(0, config.baseUrl.length - 1)
+        : config.baseUrl;
+    return '$baseUrl$path';
+  }
 
   Options _requestOptions(
     Map<String, String> headers,
@@ -105,12 +108,11 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
     LanguageModelV3CallOptions options,
   ) async {
     final headers = await _resolvedHeaders();
-    final client = await _client(headers);
     final requestBody = _buildBody(options, stream: false);
     final Response<Map<String, dynamic>> response;
     try {
-      response = await client.post<Map<String, dynamic>>(
-        '/chat/completions',
+      response = await config.client.post<Map<String, dynamic>>(
+        _endpoint('/chat/completions'),
         data: requestBody,
         queryParameters: config.queryParameters,
         options: _requestOptions(headers, options),
@@ -187,12 +189,11 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
     LanguageModelV3CallOptions options,
   ) async {
     final headers = await _resolvedHeaders();
-    final client = await _client(headers);
     final requestBody = _buildBody(options, stream: true);
     final Response<ResponseBody> response;
     try {
-      response = await client.post<ResponseBody>(
-        '/chat/completions',
+      response = await config.client.post<ResponseBody>(
+        _endpoint('/chat/completions'),
         data: requestBody,
         queryParameters: config.queryParameters,
         options: _requestOptions(
@@ -689,7 +690,8 @@ Map<String, dynamic>? _safeParseJsonMap(String input) {
   // Unreachable: jsonDecode always produces a Map<String, dynamic> for JSON
   // objects, so the typed check above always matches first; this guards a
   // hypothetical differently-typed Map without crashing.
-  if (parsed is Map) return parsed.cast<String, dynamic>(); // coverage:ignore-line
+  if (parsed is Map)
+    return parsed.cast<String, dynamic>(); // coverage:ignore-line
   return null;
 }
 

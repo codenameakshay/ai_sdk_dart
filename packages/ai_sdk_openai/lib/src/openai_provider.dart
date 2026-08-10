@@ -39,9 +39,7 @@ class OpenAIProvider {
 
   Future<Map<String, String>> _headers() async {
     final key = await Future.value(_credentialProvider());
-    return {
-      if (key != null && key.isNotEmpty) 'Authorization': 'Bearer $key',
-    };
+    return {if (key != null && key.isNotEmpty) 'Authorization': 'Bearer $key'};
   }
 
   void dispose({bool force = true}) {
@@ -67,12 +65,11 @@ class OpenAIProvider {
   );
 
   /// Returns an embedding model for the given [modelId].
-  EmbeddingModelV2<String> embedding(String modelId) =>
-      _OpenAIEmbeddingModel(
-        modelId: modelId,
-        client: _client,
-        headers: _headers,
-      );
+  EmbeddingModelV2<String> embedding(String modelId) => _OpenAIEmbeddingModel(
+    modelId: modelId,
+    client: _client,
+    headers: _headers,
+  );
 
   /// Returns an image generation model for the given [modelId].
   ImageModelV3 image(String modelId) =>

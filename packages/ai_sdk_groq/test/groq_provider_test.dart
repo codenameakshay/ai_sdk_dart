@@ -5,7 +5,10 @@ import 'dart:typed_data';
 
 import 'package:ai_sdk_groq/ai_sdk_groq.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+import 'package:dio/dio.dart';
 import 'package:test/test.dart';
+
+import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
   group('GroqProvider', () {
@@ -29,6 +32,71 @@ void main() {
       final model = provider('mixtral-8x7b-32768');
       expect(model.modelId, 'mixtral-8x7b-32768');
     });
+
+    test('credentials are resolved immediately before each request', () async {
+      final authorizations = <String?>[];
+      final server = await _TestServer.start((request) async {
+        authorizations.add(request.headers.value('authorization'));
+        _writeOk(request);
+      });
+      addTearDown(server.close);
+
+      var token = 'first-token';
+      final provider = GroqProvider(
+        baseUrl: server.baseUrl,
+        credentialProvider: () async => token,
+      );
+
+      await provider(
+        'llama3-8b-8192',
+      ).doGenerate(LanguageModelV3CallOptions(prompt: _userPrompt('first')));
+      token = 'second-token';
+      await provider(
+        'llama3-8b-8192',
+      ).doGenerate(LanguageModelV3CallOptions(prompt: _userPrompt('second')));
+
+      expect(authorizations, ['Bearer first-token', 'Bearer second-token']);
+    });
+
+    test(
+      'dispose closes owned clients and leaves injected clients open',
+      () async {
+        final server = await _TestServer.start((request) async {
+          _writeOk(request);
+        });
+        addTearDown(server.close);
+
+        final ownedProvider = GroqProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        );
+        ownedProvider.dispose();
+        await expectLater(
+          ownedProvider('llama3-8b-8192').doGenerate(
+            LanguageModelV3CallOptions(prompt: _userPrompt('after-dispose')),
+          ),
+          throwsA(anything),
+        );
+
+        final client = Dio(BaseOptions(baseUrl: server.baseUrl));
+        final adapter = attachTrackingAdapter(client);
+        final injectedProvider = GroqProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+          client: client,
+        );
+
+        injectedProvider.dispose(force: false);
+        await injectedProvider('llama3-8b-8192').doGenerate(
+          LanguageModelV3CallOptions(prompt: _userPrompt('still-open')),
+        );
+
+        expect(adapter.closeCount, 0);
+        client.close(force: true);
+        expect(adapter.closeCount, 1);
+        expect(adapter.lastForce, true);
+      },
+    );
   });
 
   group('LanguageModelV3 interface', () {

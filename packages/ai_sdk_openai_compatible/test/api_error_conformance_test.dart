@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:ai_sdk_openai_compatible/ai_sdk_openai_compatible.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
 /// A non-2xx provider response should surface as a typed [AiApiCallError] from
@@ -47,6 +48,13 @@ void main() {
           config: OpenAICompatibleConfig(
             provider: 'test',
             baseUrl: baseUrl,
+            client: Dio(
+              BaseOptions(
+                baseUrl: baseUrl,
+                headers: {'Content-Type': 'application/json'},
+                responseType: ResponseType.json,
+              ),
+            ),
             headers: () => {'Authorization': 'Bearer test-token'},
           ),
         );

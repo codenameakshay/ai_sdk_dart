@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:ai_sdk_anthropic/ai_sdk_anthropic.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
 import '../../ai_sdk_provider/test/contract/language_model_contract.dart';
@@ -130,6 +131,85 @@ void main() {
         parts.whereType<StreamPartFinish>().single.finishReason,
         LanguageModelV3FinishReason.toolCalls,
       );
+    });
+
+    test('credentials are resolved immediately before each request', () async {
+      final apiKeys = <String?>[];
+      final server = await _TestServer.start((request) async {
+        apiKeys.add(request.headers.value('x-api-key'));
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'stop_reason': 'end_turn',
+            'content': [
+              {'type': 'text', 'text': 'ok'},
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      var token = 'first-key';
+      final provider = AnthropicProvider(
+        baseUrl: server.baseUrl,
+        credentialProvider: () async => token,
+      );
+
+      await provider.call('claude-sonnet-4-5').doGenerate(
+        LanguageModelV3CallOptions(prompt: _userPrompt('first')),
+      );
+      token = 'second-key';
+      await provider.call('claude-sonnet-4-5').doGenerate(
+        LanguageModelV3CallOptions(prompt: _userPrompt('second')),
+      );
+
+      expect(apiKeys, ['first-key', 'second-key']);
+    });
+
+    test('reuses an injected client across multiple requests', () async {
+      final server = await _TestServer.start((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'stop_reason': 'end_turn',
+            'content': [
+              {'type': 'text', 'text': 'ok'},
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      var interceptedRequests = 0;
+      final client = Dio(BaseOptions(baseUrl: server.baseUrl))
+        ..interceptors.add(
+          InterceptorsWrapper(
+            onRequest: (options, handler) {
+              interceptedRequests++;
+              handler.next(options);
+            },
+          ),
+        );
+      addTearDown(() => client.close(force: true));
+
+      final provider = AnthropicProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+        client: client,
+      );
+
+      await provider.call('claude-sonnet-4-5').doGenerate(
+        LanguageModelV3CallOptions(prompt: _userPrompt('first')),
+      );
+      await provider.call('claude-sonnet-4-5').doGenerate(
+        LanguageModelV3CallOptions(prompt: _userPrompt('second')),
+      );
+
+      expect(interceptedRequests, 2);
     });
 
     test('maps tool choice modes to anthropic wire format', () async {
@@ -1489,6 +1569,17 @@ Future<Map<String, dynamic>> _captureAnthropicRequestBody(
   await model.doGenerate(LanguageModelV3CallOptions(prompt: prompt));
   await server.close();
   return captured;
+}
+
+LanguageModelV3Prompt _userPrompt(String text) {
+  return LanguageModelV3Prompt(
+    messages: [
+      LanguageModelV3Message(
+        role: LanguageModelV3Role.user,
+        content: [LanguageModelV3TextPart(text: text)],
+      ),
+    ],
+  );
 }
 
 class _TestServer {

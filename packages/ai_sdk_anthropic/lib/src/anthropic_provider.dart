@@ -15,7 +15,16 @@ import 'package:dio/dio.dart';
 /// final result = await generateText(model: model, prompt: 'Hello');
 /// ```
 class AnthropicProvider {
-  const AnthropicProvider({this.apiKey, this.baseUrl});
+  AnthropicProvider({
+    this.apiKey,
+    this.baseUrl,
+    CredentialProvider? credentialProvider,
+    Dio? client,
+  }) : _credentialProvider =
+           credentialProvider ??
+           (() => apiKey ?? const String.fromEnvironment('ANTHROPIC_API_KEY')),
+       _client = client ?? _anthropicDio(baseUrl: baseUrl),
+       _ownsClient = client == null;
 
   /// API key (defaults to `ANTHROPIC_API_KEY` environment variable).
   final String? apiKey;
@@ -23,28 +32,46 @@ class AnthropicProvider {
   /// Base URL for the API.
   final String? baseUrl;
 
+  final CredentialProvider _credentialProvider;
+  final Dio _client;
+  final bool _ownsClient;
+
+  Future<Map<String, String>> _headers() async {
+    final key = await Future.value(_credentialProvider());
+    return {
+      if (key != null && key.isNotEmpty) 'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+    };
+  }
+
+  void dispose({bool force = true}) {
+    if (_ownsClient) {
+      _client.close(force: force);
+    }
+  }
+
   /// Returns a language model for the given [modelId].
   LanguageModelV3 call(String modelId) => _AnthropicLanguageModel(
     modelId: modelId,
-    apiKey: apiKey,
-    baseUrl: baseUrl,
+    client: _client,
+    headers: _headers,
   );
 }
 
 /// Default Anthropic provider instance.
-const anthropic = AnthropicProvider();
+final anthropic = AnthropicProvider();
 
 class _AnthropicLanguageModel implements LanguageModelV3 {
-  const _AnthropicLanguageModel({
+  _AnthropicLanguageModel({
     required this.modelId,
-    this.apiKey,
-    this.baseUrl,
+    required this.client,
+    required this.headers,
   });
 
   @override
   final String modelId;
-  final String? apiKey;
-  final String? baseUrl;
+  final Dio client;
+  final RequestHeadersProvider headers;
 
   @override
   String get provider => 'anthropic';
@@ -56,7 +83,7 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
   Future<LanguageModelV3GenerateResult> doGenerate(
     LanguageModelV3CallOptions options,
   ) async {
-    final client = _anthropicDio(apiKey: apiKey, baseUrl: baseUrl);
+    final resolvedHeaders = await Future.value(headers());
     final po = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
@@ -93,7 +120,7 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
       response = await client.post<Map<String, dynamic>>(
         '/messages',
         data: requestBody,
-        options: Options(headers: options.headers),
+        options: Options(headers: {...resolvedHeaders, ...?options.headers}),
       );
     } on DioException catch (e) {
       throw await _apiCallError(e, provider);
@@ -190,7 +217,7 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
   Future<LanguageModelV3StreamResult> doStream(
     LanguageModelV3CallOptions options,
   ) async {
-    final client = _anthropicDio(apiKey: apiKey, baseUrl: baseUrl);
+    final resolvedHeaders = await Future.value(headers());
     final po = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
@@ -228,7 +255,7 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
         data: requestBody,
         options: Options(
           responseType: ResponseType.stream,
-          headers: options.headers,
+          headers: {...resolvedHeaders, ...?options.headers},
         ),
       );
     } on DioException catch (e) {
@@ -421,14 +448,11 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
   }
 }
 
-Dio _anthropicDio({String? apiKey, String? baseUrl}) {
-  final resolvedApiKey =
-      apiKey ?? const String.fromEnvironment('ANTHROPIC_API_KEY');
+Dio _anthropicDio({String? baseUrl}) {
   return Dio(
     BaseOptions(
       baseUrl: baseUrl ?? 'https://api.anthropic.com/v1',
       headers: {
-        if (resolvedApiKey.isNotEmpty) 'x-api-key': resolvedApiKey,
         'anthropic-version': '2023-06-01',
         'content-type': 'application/json',
       },

@@ -34,6 +34,7 @@ class OpenAICompatibleConfig {
     required this.provider,
     required this.baseUrl,
     required this.headers,
+    this.client,
     this.queryParameters,
     this.seedKey = 'seed',
     this.maxTokensKey = 'max_completion_tokens',
@@ -62,7 +63,10 @@ class OpenAICompatibleConfig {
   /// OpenAI/Groq/Mistral use `{'Authorization': 'Bearer <key>'}`; Azure uses
   /// `{'api-key': <key>}`. `Content-Type: application/json` is added by the
   /// default client factory, so it need not be returned here.
-  final Map<String, String> Function() headers;
+  final RequestHeadersProvider headers;
+
+  /// Optional reusable client owned by the provider instance.
+  final Dio? client;
 
   /// Static query parameters added to every request, e.g. Azure's
   /// `{'api-version': '2024-02-15-preview'}`. `null` when none are needed.

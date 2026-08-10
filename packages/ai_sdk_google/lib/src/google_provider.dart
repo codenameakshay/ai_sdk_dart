@@ -15,7 +15,16 @@ import 'package:dio/dio.dart';
 /// final result = await generateText(model: model, prompt: 'Hello');
 /// ```
 class GoogleGenerativeAIProvider {
-  const GoogleGenerativeAIProvider({this.apiKey, this.baseUrl});
+  GoogleGenerativeAIProvider({
+    this.apiKey,
+    this.baseUrl,
+    CredentialProvider? credentialProvider,
+    Dio? client,
+  }) : _credentialProvider =
+           credentialProvider ??
+           (() => apiKey ?? const String.fromEnvironment('GOOGLE_API_KEY')),
+       _client = client ?? _googleDio(baseUrl: baseUrl),
+       _ownsClient = client == null;
 
   /// API key (defaults to `GOOGLE_GENERATIVE_AI_API_KEY` environment variable).
   final String? apiKey;
@@ -23,29 +32,47 @@ class GoogleGenerativeAIProvider {
   /// Base URL for the API.
   final String? baseUrl;
 
+  final CredentialProvider _credentialProvider;
+  final Dio _client;
+  final bool _ownsClient;
+
+  Future<String> _apiKey() async {
+    final key = await Future.value(_credentialProvider());
+    if (key == null || key.isEmpty) {
+      throw StateError('Missing GOOGLE_API_KEY for Google provider.');
+    }
+    return key;
+  }
+
+  void dispose({bool force = true}) {
+    if (_ownsClient) {
+      _client.close(force: force);
+    }
+  }
+
   /// Returns a language model for the given [modelId].
   LanguageModelV3 call(String modelId) =>
-      _GoogleLanguageModel(modelId: modelId, apiKey: apiKey, baseUrl: baseUrl);
+      _GoogleLanguageModel(modelId: modelId, client: _client, apiKey: _apiKey);
 
   /// Returns an embedding model for the given [modelId].
   EmbeddingModelV2<String> embedding(String modelId) =>
-      _GoogleEmbeddingModel(modelId: modelId, apiKey: apiKey, baseUrl: baseUrl);
+      _GoogleEmbeddingModel(modelId: modelId, client: _client, apiKey: _apiKey);
 }
 
 /// Default Google Generative AI provider instance.
-const google = GoogleGenerativeAIProvider();
+final google = GoogleGenerativeAIProvider();
 
 class _GoogleLanguageModel implements LanguageModelV3 {
-  const _GoogleLanguageModel({
+  _GoogleLanguageModel({
     required this.modelId,
-    this.apiKey,
-    this.baseUrl,
+    required this.client,
+    required this.apiKey,
   });
 
   @override
   final String modelId;
-  final String? apiKey;
-  final String? baseUrl;
+  final Dio client;
+  final CredentialProvider apiKey;
 
   @override
   String get provider => 'google';
@@ -57,7 +84,7 @@ class _GoogleLanguageModel implements LanguageModelV3 {
   Future<LanguageModelV3GenerateResult> doGenerate(
     LanguageModelV3CallOptions options,
   ) async {
-    final client = _googleDio(baseUrl: baseUrl);
+    final resolvedApiKey = await Future.value(apiKey());
     final modelPath = _modelPath(modelId);
     final providerOptions = options.providerOptions != null
         ? options.providerOptions![provider]
@@ -103,7 +130,7 @@ class _GoogleLanguageModel implements LanguageModelV3 {
     try {
       response = await client.post<Map<String, dynamic>>(
         '/$modelPath:generateContent',
-        queryParameters: {'key': _resolvedApiKey(apiKey)},
+        queryParameters: {'key': resolvedApiKey},
         data: requestBody,
         options: Options(headers: options.headers),
       );
@@ -228,7 +255,7 @@ class _GoogleLanguageModel implements LanguageModelV3 {
   Future<LanguageModelV3StreamResult> doStream(
     LanguageModelV3CallOptions options,
   ) async {
-    final client = _googleDio(baseUrl: baseUrl);
+    final resolvedApiKey = await Future.value(apiKey());
     final modelPath = _modelPath(modelId);
     final providerOptions = options.providerOptions != null
         ? options.providerOptions![provider]
@@ -273,7 +300,7 @@ class _GoogleLanguageModel implements LanguageModelV3 {
     try {
       response = await client.post<ResponseBody>(
         '/$modelPath:streamGenerateContent',
-        queryParameters: {'alt': 'sse', 'key': _resolvedApiKey(apiKey)},
+        queryParameters: {'alt': 'sse', 'key': resolvedApiKey},
         data: requestBody,
         options: Options(
           responseType: ResponseType.stream,
@@ -502,16 +529,16 @@ class _GoogleLanguageModel implements LanguageModelV3 {
 }
 
 class _GoogleEmbeddingModel implements EmbeddingModelV2<String> {
-  const _GoogleEmbeddingModel({
+  _GoogleEmbeddingModel({
     required this.modelId,
-    this.apiKey,
-    this.baseUrl,
+    required this.client,
+    required this.apiKey,
   });
 
   @override
   final String modelId;
-  final String? apiKey;
-  final String? baseUrl;
+  final Dio client;
+  final CredentialProvider apiKey;
 
   @override
   String get provider => 'google';
@@ -523,7 +550,7 @@ class _GoogleEmbeddingModel implements EmbeddingModelV2<String> {
   Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
     EmbeddingModelV2CallOptions<String> options,
   ) async {
-    final client = _googleDio(baseUrl: baseUrl);
+    final resolvedApiKey = await Future.value(apiKey());
     final modelPath = _modelPath(modelId);
     final providerOptions = options.providerOptions != null
         ? options.providerOptions![provider]
@@ -547,7 +574,7 @@ class _GoogleEmbeddingModel implements EmbeddingModelV2<String> {
     try {
       response = await client.post<Map<String, dynamic>>(
         '/$modelPath:batchEmbedContents',
-        queryParameters: {'key': _resolvedApiKey(apiKey)},
+        queryParameters: {'key': resolvedApiKey},
         data: embedRequest,
         options: Options(headers: options.headers),
       );
@@ -583,14 +610,6 @@ Dio _googleDio({String? baseUrl}) {
       headers: {'content-type': 'application/json'},
     ),
   );
-}
-
-String _resolvedApiKey(String? apiKey) {
-  final resolved = apiKey ?? const String.fromEnvironment('GOOGLE_API_KEY');
-  if (resolved.isEmpty) {
-    throw StateError('Missing GOOGLE_API_KEY for Google provider.');
-  }
-  return resolved;
 }
 
 String _modelPath(String modelId) {

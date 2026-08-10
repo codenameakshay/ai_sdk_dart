@@ -37,14 +37,24 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
   @override
   String get specificationVersion => 'v3';
 
-  Dio _client() =>
-      config.clientFactory(baseUrl: config.baseUrl, headers: config.headers());
+  Future<Map<String, String>> _resolvedHeaders() async {
+    final headers = await Future.value(config.headers());
+    return Map<String, String>.unmodifiable(headers);
+  }
+
+  Future<Dio> _client(Map<String, String> headers) async =>
+      config.client ??
+      config.clientFactory(baseUrl: config.baseUrl, headers: headers);
 
   Options _requestOptions(
+    Map<String, String> headers,
     LanguageModelV3CallOptions options, {
     ResponseType? responseType,
   }) {
-    return Options(responseType: responseType, headers: options.headers);
+    return Options(
+      responseType: responseType,
+      headers: {...headers, ...?options.headers},
+    );
   }
 
   Map<String, dynamic> _buildBody(
@@ -94,7 +104,8 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
   Future<LanguageModelV3GenerateResult> doGenerate(
     LanguageModelV3CallOptions options,
   ) async {
-    final client = _client();
+    final headers = await _resolvedHeaders();
+    final client = await _client(headers);
     final requestBody = _buildBody(options, stream: false);
     final Response<Map<String, dynamic>> response;
     try {
@@ -102,7 +113,7 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
         '/chat/completions',
         data: requestBody,
         queryParameters: config.queryParameters,
-        options: _requestOptions(options),
+        options: _requestOptions(headers, options),
       );
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);
@@ -175,7 +186,8 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
   Future<LanguageModelV3StreamResult> doStream(
     LanguageModelV3CallOptions options,
   ) async {
-    final client = _client();
+    final headers = await _resolvedHeaders();
+    final client = await _client(headers);
     final requestBody = _buildBody(options, stream: true);
     final Response<ResponseBody> response;
     try {
@@ -183,7 +195,11 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
         '/chat/completions',
         data: requestBody,
         queryParameters: config.queryParameters,
-        options: _requestOptions(options, responseType: ResponseType.stream),
+        options: _requestOptions(
+          headers,
+          options,
+          responseType: ResponseType.stream,
+        ),
       );
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);

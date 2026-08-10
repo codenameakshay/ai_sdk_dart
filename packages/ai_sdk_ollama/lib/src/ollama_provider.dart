@@ -15,22 +15,33 @@ import 'package:dio/dio.dart';
 /// final embedder = ollama.embedding('nomic-embed-text');
 /// ```
 class OllamaProvider {
-  const OllamaProvider({this.baseUrl});
+  OllamaProvider({this.baseUrl, Dio? client})
+    : _client = client ?? _ollamaDio(baseUrl: baseUrl),
+      _ownsClient = client == null;
 
   /// Base URL — defaults to `http://localhost:11434/api`.
   final String? baseUrl;
 
+  final Dio _client;
+  final bool _ownsClient;
+
+  void dispose({bool force = true}) {
+    if (_ownsClient) {
+      _client.close(force: force);
+    }
+  }
+
   /// Returns a language model for the given [model].
   LanguageModelV3 call(String model) =>
-      _OllamaLanguageModel(model: model, baseUrl: baseUrl);
+      _OllamaLanguageModel(model: model, client: _client);
 
   /// Returns an embedding model for the given [model].
   EmbeddingModelV2<String> embedding(String model) =>
-      _OllamaEmbeddingModel(model: model, baseUrl: baseUrl);
+      _OllamaEmbeddingModel(model: model, client: _client);
 }
 
 /// Default Ollama provider instance (connects to http://localhost:11434).
-const ollama = OllamaProvider();
+final ollama = OllamaProvider();
 
 // ---------------------------------------------------------------------------
 // HTTP helper
@@ -50,10 +61,10 @@ Dio _ollamaDio({String? baseUrl}) {
 // ---------------------------------------------------------------------------
 
 class _OllamaLanguageModel implements LanguageModelV3 {
-  const _OllamaLanguageModel({required this.model, this.baseUrl});
+  _OllamaLanguageModel({required this.model, required this.client});
 
   final String model;
-  final String? baseUrl;
+  final Dio client;
 
   @override
   String get modelId => model;
@@ -199,7 +210,6 @@ class _OllamaLanguageModel implements LanguageModelV3 {
   Future<LanguageModelV3GenerateResult> doGenerate(
     LanguageModelV3CallOptions options,
   ) async {
-    final client = _ollamaDio(baseUrl: baseUrl);
     final body = _buildBody(options);
 
     final Response<Map<String, dynamic>> response;
@@ -234,7 +244,6 @@ class _OllamaLanguageModel implements LanguageModelV3 {
   Future<LanguageModelV3StreamResult> doStream(
     LanguageModelV3CallOptions options,
   ) async {
-    final client = _ollamaDio(baseUrl: baseUrl);
     // Override stream to true for streaming mode.
     final body = _buildBody(options);
     body['stream'] = true;
@@ -384,10 +393,10 @@ class _OllamaLanguageModel implements LanguageModelV3 {
 // ---------------------------------------------------------------------------
 
 class _OllamaEmbeddingModel implements EmbeddingModelV2<String> {
-  const _OllamaEmbeddingModel({required this.model, this.baseUrl});
+  _OllamaEmbeddingModel({required this.model, required this.client});
 
   final String model;
-  final String? baseUrl;
+  final Dio client;
 
   @override
   String get modelId => model;
@@ -402,8 +411,6 @@ class _OllamaEmbeddingModel implements EmbeddingModelV2<String> {
   Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
     EmbeddingModelV2CallOptions<String> options,
   ) async {
-    final client = _ollamaDio(baseUrl: baseUrl);
-
     final body = <String, dynamic>{'model': model, 'input': options.values};
 
     final Response<Map<String, dynamic>> response;

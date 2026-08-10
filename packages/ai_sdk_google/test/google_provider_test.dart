@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:ai_sdk_google/ai_sdk_google.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
 import '../../ai_sdk_provider/test/contract/language_model_contract.dart';
@@ -77,6 +78,97 @@ void main() {
         result.content.whereType<LanguageModelV3ToolCallPart>().single.toolName,
         'weather',
       );
+    });
+
+    test('credentials are resolved immediately before each request', () async {
+      final apiKeys = <String?>[];
+      final server = await _TestServer.start((request) async {
+        apiKeys.add(request.uri.queryParameters['key']);
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'candidates': [
+              {
+                'finishReason': 'STOP',
+                'content': {
+                  'parts': [
+                    {'text': 'ok'},
+                  ],
+                },
+              },
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      var token = 'first-key';
+      final provider = GoogleGenerativeAIProvider(
+        baseUrl: server.baseUrl,
+        credentialProvider: () async => token,
+      );
+
+      await provider.call('gemini-2.0-flash').doGenerate(
+        LanguageModelV3CallOptions(prompt: _userPrompt('first')),
+      );
+      token = 'second-key';
+      await provider.call('gemini-2.0-flash').doGenerate(
+        LanguageModelV3CallOptions(prompt: _userPrompt('second')),
+      );
+
+      expect(apiKeys, ['first-key', 'second-key']);
+    });
+
+    test('reuses an injected client across multiple requests', () async {
+      final server = await _TestServer.start((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'candidates': [
+              {
+                'finishReason': 'STOP',
+                'content': {
+                  'parts': [
+                    {'text': 'ok'},
+                  ],
+                },
+              },
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      var interceptedRequests = 0;
+      final client = Dio(BaseOptions(baseUrl: server.baseUrl))
+        ..interceptors.add(
+          InterceptorsWrapper(
+            onRequest: (options, handler) {
+              interceptedRequests++;
+              handler.next(options);
+            },
+          ),
+        );
+      addTearDown(() => client.close(force: true));
+
+      final provider = GoogleGenerativeAIProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+        client: client,
+      );
+
+      await provider.call('gemini-2.0-flash').doGenerate(
+        LanguageModelV3CallOptions(prompt: _userPrompt('first')),
+      );
+      await provider.call('gemini-2.0-flash').doGenerate(
+        LanguageModelV3CallOptions(prompt: _userPrompt('second')),
+      );
+
+      expect(interceptedRequests, 2);
     });
 
     test('doGenerate extracts provider-native source and file parts', () async {
@@ -611,14 +703,14 @@ void main() {
     });
 
     test('exposes specification metadata for language model', () {
-      final model = const GoogleGenerativeAIProvider().call('gemini-2.0-flash');
+      final model = GoogleGenerativeAIProvider().call('gemini-2.0-flash');
       expect(model.provider, 'google');
       expect(model.specificationVersion, 'v3');
       expect(model.modelId, 'gemini-2.0-flash');
     });
 
     test('exposes specification metadata for embedding model', () {
-      final model = const GoogleGenerativeAIProvider().embedding(
+      final model = GoogleGenerativeAIProvider().embedding(
         'text-embedding-004',
       );
       expect(model.provider, 'google');
@@ -1487,7 +1579,7 @@ void main() {
     });
 
     test('resolved api key throws when missing', () async {
-      final model = const GoogleGenerativeAIProvider().call('gemini-2.0-flash');
+      final model = GoogleGenerativeAIProvider().call('gemini-2.0-flash');
       await expectLater(
         model.doGenerate(
           LanguageModelV3CallOptions(
@@ -1563,6 +1655,17 @@ Future<Map<String, dynamic>> _captureGoogleRequestBody(
   await model.doGenerate(LanguageModelV3CallOptions(prompt: prompt));
   await server.close();
   return captured;
+}
+
+LanguageModelV3Prompt _userPrompt(String text) {
+  return LanguageModelV3Prompt(
+    messages: [
+      LanguageModelV3Message(
+        role: LanguageModelV3Role.user,
+        content: [LanguageModelV3TextPart(text: text)],
+      ),
+    ],
+  );
 }
 
 class _TestServer {

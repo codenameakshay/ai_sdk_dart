@@ -522,6 +522,73 @@ void main() {
       expect(bearerHeaders.value('api-key'), isNull);
     });
 
+    test('headers are resolved immediately before each dispatch', () async {
+      final authorizations = <String?>[];
+      final server = await _TestServer.start((request) async {
+        authorizations.add(request.headers.value('authorization'));
+        _writeOk(request);
+      });
+      addTearDown(server.close);
+
+      var token = 'first-token';
+      final model = OpenAICompatibleChatLanguageModel(
+        modelId: 'm',
+        config: OpenAICompatibleConfig(
+          provider: 'test',
+          baseUrl: server.baseUrl,
+          headers: () async => {'Authorization': 'Bearer $token'},
+        ),
+      );
+
+      await model.doGenerate(
+        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+      );
+      token = 'second-token';
+      await model.doGenerate(
+        LanguageModelV3CallOptions(prompt: _userPrompt('again')),
+      );
+
+      expect(authorizations, ['Bearer first-token', 'Bearer second-token']);
+    });
+
+    test('reuses an injected client across requests', () async {
+      final server = await _TestServer.start((request) async {
+        _writeOk(request);
+      });
+      addTearDown(server.close);
+
+      var interceptedRequests = 0;
+      final client = Dio(BaseOptions(baseUrl: server.baseUrl))
+        ..interceptors.add(
+          InterceptorsWrapper(
+            onRequest: (options, handler) {
+              interceptedRequests++;
+              handler.next(options);
+            },
+          ),
+        );
+      addTearDown(() => client.close(force: true));
+
+      final model = OpenAICompatibleChatLanguageModel(
+        modelId: 'm',
+        config: OpenAICompatibleConfig(
+          provider: 'test',
+          baseUrl: server.baseUrl,
+          headers: () => {'Authorization': 'Bearer reused'},
+          client: client,
+        ),
+      );
+
+      await model.doGenerate(
+        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+      );
+      await model.doGenerate(
+        LanguageModelV3CallOptions(prompt: _userPrompt('again')),
+      );
+
+      expect(interceptedRequests, 2);
+    });
+
     test('extraBody hook injects provider-specific fields', () async {
       late Map<String, dynamic> captured;
       final server = await _TestServer.start((request) async {

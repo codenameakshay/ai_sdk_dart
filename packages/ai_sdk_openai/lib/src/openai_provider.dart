@@ -16,13 +16,39 @@ import 'package:dio/dio.dart';
 /// final result = await generateText(model: model, prompt: 'Hello');
 /// ```
 class OpenAIProvider {
-  const OpenAIProvider({this.apiKey, this.baseUrl});
+  OpenAIProvider({
+    this.apiKey,
+    this.baseUrl,
+    CredentialProvider? credentialProvider,
+    Dio? client,
+  }) : _credentialProvider =
+           credentialProvider ??
+           (() => apiKey ?? const String.fromEnvironment('OPENAI_API_KEY')),
+       _client = client ?? _openAiDio(baseUrl: baseUrl),
+       _ownsClient = client == null;
 
   /// API key (defaults to `OPENAI_API_KEY` environment variable).
   final String? apiKey;
 
   /// Base URL (defaults to `https://api.openai.com/v1`).
   final String? baseUrl;
+
+  final CredentialProvider _credentialProvider;
+  final Dio _client;
+  final bool _ownsClient;
+
+  Future<Map<String, String>> _headers() async {
+    final key = await Future.value(_credentialProvider());
+    return {
+      if (key != null && key.isNotEmpty) 'Authorization': 'Bearer $key',
+    };
+  }
+
+  void dispose({bool force = true}) {
+    if (_ownsClient) {
+      _client.close(force: force);
+    }
+  }
 
   /// Returns a language model for the given [modelId].
   ///
@@ -34,39 +60,41 @@ class OpenAIProvider {
     config: OpenAICompatibleConfig(
       provider: 'openai',
       baseUrl: baseUrl ?? 'https://api.openai.com/v1',
-      headers: () {
-        final key = apiKey ?? const String.fromEnvironment('OPENAI_API_KEY');
-        return {if (key.isNotEmpty) 'Authorization': 'Bearer $key'};
-      },
+      headers: _headers,
+      client: _client,
       extraBody: _openAiExtraBody,
     ),
   );
 
   /// Returns an embedding model for the given [modelId].
   EmbeddingModelV2<String> embedding(String modelId) =>
-      _OpenAIEmbeddingModel(modelId: modelId, apiKey: apiKey, baseUrl: baseUrl);
+      _OpenAIEmbeddingModel(
+        modelId: modelId,
+        client: _client,
+        headers: _headers,
+      );
 
   /// Returns an image generation model for the given [modelId].
   ImageModelV3 image(String modelId) =>
-      _OpenAIImageModel(modelId: modelId, apiKey: apiKey, baseUrl: baseUrl);
+      _OpenAIImageModel(modelId: modelId, client: _client, headers: _headers);
 
   /// Returns a speech (text-to-speech) model for the given [modelId].
   SpeechModelV1 speech(String modelId) =>
-      _OpenAISpeechModel(modelId: modelId, apiKey: apiKey, baseUrl: baseUrl);
+      _OpenAISpeechModel(modelId: modelId, client: _client, headers: _headers);
 
   /// Returns a transcription (speech-to-text) model for the given [modelId].
   TranscriptionModelV1 transcription(String modelId) =>
       _OpenAITranscriptionModel(
         modelId: modelId,
-        apiKey: apiKey,
-        baseUrl: baseUrl,
+        client: _client,
+        headers: _headers,
       );
 }
 
 /// Default OpenAI provider instance — call it with a model id, e.g.
 /// `openai('gpt-4.1-mini')`. Reads the API key from the `OPENAI_API_KEY`
 /// environment variable unless an [OpenAIProvider] is constructed explicitly.
-const openai = OpenAIProvider();
+final openai = OpenAIProvider();
 
 /// Builds the OpenAI-specific request-body additions for the shared base's
 /// `extraBody` hook: reasoning_effort / reasoning_summary (accepting both
@@ -84,17 +112,16 @@ Map<String, dynamic>? _openAiExtraBody(LanguageModelV3CallOptions options) {
 }
 
 class _OpenAIEmbeddingModel implements EmbeddingModelV2<String> {
-  const _OpenAIEmbeddingModel({
+  _OpenAIEmbeddingModel({
     required this.modelId,
-    this.apiKey,
-    this.baseUrl,
+    required this.client,
+    required this.headers,
   });
 
   @override
   final String modelId;
-
-  final String? apiKey;
-  final String? baseUrl;
+  final Dio client;
+  final RequestHeadersProvider headers;
 
   @override
   String get provider => 'openai';
@@ -106,7 +133,7 @@ class _OpenAIEmbeddingModel implements EmbeddingModelV2<String> {
   Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
     EmbeddingModelV2CallOptions<String> options,
   ) async {
-    final client = _openAiDio(apiKey: apiKey, baseUrl: baseUrl);
+    final resolvedHeaders = await Future.value(headers());
     final providerOptions = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
@@ -115,7 +142,7 @@ class _OpenAIEmbeddingModel implements EmbeddingModelV2<String> {
       response = await client.post<Map<String, dynamic>>(
         '/embeddings',
         data: {'model': modelId, 'input': options.values, ...?providerOptions},
-        options: Options(headers: options.headers),
+        options: Options(headers: {...resolvedHeaders, ...?options.headers}),
       );
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);
@@ -151,13 +178,16 @@ class _OpenAIEmbeddingModel implements EmbeddingModelV2<String> {
 }
 
 class _OpenAIImageModel implements ImageModelV3 {
-  const _OpenAIImageModel({required this.modelId, this.apiKey, this.baseUrl});
+  _OpenAIImageModel({
+    required this.modelId,
+    required this.client,
+    required this.headers,
+  });
 
   @override
   final String modelId;
-
-  final String? apiKey;
-  final String? baseUrl;
+  final Dio client;
+  final RequestHeadersProvider headers;
 
   @override
   String get provider => 'openai';
@@ -169,7 +199,7 @@ class _OpenAIImageModel implements ImageModelV3 {
   Future<ImageModelV3GenerateResult> doGenerate(
     ImageModelV3CallOptions options,
   ) async {
-    final client = _openAiDio(apiKey: apiKey, baseUrl: baseUrl);
+    final resolvedHeaders = await Future.value(headers());
     final providerOptions = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
@@ -187,7 +217,7 @@ class _OpenAIImageModel implements ImageModelV3 {
           if (!modelId.startsWith('gpt-image')) 'response_format': 'b64_json',
           ...?providerOptions,
         },
-        options: Options(headers: options.headers),
+        options: Options(headers: {...resolvedHeaders, ...?options.headers}),
       );
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);
@@ -221,21 +251,14 @@ class _OpenAIImageModel implements ImageModelV3 {
   }
 }
 
-Dio _openAiDio({String? apiKey, String? baseUrl}) {
-  final resolvedApiKey =
-      apiKey ?? const String.fromEnvironment('OPENAI_API_KEY');
-  final client = Dio(
+Dio _openAiDio({String? baseUrl}) {
+  return Dio(
     BaseOptions(
       baseUrl: baseUrl ?? 'https://api.openai.com/v1',
-      headers: {
-        if (resolvedApiKey.isNotEmpty)
-          'Authorization': 'Bearer $resolvedApiKey',
-        'Content-Type': 'application/json',
-      },
+      headers: {'Content-Type': 'application/json'},
       responseType: ResponseType.json,
     ),
   );
-  return client;
 }
 
 int? _intOrNull(Object? value) => switch (value) {
@@ -246,12 +269,16 @@ int? _intOrNull(Object? value) => switch (value) {
 };
 
 class _OpenAISpeechModel implements SpeechModelV1 {
-  const _OpenAISpeechModel({required this.modelId, this.apiKey, this.baseUrl});
+  _OpenAISpeechModel({
+    required this.modelId,
+    required this.client,
+    required this.headers,
+  });
 
   @override
   final String modelId;
-  final String? apiKey;
-  final String? baseUrl;
+  final Dio client;
+  final RequestHeadersProvider headers;
 
   @override
   String get provider => 'openai';
@@ -263,7 +290,7 @@ class _OpenAISpeechModel implements SpeechModelV1 {
   Future<SpeechModelV1GenerateResult> doGenerate(
     SpeechModelV1CallOptions options,
   ) async {
-    final client = _openAiDio(apiKey: apiKey, baseUrl: baseUrl);
+    final resolvedHeaders = await Future.value(headers());
     final providerOptions = options.providerOptions?['openai'];
     final requestBody = {
       'model': modelId,
@@ -280,7 +307,7 @@ class _OpenAISpeechModel implements SpeechModelV1 {
         data: requestBody,
         options: Options(
           responseType: ResponseType.bytes,
-          headers: options.headers,
+          headers: {...resolvedHeaders, ...?options.headers},
         ),
       );
     } on DioException catch (e) {
@@ -296,16 +323,16 @@ class _OpenAISpeechModel implements SpeechModelV1 {
 }
 
 class _OpenAITranscriptionModel implements TranscriptionModelV1 {
-  const _OpenAITranscriptionModel({
+  _OpenAITranscriptionModel({
     required this.modelId,
-    this.apiKey,
-    this.baseUrl,
+    required this.client,
+    required this.headers,
   });
 
   @override
   final String modelId;
-  final String? apiKey;
-  final String? baseUrl;
+  final Dio client;
+  final RequestHeadersProvider headers;
 
   @override
   String get provider => 'openai';
@@ -317,7 +344,7 @@ class _OpenAITranscriptionModel implements TranscriptionModelV1 {
   Future<TranscriptionModelV1GenerateResult> doGenerate(
     TranscriptionModelV1CallOptions options,
   ) async {
-    final client = _openAiDio(apiKey: apiKey, baseUrl: baseUrl);
+    final resolvedHeaders = await Future.value(headers());
     final formData = FormData.fromMap({
       'model': modelId,
       'file': MultipartFile.fromBytes(
@@ -334,7 +361,7 @@ class _OpenAITranscriptionModel implements TranscriptionModelV1 {
       response = await client.post<Map<String, dynamic>>(
         '/audio/transcriptions',
         data: formData,
-        options: Options(headers: options.headers),
+        options: Options(headers: {...resolvedHeaders, ...?options.headers}),
       );
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);

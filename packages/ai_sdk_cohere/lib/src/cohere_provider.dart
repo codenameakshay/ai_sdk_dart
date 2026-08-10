@@ -24,7 +24,16 @@ import 'package:dio/dio.dart';
 /// );
 /// ```
 class CohereProvider {
-  const CohereProvider({this.apiKey, this.baseUrl});
+  CohereProvider({
+    this.apiKey,
+    this.baseUrl,
+    CredentialProvider? credentialProvider,
+    Dio? client,
+  }) : _credentialProvider =
+           credentialProvider ??
+           (() => apiKey ?? const String.fromEnvironment('COHERE_API_KEY')),
+       _client = client ?? _cohereDio(baseUrl: baseUrl),
+       _ownsClient = client == null;
 
   /// Cohere API key (defaults to `COHERE_API_KEY` env variable).
   final String? apiKey;
@@ -32,35 +41,48 @@ class CohereProvider {
   /// Base URL — defaults to `https://api.cohere.com/v2`.
   final String? baseUrl;
 
+  final CredentialProvider _credentialProvider;
+  final Dio _client;
+  final bool _ownsClient;
+
+  Future<Map<String, String>> _headers() async {
+    final key = await Future.value(_credentialProvider());
+    return {
+      if (key != null && key.isNotEmpty) 'Authorization': 'Bearer $key',
+    };
+  }
+
+  void dispose({bool force = true}) {
+    if (_ownsClient) {
+      _client.close(force: force);
+    }
+  }
+
   /// Returns a language model for the given [modelId].
   LanguageModelV3 call(String modelId) =>
-      _CohereLanguageModel(modelId: modelId, apiKey: apiKey, baseUrl: baseUrl);
+      _CohereLanguageModel(modelId: modelId, client: _client, headers: _headers);
 
   /// Returns an embedding model for the given [modelId].
   EmbeddingModelV2<String> embedding(String modelId) =>
-      _CohereEmbeddingModel(modelId: modelId, apiKey: apiKey, baseUrl: baseUrl);
+      _CohereEmbeddingModel(modelId: modelId, client: _client, headers: _headers);
 
   /// Returns a reranking model for the given [modelId].
   RerankModelV1 rerank(String modelId) =>
-      _CohereRerankModel(modelId: modelId, apiKey: apiKey, baseUrl: baseUrl);
+      _CohereRerankModel(modelId: modelId, client: _client, headers: _headers);
 }
 
 /// Default Cohere provider instance.
-const cohere = CohereProvider();
+final cohere = CohereProvider();
 
 // ---------------------------------------------------------------------------
 // HTTP helper
 // ---------------------------------------------------------------------------
 
-Dio _cohereDio({String? apiKey, String? baseUrl}) {
-  final key = apiKey ?? const String.fromEnvironment('COHERE_API_KEY');
+Dio _cohereDio({String? baseUrl}) {
   return Dio(
     BaseOptions(
       baseUrl: baseUrl ?? 'https://api.cohere.com/v2',
-      headers: {
-        'Authorization': 'Bearer $key',
-        'Content-Type': 'application/json',
-      },
+      headers: {'Content-Type': 'application/json'},
     ),
   );
 }
@@ -70,16 +92,16 @@ Dio _cohereDio({String? apiKey, String? baseUrl}) {
 // ---------------------------------------------------------------------------
 
 class _CohereLanguageModel implements LanguageModelV3 {
-  const _CohereLanguageModel({
+  _CohereLanguageModel({
     required this.modelId,
-    this.apiKey,
-    this.baseUrl,
+    required this.client,
+    required this.headers,
   });
 
   @override
   final String modelId;
-  final String? apiKey;
-  final String? baseUrl;
+  final Dio client;
+  final RequestHeadersProvider headers;
 
   @override
   String get provider => 'cohere';
@@ -266,12 +288,16 @@ class _CohereLanguageModel implements LanguageModelV3 {
   Future<LanguageModelV3GenerateResult> doGenerate(
     LanguageModelV3CallOptions options,
   ) async {
-    final client = _cohereDio(apiKey: apiKey, baseUrl: baseUrl);
+    final resolvedHeaders = await Future.value(headers());
     final body = _buildBody(options);
 
     final Response<Map<String, dynamic>> response;
     try {
-      response = await client.post<Map<String, dynamic>>('/chat', data: body);
+      response = await client.post<Map<String, dynamic>>(
+        '/chat',
+        data: body,
+        options: Options(headers: {...resolvedHeaders, ...?options.headers}),
+      );
     } on DioException catch (e) {
       throw await _apiCallError(e, provider);
     }
@@ -323,7 +349,7 @@ class _CohereLanguageModel implements LanguageModelV3 {
   Future<LanguageModelV3StreamResult> doStream(
     LanguageModelV3CallOptions options,
   ) async {
-    final client = _cohereDio(apiKey: apiKey, baseUrl: baseUrl);
+    final resolvedHeaders = await Future.value(headers());
     final body = _buildBody(options)..['stream'] = true;
 
     final Response<ResponseBody> response;
@@ -331,7 +357,10 @@ class _CohereLanguageModel implements LanguageModelV3 {
       response = await client.post<ResponseBody>(
         '/chat',
         data: body,
-        options: Options(responseType: ResponseType.stream),
+        options: Options(
+          responseType: ResponseType.stream,
+          headers: {...resolvedHeaders, ...?options.headers},
+        ),
       );
     } on DioException catch (e) {
       throw await _apiCallError(e, provider);
@@ -521,16 +550,16 @@ String _generateId() => 'cohere-tool-${DateTime.now().microsecondsSinceEpoch}';
 // ---------------------------------------------------------------------------
 
 class _CohereEmbeddingModel implements EmbeddingModelV2<String> {
-  const _CohereEmbeddingModel({
+  _CohereEmbeddingModel({
     required this.modelId,
-    this.apiKey,
-    this.baseUrl,
+    required this.client,
+    required this.headers,
   });
 
   @override
   final String modelId;
-  final String? apiKey;
-  final String? baseUrl;
+  final Dio client;
+  final RequestHeadersProvider headers;
 
   @override
   String get provider => 'cohere';
@@ -542,7 +571,7 @@ class _CohereEmbeddingModel implements EmbeddingModelV2<String> {
   Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
     EmbeddingModelV2CallOptions<String> options,
   ) async {
-    final client = _cohereDio(apiKey: apiKey, baseUrl: baseUrl);
+    final resolvedHeaders = await Future.value(headers());
 
     final body = <String, dynamic>{
       'model': modelId,
@@ -553,7 +582,11 @@ class _CohereEmbeddingModel implements EmbeddingModelV2<String> {
 
     final Response<Map<String, dynamic>> response;
     try {
-      response = await client.post<Map<String, dynamic>>('/embed', data: body);
+      response = await client.post<Map<String, dynamic>>(
+        '/embed',
+        data: body,
+        options: Options(headers: {...resolvedHeaders, ...?options.headers}),
+      );
     } on DioException catch (e) {
       throw await _apiCallError(e, provider);
     }
@@ -577,12 +610,16 @@ class _CohereEmbeddingModel implements EmbeddingModelV2<String> {
 // ---------------------------------------------------------------------------
 
 class _CohereRerankModel implements RerankModelV1 {
-  const _CohereRerankModel({required this.modelId, this.apiKey, this.baseUrl});
+  _CohereRerankModel({
+    required this.modelId,
+    required this.client,
+    required this.headers,
+  });
 
   @override
   final String modelId;
-  final String? apiKey;
-  final String? baseUrl;
+  final Dio client;
+  final RequestHeadersProvider headers;
 
   @override
   String get provider => 'cohere';
@@ -592,7 +629,7 @@ class _CohereRerankModel implements RerankModelV1 {
 
   @override
   Future<RerankModelV1Result> doRerank(RerankModelV1CallOptions options) async {
-    final client = _cohereDio(apiKey: apiKey, baseUrl: baseUrl);
+    final resolvedHeaders = await Future.value(headers());
 
     final body = <String, dynamic>{
       'model': modelId,
@@ -603,7 +640,11 @@ class _CohereRerankModel implements RerankModelV1 {
 
     final Response<Map<String, dynamic>> response;
     try {
-      response = await client.post<Map<String, dynamic>>('/rerank', data: body);
+      response = await client.post<Map<String, dynamic>>(
+        '/rerank',
+        data: body,
+        options: Options(headers: {...resolvedHeaders, ...?options.headers}),
+      );
     } on DioException catch (e) {
       throw await _apiCallError(e, provider);
     }

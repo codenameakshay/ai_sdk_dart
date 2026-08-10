@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:ai_sdk_ollama/ai_sdk_ollama.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -35,6 +36,45 @@ void main() {
       );
       final model = provider('phi3');
       expect(model.modelId, 'phi3');
+    });
+
+    test('reuses an injected client across multiple requests', () async {
+      final server = await _TestServer.start((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'done': true,
+            'done_reason': 'stop',
+            'message': {'role': 'assistant', 'content': 'ok'},
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      var interceptedRequests = 0;
+      final client = Dio(BaseOptions(baseUrl: server.baseUrl))
+        ..interceptors.add(
+          InterceptorsWrapper(
+            onRequest: (options, handler) {
+              interceptedRequests++;
+              handler.next(options);
+            },
+          ),
+        );
+      addTearDown(() => client.close(force: true));
+
+      final provider = OllamaProvider(baseUrl: server.baseUrl, client: client);
+
+      await provider('llama3').doGenerate(
+        LanguageModelV3CallOptions(prompt: _userPrompt('first')),
+      );
+      await provider('llama3').doGenerate(
+        LanguageModelV3CallOptions(prompt: _userPrompt('second')),
+      );
+
+      expect(interceptedRequests, 2);
     });
   });
 
@@ -657,6 +697,17 @@ void main() {
       expect(result.embeddings, isEmpty);
     });
   });
+}
+
+LanguageModelV3Prompt _userPrompt(String text) {
+  return LanguageModelV3Prompt(
+    messages: [
+      LanguageModelV3Message(
+        role: LanguageModelV3Role.user,
+        content: [LanguageModelV3TextPart(text: text)],
+      ),
+    ],
+  );
 }
 
 class _TestServer {

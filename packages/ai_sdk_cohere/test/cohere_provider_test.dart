@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:ai_sdk_cohere/ai_sdk_cohere.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -242,6 +243,89 @@ void main() {
       expect(toolMessage['role'], 'tool');
       expect(toolMessage['tool_call_id'], 'call_1');
       expect(toolMessage['content'], 'sunny');
+    });
+
+    test('credentials are resolved immediately before each request', () async {
+      final authorizations = <String?>[];
+      final server = await _TestServer.start((request) async {
+        authorizations.add(request.headers.value('authorization'));
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'finish_reason': 'COMPLETE',
+            'message': {
+              'content': [
+                {'type': 'text', 'text': 'ok'},
+              ],
+            },
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      var token = 'first-key';
+      final provider = CohereProvider(
+        baseUrl: server.baseUrl,
+        credentialProvider: () async => token,
+      );
+
+      await provider.call('command-r-plus').doGenerate(
+        LanguageModelV3CallOptions(prompt: _userPrompt('first')),
+      );
+      token = 'second-key';
+      await provider.call('command-r-plus').doGenerate(
+        LanguageModelV3CallOptions(prompt: _userPrompt('second')),
+      );
+
+      expect(authorizations, ['Bearer first-key', 'Bearer second-key']);
+    });
+
+    test('reuses an injected client across multiple requests', () async {
+      final server = await _TestServer.start((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'finish_reason': 'COMPLETE',
+            'message': {
+              'content': [
+                {'type': 'text', 'text': 'ok'},
+              ],
+            },
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      var interceptedRequests = 0;
+      final client = Dio(BaseOptions(baseUrl: server.baseUrl))
+        ..interceptors.add(
+          InterceptorsWrapper(
+            onRequest: (options, handler) {
+              interceptedRequests++;
+              handler.next(options);
+            },
+          ),
+        );
+      addTearDown(() => client.close(force: true));
+
+      final provider = CohereProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+        client: client,
+      );
+
+      await provider.call('command-r-plus').doGenerate(
+        LanguageModelV3CallOptions(prompt: _userPrompt('first')),
+      );
+      await provider.call('command-r-plus').doGenerate(
+        LanguageModelV3CallOptions(prompt: _userPrompt('second')),
+      );
+
+      expect(interceptedRequests, 2);
     });
 
     test('parses tool calls from the NDJSON stream', () async {
@@ -601,6 +685,17 @@ void main() {
       },
     );
   });
+}
+
+LanguageModelV3Prompt _userPrompt(String text) {
+  return LanguageModelV3Prompt(
+    messages: [
+      LanguageModelV3Message(
+        role: LanguageModelV3Role.user,
+        content: [LanguageModelV3TextPart(text: text)],
+      ),
+    ],
+  );
 }
 
 class _TestServer {

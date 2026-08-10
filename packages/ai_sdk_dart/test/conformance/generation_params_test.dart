@@ -166,6 +166,75 @@ void main() {
       expect(callCount, 1);
     });
 
+    test(
+      'pre-cancelled generateText short-circuits before any provider call',
+      () async {
+        final token = CancellationToken()..cancel();
+        var callCount = 0;
+        final model = _CountingFakeModel(
+          onCall: () {
+            callCount++;
+            return LanguageModelV3GenerateResult(
+              content: [LanguageModelV3TextPart(text: 'unexpected')],
+              finishReason: LanguageModelV3FinishReason.stop,
+            );
+          },
+        );
+
+        await expectLater(
+          () => generateText(
+            model: model,
+            prompt: 'hi',
+            maxRetries: 3,
+            abortSignal: token,
+          ),
+          throwsA(isA<StateError>()),
+        );
+        expect(callCount, 0);
+      },
+    );
+
+    test(
+      'cancelling during retry backoff rethrows the triggering provider error',
+      () async {
+        final token = CancellationToken();
+        final sleepEntered = Completer<void>();
+        final sleepCompleter = Completer<void>();
+        debugConfigureRetryHooksForTests(
+          sleep: (duration) async {
+            if (!sleepEntered.isCompleted) sleepEntered.complete();
+            await sleepCompleter.future;
+          },
+          randomDouble: () => 1.0,
+        );
+
+        var callCount = 0;
+        final model = _CountingFakeModel(
+          onCall: () {
+            callCount++;
+            throw const AiApiCallError(
+              'Transient upstream failure',
+              statusCode: 503,
+              isRetryable: true,
+            );
+          },
+        );
+
+        final future = generateText(
+          model: model,
+          prompt: 'hi',
+          maxRetries: 3,
+          abortSignal: token,
+        );
+
+        await sleepEntered.future;
+        token.cancel();
+
+        await expectLater(future, throwsA(isA<AiApiCallError>()));
+        expect(callCount, 1);
+      },
+    );
+
     test('honors Retry-After headers before retrying', () async {
       final slept = <Duration>[];
       debugConfigureRetryHooksForTests(
@@ -358,6 +427,34 @@ void main() {
         await completer.future;
         expect(zoneErrors.single, isA<Exception>());
         expect(callCount, 1);
+      },
+    );
+
+    test(
+      'pre-cancelled streamText short-circuits before any provider call',
+      () async {
+        final token = CancellationToken()..cancel();
+        var callCount = 0;
+        final model = _CountingFakeModel(
+          onCall: () {
+            callCount++;
+            return LanguageModelV3GenerateResult(
+              content: [LanguageModelV3TextPart(text: 'unexpected')],
+              finishReason: LanguageModelV3FinishReason.stop,
+            );
+          },
+          isStream: true,
+        );
+
+        final result = await streamText(
+          model: model,
+          prompt: 'hi',
+          maxRetries: 3,
+          abortSignal: token,
+        );
+
+        await expectLater(result.output, throwsA(isA<StateError>()));
+        expect(callCount, 0);
       },
     );
 

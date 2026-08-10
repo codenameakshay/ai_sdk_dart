@@ -21,13 +21,13 @@ class RetryAttemptObservation {
 }
 
 class _RetryHooks {
-  DateTime Function() now = DateTime.now;
+  Duration Function()? elapsed;
   Future<void> Function(Duration) sleep = Future.delayed;
   double Function() randomDouble = _retryRandom.nextDouble;
   void Function(RetryAttemptObservation)? onAttempt;
 
   void reset() {
-    now = DateTime.now;
+    elapsed = null;
     sleep = Future.delayed;
     randomDouble = _retryRandom.nextDouble;
     onAttempt = null;
@@ -35,12 +35,12 @@ class _RetryHooks {
 }
 
 void debugConfigureRetryHooksForTests({
-  DateTime Function()? now,
+  Duration Function()? elapsed,
   Future<void> Function(Duration)? sleep,
   double Function()? randomDouble,
   void Function(RetryAttemptObservation)? onAttempt,
 }) {
-  if (now != null) _retryHooks.now = now;
+  if (elapsed != null) _retryHooks.elapsed = elapsed;
   if (sleep != null) _retryHooks.sleep = sleep;
   if (randomDouble != null) _retryHooks.randomDouble = randomDouble;
   if (onAttempt != null) _retryHooks.onAttempt = onAttempt;
@@ -56,13 +56,17 @@ Future<T> withRetry<T>({
   CancellationToken? abortSignal,
   required Future<T> Function(Duration? attemptTimeout) fn,
 }) async {
-  final startedAt = _retryHooks.now();
+  final stopwatch = Stopwatch()..start();
   var retryCount = 0;
 
   while (true) {
+    if (abortSignal?.isCancelled ?? false) {
+      throw StateError('Operation cancelled.');
+    }
+
     final attemptTimeout = _remainingTimeout(
       totalTimeout: timeout,
-      startedAt: startedAt,
+      elapsed: _elapsedSinceStart(stopwatch),
     );
     if (retryCount > 0 && attemptTimeout == Duration.zero) {
       throw TimeoutException('Retry budget exhausted.', timeout);
@@ -88,7 +92,7 @@ Future<T> withRetry<T>({
 
       final remaining = _remainingTimeout(
         totalTimeout: timeout,
-        startedAt: startedAt,
+        elapsed: _elapsedSinceStart(stopwatch),
       );
       if (remaining == Duration.zero) {
         throw TimeoutException('Retry budget exhausted.', timeout);
@@ -102,11 +106,37 @@ Future<T> withRetry<T>({
           ? requestedDelay
           : _minDuration(requestedDelay, remaining!);
       if (delay > Duration.zero) {
-        await _retryHooks.sleep(delay);
+        final cancelled = await _sleepWithCancellation(
+          duration: delay,
+          abortSignal: abortSignal,
+        );
+        if (cancelled) rethrow;
+      } else if (abortSignal?.isCancelled ?? false) {
+        rethrow;
       }
       retryCount++;
     }
   }
+}
+
+Duration _elapsedSinceStart(Stopwatch stopwatch) {
+  return _retryHooks.elapsed?.call() ?? stopwatch.elapsed;
+}
+
+Future<bool> _sleepWithCancellation({
+  required Duration duration,
+  required CancellationToken? abortSignal,
+}) async {
+  if (abortSignal == null) {
+    await _retryHooks.sleep(duration);
+    return false;
+  }
+  if (abortSignal.isCancelled) return true;
+
+  return Future.any<bool>([
+    _retryHooks.sleep(duration).then((_) => false),
+    abortSignal.onCancelled.then((_) => true),
+  ]);
 }
 
 bool _shouldRetry(
@@ -158,11 +188,10 @@ Duration? _retryAfterDelay(Object error) {
 
 Duration? _remainingTimeout({
   required Duration? totalTimeout,
-  required DateTime startedAt,
+  required Duration elapsed,
 }) {
   if (totalTimeout == null) return null;
 
-  final elapsed = _retryHooks.now().difference(startedAt);
   if (elapsed >= totalTimeout) return Duration.zero;
   return totalTimeout - elapsed;
 }

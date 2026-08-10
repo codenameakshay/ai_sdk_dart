@@ -48,14 +48,14 @@ void main() {
         () async {
           final attemptTimeouts = <Duration?>[];
           final slept = <Duration>[];
-          var now = DateTime(2026, 1, 1, 0, 0, 0);
+          var elapsed = Duration.zero;
 
           debugConfigureRetryHooksForTests(
-            now: () => now,
+            elapsed: () => elapsed,
             randomDouble: () => 0.5,
             sleep: (duration) async {
               slept.add(duration);
-              now = now.add(duration);
+              elapsed += duration;
             },
             onAttempt: (attempt) => attemptTimeouts.add(attempt.timeout),
           );
@@ -65,7 +65,7 @@ void main() {
             onGenerate: () async {
               callCount++;
               if (callCount == 1) {
-                now = now.add(const Duration(milliseconds: 50));
+                elapsed += const Duration(milliseconds: 50);
                 throw const AiApiCallError(
                   'Transient upstream failure',
                   statusCode: 503,
@@ -111,46 +111,21 @@ void main() {
       });
 
       test(
-        'unhandled TimeoutException propagates when model exceeds timeout',
+        'output future completes with TimeoutException when model exceeds timeout',
         () async {
-          // streamText() always returns a StreamTextResult immediately; the
-          // timeout causes the internal doStream to throw TimeoutException
-          // which propagates as an unhandled error in the unawaited block.
-          // This test captures it via runZonedGuarded.
           final model = _SlowStreamModel(delay: const Duration(seconds: 10));
-          final errors = <Object>[];
-          final completer = Completer<void>();
-
-          await runZonedGuarded(
-            () async {
-              final result = await streamText(
-                model: model,
-                prompt: 'hi',
-                timeout: const Duration(milliseconds: 50),
-                maxRetries: 0,
-              );
-              // Wait for text to complete (catches errors from the stream).
-              await result.text
-                  .timeout(const Duration(seconds: 2))
-                  .whenComplete(() {
-                    if (!completer.isCompleted) completer.complete();
-                  });
-            },
-            (error, stack) {
-              errors.add(error);
-              if (!completer.isCompleted) completer.complete();
-            },
+          final result = await streamText(
+            model: model,
+            prompt: 'hi',
+            timeout: const Duration(milliseconds: 50),
+            maxRetries: 0,
           );
-
-          await completer.future;
-          // Either text completes (empty) or a TimeoutException was reported.
-          // Either way verifies the timeout fires rather than hanging.
-          final hasTimeout = errors.any((e) => e is TimeoutException);
-          expect(
-            hasTimeout || errors.isEmpty,
-            isTrue,
-            reason: 'Expected TimeoutException or clean empty-text completion',
+          final outputExpectation = expectLater(
+            result.output,
+            throwsA(isA<TimeoutException>()),
           );
+          await result.fullStream.toList();
+          await outputExpectation;
         },
       );
     });

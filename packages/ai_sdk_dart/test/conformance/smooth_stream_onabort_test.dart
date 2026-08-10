@@ -121,6 +121,7 @@ void main() {
           abortCalled = true;
         },
       );
+      final outputDrain = result.output.catchError((_) => null);
 
       // Cancel before consuming stream
       token.cancel();
@@ -130,6 +131,7 @@ void main() {
       expect(abortCalled, isTrue);
       // Consume stream to avoid dangling subscription
       await result.text.catchError((_) => '');
+      await outputDrain;
     });
 
     test('onAbort is not called when stream finishes normally', () async {
@@ -175,10 +177,13 @@ void main() {
       // Regression: cancelling must actually break the read loop, not merely
       // fire the onAbort callback while the stream keeps draining.
       final token = CancellationToken();
-      final model = _SlowStreamModel(
-        const ['one ', 'two ', 'three ', 'four ', 'five'],
-        chunkDelayInMs: 25,
-      );
+      final model = _SlowStreamModel(const [
+        'one ',
+        'two ',
+        'three ',
+        'four ',
+        'five',
+      ], chunkDelayInMs: 25);
       final received = <String>[];
       final result = await streamText(
         model: model,

@@ -8,27 +8,37 @@ on:
 jobs:
   analyze-test-coverage:
     runs-on: ubuntu-latest
+    env:
+      FLUTTER_VERSION: 3.44.3
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Flutter (includes Dart)
+      - name: Verify pinned Flutter version
+        run: |
+          test "$(python3 -c 'import json; print(json.load(open(".fvmrc"))["flutter"])')" = "$FLUTTER_VERSION"
+
+      - name: Set up Flutter ${{ env.FLUTTER_VERSION }} (includes Dart)
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version: 3.44.3
+          flutter-version: ${{ env.FLUTTER_VERSION }}
 
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Verify formatting
+        run: make format-check DART=dart
+
       - name: Analyze
-        run: dart analyze .
+        run: make analyze DART=dart FLUTTER=flutter
+
+      - name: Test
+        run: make test DART=dart FLUTTER=flutter
 
       - name: Activate coverage tool
         run: dart pub global activate coverage
 
-      # Ratchet gate: prevents coverage regressions. Total is ~99.9% (11 of 12
-      # packages at 100%; flutter_ui sits at ~99.5% on a few animation/defensive
-      # branches). Raise toward 100 as those close.
+      # Ratchet gate: prevents coverage regressions across the published packages.
       - name: Test with coverage (gate)
-        run: tool/coverage.sh 99
+        run: make coverage-check DART=dart FLUTTER=flutter

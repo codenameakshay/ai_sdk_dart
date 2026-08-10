@@ -25,8 +25,13 @@ MERGED="$ROOT/coverage/lcov.info"
 mkdir -p "$ROOT/coverage"
 : > "$MERGED"
 
+if [ ! -f "$PKG_CONFIG" ]; then
+  echo "Missing $PKG_CONFIG. Run '$DART pub get' first."
+  exit 1
+fi
+
 # Pure-Dart packages (run with `dart test --coverage`).
-DART_PKGS="ai_sdk_dart ai_sdk_openai ai_sdk_openai_compatible ai_sdk_anthropic ai_sdk_google ai_sdk_azure ai_sdk_cohere ai_sdk_groq ai_sdk_mistral ai_sdk_ollama ai_sdk_mcp"
+DART_PKGS="ai_sdk_dart ai_sdk_provider ai_sdk_openai ai_sdk_openai_compatible ai_sdk_anthropic ai_sdk_google ai_sdk_azure ai_sdk_cohere ai_sdk_groq ai_sdk_mistral ai_sdk_ollama ai_sdk_mcp"
 
 # Flutter packages (run with `flutter test --coverage`, which emits lcov directly).
 FLUTTER_PKGS="ai_sdk_flutter_ui"
@@ -54,6 +59,7 @@ done
 
 for p in $FLUTTER_PKGS; do
   [ -d "$ROOT/packages/$p/test" ] || continue
+  rm -rf "$ROOT/packages/$p/coverage"
   ( cd "$ROOT/packages/$p"; $FLUTTER test --coverage >/dev/null )
   summarize "$ROOT/packages/$p/coverage/lcov.info" "$p"
   cat "$ROOT/packages/$p/coverage/lcov.info" >> "$MERGED"

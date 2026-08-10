@@ -21,8 +21,8 @@
 #   make dry-run           # pub publish --dry-run for all packages
 # ──────────────────────────────────────────────────────────────────────────────
 
-FLUTTER   := fvm flutter
-DART      := fvm dart
+FLUTTER   ?= fvm flutter
+DART      ?= fvm dart
 
 FLUTTER_APP  := examples/flutter_chat
 ADVANCED_APP := examples/advanced_app
@@ -55,7 +55,7 @@ ifdef GOOGLE_API_KEY
 endif
 
 .PHONY: all get run run-web run-advanced run-advanced-web run-basic \
-        test analyze format dry-run publish clean help \
+        test analyze format format-check dry-run publish clean help \
         coverage coverage-check
 
 all: help
@@ -115,6 +115,7 @@ test:
 	$(DART) test packages/ai_sdk_mistral/test/
 	$(DART) test packages/ai_sdk_ollama/test/
 	$(DART) test packages/ai_sdk_mcp/test/
+	$(FLUTTER) test packages/ai_sdk_flutter_ui/
 	$(FLUTTER) test $(FLUTTER_APP)/
 	$(FLUTTER) test $(ADVANCED_APP)/
 
@@ -149,6 +150,10 @@ coverage-check:
 ## Format all Dart source files
 format:
 	$(DART) format packages/ examples/
+
+## Verify formatting without writing changes
+format-check:
+	$(DART) format --output=none --set-exit-if-changed packages/ examples/
 
 # ── Publish ───────────────────────────────────────────────────────────────────
 
@@ -200,6 +205,7 @@ help:
 	@echo "  make test              Run all package tests"
 	@echo "  make analyze           Run dart analyze across all packages"
 	@echo "  make format            Format all Dart source files"
+	@echo "  make format-check      Verify Dart formatting without writing changes"
 	@echo "  make dry-run           pub publish --dry-run for all packages"
 	@echo "  make publish           pub publish for all packages (run dry-run first)"
 	@echo ""

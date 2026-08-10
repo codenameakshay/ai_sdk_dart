@@ -414,6 +414,192 @@ void main() {
       expect(finish.usage?.inputTokens, 6);
       expect(finish.usage?.outputTokens, 8);
     });
+
+    test('does not duplicate an explicit tool-call-end at message end', () async {
+      final server = await _TestServer.start((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          '${jsonEncode({
+            'type': 'tool-call-start',
+            'index': 0,
+            'delta': {
+              'message': {
+                'tool_calls': {
+                  'id': 'call_explicit_end',
+                  'type': 'function',
+                  'function': {'name': 'weather', 'arguments': '{"city":"Berlin"}'},
+                },
+              },
+            },
+          })}\n',
+        );
+        request.response.write(
+          '${jsonEncode({'type': 'tool-call-end', 'index': 0})}\n',
+        );
+        request.response.write(
+          '${jsonEncode({
+            'type': 'message-end',
+            'delta': {
+              'finish_reason': 'TOOL_CALL',
+              'usage': {
+                'tokens': {'input_tokens': 2, 'output_tokens': 3},
+              },
+            },
+          })}\n',
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = CohereProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).call('command-r-plus');
+
+      final streamResult = await model.doStream(
+        LanguageModelV3CallOptions(
+          prompt: LanguageModelV3Prompt(
+            messages: [
+              LanguageModelV3Message(
+                role: LanguageModelV3Role.user,
+                content: [LanguageModelV3TextPart(text: 'weather?')],
+              ),
+            ],
+          ),
+        ),
+      );
+
+      final parts = await streamResult.stream.toList();
+      final ends = parts.whereType<StreamPartToolCallEnd>().toList();
+      expect(ends, hasLength(1));
+      expect(ends.single.toolCallId, 'call_explicit_end');
+      expect(ends.single.toolName, 'weather');
+      expect(ends.single.input, {'city': 'Berlin'});
+
+      final finish = parts.whereType<StreamPartFinish>().single;
+      expect(parts.indexOf(ends.single), lessThan(parts.indexOf(finish)));
+      expect(finish.usage?.inputTokens, 2);
+      expect(finish.usage?.outputTokens, 3);
+    });
+
+    test(
+      'finalizes interleaved pending tool-call indexes in sorted order before finish',
+      () async {
+        final server = await _TestServer.start((request) async {
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            '${jsonEncode({
+              'type': 'tool-call-start',
+              'index': 1,
+              'delta': {
+                'message': {
+                  'tool_calls': {
+                    'id': 'call_2',
+                    'type': 'function',
+                    'function': {'name': 'forecast', 'arguments': '{"days":'},
+                  },
+                },
+              },
+            })}\n',
+          );
+          request.response.write(
+            '${jsonEncode({
+              'type': 'tool-call-start',
+              'index': 0,
+              'delta': {
+                'message': {
+                  'tool_calls': {
+                    'id': 'call_1',
+                    'type': 'function',
+                    'function': {'name': 'weather', 'arguments': '{"city":"'},
+                  },
+                },
+              },
+            })}\n',
+          );
+          request.response.write(
+            '${jsonEncode({
+              'type': 'tool-call-delta',
+              'index': 1,
+              'delta': {
+                'message': {
+                  'tool_calls': {
+                    'function': {'arguments': '5,"unit":"C"}'},
+                  },
+                },
+              },
+            })}\n',
+          );
+          request.response.write(
+            '${jsonEncode({
+              'type': 'tool-call-delta',
+              'index': 0,
+              'delta': {
+                'message': {
+                  'tool_calls': {
+                    'function': {'arguments': 'Paris"}'},
+                  },
+                },
+              },
+            })}\n',
+          );
+          request.response.write(
+            '${jsonEncode({
+              'type': 'message-end',
+              'delta': {
+                'finish_reason': 'TOOL_CALL',
+                'usage': {
+                  'tokens': {'input_tokens': 7, 'output_tokens': 9},
+                },
+              },
+            })}\n',
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = CohereProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('command-r-plus');
+
+        final streamResult = await model.doStream(
+          LanguageModelV3CallOptions(
+            prompt: LanguageModelV3Prompt(
+              messages: [
+                LanguageModelV3Message(
+                  role: LanguageModelV3Role.user,
+                  content: [LanguageModelV3TextPart(text: 'weather?')],
+                ),
+              ],
+            ),
+          ),
+        );
+
+        final parts = await streamResult.stream.toList();
+        final ends = parts.whereType<StreamPartToolCallEnd>().toList();
+        expect(ends, hasLength(2));
+        expect(ends.map((end) => end.toolCallId).toList(), [
+          'call_1',
+          'call_2',
+        ]);
+        expect(ends.map((end) => end.toolName).toList(), [
+          'weather',
+          'forecast',
+        ]);
+        expect(ends[0].input, {'city': 'Paris'});
+        expect(ends[1].input, {'days': 5, 'unit': 'C'});
+
+        final finish = parts.whereType<StreamPartFinish>().single;
+        expect(parts.indexOf(ends[0]), lessThan(parts.indexOf(ends[1])));
+        expect(parts.indexOf(ends[1]), lessThan(parts.indexOf(finish)));
+        expect(finish.finishReason, LanguageModelV3FinishReason.toolCalls);
+        expect(finish.usage?.inputTokens, 7);
+        expect(finish.usage?.outputTokens, 9);
+      },
+    );
   });
 }
 

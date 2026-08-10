@@ -1,3 +1,5 @@
+import 'package:ai_sdk_dart/ai_sdk_dart.dart';
+import 'package:ai_sdk_dart/test.dart';
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -28,6 +30,22 @@ void main() {
         ),
       ),
     );
+
+    testWidgets('stays hidden before any scroll view attaches', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.bottomRight,
+              child: ScrollToBottomButton(controller: controller),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.byKey(const ValueKey('scroll-to-bottom')), findsNothing);
+    });
 
     testWidgets('is hidden when the list is already at the bottom', (
       tester,
@@ -133,5 +151,30 @@ void main() {
       await tester.pump();
       expect(find.byKey(const ValueKey('scroll-to-bottom')), findsNothing);
     });
+
+    testWidgets(
+      'stays hidden in scaffold empty state before the list attaches',
+      (tester) async {
+        final chatController = ChatController();
+        addTearDown(chatController.dispose);
+        final agent = ToolLoopAgent(model: MockLanguageModelV3());
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: AiChatScaffold(
+                controller: chatController,
+                agent: agent,
+                emptyState: const Center(child: Text('No messages yet')),
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        expect(find.text('No messages yet'), findsOneWidget);
+        expect(find.byKey(const ValueKey('scroll-to-bottom')), findsNothing);
+      },
+    );
   });
 }

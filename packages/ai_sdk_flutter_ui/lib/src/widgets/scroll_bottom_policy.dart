@@ -19,9 +19,9 @@ abstract final class ScrollBottomPolicy {
     ScrollController controller, {
     double threshold = ScrollBottomPolicy.threshold,
   }) {
-    if (!controller.hasClients) return false;
+    if (!controller.hasClients) return true;
     final position = controller.position;
-    if (!position.hasContentDimensions) return false;
+    if (!position.hasContentDimensions) return true;
     return isNearBottom(position, threshold: threshold);
   }
 }

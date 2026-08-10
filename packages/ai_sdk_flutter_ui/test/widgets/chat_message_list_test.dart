@@ -37,18 +37,22 @@ Widget _scrollHarness({
   required ChatController controller,
   required ScrollController scrollController,
   bool disableAnimations = false,
+  double viewportHeight = 240,
+  double rowHeight = 72,
+  Widget? emptyState,
 }) {
   return MaterialApp(
     home: MediaQuery(
       data: MediaQueryData(disableAnimations: disableAnimations),
       child: Scaffold(
         body: SizedBox(
-          height: 240,
+          height: viewportHeight,
           child: ChatMessageList(
             controller: controller,
             scrollController: scrollController,
+            emptyState: emptyState,
             messageBuilder: (context, message, isStreaming) => SizedBox(
-              height: 72,
+              height: rowHeight,
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
@@ -499,6 +503,51 @@ void main() {
 
         expect(secondScrollController.jumpCallCount, 1);
         expect(firstScrollController.jumpCallCount, 0);
+      },
+    );
+
+    testWidgets(
+      'first streamed response auto-pins after empty state attaches',
+      (tester) async {
+        final controller = ChatController();
+        addTearDown(controller.dispose);
+        final scrollController = _TrackingScrollController();
+        addTearDown(scrollController.dispose);
+        final model = HoldingTextModel('streamed reply');
+
+        await tester.pumpWidget(
+          _scrollHarness(
+            controller: controller,
+            scrollController: scrollController,
+            viewportHeight: 120,
+            rowHeight: 100,
+            emptyState: const Center(child: Text('Start chatting')),
+          ),
+        );
+        await tester.pump();
+
+        expect(find.text('Start chatting'), findsOneWidget);
+        expect(scrollController.hasClients, isFalse);
+
+        controller.sendMessage(
+          agent: ToolLoopAgent(model: model),
+          text: 'ask',
+        );
+        await _pumpUntilStreamingStarts(tester, controller);
+        await tester.pumpAndSettle();
+
+        expect(scrollController.hasClients, isTrue);
+        expect(
+          scrollController.position.pixels,
+          scrollController.position.maxScrollExtent,
+        );
+        expect(
+          scrollController.animateCallCount + scrollController.jumpCallCount,
+          greaterThan(0),
+        );
+
+        model.finish();
+        await tester.pumpAndSettle();
       },
     );
   });

@@ -4,7 +4,6 @@ import 'dart:io';
 
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_mcp/ai_sdk_mcp.dart';
-import 'package:ai_sdk_mcp/src/json_rpc.dart';
 import 'package:test/test.dart';
 
 // ---------------------------------------------------------------------------
@@ -1264,6 +1263,106 @@ void main() {
           .timeout(const Duration(seconds: 20));
       expect(resp.isError, isTrue);
       expect(resp.error!['message'], contains('Method not found'));
+    });
+
+    test(
+      'process exit fails each pending request once and rejects later sends',
+      () async {
+        final transport = StdioMCPTransport(command: dartExe, args: [fixture]);
+        addTearDown(transport.close);
+
+        final first = transport.send(
+          JsonRpcRequest(method: 'exit_after_delay', id: 1),
+        );
+        final second = transport.send(
+          JsonRpcRequest(method: 'exit_after_delay', id: 2),
+        );
+
+        final exitMatcher = throwsA(
+          isA<MCPException>().having(
+            (e) => e.message,
+            'message',
+            contains('Stdio MCP process exited with code 17'),
+          ),
+        );
+
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+        await expectLater(first, exitMatcher);
+        await expectLater(second, exitMatcher);
+        await expectLater(
+          transport.send(JsonRpcRequest(method: 'initialize', id: 3)),
+          exitMatcher,
+        );
+        await expectLater(
+          transport.sendNotification(
+            JsonRpcNotification(method: 'notifications/ping'),
+          ),
+          exitMatcher,
+        );
+      },
+    );
+
+    test('close() fails pending requests and rejects later sends', () async {
+      final transport = StdioMCPTransport(command: dartExe, args: [fixture]);
+
+      final first = transport.send(JsonRpcRequest(method: 'stall', id: 1));
+      final second = transport.send(
+        JsonRpcRequest(method: 'tools/list', id: 2),
+      );
+
+      final closeMatcher = throwsA(
+        isA<MCPException>().having(
+          (e) => e.message,
+          'message',
+          contains('Stdio transport closed'),
+        ),
+      );
+
+      final firstExpectation = expectLater(first, closeMatcher);
+      final secondExpectation = expectLater(second, closeMatcher);
+
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await transport.close();
+
+      await firstExpectation;
+      await secondExpectation;
+      await expectLater(
+        transport.send(JsonRpcRequest(method: 'initialize', id: 3)),
+        closeMatcher,
+      );
+      await expectLater(
+        transport.sendNotification(
+          JsonRpcNotification(method: 'notifications/ping'),
+        ),
+        closeMatcher,
+      );
+    });
+
+    test('captures bounded stderr in process-exit errors', () async {
+      final transport = StdioMCPTransport(command: dartExe, args: [fixture]);
+      addTearDown(transport.close);
+
+      await expectLater(
+        transport.send(JsonRpcRequest(method: 'exit_with_stderr', id: 1)),
+        throwsA(
+          isA<MCPException>()
+              .having(
+                (e) => e.message,
+                'message',
+                contains('Stdio MCP process exited with code 23'),
+              )
+              .having(
+                (e) => e.message,
+                'message',
+                contains('stderr-tail-marker'),
+              )
+              .having(
+                (e) => e.message.length,
+                'message length',
+                lessThan(5000),
+              ),
+        ),
+      );
     });
 
     test('close() is idempotent and tears down the process', () async {

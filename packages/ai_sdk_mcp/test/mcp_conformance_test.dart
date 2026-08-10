@@ -3,9 +3,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:ai_sdk_mcp/ai_sdk_mcp.dart';
-// JsonRpcRequest is internal (not re-exported by the barrel); the failure-path
-// tests drive the transport directly, so import it from src.
-import 'package:ai_sdk_mcp/src/json_rpc.dart' show JsonRpcRequest;
 import 'package:test/test.dart';
 
 // ---------------------------------------------------------------------------

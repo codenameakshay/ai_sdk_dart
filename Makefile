@@ -121,6 +121,7 @@ test:
 
 ## Run dart analyze across all packages
 analyze:
+	$(DART) analyze $(DART_APP)/
 	$(DART) analyze packages/ai_sdk_dart/
 	$(DART) analyze packages/ai_sdk_provider/
 	$(DART) analyze packages/ai_sdk_openai_compatible/

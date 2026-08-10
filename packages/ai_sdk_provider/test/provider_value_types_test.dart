@@ -193,7 +193,7 @@ void main() {
       expect(options.providerOptions?['openai']?['reasoningEffort'], 'medium');
       expect(options.outputSchema?['type'], 'object');
 
-      expect((imageData as DataContentBytes).bytes, same(imageBytes));
+      expect(imageData.bytes, same(imageBytes));
       expect(base64Data.base64, 'AQID');
       expect(urlData.url.host, 'example.com');
 

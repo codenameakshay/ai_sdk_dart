@@ -10,6 +10,7 @@ import '../stop_conditions/stop_conditions.dart';
 import '../telemetry/telemetry.dart';
 import '../tools/tool.dart';
 import 'generate_text.dart';
+import 'partial_json.dart';
 import 'retry_helper.dart';
 
 extension _CompleteIfPending<T> on Completer<T> {
@@ -644,682 +645,689 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   }
 
   final runFuture = Future<void>(() async {
-      final steps = <GenerateTextStep>[];
-      final overallTextBuffer = StringBuffer();
-      var emittedArrayElements = 0;
-      StreamPartFinish? lastFinishPart;
-      var lastContent = <LanguageModelV3ContentPart>[];
-      Object? lastRequestBody;
-      Object? lastResponseBody;
-      LanguageModelV3ResponseMetadata? lastResponseMetadata;
-      var lastWarnings = <String>[];
-      Map<Object?, Object?>? rawEnvelope;
+    final steps = <GenerateTextStep>[];
+    final overallTextBuffer = StringBuffer();
+    final partialJsonTracker = PartialJsonTracker();
+    var emittedArrayElements = 0;
+    String? lastPartialFingerprint;
+    StreamPartFinish? lastFinishPart;
+    var lastContent = <LanguageModelV3ContentPart>[];
+    Object? lastRequestBody;
+    Object? lastResponseBody;
+    LanguageModelV3ResponseMetadata? lastResponseMetadata;
+    var lastWarnings = <String>[];
+    Map<Object?, Object?>? rawEnvelope;
 
-      void refreshEnvelopeFromRaw() {
-        final raw = rawEnvelope;
-        if (raw == null) return;
-        lastRequestBody = raw['requestBody'];
-        lastResponseBody = raw['body'];
-        final rawWarnings = raw['warnings'];
-        if (rawWarnings is List) {
-          lastWarnings = rawWarnings.map((e) => e.toString()).toList();
-        }
-        final meta = raw['responseMetadata'];
-        if (meta is Map) {
-          final map = meta.cast<Object?, Object?>();
-          final ts = map['timestamp']?.toString();
-          lastResponseMetadata = LanguageModelV3ResponseMetadata(
-            id: map['id']?.toString(),
-            modelId: map['modelId']?.toString(),
-            timestamp: ts == null ? null : DateTime.tryParse(ts),
-            headers: null,
-            body: lastResponseBody,
-            requestBody: lastRequestBody,
-          );
-        }
+    void refreshEnvelopeFromRaw() {
+      final raw = rawEnvelope;
+      if (raw == null) return;
+      lastRequestBody = raw['requestBody'];
+      lastResponseBody = raw['body'];
+      final rawWarnings = raw['warnings'];
+      if (rawWarnings is List) {
+        lastWarnings = rawWarnings.map((e) => e.toString()).toList();
       }
+      final meta = raw['responseMetadata'];
+      if (meta is Map) {
+        final map = meta.cast<Object?, Object?>();
+        final ts = map['timestamp']?.toString();
+        lastResponseMetadata = LanguageModelV3ResponseMetadata(
+          id: map['id']?.toString(),
+          modelId: map['modelId']?.toString(),
+          timestamp: ts == null ? null : DateTime.tryParse(ts),
+          headers: null,
+          body: lastResponseBody,
+          requestBody: lastRequestBody,
+        );
+      }
+    }
 
-      _safeInvoke(
-        () => experimentalOnStart?.call(
-          GenerateTextExperimentalStartEvent(
-            model: model,
-            system: systemInstruction,
-            prompt: prompt,
-            messages: List.unmodifiable(normalizedMessages),
-            experimentalContext: experimentalContext,
-          ),
+    _safeInvoke(
+      () => experimentalOnStart?.call(
+        GenerateTextExperimentalStartEvent(
+          model: model,
+          system: systemInstruction,
+          prompt: prompt,
+          messages: List.unmodifiable(normalizedMessages),
+          experimentalContext: experimentalContext,
         ),
+      ),
+    );
+
+    try {
+      throwIfCancelled(abortSignal);
+      fullController.add(const StreamTextStartEvent());
+
+      final _allStopConditions = resolveStopConditions(
+        stopWhen,
+        stopConditions,
       );
-
-      try {
+      final totalSteps = resolveStepBudget(
+        hasTools: tools.isNotEmpty,
+        stopWhen: stopWhen,
+        maxSteps: maxSteps,
+      );
+      for (var stepNumber = 0; stepNumber < totalSteps; stepNumber++) {
         throwIfCancelled(abortSignal);
-        fullController.add(const StreamTextStartEvent());
+        fullController.add(StreamTextStartStepEvent(stepNumber: stepNumber));
 
-        final _allStopConditions = resolveStopConditions(
-          stopWhen,
-          stopConditions,
+        final prepareResult = await Future.value(
+          prepareStep?.call(
+            GenerateTextPrepareStepContext(
+              model: model,
+              stepNumber: stepNumber,
+              steps: List.unmodifiable(steps),
+              messages: List.unmodifiable(normalizedMessages),
+              stopConditions: _allStopConditions,
+              experimentalContext: experimentalContext,
+            ),
+          ),
         );
-        final totalSteps = resolveStepBudget(
-          hasTools: tools.isNotEmpty,
-          stopWhen: stopWhen,
-          maxSteps: maxSteps,
+
+        final stepModel = prepareResult?.model ?? model;
+        final stepToolChoice = prepareResult?.toolChoice ?? toolChoice;
+        final stepMessages = prepareResult?.messages ?? normalizedMessages;
+        final stepProviderOptions =
+            prepareResult?.providerOptions ?? providerOptions;
+        final activeTools = _selectActiveTools(
+          tools,
+          prepareResult?.activeTools ??
+              (activeToolNames.isNotEmpty ? activeToolNames : null),
         );
-        for (var stepNumber = 0; stepNumber < totalSteps; stepNumber++) {
-          throwIfCancelled(abortSignal);
-          fullController.add(StreamTextStartStepEvent(stepNumber: stepNumber));
+        final toolSelection = _resolveToolSelection(
+          tools: activeTools,
+          toolChoice: stepToolChoice,
+        );
 
-          final prepareResult = await Future.value(
-            prepareStep?.call(
-              GenerateTextPrepareStepContext(
-                model: model,
-                stepNumber: stepNumber,
-                steps: List.unmodifiable(steps),
-                messages: List.unmodifiable(normalizedMessages),
-                stopConditions: _allStopConditions,
-                experimentalContext: experimentalContext,
-              ),
+        _safeInvoke(
+          () => experimentalOnStepStart?.call(
+            GenerateTextExperimentalStepStartEvent(
+              stepNumber: stepNumber,
+              model: stepModel,
+              messages: List.unmodifiable(stepMessages),
+              steps: List.unmodifiable(steps),
             ),
-          );
+          ),
+        );
 
-          final stepModel = prepareResult?.model ?? model;
-          final stepToolChoice = prepareResult?.toolChoice ?? toolChoice;
-          final stepMessages = prepareResult?.messages ?? normalizedMessages;
-          final stepProviderOptions =
-              prepareResult?.providerOptions ?? providerOptions;
-          final activeTools = _selectActiveTools(
-            tools,
-            prepareResult?.activeTools ??
-                (activeToolNames.isNotEmpty ? activeToolNames : null),
-          );
-          final toolSelection = _resolveToolSelection(
-            tools: activeTools,
-            toolChoice: stepToolChoice,
-          );
+        final streamCallOptions = LanguageModelV3CallOptions(
+          prompt: LanguageModelV3Prompt(
+            system: systemInstruction,
+            messages: stepMessages,
+          ),
+          tools: toolSelection.exposedTools.entries
+              .map(
+                (entry) => LanguageModelV3FunctionTool(
+                  name: entry.key,
+                  description: entry.value.description,
+                  inputSchema: entry.value.inputSchema.jsonSchema,
+                  strict: entry.value.strict,
+                  inputExamples: entry.value.inputExamples
+                      .map((example) => example.input)
+                      .toList(),
+                ),
+              )
+              .toList(),
+          providerDefinedTools: providerDefinedTools,
+          toolChoice: toolSelection.toolChoice,
+          maxOutputTokens: maxOutputTokens,
+          temperature: temperature,
+          topP: topP,
+          topK: topK,
+          presencePenalty: presencePenalty,
+          frequencyPenalty: frequencyPenalty,
+          stopSequences: stopSequences,
+          seed: seed,
+          headers: headers,
+          providerOptions: stepProviderOptions,
+        );
+        final response = await withRetry(
+          maxRetries: maxRetries,
+          timeout: timeout,
+          abortSignal: abortSignal,
+          fn: (attemptTimeout) {
+            final call = stepModel.doStream(streamCallOptions);
+            return attemptTimeout != null ? call.timeout(attemptTimeout) : call;
+          },
+        );
+        if (response.rawResponse is Map) {
+          rawEnvelope = (response.rawResponse as Map).cast<Object?, Object?>();
+          refreshEnvelopeFromRaw();
+        }
 
-          _safeInvoke(
-            () => experimentalOnStepStart?.call(
-              GenerateTextExperimentalStepStartEvent(
-                stepNumber: stepNumber,
-                model: stepModel,
-                messages: List.unmodifiable(stepMessages),
-                steps: List.unmodifiable(steps),
-              ),
-            ),
-          );
+        final stepTextById = <String, StringBuffer>{};
+        final stepToolCalls = <LanguageModelV3ToolCallPart>[];
+        final stepToolResults = <LanguageModelV3ToolResultPart>[];
+        final stepApprovalRequests = <LanguageModelV3ToolApprovalRequestPart>[];
+        final stepContent = <LanguageModelV3ContentPart>[];
+        final toolInputBuffers = <String, StringBuffer>{};
+        var inReasoning = false;
+        var reasoningClosed = false;
+        const reasoningId = 'reasoning-0';
+        final reasoningBuffer = StringBuffer();
+        StreamPartFinish? stepFinishPart;
 
-          final streamCallOptions = LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
-              system: systemInstruction,
-              messages: stepMessages,
-            ),
-            tools: toolSelection.exposedTools.entries
-                .map(
-                  (entry) => LanguageModelV3FunctionTool(
-                    name: entry.key,
-                    description: entry.value.description,
-                    inputSchema: entry.value.inputSchema.jsonSchema,
-                    strict: entry.value.strict,
-                    inputExamples: entry.value.inputExamples
-                        .map((example) => example.input)
-                        .toList(),
-                  ),
-                )
-                .toList(),
-            providerDefinedTools: providerDefinedTools,
-            toolChoice: toolSelection.toolChoice,
-            maxOutputTokens: maxOutputTokens,
-            temperature: temperature,
-            topP: topP,
-            topK: topK,
-            presencePenalty: presencePenalty,
-            frequencyPenalty: frequencyPenalty,
-            stopSequences: stopSequences,
-            seed: seed,
-            headers: headers,
-            providerOptions: stepProviderOptions,
-          );
-          final response = await withRetry(
-            maxRetries: maxRetries,
-            timeout: timeout,
-            abortSignal: abortSignal,
-            fn: (attemptTimeout) {
-              final call = stepModel.doStream(streamCallOptions);
-              return attemptTimeout != null
-                  ? call.timeout(attemptTimeout)
-                  : call;
-            },
-          );
-          if (response.rawResponse is Map) {
-            rawEnvelope = (response.rawResponse as Map)
-                .cast<Object?, Object?>();
-            refreshEnvelopeFromRaw();
-          }
+        final iterator = StreamIterator<LanguageModelV3StreamPart>(
+          response.stream,
+        );
+        try {
+          while (await moveNextOrCancellation(iterator, abortSignal)) {
+            final part = iterator.current;
+            rawController.add(part);
+            fullController.add(StreamTextRawEvent(part: part));
+            onChunk?.call(StreamTextRawChunk(part: part));
 
-          final stepTextById = <String, StringBuffer>{};
-          final stepToolCalls = <LanguageModelV3ToolCallPart>[];
-          final stepToolResults = <LanguageModelV3ToolResultPart>[];
-          final stepApprovalRequests =
-              <LanguageModelV3ToolApprovalRequestPart>[];
-          final stepContent = <LanguageModelV3ContentPart>[];
-          final toolInputBuffers = <String, StringBuffer>{};
-          var inReasoning = false;
-          var reasoningClosed = false;
-          const reasoningId = 'reasoning-0';
-          final reasoningBuffer = StringBuffer();
-          StreamPartFinish? stepFinishPart;
+            if (inReasoning &&
+                part is! StreamPartReasoningDelta &&
+                !reasoningClosed) {
+              stepContent.add(
+                LanguageModelV3ReasoningPart(text: reasoningBuffer.toString()),
+              );
+              fullController.add(
+                const StreamTextReasoningEndEvent(id: reasoningId),
+              );
+              reasoningClosed = true;
+            }
 
-          final iterator = StreamIterator<LanguageModelV3StreamPart>(
-            response.stream,
-          );
-          try {
-            while (await moveNextOrCancellation(iterator, abortSignal)) {
-              final part = iterator.current;
-              rawController.add(part);
-              fullController.add(StreamTextRawEvent(part: part));
-              onChunk?.call(StreamTextRawChunk(part: part));
-
-              if (inReasoning &&
-                  part is! StreamPartReasoningDelta &&
-                  !reasoningClosed) {
-                stepContent.add(
-                  LanguageModelV3ReasoningPart(
-                    text: reasoningBuffer.toString(),
-                  ),
+            switch (part) {
+              case StreamPartTextStart(:final id):
+                stepTextById[id] = StringBuffer();
+                fullController.add(StreamTextTextStartEvent(id: id));
+              case StreamPartTextDelta(:final id, :final delta):
+                final transformedStream =
+                    experimentalTransform?.call(delta) ?? Stream.value(delta);
+                final transformedIterator = StreamIterator<String>(
+                  transformedStream,
                 );
-                fullController.add(
-                  const StreamTextReasoningEndEvent(id: reasoningId),
-                );
-                reasoningClosed = true;
-              }
+                try {
+                  while (await moveNextOrCancellation(
+                    transformedIterator,
+                    abortSignal,
+                  )) {
+                    final transformedDelta = transformedIterator.current;
+                    final textBuffer = stepTextById.putIfAbsent(
+                      id,
+                      StringBuffer.new,
+                    );
+                    textBuffer.write(transformedDelta);
+                    overallTextBuffer.write(transformedDelta);
+                    textController.add(transformedDelta);
+                    fullController.add(
+                      StreamTextTextDeltaEvent(id: id, delta: transformedDelta),
+                    );
+                    onChunk?.call(
+                      StreamTextTextChunk(id: id, text: transformedDelta),
+                    );
 
-              switch (part) {
-                case StreamPartTextStart(:final id):
-                  stepTextById[id] = StringBuffer();
-                  fullController.add(StreamTextTextStartEvent(id: id));
-                case StreamPartTextDelta(:final id, :final delta):
-                  final transformedStream =
-                      experimentalTransform?.call(delta) ?? Stream.value(delta);
-                  final transformedIterator = StreamIterator<String>(
-                    transformedStream,
-                  );
-                  try {
-                    while (await moveNextOrCancellation(
-                      transformedIterator,
-                      abortSignal,
-                    )) {
-                      final transformedDelta = transformedIterator.current;
-                      final textBuffer = stepTextById.putIfAbsent(
-                        id,
-                        StringBuffer.new,
+                    if (outputSpec is! TextOutput) {
+                      final cadence = partialJsonTracker.append(
+                        transformedDelta,
                       );
-                      textBuffer.write(transformedDelta);
-                      overallTextBuffer.write(transformedDelta);
-                      textController.add(transformedDelta);
-                      fullController.add(
-                        StreamTextTextDeltaEvent(
-                          id: id,
-                          delta: transformedDelta,
-                        ),
-                      );
-                      onChunk?.call(
-                        StreamTextTextChunk(id: id, text: transformedDelta),
-                      );
+                      final fullText = overallTextBuffer.toString();
 
-                      if (outputSpec is! TextOutput) {
+                      if (cadence.shouldAttemptValue) {
                         final partial = _tryParsePartialOutput(
                           outputSpec,
-                          overallTextBuffer.toString(),
+                          fullText,
                         );
                         if (partial != null) {
-                          partialController.add(partial);
+                          final fingerprint = partialJsonFingerprint(partial);
+                          if (fingerprint != lastPartialFingerprint) {
+                            lastPartialFingerprint = fingerprint;
+                            partialController.add(partial);
+                          }
                         }
+                      }
+                      if (cadence.shouldAttemptArrayElements) {
                         final nextCount = _emitArrayElementsIfAny(
                           output: outputSpec,
-                          text: overallTextBuffer.toString(),
+                          text: fullText,
                           alreadyEmittedCount: emittedArrayElements,
                           onElement: elementController.add,
                         );
                         emittedArrayElements = nextCount;
+
+                        final partial = _tryParsePartialOutput(
+                          outputSpec,
+                          fullText,
+                        );
+                        if (partial != null) {
+                          final fingerprint = partialJsonFingerprint(partial);
+                          if (fingerprint != lastPartialFingerprint) {
+                            lastPartialFingerprint = fingerprint;
+                            partialController.add(partial);
+                          }
+                        }
                       }
                     }
-                  } finally {
-                    await transformedIterator.cancel();
                   }
-                case StreamPartTextEnd(:final id):
-                  final text = stepTextById[id]?.toString() ?? '';
-                  stepContent.add(LanguageModelV3TextPart(text: text));
-                  fullController.add(StreamTextTextEndEvent(id: id));
-                case StreamPartReasoningDelta(:final delta):
-                  if (!inReasoning) {
-                    inReasoning = true;
-                    fullController.add(
-                      const StreamTextReasoningStartEvent(id: reasoningId),
-                    );
-                  }
-                  reasoningBuffer.write(delta);
+                } finally {
+                  await transformedIterator.cancel();
+                }
+              case StreamPartTextEnd(:final id):
+                final text = stepTextById[id]?.toString() ?? '';
+                stepContent.add(LanguageModelV3TextPart(text: text));
+                fullController.add(StreamTextTextEndEvent(id: id));
+              case StreamPartReasoningDelta(:final delta):
+                if (!inReasoning) {
+                  inReasoning = true;
                   fullController.add(
-                    StreamTextReasoningDeltaEvent(
-                      id: reasoningId,
-                      delta: delta,
-                    ),
+                    const StreamTextReasoningStartEvent(id: reasoningId),
                   );
-                  onChunk?.call(StreamTextReasoningChunk(delta: delta));
-                case StreamPartSource(:final source):
-                  stepContent.add(source);
-                  fullController.add(StreamTextSourceEvent(source: source));
-                  onChunk?.call(StreamTextSourceChunk(source: source));
-                case StreamPartFile(:final file):
-                  stepContent.add(file);
-                  fullController.add(StreamTextFileEvent(file: file));
-                  onChunk?.call(StreamTextFileChunk(file: file));
-                case StreamPartToolCallStart(
-                  :final toolCallId,
-                  :final toolName,
-                ):
-                  toolInputBuffers[toolCallId] = StringBuffer();
-                  final event = StreamTextToolInputStartEvent(
+                }
+                reasoningBuffer.write(delta);
+                fullController.add(
+                  StreamTextReasoningDeltaEvent(id: reasoningId, delta: delta),
+                );
+                onChunk?.call(StreamTextReasoningChunk(delta: delta));
+              case StreamPartSource(:final source):
+                stepContent.add(source);
+                fullController.add(StreamTextSourceEvent(source: source));
+                onChunk?.call(StreamTextSourceChunk(source: source));
+              case StreamPartFile(:final file):
+                stepContent.add(file);
+                fullController.add(StreamTextFileEvent(file: file));
+                onChunk?.call(StreamTextFileChunk(file: file));
+              case StreamPartToolCallStart(:final toolCallId, :final toolName):
+                toolInputBuffers[toolCallId] = StringBuffer();
+                final event = StreamTextToolInputStartEvent(
+                  toolCallId: toolCallId,
+                  toolName: toolName,
+                );
+                fullController.add(event);
+                onInputStart?.call(event);
+                onChunk?.call(
+                  StreamTextToolInputStartChunk(
                     toolCallId: toolCallId,
                     toolName: toolName,
-                  );
-                  fullController.add(event);
-                  onInputStart?.call(event);
-                  onChunk?.call(
-                    StreamTextToolInputStartChunk(
-                      toolCallId: toolCallId,
-                      toolName: toolName,
-                    ),
-                  );
-                case StreamPartToolCallDelta(
-                  :final toolCallId,
-                  :final toolName,
-                  :final argsTextDelta,
-                ):
-                  final buffer = toolInputBuffers.putIfAbsent(
-                    toolCallId,
-                    StringBuffer.new,
-                  );
-                  buffer.write(argsTextDelta);
-                  final event = StreamTextToolInputDeltaEvent(
+                  ),
+                );
+              case StreamPartToolCallDelta(
+                :final toolCallId,
+                :final toolName,
+                :final argsTextDelta,
+              ):
+                final buffer = toolInputBuffers.putIfAbsent(
+                  toolCallId,
+                  StringBuffer.new,
+                );
+                buffer.write(argsTextDelta);
+                final event = StreamTextToolInputDeltaEvent(
+                  toolCallId: toolCallId,
+                  toolName: toolName,
+                  delta: argsTextDelta,
+                  inputBuffer: buffer.toString(),
+                );
+                fullController.add(event);
+                onInputDelta?.call(event);
+                onChunk?.call(
+                  StreamTextToolInputDeltaChunk(
                     toolCallId: toolCallId,
                     toolName: toolName,
                     delta: argsTextDelta,
                     inputBuffer: buffer.toString(),
-                  );
-                  fullController.add(event);
-                  onInputDelta?.call(event);
-                  onChunk?.call(
-                    StreamTextToolInputDeltaChunk(
-                      toolCallId: toolCallId,
-                      toolName: toolName,
-                      delta: argsTextDelta,
-                      inputBuffer: buffer.toString(),
-                    ),
-                  );
-                case StreamPartToolCallEnd(
-                  :final toolCallId,
-                  :final toolName,
-                  :final input,
-                ):
-                  final inputBuffer =
-                      toolInputBuffers[toolCallId]?.toString() ?? '';
-                  final inputEvent = StreamTextToolInputEndEvent(
-                    toolCallId: toolCallId,
-                    toolName: toolName,
-                    input: input,
-                    inputBuffer: inputBuffer,
-                  );
-                  final toolCall = LanguageModelV3ToolCallPart(
-                    toolCallId: toolCallId,
-                    toolName: toolName,
-                    input: input,
-                  );
-                  stepToolCalls.add(toolCall);
-                  stepContent.add(toolCall);
-                  fullController.add(inputEvent);
-                  onInputAvailable?.call(inputEvent);
-                  onChunk?.call(StreamTextToolCallChunk(toolCall: toolCall));
-                case StreamPartError(:final error):
-                  throw error;
-                case StreamPartFinish():
-                  if (part.usage != null) {
-                    fullController.add(
-                      StreamTextUsageEvent(usage: part.usage!),
-                    );
-                    onChunk?.call(StreamTextUsageChunk(usage: part.usage!));
-                  }
-                  stepFinishPart = part;
-                  lastFinishPart = part;
-              }
+                  ),
+                );
+              case StreamPartToolCallEnd(
+                :final toolCallId,
+                :final toolName,
+                :final input,
+              ):
+                final inputBuffer =
+                    toolInputBuffers[toolCallId]?.toString() ?? '';
+                final inputEvent = StreamTextToolInputEndEvent(
+                  toolCallId: toolCallId,
+                  toolName: toolName,
+                  input: input,
+                  inputBuffer: inputBuffer,
+                );
+                final toolCall = LanguageModelV3ToolCallPart(
+                  toolCallId: toolCallId,
+                  toolName: toolName,
+                  input: input,
+                );
+                stepToolCalls.add(toolCall);
+                stepContent.add(toolCall);
+                fullController.add(inputEvent);
+                onInputAvailable?.call(inputEvent);
+                onChunk?.call(StreamTextToolCallChunk(toolCall: toolCall));
+              case StreamPartError(:final error):
+                throw error;
+              case StreamPartFinish():
+                if (part.usage != null) {
+                  fullController.add(StreamTextUsageEvent(usage: part.usage!));
+                  onChunk?.call(StreamTextUsageChunk(usage: part.usage!));
+                }
+                stepFinishPart = part;
+                lastFinishPart = part;
             }
-          } finally {
-            await iterator.cancel();
           }
+        } finally {
+          await iterator.cancel();
+        }
 
-          if (inReasoning && !reasoningClosed) {
-            stepContent.add(
-              LanguageModelV3ReasoningPart(text: reasoningBuffer.toString()),
-            );
-            fullController.add(
-              const StreamTextReasoningEndEvent(id: reasoningId),
-            );
-          }
-
-          _validateToolChoiceInStreamingStep(
-            stepToolCalls: stepToolCalls,
-            tools: toolSelection.exposedTools,
-            toolChoice: toolSelection.toolChoice,
-            stepNumber: stepNumber,
+        if (inReasoning && !reasoningClosed) {
+          stepContent.add(
+            LanguageModelV3ReasoningPart(text: reasoningBuffer.toString()),
           );
+          fullController.add(
+            const StreamTextReasoningEndEvent(id: reasoningId),
+          );
+        }
 
-          normalizedMessages = [
-            ...stepMessages,
-            LanguageModelV3Message(
-              role: LanguageModelV3Role.assistant,
-              content: stepContent,
-            ),
-          ];
+        _validateToolChoiceInStreamingStep(
+          stepToolCalls: stepToolCalls,
+          tools: toolSelection.exposedTools,
+          toolChoice: toolSelection.toolChoice,
+          stepNumber: stepNumber,
+        );
 
-          if (stepToolCalls.isNotEmpty) {
-            for (final call in stepToolCalls) {
-              throwIfCancelled(abortSignal);
-              final execution = await _executeToolCall(
-                tools: toolSelection.exposedTools,
-                call: call,
-                messages: normalizedMessages,
-                approvalById: approvalById,
-                abortSignal: abortSignal,
-                experimentalContext: experimentalContext,
-                onToolCallStart: experimentalOnToolCallStart,
-                onToolCallFinish: experimentalOnToolCallFinish,
-                onPreliminaryResult: (preliminary) {
-                  final result = LanguageModelV3ToolResultPart(
-                    toolCallId: call.toolCallId,
-                    toolName: call.toolName,
-                    output: ToolResultOutputText(
-                      _stringifyToolOutput(preliminary),
-                    ),
-                  );
-                  fullController.add(
-                    StreamTextToolResultEvent(
-                      toolResult: result,
-                      preliminary: true,
-                    ),
-                  );
-                  onChunk?.call(
-                    StreamTextToolResultChunk(
-                      toolResult: result,
-                      preliminary: true,
-                    ),
-                  );
-                },
-              );
-              if (execution.approvalRequest != null) {
-                stepApprovalRequests.add(execution.approvalRequest!);
-                stepContent.add(execution.approvalRequest!);
-              }
-              if (execution.toolResult != null) {
-                stepToolResults.add(execution.toolResult!);
+        normalizedMessages = [
+          ...stepMessages,
+          LanguageModelV3Message(
+            role: LanguageModelV3Role.assistant,
+            content: stepContent,
+          ),
+        ];
+
+        if (stepToolCalls.isNotEmpty) {
+          for (final call in stepToolCalls) {
+            throwIfCancelled(abortSignal);
+            final execution = await _executeToolCall(
+              tools: toolSelection.exposedTools,
+              call: call,
+              messages: normalizedMessages,
+              approvalById: approvalById,
+              abortSignal: abortSignal,
+              experimentalContext: experimentalContext,
+              onToolCallStart: experimentalOnToolCallStart,
+              onToolCallFinish: experimentalOnToolCallFinish,
+              onPreliminaryResult: (preliminary) {
+                final result = LanguageModelV3ToolResultPart(
+                  toolCallId: call.toolCallId,
+                  toolName: call.toolName,
+                  output: ToolResultOutputText(
+                    _stringifyToolOutput(preliminary),
+                  ),
+                );
                 fullController.add(
                   StreamTextToolResultEvent(
-                    toolResult: execution.toolResult!,
-                    preliminary: false,
+                    toolResult: result,
+                    preliminary: true,
                   ),
                 );
                 onChunk?.call(
                   StreamTextToolResultChunk(
-                    toolResult: execution.toolResult!,
-                    preliminary: false,
+                    toolResult: result,
+                    preliminary: true,
                   ),
                 );
-              }
-              if (execution.toolError != null) {
-                fullController.add(
-                  StreamTextToolErrorEvent(
-                    toolCallId: call.toolCallId,
-                    toolName: call.toolName,
-                    error: execution.toolError!,
-                  ),
-                );
-              }
+              },
+            );
+            if (execution.approvalRequest != null) {
+              stepApprovalRequests.add(execution.approvalRequest!);
+              stepContent.add(execution.approvalRequest!);
             }
-          }
-
-          if (stepToolResults.isNotEmpty) {
-            normalizedMessages = [
-              ...normalizedMessages,
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.tool,
-                content: stepToolResults,
-              ),
-            ];
-          }
-
-          final stepText = stepContent
-              .whereType<LanguageModelV3TextPart>()
-              .map((part) => part.text)
-              .join();
-          final resolvedFinish =
-              stepFinishPart ??
-              const StreamPartFinish(
-                finishReason: LanguageModelV3FinishReason.unknown,
+            if (execution.toolResult != null) {
+              stepToolResults.add(execution.toolResult!);
+              fullController.add(
+                StreamTextToolResultEvent(
+                  toolResult: execution.toolResult!,
+                  preliminary: false,
+                ),
               );
-          final stepFinish = GenerateTextStepFinishEvent(
-            stepNumber: stepNumber,
-            text: stepText,
-            toolCalls: List.unmodifiable(stepToolCalls),
-            toolResults: List.unmodifiable(stepToolResults),
-            finishReason: resolvedFinish.finishReason,
-            usage: resolvedFinish.usage,
-          );
-
-          final step = GenerateTextStep(
-            stepNumber: stepNumber,
-            content: stepContent,
-            toolCalls: stepToolCalls,
-            toolResults: stepToolResults,
-            toolApprovalRequests: stepApprovalRequests,
-            response: LanguageModelV3GenerateResult(
-              content: stepContent,
-              finishReason: resolvedFinish.finishReason,
-              usage: resolvedFinish.usage,
-              providerMetadata: resolvedFinish.providerMetadata,
-              rawFinishReason: resolvedFinish.rawFinishReason,
-            ),
-            text: stepText,
-            finishReason: resolvedFinish.finishReason,
-            usage: resolvedFinish.usage,
-          );
-          steps.add(step);
-          lastContent = stepContent;
-
-          _safeInvoke(() => onStepFinish?.call(stepFinish));
-          fullController.add(StreamTextFinishStepEvent(step: stepFinish));
-
-          final shouldStop = shouldStopAfterStep(
-            toolResultsEmpty: stepToolResults.isEmpty,
-            hasApprovalRequests: stepApprovalRequests.isNotEmpty,
-            snapshot: StepSnapshot(
-              stepCount: stepNumber + 1,
-              toolCallNames: stepToolCalls
-                  .map((call) => call.toolName)
-                  .toList(),
-              finishReason: stepFinish.finishReason,
-            ),
-            conditions: _allStopConditions,
-          );
-          if (shouldStop) {
-            break;
+              onChunk?.call(
+                StreamTextToolResultChunk(
+                  toolResult: execution.toolResult!,
+                  preliminary: false,
+                ),
+              );
+            }
+            if (execution.toolError != null) {
+              fullController.add(
+                StreamTextToolErrorEvent(
+                  toolCallId: call.toolCallId,
+                  toolName: call.toolName,
+                  error: execution.toolError!,
+                ),
+              );
+            }
           }
         }
 
-        final finalText = lastContent
+        if (stepToolResults.isNotEmpty) {
+          normalizedMessages = [
+            ...normalizedMessages,
+            LanguageModelV3Message(
+              role: LanguageModelV3Role.tool,
+              content: stepToolResults,
+            ),
+          ];
+        }
+
+        final stepText = stepContent
             .whereType<LanguageModelV3TextPart>()
             .map((part) => part.text)
             .join();
-        refreshEnvelopeFromRaw();
-        final finalOutput = _parseOutputWithNoObjectError(
-          output: outputSpec,
-          text: finalText,
-          usage: lastFinishPart?.usage,
-          response: lastResponseMetadata,
-        );
-        final totalUsage = _sumUsage(steps.map((step) => step.usage));
-        final reasoning = lastContent
-            .whereType<LanguageModelV3ReasoningPart>()
-            .toList();
-        final resolvedReasoningText = lastContent
-            .where(
-              (part) =>
-                  part is LanguageModelV3ReasoningPart ||
-                  part is LanguageModelV3RedactedReasoningPart,
-            )
-            .map(
-              (part) => part is LanguageModelV3ReasoningPart
-                  ? part.text
-                  : '[REDACTED]',
-            )
-            .join();
-        final sources = lastContent
-            .whereType<LanguageModelV3SourcePart>()
-            .toList();
-        final files = lastContent.whereType<LanguageModelV3FilePart>().toList();
-        final responseMessages = normalizedMessages
-            .where(
-              (message) =>
-                  message.role == LanguageModelV3Role.assistant ||
-                  message.role == LanguageModelV3Role.tool,
-            )
-            .toList(growable: false);
-        final requestInfo = GenerateTextRequest(
-          system: systemInstruction,
-          messages: List.unmodifiable(
-            normalizedMessages
-                .where(
-                  (message) =>
-                      message.role == LanguageModelV3Role.user ||
-                      message.role == LanguageModelV3Role.system,
-                )
-                .toList(),
-          ),
-          body: lastRequestBody,
-        );
-        final responseInfo = GenerateTextResponse(
-          messages: List.unmodifiable(responseMessages),
-          body: lastResponseBody,
-          metadata: lastResponseMetadata,
-        );
         final resolvedFinish =
-            lastFinishPart ??
+            stepFinishPart ??
             const StreamPartFinish(
               finishReason: LanguageModelV3FinishReason.unknown,
             );
-
-        final finishEvent = StreamTextFinishEvent<TOutput>(
-          text: finalText,
-          output: finalOutput,
+        final stepFinish = GenerateTextStepFinishEvent(
+          stepNumber: stepNumber,
+          text: stepText,
+          toolCalls: List.unmodifiable(stepToolCalls),
+          toolResults: List.unmodifiable(stepToolResults),
           finishReason: resolvedFinish.finishReason,
-          rawFinishReason: resolvedFinish.rawFinishReason,
           usage: resolvedFinish.usage,
-          totalUsage: totalUsage,
-          providerMetadata: resolvedFinish.providerMetadata,
-          steps: List.unmodifiable(steps),
-          reasoning: List.unmodifiable(reasoning),
-          reasoningText: resolvedReasoningText,
-          sources: List.unmodifiable(sources),
-          files: List.unmodifiable(files),
-          responseMessages: List.unmodifiable(responseMessages),
-          request: requestInfo,
-          response: responseInfo,
-          warnings: List.unmodifiable(lastWarnings),
         );
 
-        isTerminal = true;
-        fullController.add(finishEvent);
-        _safeInvoke(() => onFinish?.call(finishEvent));
-
-        textCompleter.completeIfPending(finalText);
-        outputCompleter.completeIfPending(finalOutput);
-        finishCompleter.completeIfPending(lastFinishPart);
-        contentCompleter.completeIfPending(List.unmodifiable(lastContent));
-        reasoningCompleter.completeIfPending(List.unmodifiable(reasoning));
-        reasoningTextCompleter.completeIfPending(resolvedReasoningText);
-        filesCompleter.completeIfPending(List.unmodifiable(files));
-        sourcesCompleter.completeIfPending(List.unmodifiable(sources));
-        toolCallsCompleter.completeIfPending(
-          List.unmodifiable(
-            lastContent.whereType<LanguageModelV3ToolCallPart>().toList(),
+        final step = GenerateTextStep(
+          stepNumber: stepNumber,
+          content: stepContent,
+          toolCalls: stepToolCalls,
+          toolResults: stepToolResults,
+          toolApprovalRequests: stepApprovalRequests,
+          response: LanguageModelV3GenerateResult(
+            content: stepContent,
+            finishReason: resolvedFinish.finishReason,
+            usage: resolvedFinish.usage,
+            providerMetadata: resolvedFinish.providerMetadata,
+            rawFinishReason: resolvedFinish.rawFinishReason,
           ),
+          text: stepText,
+          finishReason: resolvedFinish.finishReason,
+          usage: resolvedFinish.usage,
         );
-        toolResultsCompleter.completeIfPending(
-          List.unmodifiable(
-            lastContent.whereType<LanguageModelV3ToolResultPart>().toList(),
+        steps.add(step);
+        lastContent = stepContent;
+
+        _safeInvoke(() => onStepFinish?.call(stepFinish));
+        fullController.add(StreamTextFinishStepEvent(step: stepFinish));
+
+        final shouldStop = shouldStopAfterStep(
+          toolResultsEmpty: stepToolResults.isEmpty,
+          hasApprovalRequests: stepApprovalRequests.isNotEmpty,
+          snapshot: StepSnapshot(
+            stepCount: stepNumber + 1,
+            toolCallNames: stepToolCalls.map((call) => call.toolName).toList(),
+            finishReason: stepFinish.finishReason,
           ),
+          conditions: _allStopConditions,
         );
-        finishReasonCompleter.completeIfPending(resolvedFinish.finishReason);
-        rawFinishReasonCompleter.completeIfPending(
-          resolvedFinish.rawFinishReason,
-        );
-        usageCompleter.completeIfPending(resolvedFinish.usage);
-        totalUsageCompleter.completeIfPending(totalUsage);
-        warningsCompleter.completeIfPending(List.unmodifiable(lastWarnings));
-        stepsCompleter.completeIfPending(List.unmodifiable(steps));
-        requestCompleter.completeIfPending(requestInfo);
-        responseCompleter.completeIfPending(responseInfo);
-        providerMetadataCompleter.completeIfPending(
-          resolvedFinish.providerMetadata,
-        );
-      } catch (error, stackTrace) {
-        refreshEnvelopeFromRaw();
-        isTerminal = true;
-        terminalError = error;
-        terminalStackTrace = stackTrace;
-        terminalFullStreamErrorEvent = StreamTextErrorEvent(error: error);
-        _safeInvoke(() => onError?.call(error));
-        fullController.add(terminalFullStreamErrorEvent!);
-
-        textCompleter.completeErrorIfPending(error, stackTrace);
-        outputCompleter.completeErrorIfPending(error, stackTrace);
-        finishCompleter.completeErrorIfPending(error, stackTrace);
-        contentCompleter.completeErrorIfPending(error, stackTrace);
-        reasoningCompleter.completeErrorIfPending(error, stackTrace);
-        reasoningTextCompleter.completeErrorIfPending(error, stackTrace);
-        filesCompleter.completeErrorIfPending(error, stackTrace);
-        sourcesCompleter.completeErrorIfPending(error, stackTrace);
-        toolCallsCompleter.completeErrorIfPending(error, stackTrace);
-        toolResultsCompleter.completeErrorIfPending(error, stackTrace);
-        finishReasonCompleter.completeErrorIfPending(error, stackTrace);
-        rawFinishReasonCompleter.completeErrorIfPending(error, stackTrace);
-        usageCompleter.completeErrorIfPending(error, stackTrace);
-        totalUsageCompleter.completeErrorIfPending(error, stackTrace);
-        warningsCompleter.completeErrorIfPending(error, stackTrace);
-        stepsCompleter.completeErrorIfPending(error, stackTrace);
-        requestCompleter.completeErrorIfPending(error, stackTrace);
-        responseCompleter.completeErrorIfPending(error, stackTrace);
-        providerMetadataCompleter.completeErrorIfPending(error, stackTrace);
-
-        if (rawController.hasListener) {
-          rawController.addError(error, stackTrace);
+        if (shouldStop) {
+          break;
         }
-        if (textController.hasListener) {
-          textController.addError(error, stackTrace);
-        }
-        if (fullController.hasListener) {
-          fullController.addError(error, stackTrace);
-        }
-        if (partialController.hasListener) {
-          partialController.addError(error, stackTrace);
-        }
-        if (elementController.hasListener) {
-          elementController.addError(error, stackTrace);
-        }
-      } finally {
-        await rawController.close();
-        await textController.close();
-        await fullController.close();
-        await partialController.close();
-        await elementController.close();
       }
-    });
+
+      final finalText = lastContent
+          .whereType<LanguageModelV3TextPart>()
+          .map((part) => part.text)
+          .join();
+      refreshEnvelopeFromRaw();
+      final finalOutput = _parseOutputWithNoObjectError(
+        output: outputSpec,
+        text: finalText,
+        usage: lastFinishPart?.usage,
+        response: lastResponseMetadata,
+      );
+      final totalUsage = _sumUsage(steps.map((step) => step.usage));
+      final reasoning = lastContent
+          .whereType<LanguageModelV3ReasoningPart>()
+          .toList();
+      final resolvedReasoningText = lastContent
+          .where(
+            (part) =>
+                part is LanguageModelV3ReasoningPart ||
+                part is LanguageModelV3RedactedReasoningPart,
+          )
+          .map(
+            (part) =>
+                part is LanguageModelV3ReasoningPart ? part.text : '[REDACTED]',
+          )
+          .join();
+      final sources = lastContent
+          .whereType<LanguageModelV3SourcePart>()
+          .toList();
+      final files = lastContent.whereType<LanguageModelV3FilePart>().toList();
+      final responseMessages = normalizedMessages
+          .where(
+            (message) =>
+                message.role == LanguageModelV3Role.assistant ||
+                message.role == LanguageModelV3Role.tool,
+          )
+          .toList(growable: false);
+      final requestInfo = GenerateTextRequest(
+        system: systemInstruction,
+        messages: List.unmodifiable(
+          normalizedMessages
+              .where(
+                (message) =>
+                    message.role == LanguageModelV3Role.user ||
+                    message.role == LanguageModelV3Role.system,
+              )
+              .toList(),
+        ),
+        body: lastRequestBody,
+      );
+      final responseInfo = GenerateTextResponse(
+        messages: List.unmodifiable(responseMessages),
+        body: lastResponseBody,
+        metadata: lastResponseMetadata,
+      );
+      final resolvedFinish =
+          lastFinishPart ??
+          const StreamPartFinish(
+            finishReason: LanguageModelV3FinishReason.unknown,
+          );
+
+      final finishEvent = StreamTextFinishEvent<TOutput>(
+        text: finalText,
+        output: finalOutput,
+        finishReason: resolvedFinish.finishReason,
+        rawFinishReason: resolvedFinish.rawFinishReason,
+        usage: resolvedFinish.usage,
+        totalUsage: totalUsage,
+        providerMetadata: resolvedFinish.providerMetadata,
+        steps: List.unmodifiable(steps),
+        reasoning: List.unmodifiable(reasoning),
+        reasoningText: resolvedReasoningText,
+        sources: List.unmodifiable(sources),
+        files: List.unmodifiable(files),
+        responseMessages: List.unmodifiable(responseMessages),
+        request: requestInfo,
+        response: responseInfo,
+        warnings: List.unmodifiable(lastWarnings),
+      );
+
+      isTerminal = true;
+      fullController.add(finishEvent);
+      _safeInvoke(() => onFinish?.call(finishEvent));
+
+      textCompleter.completeIfPending(finalText);
+      outputCompleter.completeIfPending(finalOutput);
+      finishCompleter.completeIfPending(lastFinishPart);
+      contentCompleter.completeIfPending(List.unmodifiable(lastContent));
+      reasoningCompleter.completeIfPending(List.unmodifiable(reasoning));
+      reasoningTextCompleter.completeIfPending(resolvedReasoningText);
+      filesCompleter.completeIfPending(List.unmodifiable(files));
+      sourcesCompleter.completeIfPending(List.unmodifiable(sources));
+      toolCallsCompleter.completeIfPending(
+        List.unmodifiable(
+          lastContent.whereType<LanguageModelV3ToolCallPart>().toList(),
+        ),
+      );
+      toolResultsCompleter.completeIfPending(
+        List.unmodifiable(
+          lastContent.whereType<LanguageModelV3ToolResultPart>().toList(),
+        ),
+      );
+      finishReasonCompleter.completeIfPending(resolvedFinish.finishReason);
+      rawFinishReasonCompleter.completeIfPending(
+        resolvedFinish.rawFinishReason,
+      );
+      usageCompleter.completeIfPending(resolvedFinish.usage);
+      totalUsageCompleter.completeIfPending(totalUsage);
+      warningsCompleter.completeIfPending(List.unmodifiable(lastWarnings));
+      stepsCompleter.completeIfPending(List.unmodifiable(steps));
+      requestCompleter.completeIfPending(requestInfo);
+      responseCompleter.completeIfPending(responseInfo);
+      providerMetadataCompleter.completeIfPending(
+        resolvedFinish.providerMetadata,
+      );
+    } catch (error, stackTrace) {
+      refreshEnvelopeFromRaw();
+      isTerminal = true;
+      terminalError = error;
+      terminalStackTrace = stackTrace;
+      terminalFullStreamErrorEvent = StreamTextErrorEvent(error: error);
+      _safeInvoke(() => onError?.call(error));
+      fullController.add(terminalFullStreamErrorEvent!);
+
+      textCompleter.completeErrorIfPending(error, stackTrace);
+      outputCompleter.completeErrorIfPending(error, stackTrace);
+      finishCompleter.completeErrorIfPending(error, stackTrace);
+      contentCompleter.completeErrorIfPending(error, stackTrace);
+      reasoningCompleter.completeErrorIfPending(error, stackTrace);
+      reasoningTextCompleter.completeErrorIfPending(error, stackTrace);
+      filesCompleter.completeErrorIfPending(error, stackTrace);
+      sourcesCompleter.completeErrorIfPending(error, stackTrace);
+      toolCallsCompleter.completeErrorIfPending(error, stackTrace);
+      toolResultsCompleter.completeErrorIfPending(error, stackTrace);
+      finishReasonCompleter.completeErrorIfPending(error, stackTrace);
+      rawFinishReasonCompleter.completeErrorIfPending(error, stackTrace);
+      usageCompleter.completeErrorIfPending(error, stackTrace);
+      totalUsageCompleter.completeErrorIfPending(error, stackTrace);
+      warningsCompleter.completeErrorIfPending(error, stackTrace);
+      stepsCompleter.completeErrorIfPending(error, stackTrace);
+      requestCompleter.completeErrorIfPending(error, stackTrace);
+      responseCompleter.completeErrorIfPending(error, stackTrace);
+      providerMetadataCompleter.completeErrorIfPending(error, stackTrace);
+
+      if (rawController.hasListener) {
+        rawController.addError(error, stackTrace);
+      }
+      if (textController.hasListener) {
+        textController.addError(error, stackTrace);
+      }
+      if (fullController.hasListener) {
+        fullController.addError(error, stackTrace);
+      }
+      if (partialController.hasListener) {
+        partialController.addError(error, stackTrace);
+      }
+      if (elementController.hasListener) {
+        elementController.addError(error, stackTrace);
+      }
+    } finally {
+      await rawController.close();
+      await textController.close();
+      await fullController.close();
+      await partialController.close();
+      await elementController.close();
+    }
+  });
   observeFutureError(runFuture);
   unawaited(runFuture);
 
@@ -1734,7 +1742,11 @@ int _emitArrayElementsIfAny({
   if (output is! ArrayOutput) {
     return alreadyEmittedCount;
   }
-  final parsedElements = _parsePartialArrayElements(text);
+  final parsedElements = parsePartialArrayElements(
+    text,
+    phase: PartialJsonParsePhase.streamTextArrayElements,
+    trigger: PartialJsonParseTrigger.arrayElementBoundary,
+  );
   var emittedCount = alreadyEmittedCount;
 
   for (
@@ -1762,7 +1774,11 @@ int _emitArrayElementsIfAny({
 TOutput? _tryParsePartialOutput<TOutput>(Output<TOutput> output, String text) {
   if (output is ArrayOutput) {
     final arrayOutput = output as ArrayOutput<dynamic>;
-    final parsedElements = _parsePartialArrayElements(text);
+    final parsedElements = parsePartialArrayElements(
+      text,
+      phase: PartialJsonParsePhase.streamTextPartial,
+      trigger: PartialJsonParseTrigger.arrayElementBoundary,
+    );
     final values = <dynamic>[];
     for (final item in parsedElements) {
       try {
@@ -1785,77 +1801,6 @@ TOutput? _tryParsePartialOutput<TOutput>(Output<TOutput> output, String text) {
   } catch (_) {
     return null;
   }
-}
-
-List<Object?> _parsePartialArrayElements(String text) {
-  final fullJson = _safeParseJson(text.trim());
-  if (fullJson is List) {
-    return fullJson.cast<Object?>();
-  }
-
-  final candidate = _extractJsonCandidate(text);
-  if (candidate == null) {
-    return const [];
-  }
-  final start = candidate.indexOf('[');
-  if (start < 0) {
-    return const [];
-  }
-  final body = candidate.substring(start + 1);
-  final elements = <Object?>[];
-  var inString = false;
-  var escaped = false;
-  var depth = 0;
-  var tokenStart = 0;
-
-  void flushToken(int endExclusive) {
-    final token = body.substring(tokenStart, endExclusive).trim();
-    if (token.isEmpty) {
-      tokenStart = endExclusive + 1;
-      return;
-    }
-    try {
-      elements.add(jsonDecode(token));
-    } catch (_) {}
-    tokenStart = endExclusive + 1;
-  }
-
-  for (var i = 0; i < body.length; i++) {
-    final char = body[i];
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (char == r'\') {
-      escaped = true;
-      continue;
-    }
-    if (char == '"') {
-      inString = !inString;
-      continue;
-    }
-    if (inString) {
-      continue;
-    }
-    if (char == '{' || char == '[') {
-      depth++;
-      continue;
-    }
-    if (char == '}' || char == ']') {
-      if (depth > 0) {
-        depth--;
-      } else if (char == ']') {
-        flushToken(i);
-        break;
-      }
-      continue;
-    }
-    if (char == ',' && depth == 0) {
-      flushToken(i);
-    }
-  }
-
-  return elements;
 }
 
 LanguageModelV3Message _toLanguageModelMessage(ModelMessage message) {
@@ -1941,7 +1886,11 @@ TOutput _parseOutput<TOutput>(Output<TOutput> output, String text) {
       }
       return list as TOutput;
     case ChoiceOutput(:final options):
-      final parsed = _safeParseJson(text.trim());
+      final parsed = tryParsePartialJsonValue(
+        text,
+        phase: PartialJsonParsePhase.streamTextPartial,
+        trigger: PartialJsonParseTrigger.candidateClosed,
+      );
       final value = switch (parsed) {
         String s => s,
         _ => text.trim(),
@@ -1997,88 +1946,15 @@ Object _extractJsonValue(String text) {
   if (text.trim().isEmpty) {
     throw const AiNoContentGeneratedError('No content was generated.');
   }
-  final parsed = _safeParseJson(text.trim());
+  final parsed = tryParsePartialJsonValue(
+    text,
+    phase: PartialJsonParsePhase.streamTextPartial,
+    trigger: PartialJsonParseTrigger.candidateClosed,
+  );
   if (parsed == null) {
     throw AiInvalidToolInputError('Model did not return valid JSON: $text');
   }
   return parsed;
-}
-
-Object? _safeParseJson(String text) {
-  try {
-    return jsonDecode(text);
-  } catch (_) {
-    final fenceMatch = RegExp(
-      r'```(?:json)?\s*([\s\S]+?)\s*```',
-    ).firstMatch(text);
-    if (fenceMatch != null) {
-      final fenced = fenceMatch.group(1);
-      if (fenced != null) {
-        try {
-          return jsonDecode(fenced);
-        } catch (_) {}
-      }
-    }
-
-    final candidate = _extractJsonCandidate(text);
-    if (candidate != null) {
-      try {
-        return jsonDecode(candidate);
-      } catch (_) {
-        return null;
-      }
-    }
-
-    return null;
-  }
-}
-
-String? _extractJsonCandidate(String text) {
-  final startObject = text.indexOf('{');
-  final startArray = text.indexOf('[');
-  final starts = [
-    if (startObject >= 0) startObject,
-    if (startArray >= 0) startArray,
-  ];
-  if (starts.isEmpty) {
-    return null;
-  }
-  final start = starts.reduce((a, b) => a < b ? a : b);
-  final open = text[start];
-  final close = open == '{' ? '}' : ']';
-
-  var inString = false;
-  var escaped = false;
-  var depth = 0;
-  for (var i = start; i < text.length; i++) {
-    final char = text[i];
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (char == r'\') {
-      escaped = true;
-      continue;
-    }
-    if (char == '"') {
-      inString = !inString;
-      continue;
-    }
-    if (inString) {
-      continue;
-    }
-    if (char == open) {
-      depth++;
-      continue;
-    }
-    if (char == close) {
-      depth--;
-      if (depth == 0) {
-        return text.substring(start, i + 1);
-      }
-    }
-  }
-  return null;
 }
 
 String _stringifyToolOutput(Object? output) {

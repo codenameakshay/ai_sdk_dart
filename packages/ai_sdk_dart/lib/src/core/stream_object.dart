@@ -5,6 +5,7 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
 import '../messages/model_message.dart';
 import '../tools/tool.dart';
+import 'partial_json.dart';
 
 /// A JSON Patch-style operation for incremental object updates.
 ///
@@ -137,15 +138,28 @@ Future<StreamObjectResult<T>> streamObject<T>({
   final objectCompleter = Completer<T>();
   unawaited(() async {
     final buffer = StringBuffer();
+    final partialJsonTracker = PartialJsonTracker();
     Map<String, dynamic>? previousJson;
+    String? lastPartialFingerprint;
     T? lastObject;
     try {
       await for (final part in broadcast) {
         if (part is StreamPartTextDelta) {
           buffer.write(part.delta);
+          final cadence = partialJsonTracker.append(part.delta);
+          if (!cadence.shouldAttemptValue) {
+            continue;
+          }
+
           final parsedJson = _tryParseObjectJson(buffer.toString());
           if (parsedJson != null) {
             final parsed = schema.fromJson(parsedJson);
+            final fingerprint = partialJsonFingerprint(parsedJson);
+            if (fingerprint == lastPartialFingerprint) {
+              continue;
+            }
+
+            lastPartialFingerprint = fingerprint;
             lastObject = parsed;
             objectController.add(parsed);
 
@@ -191,9 +205,12 @@ Future<StreamObjectResult<T>> streamObject<T>({
 }
 
 Map<String, dynamic>? _tryParseObjectJson(String text) {
-  final parsed =
-      _safeParseJson(text.trim()) ??
-      _safeParseJson(_extractLastJsonObject(text) ?? '');
+  final parsed = tryParsePartialJsonValue(
+    text,
+    phase: PartialJsonParsePhase.streamObjectSnapshot,
+    trigger: PartialJsonParseTrigger.candidateClosed,
+    fallbackCandidate: extractLastJsonObject(text),
+  );
   if (parsed is Map<String, dynamic>) {
     return parsed;
   }
@@ -204,51 +221,6 @@ Map<String, dynamic>? _tryParseObjectJson(String text) {
   }
   // coverage:ignore-end
   return null;
-}
-
-String? _extractLastJsonObject(String text) {
-  var depth = 0;
-  var inString = false;
-  var escaped = false;
-  int? topLevelStart;
-  String? lastComplete;
-
-  for (var i = 0; i < text.length; i++) {
-    final char = text[i];
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (char == r'\') {
-      escaped = true;
-      continue;
-    }
-    if (char == '"') {
-      inString = !inString;
-      continue;
-    }
-    if (inString) {
-      continue;
-    }
-
-    if (char == '{') {
-      if (depth == 0) {
-        topLevelStart = i;
-      }
-      depth++;
-      continue;
-    }
-
-    if (char == '}') {
-      depth--;
-      if (depth == 0 && topLevelStart != null) {
-        lastComplete = text.substring(topLevelStart, i + 1);
-        topLevelStart = null;
-      }
-    }
-  }
-
-  return lastComplete;
 }
 
 List<StreamObjectPatchOperation> _diffObjectPatch(
@@ -360,25 +332,4 @@ bool _jsonValueEquals(Object? left, Object? right) {
   }
   // coverage:ignore-end
   return left == right;
-}
-
-Object? _safeParseJson(String text) {
-  try {
-    return jsonDecode(text);
-  } catch (_) {
-    final fenceMatch = RegExp(
-      r'```(?:json)?\s*([\s\S]+?)\s*```',
-    ).firstMatch(text);
-    if (fenceMatch != null) {
-      final fenced = fenceMatch.group(1);
-      if (fenced != null) {
-        try {
-          return jsonDecode(fenced);
-        } catch (_) {
-          return null;
-        }
-      }
-    }
-    return null;
-  }
 }

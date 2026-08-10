@@ -43,6 +43,8 @@ _BenchmarkResult _runObjectBenchmark(String payload) {
     bytes: payload.length,
     parseAttempts: counters.parseAttempts,
     decodeAttempts: counters.decodeAttempts,
+    snapshotCount: counters.snapshotCount,
+    snapshotElementsCopied: counters.snapshotElementsCopied,
     elements: 0,
     elapsedMicroseconds: stopwatch.elapsedMicroseconds,
   );
@@ -54,6 +56,7 @@ _BenchmarkResult _runArrayBenchmark(String payload) {
   partialJsonDebugCounters = counters;
 
   final tracker = PartialJsonArrayTracker();
+  final partialValues = <Object?>[];
   var elements = 0;
   final stopwatch = Stopwatch()..start();
 
@@ -64,8 +67,10 @@ _BenchmarkResult _runArrayBenchmark(String payload) {
         phase: PartialJsonParsePhase.streamTextArrayElements,
         trigger: PartialJsonParseTrigger.arrayElementBoundary,
       );
-      if (update.sawBoundary) {
-        elements = update.elements.length;
+      if (update.newElements.isNotEmpty) {
+        partialValues.addAll(update.newElements);
+        elements += update.newElements.length;
+        createTrackedImmutableSnapshot(partialValues);
       }
     }
   } finally {
@@ -78,6 +83,8 @@ _BenchmarkResult _runArrayBenchmark(String payload) {
     bytes: payload.length,
     parseAttempts: counters.parseAttempts,
     decodeAttempts: counters.decodeAttempts,
+    snapshotCount: counters.snapshotCount,
+    snapshotElementsCopied: counters.snapshotElementsCopied,
     elements: elements,
     elapsedMicroseconds: stopwatch.elapsedMicroseconds,
   );
@@ -87,6 +94,16 @@ void _assertLinear(_BenchmarkResult result) {
   final maxAttempts = switch (result.kind) {
     'object' => 1,
     'array' => result.elements + 1,
+    _ => throw StateError('Unknown benchmark kind: ${result.kind}'),
+  };
+  final maxSnapshotCount = switch (result.kind) {
+    'object' => 0,
+    'array' => result.elements,
+    _ => throw StateError('Unknown benchmark kind: ${result.kind}'),
+  };
+  final maxSnapshotElementsCopied = switch (result.kind) {
+    'object' => 0,
+    'array' => result.elements * (result.elements + 1) ~/ 2,
     _ => throw StateError('Unknown benchmark kind: ${result.kind}'),
   };
 
@@ -100,6 +117,18 @@ void _assertLinear(_BenchmarkResult result) {
     throw StateError(
       '${result.kind} decode attempts grew nonlinearly: '
       '${result.decodeAttempts} > $maxAttempts',
+    );
+  }
+  if (result.snapshotCount > maxSnapshotCount) {
+    throw StateError(
+      '${result.kind} snapshot count grew nonlinearly: '
+      '${result.snapshotCount} > $maxSnapshotCount',
+    );
+  }
+  if (result.snapshotElementsCopied > maxSnapshotElementsCopied) {
+    throw StateError(
+      '${result.kind} snapshot element copies grew nonlinearly: '
+      '${result.snapshotElementsCopied} > $maxSnapshotElementsCopied',
     );
   }
 }
@@ -151,6 +180,8 @@ class _BenchmarkResult {
     required this.bytes,
     required this.parseAttempts,
     required this.decodeAttempts,
+    required this.snapshotCount,
+    required this.snapshotElementsCopied,
     required this.elements,
     required this.elapsedMicroseconds,
   });
@@ -159,6 +190,8 @@ class _BenchmarkResult {
   final int bytes;
   final int parseAttempts;
   final int decodeAttempts;
+  final int snapshotCount;
+  final int snapshotElementsCopied;
   final int elements;
   final int elapsedMicroseconds;
 
@@ -166,6 +199,8 @@ class _BenchmarkResult {
     return '$kind $label bytes=$bytes '
         'parseAttempts=$parseAttempts '
         'decodeAttempts=$decodeAttempts '
+        'snapshotCount=$snapshotCount '
+        'snapshotElementsCopied=$snapshotElementsCopied '
         'elements=$elements '
         'elapsedMs=${elapsedMicroseconds / 1000}';
   }

@@ -871,22 +871,16 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                       );
 
                       if (update.newElements.isNotEmpty) {
-                        _emitTrackedArrayElements(
+                        final acceptedCount = _emitTrackedArrayElements(
                           output: outputSpec as ArrayOutput<dynamic>,
                           elements: update.newElements,
                           partialValues: partialArrayValues,
                           onElement: elementController.add,
                         );
-                      }
-
-                      if (update.sawBoundary) {
-                        final partial = List<dynamic>.unmodifiable(
-                          partialArrayValues,
-                        );
-                        final fingerprint = partialJsonFingerprint(partial);
-                        if (fingerprint != lastPartialFingerprint) {
-                          lastPartialFingerprint = fingerprint;
-                          partialController.add(partial);
+                        if (acceptedCount > 0) {
+                          partialController.add(
+                            createTrackedImmutableSnapshot(partialArrayValues),
+                          );
                         }
                       }
                     } else if (outputSpec is! TextOutput) {
@@ -1742,28 +1736,32 @@ dynamic _parseToolInput({
   return tool.inputSchema.fromJson(rawInput.cast<String, dynamic>());
 }
 
-void _emitTrackedArrayElements({
+int _emitTrackedArrayElements({
   required ArrayOutput<dynamic> output,
   required List<Object?> elements,
   required List<dynamic> partialValues,
   required void Function(Object? element) onElement,
 }) {
+  var acceptedCount = 0;
   for (final item in elements) {
     try {
       if (item is Map<String, dynamic>) {
         final value = output.element.fromJson(item);
         partialValues.add(value);
         onElement(value);
+        acceptedCount++;
         // Defensive: jsonDecode always yields Map<String, dynamic> objects.
         // coverage:ignore-start
       } else if (item is Map) {
         final value = output.element.fromJson(item.cast<String, dynamic>());
         partialValues.add(value);
         onElement(value);
+        acceptedCount++;
       }
       // coverage:ignore-end
     } catch (_) {}
   }
+  return acceptedCount;
 }
 
 TOutput? _tryParsePartialOutput<TOutput>(Output<TOutput> output, String text) {

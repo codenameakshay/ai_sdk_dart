@@ -89,7 +89,6 @@ void main() {
 
         final partialsFuture = result.partialOutputStream
             .cast<List<dynamic>>()
-            .map(jsonEncode)
             .toList();
         final elementsFuture = result.elementStream
             .cast<Map<String, dynamic>>()
@@ -97,7 +96,10 @@ void main() {
         final partials = await partialsFuture;
         final elements = await elementsFuture;
 
-        expect(partials, orderedEquals(partials.toSet().toList()));
+        expect(partials.map(jsonEncode).toList(), [
+          '[{"id":1,"nested":{"text":"A😀"}}]',
+          '[{"id":1,"nested":{"text":"A😀"}},{"id":2,"nested":{"text":"B\\\\C"}}]',
+        ]);
         expect(elements, [
           {
             'id': 1,
@@ -108,6 +110,9 @@ void main() {
             'nested': {'text': r'B\C'},
           },
         ]);
+        expect((partials.first.first as Map)['id'], 1);
+        expect(partials.first, hasLength(1));
+        expect(() => partials.first.add({'id': 99}), throwsUnsupportedError);
         expect(
           counters.parseAttemptsFor(
             PartialJsonParsePhase.streamTextArrayElements,
@@ -172,6 +177,11 @@ void main() {
             PartialJsonParsePhase.streamTextArrayElements,
           ),
           lessThanOrEqualTo(elementCount + 2),
+        );
+        expect(counters.snapshotCount, lessThanOrEqualTo(elementCount));
+        expect(
+          counters.snapshotElementsCopied,
+          lessThanOrEqualTo(elementCount * (elementCount + 1) ~/ 2),
         );
       },
     );

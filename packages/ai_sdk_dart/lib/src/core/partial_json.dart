@@ -11,6 +11,8 @@ enum PartialJsonParseTrigger { candidateClosed, arrayElementBoundary }
 class PartialJsonDebugCounters {
   int parseAttempts = 0;
   int decodeAttempts = 0;
+  int snapshotCount = 0;
+  int snapshotElementsCopied = 0;
 
   final Map<PartialJsonParsePhase, int> _parseAttemptsByPhase = {};
   final Map<PartialJsonParseTrigger, int> _parseAttemptsByTrigger = {};
@@ -34,6 +36,11 @@ class PartialJsonDebugCounters {
 
   void recordDecodeAttempt() {
     decodeAttempts++;
+  }
+
+  void recordSnapshotCopy(int elementCount) {
+    snapshotCount++;
+    snapshotElementsCopied += elementCount;
   }
 
   int parseAttemptsFor(PartialJsonParsePhase phase) {
@@ -60,13 +67,11 @@ class PartialJsonCadence {
 class PartialJsonArrayUpdate {
   const PartialJsonArrayUpdate({
     required this.newElements,
-    required this.elements,
     required this.sawBoundary,
     required this.isClosed,
   });
 
   final List<Object?> newElements;
-  final List<Object?> elements;
   final bool sawBoundary;
   final bool isClosed;
 }
@@ -146,7 +151,6 @@ class PartialJsonTracker {
 }
 
 class PartialJsonArrayTracker {
-  final List<Object?> _elements = [];
   StringBuffer _currentToken = StringBuffer();
 
   bool _seenRootArray = false;
@@ -229,8 +233,9 @@ class PartialJsonArrayTracker {
     }
 
     return PartialJsonArrayUpdate(
-      newElements: List<Object?>.unmodifiable(newElements),
-      elements: List<Object?>.unmodifiable(_elements),
+      newElements: newElements.isEmpty
+          ? const <Object?>[]
+          : List<Object?>.unmodifiable(newElements),
       sawBoundary: sawBoundary,
       isClosed: _closed,
     );
@@ -252,9 +257,6 @@ class PartialJsonArrayTracker {
     );
 
     final decoded = _tryJsonDecode(token);
-    if (decoded != null) {
-      _elements.add(decoded);
-    }
     return decoded;
   }
 }
@@ -368,6 +370,11 @@ String partialJsonFingerprint(Object? value) {
   } catch (_) {
     return value.toString();
   }
+}
+
+List<T> createTrackedImmutableSnapshot<T>(List<T> values) {
+  partialJsonDebugCounters?.recordSnapshotCopy(values.length);
+  return List<T>.unmodifiable(List<T>.of(values));
 }
 
 Object? _tryParsePartialJsonValue(String text, {String? fallbackCandidate}) {

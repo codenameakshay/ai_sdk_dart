@@ -85,6 +85,9 @@ abstract class MCPTransport {
   /// Send a JSON-RPC request and receive the response.
   Future<JsonRpcResponse> send(JsonRpcRequest request);
 
+  /// Send a JSON-RPC notification without waiting for a response body.
+  Future<void> sendNotification(JsonRpcNotification notification);
+
   /// Stream of server-initiated JSON-RPC messages (notifications and
   /// server→client requests) that arrive out-of-band — i.e. not as the direct
   /// response to a [send] call.
@@ -95,10 +98,4 @@ abstract class MCPTransport {
 
   /// Close the transport.
   Future<void> close();
-}
-
-/// Optional transport capability for JSON-RPC notifications.
-abstract class MCPNotificationTransport {
-  /// Send a JSON-RPC notification without waiting for a JSON response body.
-  Future<void> sendNotification(JsonRpcNotification notification);
 }

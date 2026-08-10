@@ -141,7 +141,6 @@ class _MockSseServer {
         'serverInfo': {'name': 'sse-test-server', 'version': '1.0.0'},
       },
     });
-    enqueue({'jsonrpc': '2.0', 'result': {}});
   }
 
   /// Push an arbitrary server-initiated message over the open SSE stream.
@@ -185,6 +184,10 @@ class _MockSseServer {
           request.response.statusCode = 202;
           request.response.write('Accepted');
           await request.response.close();
+
+          if (!body.containsKey('id')) {
+            continue;
+          }
 
           // Deliver the JSON-RPC response over the SSE stream.
           if (_responseQueue.isNotEmpty) {

@@ -76,6 +76,14 @@ class StdioMCPTransport implements MCPTransport {
   }
 
   @override
+  Future<void> sendNotification(JsonRpcNotification notification) async {
+    await _ensureStarted();
+    final line = '${jsonEncode(notification.toJson())}\n';
+    _process!.stdin.write(line);
+    await _process!.stdin.flush();
+  }
+
+  @override
   Future<void> close() async {
     await _stdoutSub?.cancel();
     _process?.stdin.close();

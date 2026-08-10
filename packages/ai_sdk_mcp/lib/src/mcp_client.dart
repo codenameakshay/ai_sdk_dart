@@ -6,7 +6,7 @@ import 'json_rpc.dart';
 
 // Re-export the shared JSON-RPC transport interface and exception so callers
 // importing the barrel get them.
-export 'json_rpc.dart' show MCPTransport, MCPException;
+export 'json_rpc.dart' show MCPTransport, MCPException, JsonRpcNotification;
 
 // Web-safe HTTP/SSE transports (no dart:io).
 export 'http_transport.dart' show HttpClientTransport, SseClientTransport;
@@ -268,18 +268,9 @@ class MCPClient {
     }
     // Send initialized notification (fire-and-forget, no response expected).
     try {
-      final notification = JsonRpcNotification(
-        method: 'notifications/initialized',
+      await transport.sendNotification(
+        JsonRpcNotification(method: 'notifications/initialized'),
       );
-      if (transport is MCPNotificationTransport) {
-        await (transport as MCPNotificationTransport).sendNotification(
-          notification,
-        );
-      } else {
-        await transport.send(
-          JsonRpcRequest(method: notification.method, id: _id),
-        );
-      }
     } catch (_) {
       // Notifications may not return a response — ignore errors.
     }

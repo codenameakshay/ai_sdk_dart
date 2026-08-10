@@ -37,10 +37,6 @@ Future<void> main() async {
     final method = req['method'] as String?;
 
     if (method != null && method.startsWith('notifications/')) {
-      // The StdioMCPTransport assigns every outgoing message an id and awaits a
-      // response (even for notifications), so reply with an empty result keyed
-      // to that id to unblock the client's initialize handshake.
-      writeMessage({'jsonrpc': '2.0', 'id': id, 'result': {}});
       continue;
     }
 

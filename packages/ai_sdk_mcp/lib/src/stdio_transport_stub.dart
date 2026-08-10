@@ -30,5 +30,9 @@ class StdioMCPTransport implements MCPTransport {
       throw UnsupportedError(_unsupported);
 
   @override
+  Future<void> sendNotification(JsonRpcNotification notification) =>
+      throw UnsupportedError(_unsupported);
+
+  @override
   Future<void> close() async {}
 }

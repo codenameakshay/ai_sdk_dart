@@ -17,7 +17,7 @@ import 'json_rpc.dart';
 /// including Flutter web — but it cannot receive server-initiated messages
 /// (notifications / server→client requests). For server push, use
 /// [SseClientTransport].
-class HttpClientTransport implements MCPTransport, MCPNotificationTransport {
+class HttpClientTransport implements MCPTransport {
   HttpClientTransport({required this.url, Uri? postUrl, this.headers})
     : postUrl = postUrl ?? url;
 
@@ -130,6 +130,12 @@ class SseClientTransport implements MCPTransport {
   final Uri? _explicitPostUrl;
 
   final http.Client _client;
+
+  Map<String, String> get _requestHeaders => {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json, text/event-stream',
+    ...?headers,
+  };
 
   /// Broadcast stream of server-initiated messages (no matching pending id).
   final _notifications = StreamController<Map<String, dynamic>>.broadcast();
@@ -295,8 +301,7 @@ class SseClientTransport implements MCPTransport {
     }
   }
 
-  @override
-  Future<JsonRpcResponse> send(JsonRpcRequest request) async {
+  Future<Uri> _requirePostUrl() async {
     if (_closed) throw const MCPException('SSE transport is closed');
     await _ensureConnected();
 
@@ -306,7 +311,22 @@ class SseClientTransport implements MCPTransport {
         'SSE transport has no POST endpoint (no `endpoint` event received)',
       );
     }
+    return postUrl;
+  }
 
+  Future<http.Response> _postMessage(Map<String, dynamic> message) async {
+    final postUrl = await _requirePostUrl();
+    try {
+      return await _client
+          .post(postUrl, headers: _requestHeaders, body: jsonEncode(message))
+          .timeout(requestTimeout);
+    } catch (e) {
+      throw MCPException('SSE POST failed: $e');
+    }
+  }
+
+  @override
+  Future<JsonRpcResponse> send(JsonRpcRequest request) async {
     final completer = Completer<JsonRpcResponse>();
     _pending[request.id] = completer;
     // Ensure the raw completer future is always observed: the value/error is
@@ -315,24 +335,12 @@ class SseClientTransport implements MCPTransport {
     // completer, the bare future would otherwise raise an unhandled error.
     unawaited(completer.future.then((_) {}, onError: (_) {}));
 
-    final allHeaders = {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json, text/event-stream',
-      ...?headers,
-    };
-
     http.Response response;
     try {
-      response = await _client
-          .post(
-            postUrl,
-            headers: allHeaders,
-            body: jsonEncode(request.toJson()),
-          )
-          .timeout(requestTimeout);
-    } catch (e) {
+      response = await _postMessage(request.toJson());
+    } on MCPException catch (e) {
       _pending.remove(request.id);
-      throw MCPException('SSE POST failed: $e');
+      throw e;
     }
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -370,6 +378,14 @@ class SseClientTransport implements MCPTransport {
         );
       },
     );
+  }
+
+  @override
+  Future<void> sendNotification(JsonRpcNotification notification) async {
+    final response = await _postMessage(notification.toJson());
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw MCPException('HTTP ${response.statusCode}: ${response.body}');
+    }
   }
 
   @override

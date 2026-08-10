@@ -4,9 +4,15 @@ import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 
 import 'json_rpc.dart';
 
-// Re-export the shared JSON-RPC transport interface and exception so callers
-// importing the barrel get them.
-export 'json_rpc.dart' show MCPTransport, MCPException, JsonRpcNotification;
+// Re-export the stable JSON-RPC transport surface so callers implementing
+// custom MCP transports can use only the package barrel import.
+export 'json_rpc.dart'
+    show
+        JsonRpcRequest,
+        JsonRpcResponse,
+        JsonRpcNotification,
+        MCPTransport,
+        MCPException;
 
 // Web-safe HTTP/SSE transports (no dart:io).
 export 'http_transport.dart' show HttpClientTransport, SseClientTransport;

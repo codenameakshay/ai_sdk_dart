@@ -6,8 +6,11 @@ import 'dart:async';
 
 /// JSON-RPC 2.0 request.
 ///
-/// Internal to `ai_sdk_mcp`; shared between the client and the transport
-/// implementations. Not part of the public API.
+/// Stable transport-extension primitive shared between [MCPClient] and custom
+/// [MCPTransport] implementations.
+///
+/// Import this through `package:ai_sdk_mcp/ai_sdk_mcp.dart` when implementing
+/// a transport outside this package.
 class JsonRpcRequest {
   JsonRpcRequest({required this.method, required this.id, this.params});
 
@@ -25,6 +28,8 @@ class JsonRpcRequest {
 
 /// JSON-RPC 2.0 notification.
 ///
+/// Stable transport-extension primitive for fire-and-forget MCP messages.
+///
 /// Notifications are serialized without an `id`, so no response is expected.
 class JsonRpcNotification {
   JsonRpcNotification({required this.method, this.params});
@@ -41,8 +46,11 @@ class JsonRpcNotification {
 
 /// JSON-RPC 2.0 response.
 ///
-/// Internal to `ai_sdk_mcp`; shared between the client and the transport
-/// implementations. Not part of the public API.
+/// Stable transport-extension primitive shared between [MCPClient] and custom
+/// [MCPTransport] implementations.
+///
+/// Import this through `package:ai_sdk_mcp/ai_sdk_mcp.dart` when implementing
+/// a transport outside this package.
 class JsonRpcResponse {
   const JsonRpcResponse({this.result, this.error, this.id});
 
@@ -80,7 +88,10 @@ class MCPException implements Exception {
 // Transport interface
 // ---------------------------------------------------------------------------
 
-/// Abstract transport for MCP JSON-RPC communication.
+/// Public transport contract for MCP JSON-RPC communication.
+///
+/// Custom transports should implement this interface and use the JSON-RPC
+/// primitives in this file as the stable request/notification/response types.
 abstract class MCPTransport {
   /// Send a JSON-RPC request and receive the response.
   Future<JsonRpcResponse> send(JsonRpcRequest request);

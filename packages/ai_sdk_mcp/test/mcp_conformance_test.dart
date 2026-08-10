@@ -19,6 +19,8 @@ class _MockMCPServer {
   final HttpServer _server;
   final List<Map<String, dynamic>> _requestLog = [];
   final _responseQueue = <Map<String, dynamic>>[];
+  int? _initializedNotificationStatusCode;
+  String _initializedNotificationBody = '';
 
   List<Map<String, dynamic>> get requestLog => List.unmodifiable(_requestLog);
 
@@ -35,7 +37,7 @@ class _MockMCPServer {
 
   /// Queue the standard initialize success + an empty response for the
   /// `notifications/initialized` fire-and-forget call.
-  void enqueueInitialize() {
+  void enqueueInitialize({bool includeInitializedResponse = true}) {
     enqueue({
       'jsonrpc': '2.0',
       'result': {
@@ -44,9 +46,16 @@ class _MockMCPServer {
         'serverInfo': {'name': 'test-server', 'version': '1.0.0'},
       },
     });
-    // notifications/initialized may get a response — provide one so the client
-    // doesn't hang, even though errors from it are silently ignored.
-    enqueue({'jsonrpc': '2.0', 'result': {}});
+    if (includeInitializedResponse) {
+      // notifications/initialized may get a response — provide one so the
+      // legacy request path still completes.
+      enqueue({'jsonrpc': '2.0', 'result': {}});
+    }
+  }
+
+  void acceptInitializedNotification({int statusCode = 202, String body = ''}) {
+    _initializedNotificationStatusCode = statusCode;
+    _initializedNotificationBody = body;
   }
 
   Future<void> _serve() async {
@@ -55,6 +64,16 @@ class _MockMCPServer {
       try {
         final body = (jsonDecode(bodyText) as Map).cast<String, dynamic>();
         _requestLog.add(body);
+        if (body['method'] == 'notifications/initialized' &&
+            _initializedNotificationStatusCode != null) {
+          request.response.statusCode = _initializedNotificationStatusCode!;
+          if (_initializedNotificationBody.isNotEmpty) {
+            request.response.write(_initializedNotificationBody);
+          }
+          await request.response.close();
+          continue;
+        }
+
         final id = body['id'];
 
         Map<String, dynamic> responseBody;
@@ -337,6 +356,26 @@ void main() {
               .where((r) => r['method'] == 'initialize')
               .length;
           expect(initCount, 1);
+        },
+      );
+
+      test(
+        'sends notifications/initialized without an id and accepts 202 with an empty body',
+        () async {
+          final mock = await _MockMCPServer.start();
+          addTearDown(mock.close);
+          mock.enqueueInitialize(includeInitializedResponse: false);
+          mock.acceptInitializedNotification();
+
+          final client = _client(mock);
+          addTearDown(client.close);
+
+          await client.initialize();
+
+          expect(mock.requestLog, hasLength(2));
+          final initialized = mock.requestLog[1];
+          expect(initialized['method'], 'notifications/initialized');
+          expect(initialized.containsKey('id'), isFalse);
         },
       );
 
@@ -1143,20 +1182,23 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 50));
       });
 
-      test('SSE connect to a refused port surfaces a single MCPException', () async {
-        final port = await _refusedPort();
-        final transport = SseClientTransport(
-          url: Uri.parse('http://127.0.0.1:$port/sse'),
-          connectTimeout: const Duration(seconds: 2),
-        );
-        addTearDown(transport.close);
+      test(
+        'SSE connect to a refused port surfaces a single MCPException',
+        () async {
+          final port = await _refusedPort();
+          final transport = SseClientTransport(
+            url: Uri.parse('http://127.0.0.1:$port/sse'),
+            connectTimeout: const Duration(seconds: 2),
+          );
+          addTearDown(transport.close);
 
-        await expectLater(
-          transport.send(JsonRpcRequest(method: 'initialize', id: 1)),
-          throwsA(isA<MCPException>()),
-        );
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-      });
+          await expectLater(
+            transport.send(JsonRpcRequest(method: 'initialize', id: 1)),
+            throwsA(isA<MCPException>()),
+          );
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        },
+      );
 
       test('explicit postUrl with no endpoint event surfaces one error on a '
           'failed POST', () async {
@@ -1227,32 +1269,35 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 100));
       });
 
-      test('give up after maxAttempts (no factory) surfaces one error', () async {
-        final mock = await _MockSseServer.start();
-        addTearDown(mock.close);
-        mock.enqueueInitialize();
-        final sseUri = mock.sseUri;
+      test(
+        'give up after maxAttempts (no factory) surfaces one error',
+        () async {
+          final mock = await _MockSseServer.start();
+          addTearDown(mock.close);
+          mock.enqueueInitialize();
+          final sseUri = mock.sseUri;
 
-        final client = MCPClient(
-          transport: SseClientTransport(
-            url: sseUri,
-            connectTimeout: const Duration(milliseconds: 200),
-          ),
-          reconnectPolicy: const MCPReconnectPolicy(
-            maxAttempts: 2,
-            initialDelayMs: 1,
-            backoffFactor: 1.0,
-            maxDelayMs: 5,
-          ),
-        );
-        addTearDown(client.close);
+          final client = MCPClient(
+            transport: SseClientTransport(
+              url: sseUri,
+              connectTimeout: const Duration(milliseconds: 200),
+            ),
+            reconnectPolicy: const MCPReconnectPolicy(
+              maxAttempts: 2,
+              initialDelayMs: 1,
+              backoffFactor: 1.0,
+              maxDelayMs: 5,
+            ),
+          );
+          addTearDown(client.close);
 
-        await client.initialize();
-        await mock.close();
+          await client.initialize();
+          await mock.close();
 
-        await expectLater(client.tools(), throwsA(isA<MCPException>()));
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-      });
+          await expectLater(client.tools(), throwsA(isA<MCPException>()));
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        },
+      );
     });
   });
 }

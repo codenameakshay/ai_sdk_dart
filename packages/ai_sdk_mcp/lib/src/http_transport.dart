@@ -17,7 +17,7 @@ import 'json_rpc.dart';
 /// including Flutter web — but it cannot receive server-initiated messages
 /// (notifications / server→client requests). For server push, use
 /// [SseClientTransport].
-class HttpClientTransport implements MCPTransport {
+class HttpClientTransport implements MCPTransport, MCPNotificationTransport {
   HttpClientTransport({required this.url, Uri? postUrl, this.headers})
     : postUrl = postUrl ?? url;
 
@@ -32,19 +32,20 @@ class HttpClientTransport implements MCPTransport {
 
   final _client = http.Client();
 
+  Map<String, String> get _jsonHeaders => {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+    ...?headers,
+  };
+
   @override
   Stream<Map<String, dynamic>> get notifications => const Stream.empty();
 
   @override
   Future<JsonRpcResponse> send(JsonRpcRequest request) async {
-    final allHeaders = {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-      ...?headers,
-    };
     final response = await _client.post(
       postUrl,
-      headers: allHeaders,
+      headers: _jsonHeaders,
       body: jsonEncode(request.toJson()),
     );
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -55,6 +56,18 @@ class HttpClientTransport implements MCPTransport {
       throw MCPException('Unexpected MCP response format: $body');
     }
     return JsonRpcResponse.fromJson(body.cast<String, dynamic>());
+  }
+
+  @override
+  Future<void> sendNotification(JsonRpcNotification notification) async {
+    final response = await _client.post(
+      postUrl,
+      headers: _jsonHeaders,
+      body: jsonEncode(notification.toJson()),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw MCPException('HTTP ${response.statusCode}: ${response.body}');
+    }
   }
 
   @override
@@ -361,7 +374,8 @@ class SseClientTransport implements MCPTransport {
 
   @override
   Future<void> close() async {
-    if (_closed) return; // Idempotent: safe to call repeatedly / on error paths.
+    if (_closed)
+      return; // Idempotent: safe to call repeatedly / on error paths.
     _closed = true;
     _connectTimer?.cancel();
     _connectTimer = null;

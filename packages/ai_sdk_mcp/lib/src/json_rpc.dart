@@ -23,6 +23,22 @@ class JsonRpcRequest {
   };
 }
 
+/// JSON-RPC 2.0 notification.
+///
+/// Notifications are serialized without an `id`, so no response is expected.
+class JsonRpcNotification {
+  JsonRpcNotification({required this.method, this.params});
+
+  final String method;
+  final Map<String, dynamic>? params;
+
+  Map<String, dynamic> toJson() => {
+    'jsonrpc': '2.0',
+    'method': method,
+    if (params != null) 'params': params,
+  };
+}
+
 /// JSON-RPC 2.0 response.
 ///
 /// Internal to `ai_sdk_mcp`; shared between the client and the transport
@@ -79,4 +95,10 @@ abstract class MCPTransport {
 
   /// Close the transport.
   Future<void> close();
+}
+
+/// Optional transport capability for JSON-RPC notifications.
+abstract class MCPNotificationTransport {
+  /// Send a JSON-RPC notification without waiting for a JSON response body.
+  Future<void> sendNotification(JsonRpcNotification notification);
 }

@@ -268,9 +268,18 @@ class MCPClient {
     }
     // Send initialized notification (fire-and-forget, no response expected).
     try {
-      await transport.send(
-        JsonRpcRequest(method: 'notifications/initialized', id: _id),
+      final notification = JsonRpcNotification(
+        method: 'notifications/initialized',
       );
+      if (transport is MCPNotificationTransport) {
+        await (transport as MCPNotificationTransport).sendNotification(
+          notification,
+        );
+      } else {
+        await transport.send(
+          JsonRpcRequest(method: notification.method, id: _id),
+        );
+      }
     } catch (_) {
       // Notifications may not return a response — ignore errors.
     }

@@ -4,6 +4,14 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
 
 void main() {
+  group('AiOperationCancelledError', () {
+    test('is part of the sealed AiSdkError hierarchy', () {
+      const err = AiOperationCancelledError();
+      expect(err, isA<AiSdkError>());
+      expect(AiOperationCancelledError.isInstance(err), isTrue);
+    });
+  });
+
   group('AiApiCallError', () {
     test('is part of the sealed AiSdkError hierarchy', () {
       const err = AiApiCallError('boom');

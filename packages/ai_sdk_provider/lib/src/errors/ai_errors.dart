@@ -171,6 +171,13 @@ class AiNoContentGeneratedError extends AiSdkError {
   const AiNoContentGeneratedError(super.message);
 }
 
+/// Thrown when the caller aborts an in-flight SDK operation.
+class AiOperationCancelledError extends AiSdkError {
+  const AiOperationCancelledError([super.message = 'Operation cancelled.']);
+
+  static bool isInstance(Object error) => error is AiOperationCancelledError;
+}
+
 /// Thrown when structured object generation fails.
 ///
 /// Contains [text], [response], [usage], and [cause].

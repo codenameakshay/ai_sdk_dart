@@ -303,6 +303,65 @@ void main() {
       expect(passedToolNames, contains('tool_a'));
       expect(passedToolNames, isNot(contains('tool_b')));
     });
+
+    test(
+      'tool cancellation in a terminal maxSteps generateText step throws cancellation',
+      () async {
+        final token = CancellationToken();
+        final gate = Completer<void>();
+        final future = generateText(
+          model: FakeToolModel(toolName: 'wait', toolInput: const {}),
+          prompt: 'hi',
+          maxSteps: 1,
+          abortSignal: token,
+          tools: {
+            'wait': tool<Map<String, dynamic>, String>(
+              inputSchema: jsonSchema({'type': 'object'}),
+              execute: (_, __) async {
+                await gate.future;
+                return 'late';
+              },
+            ),
+          },
+        );
+
+        await Future<void>.delayed(Duration.zero);
+        token.cancel();
+
+        await expectLater(future, throwsA(isA<AiOperationCancelledError>()));
+        gate.complete();
+      },
+    );
+
+    test(
+      'tool cancellation beats same-step stop conditions in generateText',
+      () async {
+        final token = CancellationToken();
+        final gate = Completer<void>();
+        final future = generateText(
+          model: FakeToolModel(toolName: 'wait', toolInput: const {}),
+          prompt: 'hi',
+          maxSteps: 2,
+          stopConditions: [(_) => true],
+          abortSignal: token,
+          tools: {
+            'wait': tool<Map<String, dynamic>, String>(
+              inputSchema: jsonSchema({'type': 'object'}),
+              execute: (_, __) async {
+                await gate.future;
+                return 'late';
+              },
+            ),
+          },
+        );
+
+        await Future<void>.delayed(Duration.zero);
+        token.cancel();
+
+        await expectLater(future, throwsA(isA<AiOperationCancelledError>()));
+        gate.complete();
+      },
+    );
   });
 
   // ---------------------------------------------------------------------------
@@ -571,6 +630,71 @@ void main() {
       expect(passedToolNames, contains('tool_a'));
       expect(passedToolNames, isNot(contains('tool_b')));
     });
+
+    test(
+      'tool cancellation in a terminal maxSteps streamText step throws cancellation',
+      () async {
+        final token = CancellationToken();
+        final gate = Completer<void>();
+        final result = await streamText(
+          model: FakeToolModel(toolName: 'wait', toolInput: const {}),
+          prompt: 'hi',
+          maxSteps: 1,
+          abortSignal: token,
+          tools: {
+            'wait': tool<Map<String, dynamic>, String>(
+              inputSchema: jsonSchema({'type': 'object'}),
+              execute: (_, __) async {
+                await gate.future;
+                return 'late';
+              },
+            ),
+          },
+        );
+
+        await Future<void>.delayed(Duration.zero);
+        token.cancel();
+
+        await expectLater(
+          result.text,
+          throwsA(isA<AiOperationCancelledError>()),
+        );
+        gate.complete();
+      },
+    );
+
+    test(
+      'tool cancellation beats same-step stop conditions in streamText',
+      () async {
+        final token = CancellationToken();
+        final gate = Completer<void>();
+        final result = await streamText(
+          model: FakeToolModel(toolName: 'wait', toolInput: const {}),
+          prompt: 'hi',
+          maxSteps: 2,
+          stopConditions: [(_) => true],
+          abortSignal: token,
+          tools: {
+            'wait': tool<Map<String, dynamic>, String>(
+              inputSchema: jsonSchema({'type': 'object'}),
+              execute: (_, __) async {
+                await gate.future;
+                return 'late';
+              },
+            ),
+          },
+        );
+
+        await Future<void>.delayed(Duration.zero);
+        token.cancel();
+
+        await expectLater(
+          result.text,
+          throwsA(isA<AiOperationCancelledError>()),
+        );
+        gate.complete();
+      },
+    );
   });
 
   // ---------------------------------------------------------------------------

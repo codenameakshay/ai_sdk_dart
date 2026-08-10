@@ -964,6 +964,9 @@ Future<_ToolExecutionResult> _executeToolCall({
       rethrow;
     }
   } catch (error) {
+    if (error is AiOperationCancelledError) {
+      rethrow;
+    }
     return _ToolExecutionResult(
       toolResult: LanguageModelV3ToolResultPart(
         toolCallId: call.toolCallId,

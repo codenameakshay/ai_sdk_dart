@@ -157,6 +157,27 @@ void main() {
       expect(abortCalled, isFalse);
     });
 
+    test('onAbort is not called when cancelling after normal completion',
+        () async {
+      var abortCalls = 0;
+      final token = CancellationToken();
+
+      final result = await streamText(
+        model: FakeTextModel('Hello'),
+        prompt: 'hi',
+        abortSignal: token,
+        onAbort: () {
+          abortCalls++;
+        },
+      );
+
+      await result.text;
+      token.cancel();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(abortCalls, 0);
+    });
+
     test('onAbort is not called when abortSignal is null', () async {
       var abortCalled = false;
 
@@ -231,6 +252,26 @@ void main() {
         throwsA(isA<AiOperationCancelledError>()),
       );
     });
+
+    test('onAbort is not called when cancelling after terminal error',
+        () async {
+      var abortCalls = 0;
+      final token = CancellationToken();
+      final result = await streamText(
+        model: _ImmediateErrorStreamModel(),
+        prompt: 'hi',
+        abortSignal: token,
+        onAbort: () {
+          abortCalls++;
+        },
+      );
+
+      await expectLater(result.text, throwsA(isA<StateError>()));
+      token.cancel();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(abortCalls, 0);
+    });
   });
 }
 
@@ -299,5 +340,32 @@ class _SilentStreamModel implements LanguageModelV3 {
   ) async {
     final controller = StreamController<LanguageModelV3StreamPart>();
     return LanguageModelV3StreamResult(stream: controller.stream);
+  }
+}
+
+class _ImmediateErrorStreamModel implements LanguageModelV3 {
+  @override
+  String get provider => 'fake';
+
+  @override
+  String get modelId => 'immediate-error-stream';
+
+  @override
+  String get specificationVersion => 'v3';
+
+  @override
+  Future<LanguageModelV3GenerateResult> doGenerate(
+    LanguageModelV3CallOptions options,
+  ) async => throw UnimplementedError();
+
+  @override
+  Future<LanguageModelV3StreamResult> doStream(
+    LanguageModelV3CallOptions options,
+  ) async {
+    return LanguageModelV3StreamResult(
+      stream: Stream<LanguageModelV3StreamPart>.fromIterable([
+        StreamPartError(error: StateError('boom')),
+      ]),
+    );
   }
 }

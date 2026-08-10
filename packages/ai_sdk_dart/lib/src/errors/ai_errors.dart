@@ -12,6 +12,7 @@ export 'package:ai_sdk_provider/ai_sdk_provider.dart'
         AiNoSuchToolError,
         AiInvalidToolInputError,
         AiNoContentGeneratedError,
+        AiOperationCancelledError,
         AiNoObjectGeneratedError,
         AiToolCallRepairError,
         AiNoImageGeneratedError,
@@ -19,17 +20,3 @@ export 'package:ai_sdk_provider/ai_sdk_provider.dart'
         AiNoTranscriptGeneratedError,
         AiRetryError,
         AiDownloadError;
-
-/// Thrown when the caller aborts an in-flight SDK operation.
-class AiOperationCancelledError implements Exception {
-  const AiOperationCancelledError([
-    this.message = 'Operation cancelled.',
-  ]);
-
-  final String message;
-
-  @override
-  String toString() => '$runtimeType: $message';
-
-  static bool isInstance(Object error) => error is AiOperationCancelledError;
-}

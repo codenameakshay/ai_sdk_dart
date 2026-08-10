@@ -23,6 +23,38 @@ extension _CompleteIfPending<T> on Completer<T> {
   }
 }
 
+Stream<T> _terminalAwareBroadcastStream<T>({
+  required Stream<T> source,
+  required bool Function() isTerminal,
+  required Object? Function() terminalError,
+  required StackTrace? Function() terminalStackTrace,
+  Iterable<T> Function()? replayOnError,
+}) {
+  return Stream<T>.multi((controller) {
+    if (isTerminal()) {
+      final error = terminalError();
+      if (error != null) {
+        final replayItems = replayOnError?.call();
+        if (replayItems != null) {
+          for (final item in replayItems) {
+            controller.add(item);
+          }
+        }
+        controller.addError(error, terminalStackTrace());
+      }
+      controller.close();
+      return;
+    }
+
+    final subscription = source.listen(
+      controller.add,
+      onError: controller.addError,
+      onDone: controller.close,
+    );
+    controller.onCancel = subscription.cancel;
+  }, isBroadcast: true);
+}
+
 /// Callback invoked for each stream chunk.
 typedef StreamTextOnChunk = void Function(StreamTextChunk chunk);
 
@@ -575,6 +607,10 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   final requestCompleter = Completer<GenerateTextRequest>();
   final responseCompleter = Completer<GenerateTextResponse>();
   final providerMetadataCompleter = Completer<ProviderMetadata?>();
+  var isTerminal = false;
+  Object? terminalError;
+  StackTrace? terminalStackTrace;
+  StreamTextErrorEvent? terminalFullStreamErrorEvent;
 
   observeFutureError(textCompleter.future);
   observeFutureError(outputCompleter.future);
@@ -600,7 +636,9 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   if (abortSignal != null && onAbort != null) {
     unawaited(
       abortSignal.onCancelled.then((_) {
-        _safeInvoke(onAbort);
+        if (!isTerminal) {
+          _safeInvoke(onAbort);
+        }
       }),
     );
   }
@@ -1195,6 +1233,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
           warnings: List.unmodifiable(lastWarnings),
         );
 
+        isTerminal = true;
         fullController.add(finishEvent);
         _safeInvoke(() => onFinish?.call(finishEvent));
 
@@ -1231,8 +1270,12 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
         );
       } catch (error, stackTrace) {
         refreshEnvelopeFromRaw();
+        isTerminal = true;
+        terminalError = error;
+        terminalStackTrace = stackTrace;
+        terminalFullStreamErrorEvent = StreamTextErrorEvent(error: error);
         _safeInvoke(() => onError?.call(error));
-        fullController.add(StreamTextErrorEvent(error: error));
+        fullController.add(terminalFullStreamErrorEvent!);
 
         textCompleter.completeErrorIfPending(error, stackTrace);
         outputCompleter.completeErrorIfPending(error, stackTrace);
@@ -1302,11 +1345,39 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   );
 
   return StreamTextResult<TOutput>(
-    stream: rawController.stream,
-    fullStream: fullController.stream,
-    textStream: textController.stream,
-    partialOutputStream: partialController.stream,
-    elementStream: elementController.stream,
+    stream: _terminalAwareBroadcastStream(
+      source: rawController.stream,
+      isTerminal: () => isTerminal,
+      terminalError: () => terminalError,
+      terminalStackTrace: () => terminalStackTrace,
+    ),
+    fullStream: _terminalAwareBroadcastStream(
+      source: fullController.stream,
+      isTerminal: () => isTerminal,
+      terminalError: () => terminalError,
+      terminalStackTrace: () => terminalStackTrace,
+      replayOnError: () => terminalFullStreamErrorEvent == null
+          ? const <StreamTextEvent>[]
+          : <StreamTextEvent>[terminalFullStreamErrorEvent!],
+    ),
+    textStream: _terminalAwareBroadcastStream(
+      source: textController.stream,
+      isTerminal: () => isTerminal,
+      terminalError: () => terminalError,
+      terminalStackTrace: () => terminalStackTrace,
+    ),
+    partialOutputStream: _terminalAwareBroadcastStream(
+      source: partialController.stream,
+      isTerminal: () => isTerminal,
+      terminalError: () => terminalError,
+      terminalStackTrace: () => terminalStackTrace,
+    ),
+    elementStream: _terminalAwareBroadcastStream(
+      source: elementController.stream,
+      isTerminal: () => isTerminal,
+      terminalError: () => terminalError,
+      terminalStackTrace: () => terminalStackTrace,
+    ),
     text: textCompleter.future,
     output: outputCompleter.future,
     content: contentCompleter.future,
@@ -1592,6 +1663,9 @@ Future<_ToolExecutionResult> _executeToolCall({
       rethrow;
     }
   } catch (error) {
+    if (error is AiOperationCancelledError) {
+      rethrow;
+    }
     return _ToolExecutionResult(
       toolResult: LanguageModelV3ToolResultPart(
         toolCallId: call.toolCallId,

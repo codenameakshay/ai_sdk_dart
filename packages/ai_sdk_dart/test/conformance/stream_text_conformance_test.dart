@@ -341,6 +341,60 @@ void main() {
         expect(events.whereType<StreamTextTextDeltaEvent>().single.delta, 'Hi');
         expect(events.last, isA<StreamTextErrorEvent>());
       });
+
+      test('late fullStream subscriber sees pre-cancelled terminal error',
+          () async {
+        final token = CancellationToken()..cancel();
+        final result = await streamText(
+          model: FakeTextModel('unused'),
+          prompt: 'hi',
+          abortSignal: token,
+        );
+
+        await Future<void>.delayed(Duration.zero);
+        final events = await _collectFailingFullStream(
+          result,
+          isA<AiOperationCancelledError>(),
+        );
+
+        expect(events.single, isA<StreamTextErrorEvent>());
+      });
+
+      test(
+        'late fullStream subscriber sees startup-timeout terminal error',
+        () async {
+          final result = await streamText(
+            model: _SlowStartEmptyStreamModel(const Duration(milliseconds: 50)),
+            prompt: 'hi',
+            timeout: const Duration(milliseconds: 10),
+            maxRetries: 0,
+          );
+
+          await Future<void>.delayed(const Duration(milliseconds: 30));
+          final events = await _collectFailingFullStream(
+            result,
+            isA<TimeoutException>(),
+          );
+
+          expect(events.single, isA<StreamTextErrorEvent>());
+        },
+      );
+
+      test('late subscriber sees provider failure on raw and text streams',
+          () async {
+        final result = await streamText(
+          model: FakeErrorModel(StateError('boom')),
+          prompt: 'hi',
+          maxRetries: 0,
+        );
+
+        await Future<void>.delayed(Duration.zero);
+        await expectLater(result.stream.toList(), throwsA(isA<StateError>()));
+        await expectLater(
+          result.textStream.toList(),
+          throwsA(isA<StateError>()),
+        );
+      });
     });
 
     // ── Multi-step streaming ───────────────────────────────────────────────
@@ -539,6 +593,58 @@ class _ErrorAfterTextModel implements LanguageModelV3 {
       ]),
     );
   }
+}
+
+class _SlowStartEmptyStreamModel implements LanguageModelV3 {
+  const _SlowStartEmptyStreamModel(this.delay);
+
+  final Duration delay;
+
+  @override
+  String get provider => 'fake';
+
+  @override
+  String get modelId => 'slow-start-empty-stream';
+
+  @override
+  String get specificationVersion => 'v3';
+
+  @override
+  Future<LanguageModelV3GenerateResult> doGenerate(
+    LanguageModelV3CallOptions options,
+  ) async => throw UnimplementedError();
+
+  @override
+  Future<LanguageModelV3StreamResult> doStream(
+    LanguageModelV3CallOptions options,
+  ) async {
+    await Future<void>.delayed(delay);
+    return const LanguageModelV3StreamResult(
+      stream: Stream<LanguageModelV3StreamPart>.empty(),
+    );
+  }
+}
+
+Future<List<StreamTextEvent>> _collectFailingFullStream(
+  StreamTextResult result,
+  Matcher matcher,
+) async {
+  final events = <StreamTextEvent>[];
+  final done = Completer<void>();
+  final sub = result.fullStream.listen(
+    events.add,
+    onError: (Object error, StackTrace stackTrace) {
+      if (!done.isCompleted) {
+        done.completeError(error, stackTrace);
+      }
+    },
+    onDone: () {
+      if (!done.isCompleted) done.complete();
+    },
+  );
+  await expectLater(done.future, throwsA(matcher));
+  await sub.cancel();
+  return events;
 }
 
 /// A fake model that includes warnings in rawResponse so streamText can read them.

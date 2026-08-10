@@ -626,67 +626,70 @@ void main() {
       expect(model.modelId, 'text-embedding-004');
     });
 
-    test('doGenerate serializes system, generation config, and stops', () async {
-      late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
-        final body = await utf8.decoder.bind(request).join();
-        captured = (jsonDecode(body) as Map).cast<String, dynamic>();
-        request.response.statusCode = 200;
-        request.response.headers.contentType = ContentType.json;
-        request.response.write(
-          jsonEncode({
-            'candidates': [
-              {
-                'finishReason': 'STOP',
-                'content': {
-                  'parts': [
-                    {'text': 'ok'},
-                  ],
+    test(
+      'doGenerate serializes system, generation config, and stops',
+      () async {
+        late Map<String, dynamic> captured;
+        final server = await _TestServer.start((request) async {
+          final body = await utf8.decoder.bind(request).join();
+          captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'candidates': [
+                {
+                  'finishReason': 'STOP',
+                  'content': {
+                    'parts': [
+                      {'text': 'ok'},
+                    ],
+                  },
                 },
-              },
-            ],
-          }),
-        );
-        await request.response.close();
-      });
-      addTearDown(server.close);
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
 
-      final model = GoogleGenerativeAIProvider(
-        apiKey: 'test',
-        baseUrl: server.baseUrl,
-      ).call('gemini-2.0-flash');
+        final model = GoogleGenerativeAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('gemini-2.0-flash');
 
-      await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
-            system: 'You are concise.',
-            messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
-              ),
-            ],
+        await model.doGenerate(
+          LanguageModelV3CallOptions(
+            prompt: LanguageModelV3Prompt(
+              system: 'You are concise.',
+              messages: [
+                LanguageModelV3Message(
+                  role: LanguageModelV3Role.user,
+                  content: [LanguageModelV3TextPart(text: 'hi')],
+                ),
+              ],
+            ),
+            maxOutputTokens: 128,
+            temperature: 0.5,
+            topP: 0.9,
+            topK: 40,
+            stopSequences: const ['STOP', 'END'],
           ),
-          maxOutputTokens: 128,
-          temperature: 0.5,
-          topP: 0.9,
-          topK: 40,
-          stopSequences: const ['STOP', 'END'],
-        ),
-      );
+        );
 
-      expect(
-        ((captured['systemInstruction'] as Map)['parts'] as List).first,
-        {'text': 'You are concise.'},
-      );
-      final config = (captured['generationConfig'] as Map)
-          .cast<String, dynamic>();
-      expect(config['maxOutputTokens'], 128);
-      expect(config['temperature'], 0.5);
-      expect(config['topP'], 0.9);
-      expect(config['topK'], 40);
-      expect(config['stopSequences'], ['STOP', 'END']);
-    });
+        expect(
+          ((captured['systemInstruction'] as Map)['parts'] as List).first,
+          {'text': 'You are concise.'},
+        );
+        final config = (captured['generationConfig'] as Map)
+            .cast<String, dynamic>();
+        expect(config['maxOutputTokens'], 128);
+        expect(config['temperature'], 0.5);
+        expect(config['topP'], 0.9);
+        expect(config['topK'], 40);
+        expect(config['stopSequences'], ['STOP', 'END']);
+      },
+    );
 
     test('doGenerate tolerates empty candidates and content', () async {
       final server = await _TestServer.start((request) async {
@@ -771,10 +774,7 @@ void main() {
         LanguageModelV3FinishReason.contentFilter,
       );
       expect(await resolve('OTHER'), LanguageModelV3FinishReason.other);
-      expect(
-        await resolve('BLOCKLIST'),
-        LanguageModelV3FinishReason.other,
-      );
+      expect(await resolve('BLOCKLIST'), LanguageModelV3FinishReason.other);
       expect(await resolve(null), LanguageModelV3FinishReason.unknown);
     });
 
@@ -880,8 +880,8 @@ void main() {
       final contents = (captured['contents'] as List)
           .cast<Map<String, dynamic>>();
       expect(contents.single['role'], 'model');
-      final fnCall = ((contents.single['parts'] as List).single
-          as Map)['functionCall'];
+      final fnCall =
+          ((contents.single['parts'] as List).single as Map)['functionCall'];
       expect(fnCall, {
         'name': 'weather',
         'args': {'city': 'Paris'},
@@ -926,9 +926,7 @@ void main() {
             messages: [
               LanguageModelV3Message(
                 role: LanguageModelV3Role.assistant,
-                content: [
-                  LanguageModelV3ReasoningPart(text: 'thinking...'),
-                ],
+                content: [LanguageModelV3ReasoningPart(text: 'thinking...')],
               ),
             ],
           ),
@@ -1012,8 +1010,7 @@ void main() {
       final contents = (captured['contents'] as List)
           .cast<Map<String, dynamic>>();
       final response =
-          ((contents.single['parts'] as List).single
-                  as Map)['functionResponse']
+          ((contents.single['parts'] as List).single as Map)['functionResponse']
               as Map;
       final output = (response['response'] as Map)['output'] as Map;
       expect(output['type'], 'content');
@@ -1077,10 +1074,9 @@ void main() {
       );
       await stream.stream.toList();
 
-      expect(
-        ((captured['systemInstruction'] as Map)['parts'] as List).first,
-        {'text': 'be brief'},
-      );
+      expect(((captured['systemInstruction'] as Map)['parts'] as List).first, {
+        'text': 'be brief',
+      });
       final config = (captured['generationConfig'] as Map)
           .cast<String, dynamic>();
       expect(config['maxOutputTokens'], 64);
@@ -1092,14 +1088,11 @@ void main() {
               as List);
       expect((declarations.single as Map)['name'], 'weather');
       expect((declarations.single as Map)['description'], 'Get weather');
-      expect(
-        captured['toolConfig']['functionCallingConfig']['mode'],
-        'ANY',
-      );
+      expect(captured['toolConfig']['functionCallingConfig']['mode'], 'ANY');
       expect(captured['cachedContent'], 'cachedContents/9');
     });
 
-    test('doStream surfaces function calls and inline files in deltas', () async {
+    test('doStream emits tool call stream parts for Gemini functionCall', () async {
       final server = await _TestServer.start((request) async {
         request.response.statusCode = 200;
         request.response.headers.set('content-type', 'text/event-stream');
@@ -1136,10 +1129,80 @@ void main() {
         parts.whereType<StreamPartTextDelta>().map((e) => e.delta).join(),
         'go',
       );
+      final toolStart = parts.whereType<StreamPartToolCallStart>().single;
+      expect(toolStart.toolName, 'weather');
+      expect(toolStart.toolCallId, startsWith('tool-'));
+
+      final toolDelta = parts.whereType<StreamPartToolCallDelta>().single;
+      expect(toolDelta.toolCallId, toolStart.toolCallId);
+      expect(toolDelta.toolName, 'weather');
+      expect(toolDelta.argsTextDelta, '{"city":"NYC"}');
+
+      final toolEnd = parts.whereType<StreamPartToolCallEnd>().single;
+      expect(toolEnd.toolCallId, toolStart.toolCallId);
+      expect(toolEnd.toolName, 'weather');
+      expect(toolEnd.input, {'city': 'NYC'});
+
+      expect(
+        parts
+            .where(
+              (part) =>
+                  part is StreamPartToolCallStart ||
+                  part is StreamPartToolCallDelta ||
+                  part is StreamPartToolCallEnd,
+            )
+            .map((part) => part.runtimeType)
+            .toList(),
+        [
+          StreamPartToolCallStart,
+          StreamPartToolCallDelta,
+          StreamPartToolCallEnd,
+        ],
+      );
       expect(
         parts.whereType<StreamPartFinish>().single.finishReason,
         LanguageModelV3FinishReason.length,
       );
+    });
+
+    test('doStream sends stopSequences in generationConfig', () async {
+      late Map<String, dynamic> captured;
+      final server = await _TestServer.start((request) async {
+        captured = (jsonDecode(await utf8.decoder.bind(request).join()) as Map)
+            .cast<String, dynamic>();
+        request.response.statusCode = 200;
+        request.response.headers.set('content-type', 'text/event-stream');
+        request.response.write(
+          'data: {"candidates":[{"content":{"parts":[]},"finishReason":"STOP"}]}\n\n',
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = GoogleGenerativeAIProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).call('gemini-2.0-flash');
+
+      final stream = await model.doStream(
+        LanguageModelV3CallOptions(
+          prompt: LanguageModelV3Prompt(
+            messages: [
+              LanguageModelV3Message(
+                role: LanguageModelV3Role.user,
+                content: [LanguageModelV3TextPart(text: 'hi')],
+              ),
+            ],
+          ),
+          stopSequences: const ['END'],
+        ),
+      );
+
+      await stream.stream.toList();
+
+      final config = (captured['generationConfig'] as Map)
+          .cast<String, dynamic>();
+      expect(config['stopSequences'], ['END']);
     });
 
     test('doStream ignores malformed JSON and missing content', () async {
@@ -1182,90 +1245,97 @@ void main() {
       );
     });
 
-    test('doStream emits StreamPartError when reading the body fails', () async {
-      final server = await _TestServer.start((request) async {
-        // Detach the raw socket and promise more bytes than we deliver, then
-        // destroy the connection so the client read fails mid-stream.
-        final socket = await request.response.detachSocket(writeHeaders: false);
-        socket.write(
-          'HTTP/1.1 200 OK\r\n'
-          'content-type: text/event-stream\r\n'
-          'content-length: 4096\r\n'
-          '\r\n'
-          'data: {"candidates":[{"content":{"parts":[{"text":"hi"}]}}]}\n\n',
-        );
-        await socket.flush();
-        socket.destroy();
-      });
-      addTearDown(server.close);
+    test(
+      'doStream emits StreamPartError when reading the body fails',
+      () async {
+        final server = await _TestServer.start((request) async {
+          // Detach the raw socket and promise more bytes than we deliver, then
+          // destroy the connection so the client read fails mid-stream.
+          final socket = await request.response.detachSocket(
+            writeHeaders: false,
+          );
+          socket.write(
+            'HTTP/1.1 200 OK\r\n'
+            'content-type: text/event-stream\r\n'
+            'content-length: 4096\r\n'
+            '\r\n'
+            'data: {"candidates":[{"content":{"parts":[{"text":"hi"}]}}]}\n\n',
+          );
+          await socket.flush();
+          socket.destroy();
+        });
+        addTearDown(server.close);
 
-      final model = GoogleGenerativeAIProvider(
-        apiKey: 'test',
-        baseUrl: server.baseUrl,
-      ).call('gemini-2.0-flash');
+        final model = GoogleGenerativeAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('gemini-2.0-flash');
 
-      final stream = await model.doStream(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
-            messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
-              ),
-            ],
+        final stream = await model.doStream(
+          LanguageModelV3CallOptions(
+            prompt: LanguageModelV3Prompt(
+              messages: [
+                LanguageModelV3Message(
+                  role: LanguageModelV3Role.user,
+                  content: [LanguageModelV3TextPart(text: 'hi')],
+                ),
+              ],
+            ),
           ),
-        ),
-      );
-
-      final parts = await stream.stream.toList();
-      expect(parts.whereType<StreamPartError>(), hasLength(1));
-    });
-
-    test('embedding sends provider options and keeps request metadata', () async {
-      late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
-        final body = await utf8.decoder.bind(request).join();
-        captured = (jsonDecode(body) as Map).cast<String, dynamic>();
-        request.response.statusCode = 200;
-        request.response.headers.contentType = ContentType.json;
-        request.response.write(
-          jsonEncode({
-            'embeddings': [
-              {
-                'values': [0.5, 0.6, 0.7],
-              },
-            ],
-          }),
         );
-        await request.response.close();
-      });
-      addTearDown(server.close);
 
-      final model = GoogleGenerativeAIProvider(
-        apiKey: 'test',
-        baseUrl: server.baseUrl,
-      ).embedding('text-embedding-004');
+        final parts = await stream.stream.toList();
+        expect(parts.whereType<StreamPartError>(), hasLength(1));
+      },
+    );
 
-      final result = await model.doEmbed(
-        const EmbeddingModelV2CallOptions(
-          values: ['only'],
-          providerOptions: {
-            'google': {'taskType': 'RETRIEVAL_QUERY'},
-          },
-        ),
-      );
+    test(
+      'embedding sends provider options and keeps request metadata',
+      () async {
+        late Map<String, dynamic> captured;
+        final server = await _TestServer.start((request) async {
+          final body = await utf8.decoder.bind(request).join();
+          captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'embeddings': [
+                {
+                  'values': [0.5, 0.6, 0.7],
+                },
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
 
-      expect(captured['taskType'], 'RETRIEVAL_QUERY');
-      final requests = (captured['requests'] as List)
-          .cast<Map<String, dynamic>>();
-      expect(requests.single['model'], 'models/text-embedding-004');
-      expect(
-        ((requests.single['content'] as Map)['parts'] as List).single,
-        {'text': 'only'},
-      );
-      expect(result.embeddings.single.value, 'only');
-      expect(result.embeddings.single.embedding, [0.5, 0.6, 0.7]);
-    });
+        final model = GoogleGenerativeAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).embedding('text-embedding-004');
+
+        final result = await model.doEmbed(
+          const EmbeddingModelV2CallOptions(
+            values: ['only'],
+            providerOptions: {
+              'google': {'taskType': 'RETRIEVAL_QUERY'},
+            },
+          ),
+        );
+
+        expect(captured['taskType'], 'RETRIEVAL_QUERY');
+        final requests = (captured['requests'] as List)
+            .cast<Map<String, dynamic>>();
+        expect(requests.single['model'], 'models/text-embedding-004');
+        expect(((requests.single['content'] as Map)['parts'] as List).single, {
+          'text': 'only',
+        });
+        expect(result.embeddings.single.value, 'only');
+        expect(result.embeddings.single.embedding, [0.5, 0.6, 0.7]);
+      },
+    );
 
     test('reads promptFeedback and warnings list into warnings', () async {
       final server = await _TestServer.start((request) async {
@@ -1313,10 +1383,7 @@ void main() {
       expect(result.warnings, hasLength(3));
       expect(result.warnings, contains('too long'));
       expect(result.warnings, contains('truncated'));
-      expect(
-        result.warnings.any((w) => w.contains('promptFeedback')),
-        isTrue,
-      );
+      expect(result.warnings.any((w) => w.contains('promptFeedback')), isTrue);
     });
 
     test('resolved api key throws when missing', () async {

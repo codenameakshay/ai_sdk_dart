@@ -133,14 +133,12 @@ class _GoogleLanguageModel implements LanguageModelV3 {
       final functionCall = (partMap['functionCall'] as Map?)
           ?.cast<String, dynamic>();
       if (functionCall != null) {
-        final rawArgs = functionCall['args'];
+        final toolCall = _parseGoogleFunctionCall(functionCall);
         content.add(
           LanguageModelV3ToolCallPart(
-            toolCallId: _generateId('tool'),
-            toolName: functionCall['name']?.toString() ?? 'unknown_tool',
-            input: rawArgs is Map
-                ? rawArgs.cast<String, dynamic>()
-                : (rawArgs ?? const {}),
+            toolCallId: toolCall.toolCallId,
+            toolName: toolCall.toolName,
+            input: toolCall.input,
           ),
         );
       }
@@ -249,6 +247,8 @@ class _GoogleLanguageModel implements LanguageModelV3 {
         if (options.temperature != null) 'temperature': options.temperature,
         if (options.topP != null) 'topP': options.topP,
         if (options.topK != null) 'topK': options.topK,
+        if (options.stopSequences.isNotEmpty)
+          'stopSequences': options.stopSequences,
       },
       if (options.tools.isNotEmpty) ...{
         'tools': [
@@ -288,9 +288,7 @@ class _GoogleLanguageModel implements LanguageModelV3 {
     if (body == null) {
       // Defensive; Dio stream body is never null on a 200 streaming response.
       // coverage:ignore-start
-      throw StateError(
-        'Google stream response body is null.',
-      );
+      throw StateError('Google stream response body is null.');
       // coverage:ignore-end
     }
 
@@ -343,6 +341,32 @@ class _GoogleLanguageModel implements LanguageModelV3 {
                 controller.add(const StreamPartTextStart(id: 'text-0'));
               }
               controller.add(StreamPartTextDelta(id: 'text-0', delta: text));
+            }
+
+            final functionCall = (map['functionCall'] as Map?)
+                ?.cast<String, dynamic>();
+            if (functionCall != null) {
+              final toolCall = _parseGoogleFunctionCall(functionCall);
+              controller.add(
+                StreamPartToolCallStart(
+                  toolCallId: toolCall.toolCallId,
+                  toolName: toolCall.toolName,
+                ),
+              );
+              controller.add(
+                StreamPartToolCallDelta(
+                  toolCallId: toolCall.toolCallId,
+                  toolName: toolCall.toolName,
+                  argsTextDelta: toolCall.argsText,
+                ),
+              );
+              controller.add(
+                StreamPartToolCallEnd(
+                  toolCallId: toolCall.toolCallId,
+                  toolName: toolCall.toolName,
+                  input: toolCall.input,
+                ),
+              );
             }
 
             final fileData = (map['fileData'] as Map?)?.cast<String, dynamic>();
@@ -626,7 +650,8 @@ Map<String, dynamic>? _safeParseMap(String input) {
     final decoded = jsonDecode(input);
     if (decoded is Map<String, dynamic>) return decoded;
     // jsonDecode of a JSON object always yields a Map<String, dynamic>.
-    if (decoded is Map) return decoded.cast<String, dynamic>(); // coverage:ignore-line
+    if (decoded is Map)
+      return decoded.cast<String, dynamic>(); // coverage:ignore-line
     return null;
   } catch (_) {
     return null;
@@ -640,9 +665,38 @@ int? _intOrNull(Object? value) => switch (value) {
   _ => null,
 };
 
+_GoogleFunctionCall _parseGoogleFunctionCall(
+  Map<String, dynamic> functionCall,
+) {
+  final rawArgs = functionCall['args'];
+  final input = rawArgs is Map
+      ? rawArgs.cast<String, dynamic>()
+      : (rawArgs ?? const {});
+  return _GoogleFunctionCall(
+    toolCallId: _generateId('tool'),
+    toolName: functionCall['name']?.toString() ?? 'unknown_tool',
+    input: input,
+    argsText: jsonEncode(input),
+  );
+}
+
 String _generateId(String prefix) {
   final micros = DateTime.now().microsecondsSinceEpoch;
   return '$prefix-$micros';
+}
+
+class _GoogleFunctionCall {
+  const _GoogleFunctionCall({
+    required this.toolCallId,
+    required this.toolName,
+    required this.input,
+    required this.argsText,
+  });
+
+  final String toolCallId;
+  final String toolName;
+  final Object input;
+  final String argsText;
 }
 
 Map<String, dynamic>? _toGoogleInlinePart(

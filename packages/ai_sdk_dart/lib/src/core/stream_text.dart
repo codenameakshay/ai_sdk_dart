@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
+import 'cancellation.dart';
 import '../messages/model_message.dart';
 import '../output/output.dart';
 import '../stop_conditions/stop_conditions.dart';
@@ -15,6 +16,10 @@ extension _CompleteIfPending<T> on Completer<T> {
   /// Completes with [value] only if not already completed.
   void completeIfPending(T value) {
     if (!isCompleted) complete(value);
+  }
+
+  void completeErrorIfPending(Object error, StackTrace stackTrace) {
+    if (!isCompleted) completeError(error, stackTrace);
   }
 }
 
@@ -571,6 +576,26 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   final responseCompleter = Completer<GenerateTextResponse>();
   final providerMetadataCompleter = Completer<ProviderMetadata?>();
 
+  observeFutureError(textCompleter.future);
+  observeFutureError(outputCompleter.future);
+  observeFutureError(contentCompleter.future);
+  observeFutureError(reasoningCompleter.future);
+  observeFutureError(reasoningTextCompleter.future);
+  observeFutureError(filesCompleter.future);
+  observeFutureError(sourcesCompleter.future);
+  observeFutureError(toolCallsCompleter.future);
+  observeFutureError(toolResultsCompleter.future);
+  observeFutureError(finishReasonCompleter.future);
+  observeFutureError(rawFinishReasonCompleter.future);
+  observeFutureError(usageCompleter.future);
+  observeFutureError(totalUsageCompleter.future);
+  observeFutureError(warningsCompleter.future);
+  observeFutureError(stepsCompleter.future);
+  observeFutureError(requestCompleter.future);
+  observeFutureError(responseCompleter.future);
+  observeFutureError(providerMetadataCompleter.future);
+  observeFutureError(finishCompleter.future);
+
   // Wire onAbort: fire when the caller cancels via abortSignal.
   if (abortSignal != null && onAbort != null) {
     unawaited(
@@ -580,10 +605,8 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
     );
   }
 
-  unawaited(
-    Future<void>(() async {
+  final runFuture = Future<void>(() async {
       final steps = <GenerateTextStep>[];
-      var aborted = false;
       final overallTextBuffer = StringBuffer();
       var emittedArrayElements = 0;
       StreamPartFinish? lastFinishPart;
@@ -631,6 +654,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
       );
 
       try {
+        throwIfCancelled(abortSignal);
         fullController.add(const StreamTextStartEvent());
 
         final _allStopConditions = resolveStopConditions(
@@ -643,6 +667,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
           maxSteps: maxSteps,
         );
         for (var stepNumber = 0; stepNumber < totalSteps; stepNumber++) {
+          throwIfCancelled(abortSignal);
           fullController.add(StreamTextStartStepEvent(stepNumber: stepNumber));
 
           final prepareResult = await Future.value(
@@ -745,173 +770,192 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
           final reasoningBuffer = StringBuffer();
           StreamPartFinish? stepFinishPart;
 
-          await for (final part in response.stream) {
-            // Honor cancellation: break the read loop (which cancels the
-            // underlying subscription, stopping the in-flight provider read)
-            // instead of merely firing the onAbort callback.
-            if (abortSignal?.isCancelled ?? false) {
-              aborted = true;
-              break;
-            }
-            rawController.add(part);
-            fullController.add(StreamTextRawEvent(part: part));
-            onChunk?.call(StreamTextRawChunk(part: part));
+          final iterator = StreamIterator<LanguageModelV3StreamPart>(
+            response.stream,
+          );
+          try {
+            while (await moveNextOrCancellation(iterator, abortSignal)) {
+              final part = iterator.current;
+              rawController.add(part);
+              fullController.add(StreamTextRawEvent(part: part));
+              onChunk?.call(StreamTextRawChunk(part: part));
 
-            if (inReasoning &&
-                part is! StreamPartReasoningDelta &&
-                !reasoningClosed) {
-              stepContent.add(
-                LanguageModelV3ReasoningPart(text: reasoningBuffer.toString()),
-              );
-              fullController.add(
-                const StreamTextReasoningEndEvent(id: reasoningId),
-              );
-              reasoningClosed = true;
-            }
-
-            switch (part) {
-              case StreamPartTextStart(:final id):
-                stepTextById[id] = StringBuffer();
-                fullController.add(StreamTextTextStartEvent(id: id));
-              case StreamPartTextDelta(:final id, :final delta):
-                final transformedStream =
-                    experimentalTransform?.call(delta) ?? Stream.value(delta);
-                await for (final transformedDelta in transformedStream) {
-                  final textBuffer = stepTextById.putIfAbsent(
-                    id,
-                    StringBuffer.new,
-                  );
-                  textBuffer.write(transformedDelta);
-                  overallTextBuffer.write(transformedDelta);
-                  textController.add(transformedDelta);
-                  fullController.add(
-                    StreamTextTextDeltaEvent(id: id, delta: transformedDelta),
-                  );
-                  onChunk?.call(
-                    StreamTextTextChunk(id: id, text: transformedDelta),
-                  );
-
-                  if (outputSpec is! TextOutput) {
-                    final partial = _tryParsePartialOutput(
-                      outputSpec,
-                      overallTextBuffer.toString(),
-                    );
-                    if (partial != null) {
-                      partialController.add(partial);
-                    }
-                    final nextCount = _emitArrayElementsIfAny(
-                      output: outputSpec,
-                      text: overallTextBuffer.toString(),
-                      alreadyEmittedCount: emittedArrayElements,
-                      onElement: elementController.add,
-                    );
-                    emittedArrayElements = nextCount;
-                  }
-                }
-              case StreamPartTextEnd(:final id):
-                final text = stepTextById[id]?.toString() ?? '';
-                stepContent.add(LanguageModelV3TextPart(text: text));
-                fullController.add(StreamTextTextEndEvent(id: id));
-              case StreamPartReasoningDelta(:final delta):
-                if (!inReasoning) {
-                  inReasoning = true;
-                  fullController.add(
-                    const StreamTextReasoningStartEvent(id: reasoningId),
-                  );
-                }
-                reasoningBuffer.write(delta);
-                fullController.add(
-                  StreamTextReasoningDeltaEvent(id: reasoningId, delta: delta),
-                );
-                onChunk?.call(StreamTextReasoningChunk(delta: delta));
-              case StreamPartSource(:final source):
-                stepContent.add(source);
-                fullController.add(StreamTextSourceEvent(source: source));
-                onChunk?.call(StreamTextSourceChunk(source: source));
-              case StreamPartFile(:final file):
-                stepContent.add(file);
-                fullController.add(StreamTextFileEvent(file: file));
-                onChunk?.call(StreamTextFileChunk(file: file));
-              case StreamPartToolCallStart(:final toolCallId, :final toolName):
-                toolInputBuffers[toolCallId] = StringBuffer();
-                final event = StreamTextToolInputStartEvent(
-                  toolCallId: toolCallId,
-                  toolName: toolName,
-                );
-                fullController.add(event);
-                onInputStart?.call(event);
-                onChunk?.call(
-                  StreamTextToolInputStartChunk(
-                    toolCallId: toolCallId,
-                    toolName: toolName,
+              if (inReasoning &&
+                  part is! StreamPartReasoningDelta &&
+                  !reasoningClosed) {
+                stepContent.add(
+                  LanguageModelV3ReasoningPart(
+                    text: reasoningBuffer.toString(),
                   ),
                 );
-              case StreamPartToolCallDelta(
-                :final toolCallId,
-                :final toolName,
-                :final argsTextDelta,
-              ):
-                final buffer = toolInputBuffers.putIfAbsent(
-                  toolCallId,
-                  StringBuffer.new,
+                fullController.add(
+                  const StreamTextReasoningEndEvent(id: reasoningId),
                 );
-                buffer.write(argsTextDelta);
-                final event = StreamTextToolInputDeltaEvent(
-                  toolCallId: toolCallId,
-                  toolName: toolName,
-                  delta: argsTextDelta,
-                  inputBuffer: buffer.toString(),
-                );
-                fullController.add(event);
-                onInputDelta?.call(event);
-                onChunk?.call(
-                  StreamTextToolInputDeltaChunk(
+                reasoningClosed = true;
+              }
+
+              switch (part) {
+                case StreamPartTextStart(:final id):
+                  stepTextById[id] = StringBuffer();
+                  fullController.add(StreamTextTextStartEvent(id: id));
+                case StreamPartTextDelta(:final id, :final delta):
+                  final transformedStream =
+                      experimentalTransform?.call(delta) ?? Stream.value(delta);
+                  final transformedIterator = StreamIterator<String>(
+                    transformedStream,
+                  );
+                  try {
+                    while (await moveNextOrCancellation(
+                      transformedIterator,
+                      abortSignal,
+                    )) {
+                      final transformedDelta = transformedIterator.current;
+                      final textBuffer = stepTextById.putIfAbsent(
+                        id,
+                        StringBuffer.new,
+                      );
+                      textBuffer.write(transformedDelta);
+                      overallTextBuffer.write(transformedDelta);
+                      textController.add(transformedDelta);
+                      fullController.add(
+                        StreamTextTextDeltaEvent(
+                          id: id,
+                          delta: transformedDelta,
+                        ),
+                      );
+                      onChunk?.call(
+                        StreamTextTextChunk(id: id, text: transformedDelta),
+                      );
+
+                      if (outputSpec is! TextOutput) {
+                        final partial = _tryParsePartialOutput(
+                          outputSpec,
+                          overallTextBuffer.toString(),
+                        );
+                        if (partial != null) {
+                          partialController.add(partial);
+                        }
+                        final nextCount = _emitArrayElementsIfAny(
+                          output: outputSpec,
+                          text: overallTextBuffer.toString(),
+                          alreadyEmittedCount: emittedArrayElements,
+                          onElement: elementController.add,
+                        );
+                        emittedArrayElements = nextCount;
+                      }
+                    }
+                  } finally {
+                    await transformedIterator.cancel();
+                  }
+                case StreamPartTextEnd(:final id):
+                  final text = stepTextById[id]?.toString() ?? '';
+                  stepContent.add(LanguageModelV3TextPart(text: text));
+                  fullController.add(StreamTextTextEndEvent(id: id));
+                case StreamPartReasoningDelta(:final delta):
+                  if (!inReasoning) {
+                    inReasoning = true;
+                    fullController.add(
+                      const StreamTextReasoningStartEvent(id: reasoningId),
+                    );
+                  }
+                  reasoningBuffer.write(delta);
+                  fullController.add(
+                    StreamTextReasoningDeltaEvent(
+                      id: reasoningId,
+                      delta: delta,
+                    ),
+                  );
+                  onChunk?.call(StreamTextReasoningChunk(delta: delta));
+                case StreamPartSource(:final source):
+                  stepContent.add(source);
+                  fullController.add(StreamTextSourceEvent(source: source));
+                  onChunk?.call(StreamTextSourceChunk(source: source));
+                case StreamPartFile(:final file):
+                  stepContent.add(file);
+                  fullController.add(StreamTextFileEvent(file: file));
+                  onChunk?.call(StreamTextFileChunk(file: file));
+                case StreamPartToolCallStart(
+                  :final toolCallId,
+                  :final toolName,
+                ):
+                  toolInputBuffers[toolCallId] = StringBuffer();
+                  final event = StreamTextToolInputStartEvent(
+                    toolCallId: toolCallId,
+                    toolName: toolName,
+                  );
+                  fullController.add(event);
+                  onInputStart?.call(event);
+                  onChunk?.call(
+                    StreamTextToolInputStartChunk(
+                      toolCallId: toolCallId,
+                      toolName: toolName,
+                    ),
+                  );
+                case StreamPartToolCallDelta(
+                  :final toolCallId,
+                  :final toolName,
+                  :final argsTextDelta,
+                ):
+                  final buffer = toolInputBuffers.putIfAbsent(
+                    toolCallId,
+                    StringBuffer.new,
+                  );
+                  buffer.write(argsTextDelta);
+                  final event = StreamTextToolInputDeltaEvent(
                     toolCallId: toolCallId,
                     toolName: toolName,
                     delta: argsTextDelta,
                     inputBuffer: buffer.toString(),
-                  ),
-                );
-              case StreamPartToolCallEnd(
-                :final toolCallId,
-                :final toolName,
-                :final input,
-              ):
-                final inputBuffer =
-                    toolInputBuffers[toolCallId]?.toString() ?? '';
-                final inputEvent = StreamTextToolInputEndEvent(
-                  toolCallId: toolCallId,
-                  toolName: toolName,
-                  input: input,
-                  inputBuffer: inputBuffer,
-                );
-                final toolCall = LanguageModelV3ToolCallPart(
-                  toolCallId: toolCallId,
-                  toolName: toolName,
-                  input: input,
-                );
-                stepToolCalls.add(toolCall);
-                stepContent.add(toolCall);
-                fullController.add(inputEvent);
-                onInputAvailable?.call(inputEvent);
-                onChunk?.call(StreamTextToolCallChunk(toolCall: toolCall));
-              case StreamPartError(:final error):
-                fullController.add(StreamTextErrorEvent(error: error));
-                onError?.call(error);
-              case StreamPartFinish():
-                if (part.usage != null) {
-                  fullController.add(StreamTextUsageEvent(usage: part.usage!));
-                  onChunk?.call(StreamTextUsageChunk(usage: part.usage!));
-                }
-                stepFinishPart = part;
-                lastFinishPart = part;
+                  );
+                  fullController.add(event);
+                  onInputDelta?.call(event);
+                  onChunk?.call(
+                    StreamTextToolInputDeltaChunk(
+                      toolCallId: toolCallId,
+                      toolName: toolName,
+                      delta: argsTextDelta,
+                      inputBuffer: buffer.toString(),
+                    ),
+                  );
+                case StreamPartToolCallEnd(
+                  :final toolCallId,
+                  :final toolName,
+                  :final input,
+                ):
+                  final inputBuffer =
+                      toolInputBuffers[toolCallId]?.toString() ?? '';
+                  final inputEvent = StreamTextToolInputEndEvent(
+                    toolCallId: toolCallId,
+                    toolName: toolName,
+                    input: input,
+                    inputBuffer: inputBuffer,
+                  );
+                  final toolCall = LanguageModelV3ToolCallPart(
+                    toolCallId: toolCallId,
+                    toolName: toolName,
+                    input: input,
+                  );
+                  stepToolCalls.add(toolCall);
+                  stepContent.add(toolCall);
+                  fullController.add(inputEvent);
+                  onInputAvailable?.call(inputEvent);
+                  onChunk?.call(StreamTextToolCallChunk(toolCall: toolCall));
+                case StreamPartError(:final error):
+                  throw error;
+                case StreamPartFinish():
+                  if (part.usage != null) {
+                    fullController.add(
+                      StreamTextUsageEvent(usage: part.usage!),
+                    );
+                    onChunk?.call(StreamTextUsageChunk(usage: part.usage!));
+                  }
+                  stepFinishPart = part;
+                  lastFinishPart = part;
+              }
             }
+          } finally {
+            await iterator.cancel();
           }
-
-          // Cancelled mid-stream: skip tool execution and step finalization
-          // and fall through to the run finalizer (completes the result
-          // futures with partial content so consumers never hang).
-          if (aborted) break;
 
           if (inReasoning && !reasoningClosed) {
             stepContent.add(
@@ -939,6 +983,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
 
           if (stepToolCalls.isNotEmpty) {
             for (final call in stepToolCalls) {
+              throwIfCancelled(abortSignal);
               final execution = await _executeToolCall(
                 tools: toolSelection.exposedTools,
                 call: call,
@@ -1186,86 +1231,44 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
         );
       } catch (error, stackTrace) {
         refreshEnvelopeFromRaw();
-        textCompleter.completeIfPending(overallTextBuffer.toString());
-        if (!outputCompleter.isCompleted) {
-          outputCompleter.completeError(error, stackTrace);
-        }
-        finishCompleter.completeIfPending(lastFinishPart);
-        final reasoning = lastContent
-            .whereType<LanguageModelV3ReasoningPart>()
-            .toList();
-        final files = lastContent.whereType<LanguageModelV3FilePart>().toList();
-        final sources = lastContent
-            .whereType<LanguageModelV3SourcePart>()
-            .toList();
-        final fallbackRequest = GenerateTextRequest(
-          system: systemInstruction,
-          messages: List.unmodifiable(normalizedMessages),
-          body: lastRequestBody,
-        );
-        final fallbackResponse = GenerateTextResponse(
-          messages: List.unmodifiable(
-            normalizedMessages
-                .where(
-                  (message) =>
-                      message.role == LanguageModelV3Role.assistant ||
-                      message.role == LanguageModelV3Role.tool,
-                )
-                .toList(),
-          ),
-          body: lastResponseBody,
-          metadata: lastResponseMetadata,
-        );
-
-        contentCompleter.completeIfPending(List.unmodifiable(lastContent));
-        reasoningCompleter.completeIfPending(List.unmodifiable(reasoning));
-        reasoningTextCompleter.completeIfPending(
-          lastContent
-              .where(
-                (part) =>
-                    part is LanguageModelV3ReasoningPart ||
-                    part is LanguageModelV3RedactedReasoningPart,
-              )
-              // coverage:ignore-start
-              // Streaming never produces redacted reasoning parts, so the
-              // '[REDACTED]' arm in this error-path mapping is unreachable.
-              .map(
-                (part) => part is LanguageModelV3ReasoningPart
-                    ? part.text
-                    : '[REDACTED]',
-              )
-              // coverage:ignore-end
-              .join(),
-        );
-        filesCompleter.completeIfPending(List.unmodifiable(files));
-        sourcesCompleter.completeIfPending(List.unmodifiable(sources));
-        toolCallsCompleter.completeIfPending(
-          List.unmodifiable(
-            lastContent.whereType<LanguageModelV3ToolCallPart>().toList(),
-          ),
-        );
-        toolResultsCompleter.completeIfPending(
-          List.unmodifiable(
-            lastContent.whereType<LanguageModelV3ToolResultPart>().toList(),
-          ),
-        );
-        finishReasonCompleter.completeIfPending(lastFinishPart?.finishReason);
-        rawFinishReasonCompleter.completeIfPending(
-          lastFinishPart?.rawFinishReason,
-        );
-        usageCompleter.completeIfPending(lastFinishPart?.usage);
-        totalUsageCompleter.completeIfPending(
-          _sumUsage(steps.map((step) => step.usage)),
-        );
-        warningsCompleter.completeIfPending(List.unmodifiable(lastWarnings));
-        stepsCompleter.completeIfPending(List.unmodifiable(steps));
-        requestCompleter.completeIfPending(fallbackRequest);
-        responseCompleter.completeIfPending(fallbackResponse);
-        providerMetadataCompleter.completeIfPending(
-          lastFinishPart?.providerMetadata,
-        );
-        onError?.call(error);
+        _safeInvoke(() => onError?.call(error));
         fullController.add(StreamTextErrorEvent(error: error));
+
+        textCompleter.completeErrorIfPending(error, stackTrace);
+        outputCompleter.completeErrorIfPending(error, stackTrace);
+        finishCompleter.completeErrorIfPending(error, stackTrace);
+        contentCompleter.completeErrorIfPending(error, stackTrace);
+        reasoningCompleter.completeErrorIfPending(error, stackTrace);
+        reasoningTextCompleter.completeErrorIfPending(error, stackTrace);
+        filesCompleter.completeErrorIfPending(error, stackTrace);
+        sourcesCompleter.completeErrorIfPending(error, stackTrace);
+        toolCallsCompleter.completeErrorIfPending(error, stackTrace);
+        toolResultsCompleter.completeErrorIfPending(error, stackTrace);
+        finishReasonCompleter.completeErrorIfPending(error, stackTrace);
+        rawFinishReasonCompleter.completeErrorIfPending(error, stackTrace);
+        usageCompleter.completeErrorIfPending(error, stackTrace);
+        totalUsageCompleter.completeErrorIfPending(error, stackTrace);
+        warningsCompleter.completeErrorIfPending(error, stackTrace);
+        stepsCompleter.completeErrorIfPending(error, stackTrace);
+        requestCompleter.completeErrorIfPending(error, stackTrace);
+        responseCompleter.completeErrorIfPending(error, stackTrace);
+        providerMetadataCompleter.completeErrorIfPending(error, stackTrace);
+
+        if (rawController.hasListener) {
+          rawController.addError(error, stackTrace);
+        }
+        if (textController.hasListener) {
+          textController.addError(error, stackTrace);
+        }
+        if (fullController.hasListener) {
+          fullController.addError(error, stackTrace);
+        }
+        if (partialController.hasListener) {
+          partialController.addError(error, stackTrace);
+        }
+        if (elementController.hasListener) {
+          elementController.addError(error, stackTrace);
+        }
       } finally {
         await rawController.close();
         await textController.close();
@@ -1273,8 +1276,9 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
         await partialController.close();
         await elementController.close();
       }
-    }),
-  );
+    });
+  observeFutureError(runFuture);
+  unawaited(runFuture);
 
   // End the telemetry span when the stream fully finishes.
   finishCompleter.future.then(
@@ -1475,6 +1479,7 @@ Future<_ToolExecutionResult> _executeToolCall({
 
     final approvalEvaluator = tool.needsApprovalDynamic;
     final approvalResponse = approvalById[approvalId];
+    throwIfCancelled(abortSignal);
     if (tool.requiresApproval && approvalResponse == null) {
       return _ToolExecutionResult(
         approvalRequest: LanguageModelV3ToolApprovalRequestPart(
@@ -1486,8 +1491,9 @@ Future<_ToolExecutionResult> _executeToolCall({
 
     var needsApproval = false;
     if (approvalEvaluator != null) {
-      needsApproval = await Future.value(
-        approvalEvaluator(parsedInput, options),
+      needsApproval = await raceWithCancellation(
+        Future.value(approvalEvaluator(parsedInput, options)),
+        abortSignal,
       );
     }
     if (tool.requiresApproval &&
@@ -1544,10 +1550,14 @@ Future<_ToolExecutionResult> _executeToolCall({
     );
     final stopwatch = Stopwatch()..start();
     try {
-      final output = await executor(parsedInput, options);
+      final output = await raceWithCancellation(
+        executor(parsedInput, options),
+        abortSignal,
+      );
       final finalOutput = await _resolveFinalToolOutput(
         output,
         onPreliminaryResult: onPreliminaryResult,
+        abortSignal: abortSignal,
       );
       stopwatch.stop();
       _safeInvoke(
@@ -1597,16 +1607,23 @@ Future<_ToolExecutionResult> _executeToolCall({
 Future<Object?> _resolveFinalToolOutput(
   Object? output, {
   required void Function(Object? value) onPreliminaryResult,
+  CancellationToken? abortSignal,
 }) async {
   if (output is Stream) {
     Object? previous;
     var seenAny = false;
-    await for (final item in output) {
-      if (seenAny) {
-        onPreliminaryResult(previous);
+    final iterator = StreamIterator<Object?>(output.cast<Object?>());
+    try {
+      while (await moveNextOrCancellation(iterator, abortSignal)) {
+        final item = iterator.current;
+        if (seenAny) {
+          onPreliminaryResult(previous);
+        }
+        previous = item;
+        seenAny = true;
       }
-      previous = item;
-      seenAny = true;
+    } finally {
+      await iterator.cancel();
     }
     if (!seenAny) {
       return null;

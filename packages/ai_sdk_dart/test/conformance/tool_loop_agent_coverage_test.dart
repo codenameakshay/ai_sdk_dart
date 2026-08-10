@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
@@ -55,6 +57,16 @@ void main() {
           .map((m) => m.role.name)
           .toList();
       expect(roles, ['system', 'user', 'assistant', 'tool']);
+    });
+
+    test('forwards pre-cancelled abortSignal in direct generate path', () async {
+      final token = CancellationToken()..cancel();
+      final agent = ToolLoopAgent(model: FakeTextModel('unexpected'));
+
+      await expectLater(
+        () => agent.generate(prompt: 'hi', abortSignal: token),
+        throwsA(isA<AiOperationCancelledError>()),
+      );
     });
   });
 
@@ -127,22 +139,82 @@ void main() {
       final result = await agent.generate(prompt: 'go');
       expect(result.toolCalls, isNotEmpty);
     });
+
+    test('cancelling between tool steps prevents the next provider call',
+        () async {
+      final token = CancellationToken();
+      final model = _AgentLoopModel([
+        _toolCall('echo', const {}),
+        _text('should not happen'),
+      ]);
+      final agent = ToolLoopAgent(
+        model: model,
+        maxSteps: 3,
+        tools: {
+          'echo': tool<Map<String, dynamic>, Object?>(
+            inputSchema: objectSchema(),
+            execute: (input, options) async {
+              options.abortSignal?.cancel();
+              return 'ok';
+            },
+          ),
+        },
+      );
+
+      await expectLater(
+        () => agent.generate(prompt: 'go', abortSignal: token),
+        throwsA(isA<AiOperationCancelledError>()),
+      );
+      expect(model.callCount, 1);
+    });
+
+    test('cancelling during async tool execution stops promptly', () async {
+      final token = CancellationToken();
+      final toolGate = Completer<void>();
+      final model = _AgentLoopModel([
+        _toolCall('echo', const {}),
+        _text('should not happen'),
+      ]);
+      final agent = ToolLoopAgent(
+        model: model,
+        maxSteps: 3,
+        tools: {
+          'echo': tool<Map<String, dynamic>, Object?>(
+            inputSchema: objectSchema(),
+            execute: (input, options) async {
+              await toolGate.future;
+              return 'late';
+            },
+          ),
+        },
+      );
+
+      final future = agent.generate(prompt: 'go', abortSignal: token);
+      await Future<void>.delayed(Duration.zero);
+      token.cancel();
+
+      await expectLater(future, throwsA(isA<AiOperationCancelledError>()));
+      expect(model.callCount, 1);
+      toolGate.complete();
+    });
   });
 
   group('ToolLoopAgent tool execution errors', () {
-    test('unknown tool name yields an error tool result', () async {
+    test('unknown tool name is rejected by the shared generateText path',
+        () async {
       final model = _AgentLoopModel([
         _toolCall('missing', const {}),
         _text('after'),
       ]);
-      // Expose a known tool so the loop runs; the call targets an unknown one.
       final agent = ToolLoopAgent(
         model: model,
         maxSteps: 3,
         tools: {'known': echoTool((_) => 'ok')},
       );
-      final result = await agent.generate(prompt: 'go');
-      expect(result.text, 'after');
+      await expectLater(
+        () => agent.generate(prompt: 'go'),
+        throwsA(isA<AiNoSuchToolError>()),
+      );
     });
 
     test('non-object tool input yields an error tool result', () async {
@@ -266,6 +338,16 @@ void main() {
       final result = await agent.stream(prompt: 'go');
       expect(await result.text, 'streamed answer');
     });
+
+    test('forwards timeout through stream()', () async {
+      final agent = ToolLoopAgent(model: _SlowAgentStreamModel());
+      final result = await agent.stream(
+        prompt: 'go',
+        timeout: const Duration(milliseconds: 10),
+      );
+
+      await expectLater(result.text, throwsA(isA<TimeoutException>()));
+    });
   });
 }
 
@@ -317,6 +399,7 @@ class _AgentLoopModel implements LanguageModelV3 {
   _AgentLoopModel(this.responses);
   final List<LanguageModelV3GenerateResult> responses;
   int _i = 0;
+  int callCount = 0;
 
   @override
   String get provider => 'fake';
@@ -329,6 +412,7 @@ class _AgentLoopModel implements LanguageModelV3 {
   Future<LanguageModelV3GenerateResult> doGenerate(
     LanguageModelV3CallOptions options,
   ) async {
+    callCount++;
     final r = responses[_i < responses.length ? _i : responses.length - 1];
     _i++;
     return r;
@@ -339,4 +423,35 @@ class _AgentLoopModel implements LanguageModelV3 {
     LanguageModelV3CallOptions options,
   ) async =>
       throw UnimplementedError();
+}
+
+class _SlowAgentStreamModel implements LanguageModelV3 {
+  @override
+  String get provider => 'fake';
+
+  @override
+  String get modelId => 'slow-agent-stream-model';
+
+  @override
+  String get specificationVersion => 'v3';
+
+  @override
+  Future<LanguageModelV3GenerateResult> doGenerate(
+    LanguageModelV3CallOptions options,
+  ) async => throw UnimplementedError();
+
+  @override
+  Future<LanguageModelV3StreamResult> doStream(
+    LanguageModelV3CallOptions options,
+  ) async {
+    await Future<void>.delayed(const Duration(seconds: 1));
+    return LanguageModelV3StreamResult(
+      stream: Stream<LanguageModelV3StreamPart>.fromIterable([
+        const StreamPartTextStart(id: 'text-1'),
+        const StreamPartTextDelta(id: 'text-1', delta: 'late'),
+        const StreamPartTextEnd(id: 'text-1'),
+        StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+      ]),
+    );
+  }
 }

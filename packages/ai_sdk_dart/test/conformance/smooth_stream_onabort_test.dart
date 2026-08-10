@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
@@ -196,16 +198,38 @@ void main() {
         if (received.length == 2) token.cancel();
       });
 
-      // Finalizer completes with partial content; guard against hangs.
-      await result.text.timeout(
-        const Duration(seconds: 5),
-        onTimeout: () => '',
+      await expectLater(
+        result.text,
+        throwsA(isA<AiOperationCancelledError>()),
       );
       await sub.cancel();
 
       // The loop broke after the cancel, so not all five deltas were seen.
       expect(received.length, greaterThanOrEqualTo(2));
       expect(received.length, lessThan(5));
+    });
+
+    test('cancelling during a silent stream fails text stream promptly',
+        () async {
+      final token = CancellationToken();
+      final result = await streamText(
+        model: _SilentStreamModel(),
+        prompt: 'hi',
+        abortSignal: token,
+      );
+
+      final textStreamFuture = result.textStream.toList();
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      token.cancel();
+
+      await expectLater(
+        textStreamFuture,
+        throwsA(isA<AiOperationCancelledError>()),
+      );
+      await expectLater(
+        result.text,
+        throwsA(isA<AiOperationCancelledError>()),
+      );
     });
   });
 }
@@ -251,5 +275,29 @@ class _SlowStreamModel implements LanguageModelV3 {
         chunkDelayInMs: chunkDelayInMs,
       ),
     );
+  }
+}
+
+class _SilentStreamModel implements LanguageModelV3 {
+  @override
+  String get provider => 'fake';
+
+  @override
+  String get modelId => 'silent-stream';
+
+  @override
+  String get specificationVersion => 'v3';
+
+  @override
+  Future<LanguageModelV3GenerateResult> doGenerate(
+    LanguageModelV3CallOptions options,
+  ) async => throw UnimplementedError();
+
+  @override
+  Future<LanguageModelV3StreamResult> doStream(
+    LanguageModelV3CallOptions options,
+  ) async {
+    final controller = StreamController<LanguageModelV3StreamPart>();
+    return LanguageModelV3StreamResult(stream: controller.stream);
   }
 }

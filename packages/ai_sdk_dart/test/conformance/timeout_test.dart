@@ -124,7 +124,10 @@ void main() {
             result.output,
             throwsA(isA<TimeoutException>()),
           );
-          await result.fullStream.toList();
+          await expectLater(
+            result.fullStream.toList(),
+            throwsA(isA<TimeoutException>()),
+          );
           await outputExpectation;
         },
       );

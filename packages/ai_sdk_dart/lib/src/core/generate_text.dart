@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
+import 'cancellation.dart';
 import '../messages/model_message.dart';
 import '../output/output.dart';
 import '../stop_conditions/stop_conditions.dart';
@@ -421,6 +422,7 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
     );
 
     for (var stepNumber = 0; stepNumber < totalSteps; stepNumber++) {
+      throwIfCancelled(abortSignal);
       final prepareResult = await Future.value(
         prepareStep?.call(
           GenerateTextPrepareStepContext(
@@ -526,6 +528,7 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
 
       if (toolCalls.isNotEmpty) {
         for (final call in toolCalls) {
+          throwIfCancelled(abortSignal);
           final execution = await _executeToolCall(
             tools: toolSelection.exposedTools,
             call: call,
@@ -850,6 +853,7 @@ Future<_ToolExecutionResult> _executeToolCall({
 
     final approvalEvaluator = tool.needsApprovalDynamic;
     final approvalResponse = approvalById[approvalId];
+    throwIfCancelled(abortSignal);
     if (tool.requiresApproval && approvalResponse == null) {
       return _ToolExecutionResult(
         approvalRequest: LanguageModelV3ToolApprovalRequestPart(
@@ -861,8 +865,9 @@ Future<_ToolExecutionResult> _executeToolCall({
 
     var needsApproval = false;
     if (approvalEvaluator != null) {
-      needsApproval = await Future.value(
-        approvalEvaluator(parsedInput, options),
+      needsApproval = await raceWithCancellation(
+        Future.value(approvalEvaluator(parsedInput, options)),
+        abortSignal,
       );
     }
     if (tool.requiresApproval &&
@@ -916,8 +921,14 @@ Future<_ToolExecutionResult> _executeToolCall({
     );
     final stopwatch = Stopwatch()..start();
     try {
-      final output = await executor(parsedInput, options);
-      final resolved = await _resolveFinalToolOutput(output);
+      final output = await raceWithCancellation(
+        executor(parsedInput, options),
+        abortSignal,
+      );
+      final resolved = await _resolveFinalToolOutput(
+        output,
+        abortSignal: abortSignal,
+      );
       stopwatch.stop();
       _safeInvoke(
         () => onToolCallFinish?.call(
@@ -964,13 +975,21 @@ Future<_ToolExecutionResult> _executeToolCall({
   }
 }
 
-Future<_ToolOutputResolution> _resolveFinalToolOutput(Object? output) async {
+Future<_ToolOutputResolution> _resolveFinalToolOutput(
+  Object? output, {
+  CancellationToken? abortSignal,
+}) async {
   if (output is Stream) {
     Object? last;
     var seenAny = false;
-    await for (final item in output) {
-      seenAny = true;
-      last = item;
+    final iterator = StreamIterator<Object?>(output.cast<Object?>());
+    try {
+      while (await moveNextOrCancellation(iterator, abortSignal)) {
+        seenAny = true;
+        last = iterator.current;
+      }
+    } finally {
+      await iterator.cancel();
     }
     return _ToolOutputResolution(finalOutput: seenAny ? last : null);
   }

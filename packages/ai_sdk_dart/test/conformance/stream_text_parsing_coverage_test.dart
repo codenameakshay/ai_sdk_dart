@@ -119,7 +119,10 @@ void main() {
         result.output,
         throwsA(isA<AiNoObjectGeneratedError>()),
       );
-      await result.fullStream.toList();
+      await expectLater(
+        result.fullStream.toList(),
+        throwsA(isA<AiNoObjectGeneratedError>()),
+      );
       await expectation;
     });
 
@@ -131,7 +134,7 @@ void main() {
         prompt: 'json',
         output: Output.array(element: objectSchema()),
       );
-      final elements = await result.elementStream.toList();
+      final elements = await result.elementStream.handleError((_) {}).toList();
       expect(elements.length, 3);
       expect((elements.last as Map)['i'], 3);
     });
@@ -167,13 +170,18 @@ void main() {
         result.output,
         throwsA(isA<AiNoObjectGeneratedError>()),
       );
-      final elements = await result.elementStream.toList();
+      final fullStreamExpectation = expectLater(
+        result.fullStream.toList(),
+        throwsA(isA<AiNoObjectGeneratedError>()),
+      );
+      final elements = await result.elementStream.handleError((_) {}).toList();
       // Two valid elements survive the per-element tokenizer; the bad one is
       // dropped.
       expect(elements.length, 2);
       expect((elements.first as Map)['i'], 1);
       expect((elements.last as Map)['i'], 2);
       await outputExpectation;
+      await fullStreamExpectation;
     });
 
     test('tokenizer skips empty tokens from stray commas', () async {
@@ -189,9 +197,14 @@ void main() {
         result.output,
         throwsA(isA<AiNoObjectGeneratedError>()),
       );
-      final elements = await result.elementStream.toList();
+      final fullStreamExpectation = expectLater(
+        result.fullStream.toList(),
+        throwsA(isA<AiNoObjectGeneratedError>()),
+      );
+      final elements = await result.elementStream.handleError((_) {}).toList();
       expect(elements.length, 2);
       await outputExpectation;
+      await fullStreamExpectation;
     });
 
     test('json output parses fenced JSON', () async {
@@ -218,7 +231,10 @@ void main() {
         result.output,
         throwsA(isA<AiNoObjectGeneratedError>()),
       );
-      await result.fullStream.toList();
+      await expectLater(
+        result.fullStream.toList(),
+        throwsA(isA<AiNoObjectGeneratedError>()),
+      );
       await outputExpectation;
     });
 
@@ -234,7 +250,10 @@ void main() {
         result.output,
         throwsA(isA<AiNoObjectGeneratedError>()),
       );
-      await result.fullStream.toList();
+      await expectLater(
+        result.fullStream.toList(),
+        throwsA(isA<AiNoObjectGeneratedError>()),
+      );
       await outputExpectation;
     });
   });

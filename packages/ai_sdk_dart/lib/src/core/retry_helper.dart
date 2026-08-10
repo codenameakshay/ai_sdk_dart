@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'cancellation.dart';
 import '../errors/ai_errors.dart';
 import '../tools/tool.dart';
 
@@ -60,9 +61,7 @@ Future<T> withRetry<T>({
   var retryCount = 0;
 
   while (true) {
-    if (abortSignal?.isCancelled ?? false) {
-      throw StateError('Operation cancelled.');
-    }
+    throwIfCancelled(abortSignal);
 
     final attemptTimeout = _remainingTimeout(
       totalTimeout: timeout,
@@ -79,7 +78,7 @@ Future<T> withRetry<T>({
     );
 
     try {
-      return await fn(attemptTimeout);
+      return await raceWithCancellation(fn(attemptTimeout), abortSignal);
     } catch (error) {
       if (!_shouldRetry(
         error,

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
@@ -252,7 +254,7 @@ void main() {
     // ── onError callback ──────────────────────────────────────────────────
 
     group('onError', () {
-      test('onError is called and stream still completes', () async {
+      test('onError is called and the raw stream fails', () async {
         final model = FakeErrorStreamModel('boom');
 
         Object? observed;
@@ -262,9 +264,82 @@ void main() {
           onError: (err) => observed = err,
         );
 
-        // Drain the raw stream to ensure onError is invoked
-        await result.stream.toList();
+        await expectLater(result.stream.toList(), throwsA('boom'));
         expect(observed, 'boom');
+      });
+    });
+
+    group('failure contracts', () {
+      test(
+        'textStream-only consumer sees stream failure without zone leak',
+        () async {
+          final zoneErrors = <Object>[];
+
+          await runZonedGuarded(
+            () async {
+              final result = await streamText(
+                model: _ErrorAfterTextModel(StateError('boom')),
+                prompt: 'hi',
+              );
+              await expectLater(
+                result.textStream.toList(),
+                throwsA(isA<StateError>()),
+              );
+              await Future<void>.delayed(Duration.zero);
+            },
+            (error, stackTrace) => zoneErrors.add(error),
+          );
+
+          expect(zoneErrors, isEmpty);
+        },
+      );
+
+      test(
+        'text future-only consumer sees stream failure without zone leak',
+        () async {
+          final zoneErrors = <Object>[];
+
+          await runZonedGuarded(
+            () async {
+              final result = await streamText(
+                model: _ErrorAfterTextModel(StateError('boom')),
+                prompt: 'hi',
+              );
+              await expectLater(result.text, throwsA(isA<StateError>()));
+              await Future<void>.delayed(Duration.zero);
+            },
+            (error, stackTrace) => zoneErrors.add(error),
+          );
+
+          expect(zoneErrors, isEmpty);
+        },
+      );
+
+      test('fullStream emits an error event before failing', () async {
+        final result = await streamText(
+          model: _ErrorAfterTextModel(StateError('boom')),
+          prompt: 'hi',
+        );
+
+        final events = <StreamTextEvent>[];
+        final done = Completer<void>();
+        final sub = result.fullStream.listen(
+          events.add,
+          onError: (Object error, StackTrace stackTrace) {
+            if (!done.isCompleted) {
+              done.completeError(error, stackTrace);
+            }
+          },
+          onDone: () {
+            if (!done.isCompleted) done.complete();
+          },
+        );
+
+        await expectLater(done.future, throwsA(isA<StateError>()));
+        await sub.cancel();
+
+        expect(events.whereType<StreamTextTextDeltaEvent>().single.delta, 'Hi');
+        expect(events.last, isA<StreamTextErrorEvent>());
       });
     });
 
@@ -430,6 +505,40 @@ void main() {
       });
     });
   });
+}
+
+class _ErrorAfterTextModel implements LanguageModelV3 {
+  const _ErrorAfterTextModel(this.error);
+
+  final Object error;
+
+  @override
+  String get provider => 'fake';
+
+  @override
+  String get modelId => 'error-after-text-model';
+
+  @override
+  String get specificationVersion => 'v3';
+
+  @override
+  Future<LanguageModelV3GenerateResult> doGenerate(
+    LanguageModelV3CallOptions options,
+  ) async => throw UnimplementedError();
+
+  @override
+  Future<LanguageModelV3StreamResult> doStream(
+    LanguageModelV3CallOptions options,
+  ) async {
+    return LanguageModelV3StreamResult(
+      stream: Stream<LanguageModelV3StreamPart>.fromIterable([
+        const StreamPartTextStart(id: 'text-1'),
+        const StreamPartTextDelta(id: 'text-1', delta: 'Hi'),
+        const StreamPartTextEnd(id: 'text-1'),
+        StreamPartError(error: error),
+      ]),
+    );
+  }
 }
 
 /// A fake model that includes warnings in rawResponse so streamText can read them.

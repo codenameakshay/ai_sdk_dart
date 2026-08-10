@@ -105,7 +105,10 @@ void main() {
         result.output,
         throwsA(isA<AiNoObjectGeneratedError>()),
       );
-      await result.fullStream.toList();
+      await expectLater(
+        result.fullStream.toList(),
+        throwsA(isA<AiNoObjectGeneratedError>()),
+      );
       await expectation;
     });
 
@@ -252,7 +255,10 @@ void main() {
         result.output,
         throwsA(isA<AiNoSuchToolError>()),
       );
-      final events = await result.fullStream.toList();
+      final events = await _collectFailingFullStream(
+        result,
+        isA<AiNoSuchToolError>(),
+      );
       expect(events.whereType<StreamTextErrorEvent>(), isNotEmpty);
       await outputExpectation;
     });
@@ -352,7 +358,10 @@ void main() {
         result.output,
         throwsA(isA<AiApiCallError>()),
       );
-      await result.fullStream.toList();
+      await expectLater(
+        result.fullStream.toList(),
+        throwsA(isA<AiApiCallError>()),
+      );
       await outputExpectation;
     });
 
@@ -368,7 +377,10 @@ void main() {
         result.output,
         throwsA(isA<AiApiCallError>()),
       );
-      await result.fullStream.toList();
+      await expectLater(
+        result.fullStream.toList(),
+        throwsA(isA<AiApiCallError>()),
+      );
       await outputExpectation;
     });
 
@@ -385,7 +397,10 @@ void main() {
           result.output,
           throwsA(isA<AiNoSuchToolError>()),
         );
-        await result.fullStream.toList();
+        await expectLater(
+          result.fullStream.toList(),
+          throwsA(isA<AiNoSuchToolError>()),
+        );
         await outputExpectation;
       },
     );
@@ -402,7 +417,10 @@ void main() {
         result.output,
         throwsA(isA<AiApiCallError>()),
       );
-      await result.fullStream.toList();
+      await expectLater(
+        result.fullStream.toList(),
+        throwsA(isA<AiApiCallError>()),
+      );
       await outputExpectation;
     });
 
@@ -420,7 +438,10 @@ void main() {
           result.output,
           throwsA(isA<AiNoSuchToolError>()),
         );
-        await result.fullStream.toList();
+        await expectLater(
+          result.fullStream.toList(),
+          throwsA(isA<AiNoSuchToolError>()),
+        );
         await outputExpectation;
       },
     );
@@ -463,7 +484,10 @@ void main() {
         result.output,
         throwsA(isA<AiNoSuchToolError>()),
       );
-      await result.fullStream.toList();
+      await expectLater(
+        result.fullStream.toList(),
+        throwsA(isA<AiNoSuchToolError>()),
+      );
       await outputExpectation;
     });
   });
@@ -562,7 +586,10 @@ void main() {
         result.output,
         throwsA(isA<AiApiCallError>()),
       );
-      final events = await result.fullStream.toList();
+      final events = await _collectFailingFullStream(
+        result,
+        isA<AiApiCallError>(),
+      );
       expect(events.whereType<StreamTextErrorEvent>(), isNotEmpty);
       expect(model.attempts, 2);
       await outputExpectation;
@@ -580,7 +607,10 @@ void main() {
         result.output,
         throwsA(isA<TimeoutException>()),
       );
-      await result.fullStream.toList();
+      await expectLater(
+        result.fullStream.toList(),
+        throwsA(isA<TimeoutException>()),
+      );
       await outputExpectation;
     });
   });
@@ -731,6 +761,28 @@ void main() {
       expect(toolFinished, isTrue);
     });
   });
+}
+
+Future<List<StreamTextEvent>> _collectFailingFullStream(
+  StreamTextResult result,
+  Matcher matcher,
+) async {
+  final events = <StreamTextEvent>[];
+  final done = Completer<void>();
+  final sub = result.fullStream.listen(
+    events.add,
+    onError: (Object error, StackTrace stackTrace) {
+      if (!done.isCompleted) {
+        done.completeError(error, stackTrace);
+      }
+    },
+    onDone: () {
+      if (!done.isCompleted) done.complete();
+    },
+  );
+  await expectLater(done.future, throwsA(matcher));
+  await sub.cancel();
+  return events;
 }
 
 /// A value jsonEncode cannot serialize, with a stable toString.

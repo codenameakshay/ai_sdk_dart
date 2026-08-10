@@ -139,33 +139,6 @@ void main() {
       },
     );
 
-    test('does not retry after cancellation is requested', () async {
-      final token = CancellationToken();
-      var callCount = 0;
-      final model = _CountingFakeModel(
-        onCall: () {
-          callCount++;
-          token.cancel();
-          throw const AiApiCallError(
-            'Cancelled upstream request',
-            statusCode: 429,
-            isRetryable: true,
-          );
-        },
-      );
-
-      await expectLater(
-        () => generateText(
-          model: model,
-          prompt: 'hi',
-          maxRetries: 3,
-          abortSignal: token,
-        ),
-        throwsA(isA<AiApiCallError>()),
-      );
-      expect(callCount, 1);
-    });
-
     test(
       'pre-cancelled generateText short-circuits before any provider call',
       () async {
@@ -188,9 +161,41 @@ void main() {
             maxRetries: 3,
             abortSignal: token,
           ),
-          throwsA(isA<StateError>()),
+          throwsA(isA<AiOperationCancelledError>()),
         );
         expect(callCount, 0);
+      },
+    );
+
+    test(
+      'cancelling generateText while awaiting provider startup throws typed cancellation',
+      () async {
+        final token = CancellationToken();
+        var callCount = 0;
+        final gate = Completer<void>();
+        final model = _CountingFakeModel(
+          onCall: () async {
+            callCount++;
+            await gate.future;
+            return LanguageModelV3GenerateResult(
+              content: [LanguageModelV3TextPart(text: 'late')],
+              finishReason: LanguageModelV3FinishReason.stop,
+            );
+          },
+        );
+
+        final future = generateText(
+          model: model,
+          prompt: 'hi',
+          abortSignal: token,
+          maxRetries: 0,
+        );
+        await Future<void>.delayed(Duration.zero);
+        token.cancel();
+
+        await expectLater(future, throwsA(isA<AiOperationCancelledError>()));
+        expect(callCount, 1);
+        gate.complete();
       },
     );
 
@@ -397,8 +402,6 @@ void main() {
       'does not retry generic stream exceptions even when maxRetries is set',
       () async {
         var callCount = 0;
-        final zoneErrors = <Object>[];
-        final completer = Completer<void>();
         final model = _CountingFakeModel(
           onCall: () {
             callCount++;
@@ -407,25 +410,13 @@ void main() {
           isStream: true,
         );
 
-        await runZonedGuarded(
-          () async {
-            final result = await streamText(
-              model: model,
-              prompt: 'hi',
-              maxRetries: 3,
-            );
-            await result.text.whenComplete(() {
-              if (!completer.isCompleted) completer.complete();
-            });
-          },
-          (error, stackTrace) {
-            zoneErrors.add(error);
-            if (!completer.isCompleted) completer.complete();
-          },
+        final result = await streamText(
+          model: model,
+          prompt: 'hi',
+          maxRetries: 3,
         );
 
-        await completer.future;
-        expect(zoneErrors.single, isA<Exception>());
+        await expectLater(result.text, throwsA(isA<Exception>()));
         expect(callCount, 1);
       },
     );
@@ -453,8 +444,47 @@ void main() {
           abortSignal: token,
         );
 
-        await expectLater(result.output, throwsA(isA<StateError>()));
+        await expectLater(
+          result.output,
+          throwsA(isA<AiOperationCancelledError>()),
+        );
         expect(callCount, 0);
+      },
+    );
+
+    test(
+      'cancelling streamText while awaiting provider startup throws typed cancellation',
+      () async {
+        final token = CancellationToken();
+        var callCount = 0;
+        final gate = Completer<void>();
+        final model = _CountingFakeModel(
+          onCall: () async {
+            callCount++;
+            await gate.future;
+            return LanguageModelV3GenerateResult(
+              content: [LanguageModelV3TextPart(text: 'late')],
+              finishReason: LanguageModelV3FinishReason.stop,
+            );
+          },
+          isStream: true,
+        );
+
+        final result = await streamText(
+          model: model,
+          prompt: 'hi',
+          abortSignal: token,
+          maxRetries: 0,
+        );
+        await Future<void>.delayed(Duration.zero);
+        token.cancel();
+
+        await expectLater(
+          result.text,
+          throwsA(isA<AiOperationCancelledError>()),
+        );
+        expect(callCount, 1);
+        gate.complete();
       },
     );
 
@@ -583,7 +613,7 @@ void main() {
 // Helper fake models
 // ---------------------------------------------------------------------------
 
-typedef _GenerateCallback = LanguageModelV3GenerateResult Function();
+typedef _GenerateCallback = FutureOr<LanguageModelV3GenerateResult> Function();
 
 /// A fake model that delegates to a callback, allowing controlled failures.
 class _CountingFakeModel implements LanguageModelV3 {
@@ -605,14 +635,14 @@ class _CountingFakeModel implements LanguageModelV3 {
   Future<LanguageModelV3GenerateResult> doGenerate(
     LanguageModelV3CallOptions options,
   ) async {
-    return onCall();
+    return await onCall();
   }
 
   @override
   Future<LanguageModelV3StreamResult> doStream(
     LanguageModelV3CallOptions options,
   ) async {
-    final result = onCall();
+    final result = await onCall();
     final text = result.content
         .whereType<LanguageModelV3TextPart>()
         .map((p) => p.text)

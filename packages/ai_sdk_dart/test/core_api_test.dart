@@ -198,7 +198,7 @@ void main() {
         onError: (error) => observed = error,
       );
 
-      await result.stream.toList();
+      await expectLater(result.stream.toList(), throwsA('boom'));
       expect(observed, 'boom');
     });
 
@@ -694,10 +694,10 @@ void main() {
         onError: (error) => observed = error,
       );
 
+      final textChunks = result.textStream.handleError((_) {}).toList();
       final drains = [
         result.stream.handleError((_) {}).drain<void>(),
         result.fullStream.handleError((_) {}).drain<void>(),
-        result.textStream.handleError((_) {}).drain<void>(),
         result.partialOutputStream.handleError((_) {}).drain<void>(),
         result.elementStream.handleError((_) {}).drain<void>(),
       ];
@@ -705,8 +705,12 @@ void main() {
         result.output,
         throwsA(isA<AiNoObjectGeneratedError>()),
       );
-      expect(await result.text, '{"status":');
-      expect(await result.finish, isNotNull);
+      expect((await textChunks).join(), '{"status":');
+      await expectLater(result.text, throwsA(isA<AiNoObjectGeneratedError>()));
+      await expectLater(
+        result.finish,
+        throwsA(isA<AiNoObjectGeneratedError>()),
+      );
       await Future.wait(drains);
       expect(observed, isA<AiNoObjectGeneratedError>());
     });

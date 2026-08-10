@@ -449,5 +449,95 @@ void main() {
       expect(controller.error, isNull);
       controller.dispose();
     });
+
+    test('streaming deltas coalesce per frame and approval-free completion '
+        'flushes without duplicate notifications', () async {
+      final scheduler = FakeFrameNotificationScheduler();
+      final agent = RecordingStreamAgent();
+      final controller = ChatController(notificationScheduler: scheduler);
+      var rootNotifications = 0;
+      var statusNotifications = 0;
+      var contentNotifications = 0;
+      controller.addListener(() {
+        rootNotifications++;
+      });
+      controller.statusListenable.addListener(() {
+        statusNotifications++;
+      });
+      controller.contentListenable.addListener(() {
+        contentNotifications++;
+      });
+
+      unawaited(controller.sendMessage(agent: agent, text: 'go'));
+      await pumpUntil(() => agent.invocations.length == 1);
+      await pumpUntil(() => controller.status == ChatStatus.streaming);
+      final invocation = agent.invocations.single;
+
+      rootNotifications = 0;
+      statusNotifications = 0;
+      contentNotifications = 0;
+
+      invocation.emitText('a');
+      invocation.emitText('b');
+      invocation.emitReasoning('why');
+      invocation.emitText('c');
+      await pumpUntil(
+        () =>
+            controller.streamingContent == 'abc' &&
+            controller.streamingReasoning == 'why',
+      );
+
+      expect(controller.streamingContent, 'abc');
+      expect(controller.streamingReasoning, 'why');
+      expect(rootNotifications, 0);
+      expect(statusNotifications, 0);
+      expect(contentNotifications, 0);
+      expect(scheduler.pendingCallbackCount, 2);
+
+      scheduler.flush();
+
+      expect(rootNotifications, 1);
+      expect(statusNotifications, 0);
+      expect(contentNotifications, 1);
+
+      invocation.emitText('d');
+      await pumpUntil(() => controller.streamingContent == 'abcd');
+      await invocation.finish(finalText: 'abcd', reasoningText: 'why');
+      await pumpUntil(() => controller.status == ChatStatus.ready);
+
+      expect(controller.messages.last.content, 'abcd');
+      expect(controller.streamingContent, isEmpty);
+      expect(rootNotifications, 2);
+      expect(statusNotifications, 1);
+      expect(contentNotifications, 2);
+      expect(scheduler.pendingCallbackCount, 0);
+      controller.dispose();
+    });
+
+    test('dispose cancels a queued frame notification', () async {
+      final scheduler = FakeFrameNotificationScheduler();
+      final agent = RecordingStreamAgent();
+      final controller = ChatController(notificationScheduler: scheduler);
+      var notifications = 0;
+      controller.addListener(() {
+        notifications++;
+      });
+
+      unawaited(controller.sendMessage(agent: agent, text: 'go'));
+      await pumpUntil(() => agent.invocations.length == 1);
+      await pumpUntil(() => controller.status == ChatStatus.streaming);
+      final invocation = agent.invocations.single;
+
+      notifications = 0;
+      invocation.emitText('partial');
+      await pumpUntil(() => controller.streamingContent == 'partial');
+      expect(controller.streamingContent, 'partial');
+      expect(scheduler.pendingCallbackCount, 2);
+
+      controller.dispose();
+      scheduler.flush();
+
+      expect(notifications, 0);
+    });
   });
 }

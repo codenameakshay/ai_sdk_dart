@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_dart/test.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
+import 'package:flutter/foundation.dart';
 
 /// Builds a [ToolLoopAgent] whose model streams [text] as a single text part.
 ToolLoopAgent textAgent(String text) {
@@ -442,4 +444,28 @@ ToolLoopAgent approvalAgent({
     tools: {toolName: approvalTool('done')},
     maxSteps: 5,
   );
+}
+
+class FakeFrameNotificationScheduler implements FrameNotificationScheduler {
+  final Map<int, VoidCallback> _callbacks = <int, VoidCallback>{};
+  int _nextId = 0;
+
+  int get pendingCallbackCount => _callbacks.length;
+
+  @override
+  CancelFrameNotification schedule(VoidCallback callback) {
+    final id = ++_nextId;
+    _callbacks[id] = callback;
+    return () {
+      _callbacks.remove(id);
+    };
+  }
+
+  void flush() {
+    final callbacks = _callbacks.values.toList();
+    _callbacks.clear();
+    for (final callback in callbacks) {
+      callback();
+    }
+  }
 }

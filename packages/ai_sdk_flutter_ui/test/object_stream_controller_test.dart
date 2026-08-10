@@ -321,5 +321,60 @@ void main() {
       expect(controller.error, isNull);
       controller.dispose();
     });
+
+    test('content deltas coalesce per frame and completion flushes without '
+        'duplicate notifications', () async {
+      final scheduler = FakeFrameNotificationScheduler();
+      final source = StreamController<int>();
+      addTearDown(source.close);
+      final controller = ObjectStreamController<int>(
+        notificationScheduler: scheduler,
+      );
+      var rootNotifications = 0;
+      var statusNotifications = 0;
+      var contentNotifications = 0;
+      controller.addListener(() {
+        rootNotifications++;
+      });
+      controller.statusListenable.addListener(() {
+        statusNotifications++;
+      });
+      controller.contentListenable.addListener(() {
+        contentNotifications++;
+      });
+
+      unawaited(controller.bind(source.stream));
+      source.add(1);
+      await pumpUntil(() => controller.value == 1);
+
+      rootNotifications = 0;
+      statusNotifications = 0;
+      contentNotifications = 0;
+
+      source.add(2);
+      source.add(3);
+      await pumpUntil(() => controller.value == 3);
+
+      expect(rootNotifications, 0);
+      expect(statusNotifications, 0);
+      expect(contentNotifications, 0);
+      expect(scheduler.pendingCallbackCount, 2);
+
+      scheduler.flush();
+
+      expect(rootNotifications, 1);
+      expect(statusNotifications, 0);
+      expect(contentNotifications, 1);
+
+      await source.close();
+      await pumpUntil(() => !controller.isLoading && !controller.isStreaming);
+
+      expect(controller.value, 3);
+      expect(rootNotifications, 2);
+      expect(statusNotifications, 1);
+      expect(contentNotifications, 2);
+      expect(scheduler.pendingCallbackCount, 0);
+      controller.dispose();
+    });
   });
 }

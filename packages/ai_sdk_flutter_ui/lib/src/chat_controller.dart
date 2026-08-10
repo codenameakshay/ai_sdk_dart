@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
+import 'frame_notifier.dart';
+
 /// Status of the chat controller.
 enum ChatStatus {
   /// Idle; no generation in progress.
@@ -42,7 +44,11 @@ class ChatController extends ChangeNotifier {
     this.initialMessages = const [],
     this.onFinish,
     this.onError,
-  }) : _messages = List<ModelMessage>.from(initialMessages);
+    FrameNotificationScheduler? notificationScheduler,
+  }) : _rootListenable = FrameNotifier(scheduler: notificationScheduler),
+       _statusListenable = FrameNotifier(scheduler: notificationScheduler),
+       _contentListenable = FrameNotifier(scheduler: notificationScheduler),
+       _messages = List<ModelMessage>.from(initialMessages);
 
   /// Optional identifier for this chat session.
   final String? id;
@@ -54,6 +60,23 @@ class ChatController extends ChangeNotifier {
 
   /// Called when a generation errors.
   final void Function(Object error)? onError;
+
+  final FrameNotifier _rootListenable;
+  final FrameNotifier _statusListenable;
+  final FrameNotifier _contentListenable;
+
+  /// Notifies when generation/composer-facing state changes.
+  ///
+  /// This covers [status], [isLoading], [error], and
+  /// [pendingApprovalRequests].
+  Listenable get statusListenable => _statusListenable;
+
+  /// Notifies when transcript/content state changes.
+  ///
+  /// This covers [messages], [streamingContent], [streamingReasoning],
+  /// [reasoningText], [lastUsage], [lastSources], [lastToolCalls], and
+  /// [lastToolResults].
+  Listenable get contentListenable => _contentListenable;
 
   final List<ModelMessage> _messages;
 
@@ -133,8 +156,22 @@ class ChatController extends ChangeNotifier {
   bool _isCurrentRequest(int requestId) =>
       !_isDisposed && _activeRequestId == requestId;
 
-  void _notifyListenersSafely() {
-    if (!_isDisposed) notifyListeners();
+  void _notifyListenersSafely({
+    required bool immediate,
+    bool status = false,
+    bool content = false,
+  }) {
+    if (_isDisposed) return;
+    if (immediate) {
+      _rootListenable.notifyImmediately();
+      if (status) _statusListenable.notifyImmediately();
+      if (content) _contentListenable.notifyImmediately();
+      return;
+    }
+
+    _rootListenable.notifyInFrame();
+    if (status) _statusListenable.notifyInFrame();
+    if (content) _contentListenable.notifyInFrame();
   }
 
   void _cancelActiveRequestSync({bool commitPartial = false}) {
@@ -196,7 +233,7 @@ class ChatController extends ChangeNotifier {
   /// Add a [message] to the list without triggering generation.
   void append(ModelMessage message) {
     _messages.add(message);
-    notifyListeners();
+    _notifyListenersSafely(immediate: true, content: true);
   }
 
   /// Re-run generation using the current message list.
@@ -213,7 +250,7 @@ class ChatController extends ChangeNotifier {
     if (_messages.isNotEmpty &&
         _messages.last.role == ModelMessageRole.assistant) {
       _messages.removeLast();
-      _notifyListenersSafely();
+      _notifyListenersSafely(immediate: true, content: true);
     }
 
     await _runGeneration(effectiveAgent);
@@ -229,7 +266,7 @@ class ChatController extends ChangeNotifier {
     if (_status == ChatStatus.error) {
       _error = null;
       _status = ChatStatus.ready;
-      notifyListeners();
+      _notifyListenersSafely(immediate: true, status: true);
     }
   }
 
@@ -253,7 +290,7 @@ class ChatController extends ChangeNotifier {
     _pendingApprovalRequests = _pendingApprovalRequests
         .where((request) => request.approvalId != approvalId)
         .toList();
-    _notifyListenersSafely();
+    _notifyListenersSafely(immediate: true, status: true);
 
     // Once every paused request has a decision, replay the turn with the
     // collected responses so the agent can execute (or skip) the tools.
@@ -291,7 +328,7 @@ class ChatController extends ChangeNotifier {
     _pendingApprovalRequests = const [];
     _status = ChatStatus.submitted;
     _error = null;
-    _notifyListenersSafely();
+    _notifyListenersSafely(immediate: true, status: true, content: true);
 
     try {
       final streamResult = await agent.stream(
@@ -303,7 +340,7 @@ class ChatController extends ChangeNotifier {
       );
       if (!_isCurrentRequest(requestId)) return;
       _status = ChatStatus.streaming;
-      _notifyListenersSafely();
+      _notifyListenersSafely(immediate: true, status: true);
 
       // The result's `text`/`output` futures reject on a streaming error; we
       // surface errors via [fullStream] instead, so swallow those completions
@@ -320,7 +357,7 @@ class ChatController extends ChangeNotifier {
           _handleError(event.error, requestId);
         } else if (event is StreamTextReasoningDeltaEvent) {
           _streamingReasoning += event.delta;
-          _notifyListenersSafely();
+          _notifyListenersSafely(immediate: false, content: true);
         }
       }, onError: (Object err) => _handleError(err, requestId));
 
@@ -328,7 +365,7 @@ class ChatController extends ChangeNotifier {
         (delta) {
           if (!_isCurrentRequest(requestId)) return;
           _streamBuffer.write(delta);
-          _notifyListenersSafely();
+          _notifyListenersSafely(immediate: false, content: true);
         },
         onDone: () => unawaited(_finalizeTurn(streamResult, requestId)),
         onError: (Object err) => _handleError(err, requestId),
@@ -382,7 +419,7 @@ class ChatController extends ChangeNotifier {
       _streamBuffer.clear();
       _streamingReasoning = '';
       _status = ChatStatus.awaitingApproval;
-      _notifyListenersSafely();
+      _notifyListenersSafely(immediate: true, status: true, content: true);
       return;
     }
 
@@ -394,7 +431,7 @@ class ChatController extends ChangeNotifier {
     _streamBuffer.clear();
     _streamingReasoning = '';
     _status = ChatStatus.ready;
-    _notifyListenersSafely();
+    _notifyListenersSafely(immediate: true, status: true, content: true);
     onFinish?.call(assistantMessage);
   }
 
@@ -410,7 +447,7 @@ class ChatController extends ChangeNotifier {
     _streamBuffer.clear();
     _streamingReasoning = '';
     _status = ChatStatus.error;
-    _notifyListenersSafely();
+    _notifyListenersSafely(immediate: true, status: true, content: true);
     onError?.call(err);
   }
 
@@ -419,7 +456,7 @@ class ChatController extends ChangeNotifier {
     await _cancelActiveRequest(commitPartial: true);
     _discardApprovalState();
     _status = ChatStatus.ready;
-    _notifyListenersSafely();
+    _notifyListenersSafely(immediate: true, status: true, content: true);
   }
 
   /// Remove all messages and reset to initial state.
@@ -436,13 +473,27 @@ class ChatController extends ChangeNotifier {
     _discardApprovalState();
     _status = ChatStatus.ready;
     _error = null;
-    _notifyListenersSafely();
+    _notifyListenersSafely(immediate: true, status: true, content: true);
   }
+
+  @override
+  void addListener(VoidCallback listener) =>
+      _rootListenable.addListener(listener);
+
+  @override
+  void removeListener(VoidCallback listener) =>
+      _rootListenable.removeListener(listener);
+
+  @override
+  bool get hasListeners => _rootListenable.hasListeners;
 
   @override
   void dispose() {
     _isDisposed = true;
     _cancelActiveRequestSync();
+    _rootListenable.dispose();
+    _statusListenable.dispose();
+    _contentListenable.dispose();
     super.dispose();
   }
 }

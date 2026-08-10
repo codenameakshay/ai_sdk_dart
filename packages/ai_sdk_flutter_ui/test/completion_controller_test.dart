@@ -237,5 +237,94 @@ void main() {
       expect(controller.error, isNull);
       controller.dispose();
     });
+
+    test('streaming deltas coalesce per frame and terminal completion flushes '
+        'without duplicate notifications', () async {
+      final scheduler = FakeFrameNotificationScheduler();
+      final agent = RecordingStreamAgent();
+      final controller = CompletionController(
+        agent: agent,
+        notificationScheduler: scheduler,
+      );
+      var rootNotifications = 0;
+      var statusNotifications = 0;
+      var contentNotifications = 0;
+      controller.addListener(() {
+        rootNotifications++;
+      });
+      controller.statusListenable.addListener(() {
+        statusNotifications++;
+      });
+      controller.contentListenable.addListener(() {
+        contentNotifications++;
+      });
+
+      unawaited(controller.complete('go'));
+      await pumpUntil(() => agent.invocations.length == 1);
+      await pumpUntil(() => controller.isStreaming);
+      final invocation = agent.invocations.single;
+
+      rootNotifications = 0;
+      statusNotifications = 0;
+      contentNotifications = 0;
+
+      invocation.emitText('a');
+      invocation.emitText('b');
+      invocation.emitText('c');
+      await pumpUntil(() => controller.completion == 'abc');
+
+      expect(controller.completion, 'abc');
+      expect(rootNotifications, 0);
+      expect(statusNotifications, 0);
+      expect(contentNotifications, 0);
+      expect(scheduler.pendingCallbackCount, 2);
+
+      scheduler.flush();
+
+      expect(rootNotifications, 1);
+      expect(statusNotifications, 0);
+      expect(contentNotifications, 1);
+
+      invocation.emitText('d');
+      await pumpUntil(() => controller.completion == 'abcd');
+      await invocation.finish(finalText: 'abcd');
+      await pumpUntil(() => !controller.isLoading && !controller.isStreaming);
+
+      expect(controller.completion, 'abcd');
+      expect(rootNotifications, 2);
+      expect(statusNotifications, 1);
+      expect(contentNotifications, 2);
+      expect(scheduler.pendingCallbackCount, 0);
+      controller.dispose();
+    });
+
+    test('dispose cancels a queued frame notification', () async {
+      final scheduler = FakeFrameNotificationScheduler();
+      final agent = RecordingStreamAgent();
+      final controller = CompletionController(
+        agent: agent,
+        notificationScheduler: scheduler,
+      );
+      var notifications = 0;
+      controller.addListener(() {
+        notifications++;
+      });
+
+      unawaited(controller.complete('go'));
+      await pumpUntil(() => agent.invocations.length == 1);
+      await pumpUntil(() => controller.isStreaming);
+      final invocation = agent.invocations.single;
+
+      notifications = 0;
+      invocation.emitText('partial');
+      await pumpUntil(() => controller.completion == 'partial');
+      expect(controller.completion, 'partial');
+      expect(scheduler.pendingCallbackCount, 2);
+
+      controller.dispose();
+      scheduler.flush();
+
+      expect(notifications, 0);
+    });
   });
 }

@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
+import 'frame_notifier.dart';
+
 /// Flutter controller for streaming structured objects — mirrors `useObject` hook.
 ///
 /// Two ways to drive it:
@@ -32,7 +34,11 @@ class ObjectStreamController<T> extends ChangeNotifier {
     T? initialValue,
     this.onFinish,
     this.onError,
-  }) : _value = initialValue;
+    FrameNotificationScheduler? notificationScheduler,
+  }) : _rootListenable = FrameNotifier(scheduler: notificationScheduler),
+       _statusListenable = FrameNotifier(scheduler: notificationScheduler),
+       _contentListenable = FrameNotifier(scheduler: notificationScheduler),
+       _value = initialValue;
 
   /// Optional identifier for this controller.
   final String? id;
@@ -50,6 +56,16 @@ class ObjectStreamController<T> extends ChangeNotifier {
 
   /// Called when an error occurs.
   final void Function(Object error)? onError;
+
+  final FrameNotifier _rootListenable;
+  final FrameNotifier _statusListenable;
+  final FrameNotifier _contentListenable;
+
+  /// Notifies when loading/streaming/error state changes.
+  Listenable get statusListenable => _statusListenable;
+
+  /// Notifies when [value] changes.
+  Listenable get contentListenable => _contentListenable;
 
   T? _value;
   T? get value => _value;
@@ -72,8 +88,22 @@ class ObjectStreamController<T> extends ChangeNotifier {
   bool _isCurrentRequest(int requestId) =>
       !_isDisposed && _activeRequestId == requestId;
 
-  void _notifyListenersSafely() {
-    if (!_isDisposed) notifyListeners();
+  void _notifyListenersSafely({
+    required bool immediate,
+    bool status = false,
+    bool content = false,
+  }) {
+    if (_isDisposed) return;
+    if (immediate) {
+      _rootListenable.notifyImmediately();
+      if (status) _statusListenable.notifyImmediately();
+      if (content) _contentListenable.notifyImmediately();
+      return;
+    }
+
+    _rootListenable.notifyInFrame();
+    if (status) _statusListenable.notifyInFrame();
+    if (content) _contentListenable.notifyInFrame();
   }
 
   void _cancelActiveRequestSync() {
@@ -101,7 +131,7 @@ class ObjectStreamController<T> extends ChangeNotifier {
     _error = null;
     _isLoading = true;
     _isStreaming = false;
-    _notifyListenersSafely();
+    _notifyListenersSafely(immediate: true, status: true, content: clearValue);
     return requestId;
   }
 
@@ -109,9 +139,14 @@ class ObjectStreamController<T> extends ChangeNotifier {
     _subscription = stream.listen(
       (event) {
         if (!_isCurrentRequest(requestId)) return;
+        final wasStreaming = _isStreaming;
         _value = event;
         _isStreaming = true;
-        _notifyListenersSafely();
+        _notifyListenersSafely(
+          immediate: wasStreaming ? false : true,
+          status: !wasStreaming,
+          content: true,
+        );
       },
       onDone: () {
         if (!_isCurrentRequest(requestId)) return;
@@ -120,7 +155,7 @@ class ObjectStreamController<T> extends ChangeNotifier {
         _subscription = null;
         _isLoading = false;
         _isStreaming = false;
-        _notifyListenersSafely();
+        _notifyListenersSafely(immediate: true, status: true, content: true);
         onFinish?.call(_value);
       },
       onError: (Object err) {
@@ -131,7 +166,7 @@ class ObjectStreamController<T> extends ChangeNotifier {
         _error = err;
         _isLoading = false;
         _isStreaming = false;
-        _notifyListenersSafely();
+        _notifyListenersSafely(immediate: true, status: true);
         onError?.call(err);
       },
       cancelOnError: true,
@@ -181,7 +216,7 @@ class ObjectStreamController<T> extends ChangeNotifier {
       _error = err;
       _isLoading = false;
       _isStreaming = false;
-      _notifyListenersSafely();
+      _notifyListenersSafely(immediate: true, status: true);
       onError?.call(err);
     }
   }
@@ -196,7 +231,7 @@ class ObjectStreamController<T> extends ChangeNotifier {
     await _cancelActiveRequest();
     _isLoading = false;
     _isStreaming = false;
-    _notifyListenersSafely();
+    _notifyListenersSafely(immediate: true, status: true);
   }
 
   /// Clear the current value and error.
@@ -208,16 +243,30 @@ class ObjectStreamController<T> extends ChangeNotifier {
     _error = null;
     _isLoading = false;
     _isStreaming = false;
-    _notifyListenersSafely();
+    _notifyListenersSafely(immediate: true, status: true, content: true);
   }
 
   /// Alias for [clear] — kept for backward compatibility.
   void reset() => clear();
 
   @override
+  void addListener(VoidCallback listener) =>
+      _rootListenable.addListener(listener);
+
+  @override
+  void removeListener(VoidCallback listener) =>
+      _rootListenable.removeListener(listener);
+
+  @override
+  bool get hasListeners => _rootListenable.hasListeners;
+
+  @override
   void dispose() {
     _isDisposed = true;
     _cancelActiveRequestSync();
+    _rootListenable.dispose();
+    _statusListenable.dispose();
+    _contentListenable.dispose();
     super.dispose();
   }
 }

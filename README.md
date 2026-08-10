@@ -110,7 +110,7 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
 - `wrapEmbeddingModel()` — composable middleware pipeline for embedding models
 
 ### 🧱 Middleware System
-- `wrapLanguageModel(model, middlewares)` — composable middleware pipeline
+- `wrapLanguageModel(model: ..., middleware: ...)` — composable middleware pipeline
 - `extractReasoningMiddleware` — strips `<think>` tags into `ReasoningPart`
 - `extractJsonMiddleware` — strips ` ```json ``` ` fences
 - `simulateStreamingMiddleware` — converts non-streaming models to streaming
@@ -168,7 +168,7 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
 | [`ai_sdk_mistral`](https://pub.dev/packages/ai_sdk_mistral) | `dart pub add ai_sdk_mistral` | `mistral('mistral-large-latest')`, embeddings |
 | [`ai_sdk_ollama`](https://pub.dev/packages/ai_sdk_ollama) | `dart pub add ai_sdk_ollama` | `ollama('llama3')`, local inference, embeddings |
 | [`ai_sdk_flutter_ui`](https://pub.dev/packages/ai_sdk_flutter_ui) | `dart pub add ai_sdk_flutter_ui` | `ChatController`, `CompletionController`, `ObjectStreamController` + 19 prebuilt chat widgets |
-| [`ai_sdk_mcp`](https://pub.dev/packages/ai_sdk_mcp) | `dart pub add ai_sdk_mcp` | `MCPClient`, `StreamableHttpClientTransport`, `StdioMCPTransport` (web-safe) |
+| [`ai_sdk_mcp`](https://pub.dev/packages/ai_sdk_mcp) | `dart pub add ai_sdk_mcp` | `MCPClient`, `StreamableHttpClientTransport`, native-only `StdioMCPTransport` |
 | [`ai_sdk_provider`](https://pub.dev/packages/ai_sdk_provider) | *(transitive)* | Provider interfaces for building custom providers |
 | `ai_sdk_openai_compatible` | *(transitive)* | Shared OpenAI Chat Completions base — powers the OpenAI/Azure/Groq/Mistral language models |
 
@@ -182,26 +182,40 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
 
 ```sh
 dart pub add ai_sdk_dart ai_sdk_openai
-export OPENAI_API_KEY=sk-...
 ```
 
 ```dart
+import 'dart:io';
+
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 
-void main() async {
-  // Text generation
+Future<void> main() async {
+  final apiKey = Platform.environment['OPENAI_API_KEY'];
+  if (apiKey == null || apiKey.isEmpty) {
+    throw StateError('Set OPENAI_API_KEY before running this example.');
+  }
+
+  final provider = OpenAIProvider(apiKey: apiKey);
   final result = await generateText(
-    model: openai('gpt-4.1-mini'),
+    model: provider('gpt-4.1-mini'),
     prompt: 'Say hello from AI SDK Dart!',
   );
   print(result.text);
 }
 ```
 
+For server and CLI apps, prefer reading credentials from your runtime
+environment and passing `apiKey:` yourself, as shown above. The convenience
+factories like `openai('...')`, `anthropic('...')`, and `google('...')` read
+compile-time defines such as `OPENAI_API_KEY`, so they are best paired with
+`dart run --define=...` or Flutter `--dart-define=...`.
+
 ### Streaming
 
 ```dart
+import 'dart:io';
+
 final result = await streamText(
   model: openai('gpt-4.1-mini'),
   prompt: 'Count from 1 to 5.',
@@ -291,6 +305,12 @@ final chat = ChatController();
 // In your widget — a complete chat surface:
 AiChatScaffold(controller: chat, agent: agent);
 ```
+
+> Do not ship long-lived provider API keys inside distributed browser, mobile,
+> or desktop clients. Use a trusted proxy or backend-minted short-lived
+> credentials instead. The Flutter examples below use `--dart-define` for local
+> development and smoke testing, not as a production secret-distribution
+> strategy.
 
 ---
 
@@ -483,40 +503,67 @@ Contributions are welcome! Please open an issue first to discuss changes before 
 ### Running tests
 
 ```sh
-dart pub global activate melos
-melos bootstrap
-melos test       # run all package tests
-melos analyze    # dart analyze across all packages
+fvm dart pub get
+make test
+make analyze
 ```
 
-Or with the Makefile:
+Or run the pinned toolchain commands directly:
 
 ```sh
-make get      # install all workspace dependencies
-make test     # run all package tests
-make analyze  # run dart analyze
-make format   # format all Dart source files
+fvm dart analyze .
+fvm dart test packages/ai_sdk_dart/test/
+fvm dart test packages/ai_sdk_openai/test/
+fvm dart test packages/ai_sdk_anthropic/test/
+fvm dart test packages/ai_sdk_google/test/
+fvm flutter test examples/flutter_chat/
+fvm flutter test examples/advanced_app/
 ```
 
 ---
 
 ## Runnable examples
 
-Set API keys before running:
+CLI and server examples can read credentials from the process environment. The
+repo `make` targets forward those values to the provider factories as
+compile-time defines when needed:
 
 ```sh
-export OPENAI_API_KEY=sk-...
-export ANTHROPIC_API_KEY=sk-ant-...
-export GOOGLE_API_KEY=AIza...
+OPENAI_API_KEY=sk-... make run-basic
+OPENAI_API_KEY=sk-... make run-mcp
 ```
+
+Equivalent direct Dart invocation:
+
+```sh
+OPENAI_API_KEY=sk-... \
+  fvm dart run --define=OPENAI_API_KEY=sk-... examples/basic/lib/main.dart
+```
+
+Flutter example apps are different: they read compile-time defines from
+`String.fromEnvironment`, so pass keys with `--dart-define`:
+
+```sh
+fvm flutter run -C examples/flutter_chat \
+  --dart-define=OPENAI_API_KEY=sk-...
+
+fvm flutter run -C examples/advanced_app \
+  --dart-define=OPENAI_API_KEY=sk-... \
+  --dart-define=ANTHROPIC_API_KEY=sk-ant-... \
+  --dart-define=GOOGLE_API_KEY=AIza...
+```
+
+> The Flutter commands above compile the keys into the client app. Use them for
+> local demos only. Production apps should call a trusted backend or fetch
+> short-lived provider credentials instead of embedding long-lived secrets.
 
 | Example | Command | What it shows |
 |---------|---------|---------------|
-| Dart CLI | `make run-basic` | `generateText`, streaming, structured output, tools, embeddings, middleware |
-| Flutter chat | `make run` | ChatController, CompletionController, ObjectStreamController |
-| Flutter chat (web) | `make run-web` | Same as above on Chrome |
-| Advanced app | `make run-advanced` | All providers, tools, image gen, TTS, STT, multimodal, embeddings, completion, object stream + widget gallery |
-| Advanced app (web) | `make run-advanced-web` | Same as above on Chrome |
+| Dart CLI | `OPENAI_API_KEY=sk-... make run-basic` | `generateText`, streaming, structured output, tools, embeddings, middleware |
+| Flutter chat | `cd examples/flutter_chat && fvm flutter run --dart-define=OPENAI_API_KEY=sk-...` | ChatController, CompletionController, ObjectStreamController |
+| Flutter chat (web) | `cd examples/flutter_chat && fvm flutter run -d chrome --dart-define=OPENAI_API_KEY=sk-...` | Same as above on Chrome |
+| Advanced app | `cd examples/advanced_app && fvm flutter run --dart-define=OPENAI_API_KEY=sk-... --dart-define=ANTHROPIC_API_KEY=sk-ant-... --dart-define=GOOGLE_API_KEY=AIza...` | All providers, tools, image gen, TTS, STT, multimodal, embeddings, completion, object stream + widget gallery |
+| Advanced app (web) | `cd examples/advanced_app && fvm flutter run -d chrome --dart-define=OPENAI_API_KEY=sk-... --dart-define=ANTHROPIC_API_KEY=sk-ant-... --dart-define=GOOGLE_API_KEY=AIza...` | Same as above on Chrome |
 | MCP demo | `make run-mcp` | MCP tool discovery + direct tool calls (works without an API key) |
 
 ---
@@ -526,10 +573,9 @@ export GOOGLE_API_KEY=AIza...
 Managed with [Melos](https://melos.invertase.dev) as a monorepo workspace:
 
 ```sh
-dart pub global activate melos
-melos bootstrap
-melos analyze
-melos test
+fvm dart pub get
+make analyze
+make test
 ```
 
 See [docs/v6-parity-matrix.md](docs/v6-parity-matrix.md) for a feature-by-feature parity matrix against Vercel AI SDK v6.

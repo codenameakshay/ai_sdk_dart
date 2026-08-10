@@ -7,7 +7,6 @@ and expose its tools directly to `generateText` / `streamText`.
 
 ```sh
 dart pub add ai_sdk_dart ai_sdk_openai ai_sdk_mcp
-export OPENAI_API_KEY=sk-...
 ```
 
 ---
@@ -162,4 +161,3 @@ sharedClient.close();
 ## Runnable example apps
 
 - **[`examples/basic`](https://github.com/codenameakshay/ai_sdk_dart/tree/main/examples/basic)** — Dart CLI with MCP tool discovery
-- **[`examples/advanced_app`](https://github.com/codenameakshay/ai_sdk_dart/tree/main/examples/advanced_app)** — Flutter app demonstrating MCP integration

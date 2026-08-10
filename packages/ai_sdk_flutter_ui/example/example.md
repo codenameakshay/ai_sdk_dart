@@ -7,8 +7,11 @@ Vercel AI SDK React hooks (`useChat`, `useCompletion`, `useObject`).
 
 ```sh
 dart pub add ai_sdk_dart ai_sdk_openai ai_sdk_flutter_ui
-export OPENAI_API_KEY=sk-...
 ```
+
+In Flutter apps, resolve your provider key from a compile-time define like
+`String.fromEnvironment('OPENAI_API_KEY')` or, for production, from a trusted
+backend flow that returns short-lived credentials.
 
 ---
 
@@ -31,15 +34,14 @@ class ChatPage extends StatefulWidget {
 
 class _ChatPageState extends State<ChatPage> {
   late final ChatController _chat;
+  late final ToolLoopAgent _agent;
   final _controller = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _chat = ChatController(
-      model: openai('gpt-4.1-mini'),
-      onError: (e) => debugPrint('Error: $e'),
-    );
+    _agent = ToolLoopAgent(model: openai('gpt-4.1-mini'));
+    _chat = ChatController(onError: (e) => debugPrint('Error: $e'));
   }
 
   @override
@@ -96,13 +98,13 @@ class _ChatPageState extends State<ChatPage> {
                   ),
                   const SizedBox(width: 8),
                   IconButton.filled(
-                    onPressed: _chat.isStreaming
+                    onPressed: _chat.isLoading
                         ? null
                         : () {
                             final text = _controller.text.trim();
                             if (text.isEmpty) return;
                             _controller.clear();
-                            _chat.append(text);
+                            _chat.sendMessage(agent: _agent, text: text);
                           },
                     icon: const Icon(Icons.send),
                   ),
@@ -123,6 +125,7 @@ class _ChatPageState extends State<ChatPage> {
 
 ```dart
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
+import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 import 'package:flutter/material.dart';
 
@@ -138,7 +141,9 @@ class _CompletionPageState extends State<CompletionPage> {
   @override
   void initState() {
     super.initState();
-    _completion = CompletionController(model: openai('gpt-4.1-mini'));
+    _completion = CompletionController(
+      agent: ToolLoopAgent(model: openai('gpt-4.1-mini')),
+    );
   }
 
   @override
@@ -165,7 +170,7 @@ class _CompletionPageState extends State<CompletionPage> {
                 child: const Text('Generate haiku'),
               ),
               const SizedBox(height: 16),
-              Text(_completion.text),
+              Text(_completion.completion),
             ],
           ),
         ),
@@ -241,8 +246,8 @@ class _ObjectStreamPageState extends State<ObjectStreamPage> {
                 child: const Text('Describe Japan'),
               ),
               const SizedBox(height: 16),
-              if (_controller.object != null)
-                Text(_controller.object.toString()),
+              if (_controller.value != null)
+                Text(_controller.value.toString()),
             ],
           ),
         ),

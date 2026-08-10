@@ -18,11 +18,18 @@ A single run that walks through the major core APIs:
 | 6 | Middleware | `defaultSettingsMiddleware`, `extractReasoningMiddleware` |
 | 7 | Provider registry | `createProviderRegistry` |
 
-Requires an OpenAI key:
+Requires an OpenAI key. Prefer the repo target, which forwards the key to the
+provider factory correctly:
 
 ```sh
-export OPENAI_API_KEY=sk-...
-dart run lib/main.dart        # or: make run-basic
+OPENAI_API_KEY=sk-... make run-basic
+```
+
+Equivalent direct invocation:
+
+```sh
+OPENAI_API_KEY=sk-... \
+  fvm dart run --define=OPENAI_API_KEY=sk-... lib/main.dart
 ```
 
 ### `lib/mcp_demo.dart` — MCP (Model Context Protocol)
@@ -49,10 +56,10 @@ reconnects that listener with `Last-Event-ID` if the stream drops unexpectedly.
 
 ```sh
 # Tool discovery + a direct tool call — no API key needed:
-dart run lib/mcp_demo.dart            # or: make run-mcp
+fvm dart run lib/mcp_demo.dart        # or: make run-mcp
 
 # Also let the model call the MCP tools via generateText:
-OPENAI_API_KEY=sk-... dart run lib/mcp_demo.dart
+OPENAI_API_KEY=sk-... make run-mcp
 ```
 
 > Note: stdio-based MCP servers (`StdioMCPTransport`) are desktop/native only.

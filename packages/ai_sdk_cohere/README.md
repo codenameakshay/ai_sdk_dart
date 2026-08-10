@@ -6,17 +6,17 @@ Cohere provider for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart). Support
 
 ```yaml
 dependencies:
-  ai_sdk_dart: ^1.1.0
-  ai_sdk_cohere: ^1.1.0
+  ai_sdk_dart: ^1.2.0
+  ai_sdk_cohere: ^1.2.0
 ```
 
 ## Usage
 
-Set your API key via environment variable:
-
-```sh
-export COHERE_API_KEY=...
-```
+The top-level `cohere` factory reads
+`const String.fromEnvironment('COHERE_API_KEY')`. Use it with
+`fvm dart run --define=COHERE_API_KEY=... bin/app.dart`, or read
+`Platform.environment['COHERE_API_KEY']` yourself and pass `apiKey:` to
+`CohereProvider` in server and CLI apps.
 
 ### Language model
 
@@ -34,6 +34,8 @@ print(result.text);
 ### Streaming
 
 ```dart
+import 'dart:io';
+
 final result = await streamText(
   model: cohere('command-r-plus'),
   prompt: 'Write a haiku about the ocean.',

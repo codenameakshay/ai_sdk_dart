@@ -6,8 +6,8 @@ Azure OpenAI provider for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart). U
 
 ```yaml
 dependencies:
-  ai_sdk_dart: ^1.1.0
-  ai_sdk_azure: ^1.1.0
+  ai_sdk_dart: ^1.2.0
+  ai_sdk_azure: ^1.2.0
 ```
 
 ## Usage
@@ -33,6 +33,8 @@ print(result.text);
 ### Streaming
 
 ```dart
+import 'dart:io';
+
 final result = await streamText(
   model: provider('gpt-4o-deployment'),
   prompt: 'Count from 1 to 5.',

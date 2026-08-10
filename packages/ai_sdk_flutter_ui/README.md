@@ -16,9 +16,9 @@ pulling in `image_picker`/`file_selector`/`url_launcher`. Everything themes via
 
 ```yaml
 dependencies:
-  ai_sdk_dart: ^1.1.0
-  ai_sdk_flutter_ui: ^1.1.0
-  ai_sdk_openai: ^1.1.0   # or another provider
+  ai_sdk_dart: ^1.2.0
+  ai_sdk_flutter_ui: ^1.2.0
+  ai_sdk_openai: ^1.2.0   # or another provider
 ```
 
 ## How it works
@@ -107,7 +107,7 @@ class _ChatPageState extends State<ChatPage> {
 }
 ```
 
-**State:** `messages` (`List<ModelMessage>`), `status` (`ChatStatus.ready|submitted|streaming|error`),
+**State:** `messages` (`List<ModelMessage>`), `status` (`ChatStatus.ready|submitted|streaming|awaitingApproval|error`),
 `isLoading`, `error`, `streamingContent` (live buffer of the in-flight reply).
 
 **Methods:** `sendMessage({agent, text})`, `append(ModelMessage)` (add without generating),

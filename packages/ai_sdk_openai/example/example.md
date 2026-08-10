@@ -4,8 +4,13 @@
 
 ```sh
 dart pub add ai_sdk_dart ai_sdk_openai
-export OPENAI_API_KEY=sk-...
 ```
+
+The top-level `openai` factory reads
+`const String.fromEnvironment('OPENAI_API_KEY')`. Use it with
+`fvm dart run --define=OPENAI_API_KEY=sk-... bin/app.dart`, or read
+`Platform.environment['OPENAI_API_KEY']` yourself and pass `apiKey:` to
+`OpenAIProvider` in server and CLI apps.
 
 ---
 

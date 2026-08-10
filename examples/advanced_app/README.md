@@ -8,13 +8,13 @@ A comprehensive Flutter app demonstrating all major AI SDK capabilities: multipl
 |---------|-----|------------------|-------------|
 | Provider Chat | `ChatController` + `createProviderRegistry` | `AiChatScaffold`, `PromptSuggestions` | OpenAI, Anthropic, Google |
 | Tools Chat | `streamText` + `tools` + `extractReasoningMiddleware` | `ChatComposer`, `ChatMessageBubble`, `ToolCallCard`, `ReasoningView`, `SourceCitations` | OpenAI |
-| Image Generation | `generateImage` | — | OpenAI (DALL-E 3) |
+| Image Generation | `generateImage` | — | OpenAI (`gpt-image-1`) |
 | Multimodal | `streamText` + `LanguageModelV3ImagePart` | `StreamingTextView` | OpenAI |
 | Embeddings | `embed`, `cosineSimilarity` | — | OpenAI, Google |
 | Text-to-Speech | `generateSpeech` | — | OpenAI |
 | Speech-to-Text | `transcribe` | — | OpenAI |
 | Completion | `CompletionController` | `StreamingTextView` | OpenAI |
-| Object Stream | `ObjectStreamController.submit(model, schema)` | — | OpenAI |
+| Object Stream | `ObjectStreamController` + `submit(prompt)` | — | OpenAI |
 | Widget Gallery | — (sample data) | All prebuilt widgets | None (offline) |
 
 ### Widget Gallery
@@ -59,11 +59,16 @@ fvm flutter test examples/advanced_app
 Pass API keys at build/run time via `--dart-define`:
 
 ```bash
+cd examples/advanced_app
 fvm flutter run \
   --dart-define=OPENAI_API_KEY=sk-... \
   --dart-define=ANTHROPIC_API_KEY=sk-ant-... \
   --dart-define=GOOGLE_API_KEY=...
 ```
+
+> These `--dart-define` values are compiled into the client app. Use them for
+> local demos only. Production apps should call a trusted backend or fetch
+> short-lived provider credentials instead of embedding long-lived secrets.
 
 - **OPENAI_API_KEY** — Required for: Chat, Tools, Image Gen, Multimodal, Embeddings, TTS, STT, Completion, Object Stream
 - **ANTHROPIC_API_KEY** — Required for: Provider Chat (Anthropic)
@@ -72,16 +77,15 @@ fvm flutter run \
 ### Run
 
 ```bash
-cd examples/advanced_app
-fvm flutter pub get
 fvm flutter run --dart-define=OPENAI_API_KEY=sk-...
 ```
 
 Or from the workspace root:
 
 ```bash
-melos get
-fvm flutter run -C examples/advanced_app --dart-define=OPENAI_API_KEY=sk-...
+fvm dart pub get
+cd examples/advanced_app && \
+  fvm flutter run --dart-define=OPENAI_API_KEY=sk-...
 ```
 
 ## Platform Permissions

@@ -6,17 +6,17 @@ Mistral AI provider for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart). Sup
 
 ```yaml
 dependencies:
-  ai_sdk_dart: ^1.1.0
-  ai_sdk_mistral: ^1.1.0
+  ai_sdk_dart: ^1.2.0
+  ai_sdk_mistral: ^1.2.0
 ```
 
 ## Usage
 
-Set your API key via environment variable:
-
-```sh
-export MISTRAL_API_KEY=...
-```
+The top-level `mistral` factory reads
+`const String.fromEnvironment('MISTRAL_API_KEY')`. Use it with
+`fvm dart run --define=MISTRAL_API_KEY=... bin/app.dart`, or read
+`Platform.environment['MISTRAL_API_KEY']` yourself and pass `apiKey:` to
+`MistralProvider` in server and CLI apps.
 
 ### Language model
 
@@ -34,6 +34,8 @@ print(result.text);
 ### Streaming
 
 ```dart
+import 'dart:io';
+
 final result = await streamText(
   model: mistral('mistral-small-latest'),
   prompt: 'Write a limerick about Dart.',

@@ -6,17 +6,17 @@ Google Generative AI provider for [AI SDK Dart](https://pub.dev/packages/ai_sdk_
 
 ```yaml
 dependencies:
-  ai_sdk_dart: ^1.1.0
-  ai_sdk_google: ^1.1.0
+  ai_sdk_dart: ^1.2.0
+  ai_sdk_google: ^1.2.0
 ```
 
 ## Usage
 
-Set your API key via environment variable:
-
-```sh
-export GOOGLE_GENERATIVE_AI_API_KEY=AIza...
-```
+The top-level `google` factory reads
+`const String.fromEnvironment('GOOGLE_API_KEY')`. Use it with
+`fvm dart run --define=GOOGLE_API_KEY=AIza... bin/app.dart`, or read
+`Platform.environment['GOOGLE_API_KEY']` yourself and pass `apiKey:` to
+`GoogleGenerativeAIProvider` in server and CLI apps.
 
 ### Language model
 
@@ -34,6 +34,8 @@ print(result.text);
 ### Streaming
 
 ```dart
+import 'dart:io';
+
 final result = await streamText(
   model: google('gemini-2.0-flash'),
   prompt: 'Tell me about the history of the internet.',
@@ -56,7 +58,7 @@ print(result.embedding); // List<double>
 ### Custom API key
 
 ```dart
-final myGoogle = GoogleProvider(apiKey: 'AIza...');
+final myGoogle = GoogleGenerativeAIProvider(apiKey: 'AIza...');
 final result = await generateText(
   model: myGoogle('gemini-2.0-flash'),
   prompt: 'Hello!',

@@ -160,6 +160,28 @@ void main() {
     });
 
     test(
+      'endpoint ending with slash still posts to deployment chat once',
+      () async {
+        late String path;
+        final server = await _TestServer.start((request) async {
+          path = request.uri.path;
+          _writeOk(request);
+        });
+        addTearDown(server.close);
+
+        final model = AzureOpenAIProvider(
+          endpoint: '${server.endpoint}/',
+          apiKey: 'secret-key',
+        )('gpt-4-deployment');
+        await model.doGenerate(
+          LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        );
+
+        expect(path, '/openai/deployments/gpt-4-deployment/chat/completions');
+      },
+    );
+
+    test(
       'chat credentials are resolved immediately before each request',
       () async {
         final apiKeys = <String?>[];
@@ -333,6 +355,42 @@ void main() {
       );
       expect(result.embeddings, isEmpty);
     });
+
+    test(
+      'endpoint ending with slash still posts to deployment embeddings once',
+      () async {
+        late String path;
+        final server = await _TestServer.start((request) async {
+          path = request.uri.path;
+          await _captureBody(request);
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'data': [
+                {
+                  'index': 0,
+                  'embedding': [0.1, 0.2],
+                },
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = AzureOpenAIProvider(
+          endpoint: '${server.endpoint}/',
+          apiKey: 'secret-key',
+        ).embedding('text-embedding-ada-002');
+
+        await model.doEmbed(
+          const EmbeddingModelV2CallOptions<String>(values: ['hello']),
+        );
+
+        expect(path, '/openai/deployments/text-embedding-ada-002/embeddings');
+      },
+    );
 
     test(
       'embedding credentials are resolved immediately before each request',

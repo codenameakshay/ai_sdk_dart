@@ -201,6 +201,28 @@ void main() {
       expect(captured.containsKey('seed'), isFalse);
       expect(captured['max_tokens'], 200);
     });
+
+    test(
+      'baseUrl ending with slash still posts to chat/completions once',
+      () async {
+        late String path;
+        final server = await _TestServer.start((request) async {
+          path = request.uri.path;
+          _writeOk(request);
+        });
+        addTearDown(server.close);
+
+        final model = MistralProvider(
+          apiKey: 'key',
+          baseUrl: '${server.baseUrl}/',
+        )('mistral-small');
+        await model.doGenerate(
+          LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        );
+
+        expect(path, '/v1/chat/completions');
+      },
+    );
   });
 
   group('Mistral embedding doEmbed wire format', () {
@@ -275,6 +297,39 @@ void main() {
         const EmbeddingModelV2CallOptions<String>(values: ['only']),
       );
       expect(result.embeddings, isEmpty);
+    });
+
+    test('baseUrl ending with slash still posts to embeddings once', () async {
+      late String path;
+      final server = await _TestServer.start((request) async {
+        path = request.uri.path;
+        await _captureBody(request);
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'data': [
+              {
+                'index': 0,
+                'embedding': [0.1, 0.2],
+              },
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = MistralProvider(
+        apiKey: 'key',
+        baseUrl: '${server.baseUrl}/',
+      ).embedding('mistral-embed');
+
+      await model.doEmbed(
+        const EmbeddingModelV2CallOptions<String>(values: ['hello']),
+      );
+
+      expect(path, '/v1/embeddings');
     });
 
     test(

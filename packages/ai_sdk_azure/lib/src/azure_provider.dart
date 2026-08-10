@@ -63,7 +63,10 @@ class AzureOpenAIProvider {
         modelId: deploymentId,
         config: OpenAICompatibleConfig(
           provider: 'azure',
-          baseUrl: '$endpoint/openai/deployments/$deploymentId',
+          baseUrl: providerEndpoint(
+            endpoint,
+            '/openai/deployments/$deploymentId',
+          ),
           headers: _headers,
           client: _client,
           queryParameters: {'api-version': apiVersion},
@@ -94,7 +97,9 @@ final azureOpenAI = AzureOpenAIProvider(endpoint: '');
 Dio _azureDio({required String endpoint}) {
   return Dio(
     BaseOptions(
-      baseUrl: endpoint,
+      baseUrl: endpoint.endsWith('/')
+          ? endpoint.substring(0, endpoint.length - 1)
+          : endpoint,
       headers: {'Content-Type': 'application/json'},
       responseType: ResponseType.json,
     ),
@@ -142,7 +147,10 @@ class _AzureEmbeddingModel implements EmbeddingModelV2<String> {
     final Response<Map<String, dynamic>> response;
     try {
       response = await client.post<Map<String, dynamic>>(
-        '$endpoint/openai/deployments/$deploymentId/embeddings',
+        providerEndpoint(
+          endpoint,
+          '/openai/deployments/$deploymentId/embeddings',
+        ),
         queryParameters: {'api-version': apiVersion},
         data: body,
         options: Options(headers: {...resolvedHeaders, ...?options.headers}),

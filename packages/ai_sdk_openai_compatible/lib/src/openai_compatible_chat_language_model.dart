@@ -42,13 +42,6 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
     return Map<String, String>.unmodifiable(headers);
   }
 
-  String _endpoint(String path) {
-    final baseUrl = config.baseUrl.endsWith('/')
-        ? config.baseUrl.substring(0, config.baseUrl.length - 1)
-        : config.baseUrl;
-    return '$baseUrl$path';
-  }
-
   Options _requestOptions(
     Map<String, String> headers,
     LanguageModelV3CallOptions options, {
@@ -112,7 +105,7 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
     final Response<Map<String, dynamic>> response;
     try {
       response = await config.client.post<Map<String, dynamic>>(
-        _endpoint('/chat/completions'),
+        providerEndpoint(config.baseUrl, '/chat/completions'),
         data: requestBody,
         queryParameters: config.queryParameters,
         options: _requestOptions(headers, options),
@@ -193,7 +186,7 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
     final Response<ResponseBody> response;
     try {
       response = await config.client.post<ResponseBody>(
-        _endpoint('/chat/completions'),
+        providerEndpoint(config.baseUrl, '/chat/completions'),
         data: requestBody,
         queryParameters: config.queryParameters,
         options: _requestOptions(

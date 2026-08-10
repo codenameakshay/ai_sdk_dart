@@ -491,6 +491,34 @@ void main() {
       expect(capturedQuery, contains('api-version=2024-02-15-preview'));
     });
 
+    test(
+      'baseUrl ending with slash still posts to chat/completions once',
+      () async {
+        late String capturedPath;
+        final server = await _TestServer.start((request) async {
+          capturedPath = request.uri.path;
+          _writeOk(request);
+        });
+        addTearDown(server.close);
+
+        final model = OpenAICompatibleChatLanguageModel(
+          modelId: 'm',
+          config: OpenAICompatibleConfig(
+            provider: 'test',
+            baseUrl: '${server.baseUrl}/',
+            client: _testClient(server.baseUrl),
+            headers: () => {'Authorization': 'Bearer k'},
+          ),
+        );
+
+        await model.doGenerate(
+          LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        );
+
+        expect(capturedPath, '/v1/chat/completions');
+      },
+    );
+
     test('api-key header vs Bearer auth scheme', () async {
       late HttpHeaders apiKeyHeaders;
       final apiKeyServer = await _TestServer.start((request) async {

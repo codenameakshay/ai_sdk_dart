@@ -80,9 +80,12 @@ final mistral = MistralProvider();
 // ---------------------------------------------------------------------------
 
 Dio _mistralDio({String? baseUrl}) {
+  final resolvedBaseUrl = baseUrl ?? 'https://api.mistral.ai/v1';
   return Dio(
     BaseOptions(
-      baseUrl: baseUrl ?? 'https://api.mistral.ai/v1',
+      baseUrl: resolvedBaseUrl.endsWith('/')
+          ? resolvedBaseUrl.substring(0, resolvedBaseUrl.length - 1)
+          : resolvedBaseUrl,
       headers: {'Content-Type': 'application/json'},
       responseType: ResponseType.json,
     ),
@@ -123,7 +126,7 @@ class _MistralEmbeddingModel implements EmbeddingModelV2<String> {
     final Response<Map<String, dynamic>> response;
     try {
       response = await client.post<Map<String, dynamic>>(
-        '${baseUrl ?? 'https://api.mistral.ai/v1'}/embeddings',
+        providerEndpoint(baseUrl ?? 'https://api.mistral.ai/v1', '/embeddings'),
         data: body,
         options: Options(headers: {...resolvedHeaders, ...?options.headers}),
       );

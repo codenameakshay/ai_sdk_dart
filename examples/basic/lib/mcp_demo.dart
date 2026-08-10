@@ -15,7 +15,8 @@
 /// below for the remote transport variant.
 ///
 /// Note: stdio-based MCP servers (`StdioMCPTransport`) are desktop/native only;
-/// this HTTP/SSE flow works everywhere `package:http` does, including web.
+/// this Streamable HTTP flow works everywhere `package:http` does, including
+/// web.
 ///
 /// Run:
 ///   dart run lib/mcp_demo.dart                          # discovery + tool call

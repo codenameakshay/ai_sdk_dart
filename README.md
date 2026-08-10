@@ -393,7 +393,9 @@ print(controller.value); // Partial updates arrive in real-time
 Connect to any [Model Context Protocol](https://modelcontextprotocol.io) server and use its tools directly in your AI calls:
 
 ```dart
+import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_mcp/ai_sdk_mcp.dart';
+import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 
 final client = MCPClient(
   transport: StreamableHttpClientTransport(

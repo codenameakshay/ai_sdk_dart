@@ -111,7 +111,7 @@ print(result); // e.g. "Cloudy, 14°C in London"
 
 ```dart
 try {
-  await client.callTool(name: 'unknownTool', arguments: {});
+  await client.callTool('unknownTool', {});
 } on MCPException catch (e) {
   print('MCP error: ${e.message}');
 }

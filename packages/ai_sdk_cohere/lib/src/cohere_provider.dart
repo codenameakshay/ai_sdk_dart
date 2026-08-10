@@ -417,18 +417,21 @@ class _CohereLanguageModel implements LanguageModelV3 {
             }
           } else if (type == 'tool-call-end') {
             final index = (event['index'] as num?)?.toInt() ?? 0;
-            final state = toolStates[index];
-            if (state != null) {
-              controller.add(
-                StreamPartToolCallEnd(
-                  toolCallId: state.id,
-                  toolName: state.name,
-                  input: _safeParseJson(state.args.toString()),
-                ),
-              );
-            }
+            _finalizeToolCall(
+              index: index,
+              toolStates: toolStates,
+              controller: controller,
+            );
           } else if (type == 'message-end') {
             // Emit ends for any tool calls that never got an explicit end.
+            final pendingIndexes = toolStates.keys.toList()..sort();
+            for (final index in pendingIndexes) {
+              _finalizeToolCall(
+                index: index,
+                toolStates: toolStates,
+                controller: controller,
+              );
+            }
             final usage = delta?['usage'] as Map<String, dynamic>?;
             final tokens = usage?['tokens'] as Map<String, dynamic>?;
             controller.add(
@@ -451,6 +454,22 @@ class _CohereLanguageModel implements LanguageModelV3 {
       }
     }
     await controller.close();
+  }
+
+  void _finalizeToolCall({
+    required int index,
+    required Map<int, _CohereToolState> toolStates,
+    required StreamController<LanguageModelV3StreamPart> controller,
+  }) {
+    final state = toolStates.remove(index);
+    if (state == null) return;
+    controller.add(
+      StreamPartToolCallEnd(
+        toolCallId: state.id,
+        toolName: state.name,
+        input: _safeParseJson(state.args.toString()),
+      ),
+    );
   }
 
   LanguageModelV3FinishReason _mapFinishReason(String? reason) {

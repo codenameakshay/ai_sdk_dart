@@ -323,6 +323,97 @@ void main() {
       expect(finish.usage?.inputTokens, 3);
       expect(finish.usage?.outputTokens, 4);
     });
+
+    test('finalizes buffered tool calls once at message end', () async {
+      final server = await _TestServer.start((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          '${jsonEncode({
+            'type': 'tool-call-start',
+            'index': 0,
+            'delta': {
+              'message': {
+                'tool_calls': {
+                  'id': 'call_implicit_end',
+                  'type': 'function',
+                  'function': {'name': 'weather', 'arguments': '{"city":"'},
+                },
+              },
+            },
+          })}\n',
+        );
+        request.response.write(
+          '${jsonEncode({
+            'type': 'tool-call-delta',
+            'index': 0,
+            'delta': {
+              'message': {
+                'tool_calls': {
+                  'function': {'arguments': 'Paris","unit":"C"}'},
+                },
+              },
+            },
+          })}\n',
+        );
+        request.response.write(
+          '${jsonEncode({
+            'type': 'message-end',
+            'delta': {
+              'finish_reason': 'TOOL_CALL',
+              'usage': {
+                'tokens': {'input_tokens': 6, 'output_tokens': 8},
+              },
+            },
+          })}\n',
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = CohereProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).call('command-r-plus');
+
+      final streamResult = await model.doStream(
+        LanguageModelV3CallOptions(
+          prompt: LanguageModelV3Prompt(
+            messages: [
+              LanguageModelV3Message(
+                role: LanguageModelV3Role.user,
+                content: [LanguageModelV3TextPart(text: 'weather?')],
+              ),
+            ],
+          ),
+        ),
+      );
+
+      final parts = await streamResult.stream.toList();
+      final start = parts.whereType<StreamPartToolCallStart>().single;
+      expect(start.toolCallId, 'call_implicit_end');
+      expect(start.toolName, 'weather');
+
+      final deltas = parts.whereType<StreamPartToolCallDelta>().toList();
+      expect(deltas, hasLength(2));
+      expect(
+        deltas.map((delta) => delta.argsTextDelta).join(),
+        '{"city":"Paris","unit":"C"}',
+      );
+
+      final ends = parts.whereType<StreamPartToolCallEnd>().toList();
+      expect(ends, hasLength(1));
+      final end = ends.single;
+      expect(end.toolCallId, 'call_implicit_end');
+      expect(end.toolName, 'weather');
+      expect(end.input, {'city': 'Paris', 'unit': 'C'});
+
+      final finish = parts.whereType<StreamPartFinish>().single;
+      expect(parts.indexOf(end), lessThan(parts.indexOf(finish)));
+      expect(finish.finishReason, LanguageModelV3FinishReason.toolCalls);
+      expect(finish.usage?.inputTokens, 6);
+      expect(finish.usage?.outputTokens, 8);
+    });
   });
 }
 

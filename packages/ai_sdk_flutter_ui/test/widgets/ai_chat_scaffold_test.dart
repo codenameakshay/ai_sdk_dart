@@ -101,12 +101,10 @@ class _ErrorProbeController extends ChatController {
 }
 
 class _ApprovalProbeController extends ChatController {
-  _ApprovalProbeController({
-    List<ModelMessage> initialMessages = const <ModelMessage>[],
-  }) : _statusNotifier = ChangeNotifier(),
-       _contentNotifier = ChangeNotifier(),
-       _probeMessages = List<ModelMessage>.from(initialMessages),
-       super(initialMessages: initialMessages);
+  _ApprovalProbeController({super.initialMessages = const <ModelMessage>[]})
+    : _statusNotifier = ChangeNotifier(),
+      _contentNotifier = ChangeNotifier(),
+      _probeMessages = List<ModelMessage>.from(initialMessages);
 
   final ChangeNotifier _statusNotifier;
   final ChangeNotifier _contentNotifier;
@@ -238,27 +236,36 @@ void main() {
       expect(find.text('No messages yet'), findsOneWidget);
     });
 
-    testWidgets('shows an inline error with retry action', (tester) async {
-      final controller = _ErrorProbeController();
-      addTearDown(controller.dispose);
-      final successAgent = textAgent('Recovered');
+    testWidgets(
+      'retry delegates to controller.reload without an agent override',
+      (tester) async {
+        final controller = _ErrorProbeController();
+        addTearDown(controller.dispose);
+        final firstAgent = textAgent('first');
+        final secondAgent = textAgent('second');
 
-      await tester.pumpWidget(
-        _wrap(AiChatScaffold(controller: controller, agent: successAgent)),
-      );
+        await tester.pumpWidget(
+          _wrap(AiChatScaffold(controller: controller, agent: firstAgent)),
+        );
 
-      controller.showError(StateError('boom'));
-      await tester.pump();
+        controller.showError(StateError('boom'));
+        await tester.pump();
 
-      expect(find.byType(ChatErrorView), findsOneWidget);
-      expect(find.byKey(const ValueKey('chat-error-retry')), findsOneWidget);
+        expect(find.byType(ChatErrorView), findsOneWidget);
+        expect(find.byKey(const ValueKey('chat-error-retry')), findsOneWidget);
 
-      await tester.tap(find.byKey(const ValueKey('chat-error-retry')));
-      await tester.pump();
+        await tester.pumpWidget(
+          _wrap(AiChatScaffold(controller: controller, agent: secondAgent)),
+        );
+        await tester.pump();
 
-      expect(controller.reloadCalls, 1);
-      expect(controller.reloadAgent, same(successAgent));
-    });
+        await tester.tap(find.byKey(const ValueKey('chat-error-retry')));
+        await tester.pump();
+
+        expect(controller.reloadCalls, 1);
+        expect(controller.reloadAgent, isNull);
+      },
+    );
 
     testWidgets('shows an inline error with explicit dismiss action', (
       tester,
@@ -322,6 +329,80 @@ void main() {
         expect(controller.lastApproved, isTrue);
         expect(controller.status, ChatStatus.ready);
         expect(find.byType(ToolApprovalCard), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'shows tool result and source metadata after an approval-resumed turn',
+      (tester) async {
+        final controller = ChatController();
+        addTearDown(controller.dispose);
+        final agent = RecordingStreamAgent();
+        const source = LanguageModelV3SourcePart(
+          id: 'source-1',
+          url: 'https://example.com/weather',
+          title: 'Weather source',
+        );
+        const call = LanguageModelV3ToolCallPart(
+          toolCallId: 'c1',
+          toolName: 'deleteFile',
+          input: {'path': '/x'},
+        );
+        const result = LanguageModelV3ToolResultPart(
+          toolCallId: 'c1',
+          toolName: 'deleteFile',
+          output: ToolResultOutputText('done'),
+        );
+        const request = LanguageModelV3ToolApprovalRequestPart(
+          approvalId: 'approval_c1',
+          toolCall: call,
+        );
+
+        await tester.pumpWidget(
+          _wrap(AiChatScaffold(controller: controller, agent: agent)),
+        );
+
+        unawaited(controller.sendMessage(agent: agent, text: 'Need approval'));
+        await _pumpUntil(tester, () => agent.invocations.length == 1);
+        await agent.invocations.first.finish(
+          finalText: '',
+          steps: const [
+            GenerateTextStep(
+              stepNumber: 1,
+              content: [call, source],
+              toolCalls: [call],
+              toolResults: [result],
+              toolApprovalRequests: [request],
+              response: LanguageModelV3GenerateResult(
+                content: [call, source],
+                finishReason: LanguageModelV3FinishReason.toolCalls,
+              ),
+              text: '',
+              finishReason: LanguageModelV3FinishReason.toolCalls,
+            ),
+          ],
+          sources: const [source],
+          toolCalls: const [call],
+          toolResults: const [result],
+        );
+        await _pumpUntil(
+          tester,
+          () => controller.status == ChatStatus.awaitingApproval,
+        );
+        await tester.pump();
+
+        await tester.tap(find.byKey(const ValueKey('tool-approval-approve')));
+        await tester.pump();
+        await _pumpUntil(tester, () => agent.invocations.length == 2);
+        agent.invocations.last.emitText('final answer');
+        await agent.invocations.last.finish(finalText: 'final answer');
+        await _pumpUntil(tester, () => controller.status == ChatStatus.ready);
+        await tester.pump();
+
+        expect(find.text('final answer'), findsOneWidget);
+        expect(find.text('deleteFile'), findsOneWidget);
+        expect(find.text('done'), findsOneWidget);
+        expect(find.text('Weather source'), findsOneWidget);
       },
     );
 

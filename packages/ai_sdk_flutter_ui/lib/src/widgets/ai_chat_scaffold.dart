@@ -350,6 +350,6 @@ class _AiChatScaffoldState extends State<AiChatScaffold> {
   }
 
   void _retryLastRequest() {
-    widget.controller.reload(agent: widget.agent);
+    widget.controller.reload();
   }
 }

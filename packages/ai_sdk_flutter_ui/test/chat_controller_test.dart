@@ -322,28 +322,74 @@ void main() {
       controller.dispose();
     });
 
-    test('approving the tool resumes and completes the turn', () async {
-      final controller = ChatController();
+    test(
+      'approving the tool preserves approval-step metadata after resume',
+      () async {
+        final controller = ChatController();
+        final agent = RecordingStreamAgent();
+        const source = LanguageModelV3SourcePart(
+          id: 'source-1',
+          url: 'https://example.com/weather',
+          title: 'Weather source',
+        );
+        const call = LanguageModelV3ToolCallPart(
+          toolCallId: 'c1',
+          toolName: 'deleteFile',
+          input: {'path': '/x'},
+        );
+        const result = LanguageModelV3ToolResultPart(
+          toolCallId: 'c1',
+          toolName: 'deleteFile',
+          output: ToolResultOutputText('done'),
+        );
+        const request = LanguageModelV3ToolApprovalRequestPart(
+          approvalId: 'approval_c1',
+          toolCall: call,
+        );
 
-      await controller.sendMessage(agent: approvalAgent(), text: 'go');
-      await pumpUntil(() => controller.status == ChatStatus.awaitingApproval);
+        unawaited(controller.sendMessage(agent: agent, text: 'go'));
+        await pumpUntil(() => agent.invocations.length == 1);
+        await agent.invocations.first.finish(
+          finalText: '',
+          steps: const [
+            GenerateTextStep(
+              stepNumber: 1,
+              content: [call, source],
+              toolCalls: [call],
+              toolResults: [result],
+              toolApprovalRequests: [request],
+              response: LanguageModelV3GenerateResult(
+                content: [call, source],
+                finishReason: LanguageModelV3FinishReason.toolCalls,
+              ),
+              text: '',
+              finishReason: LanguageModelV3FinishReason.toolCalls,
+            ),
+          ],
+          sources: const [source],
+          toolCalls: const [call],
+          toolResults: const [result],
+        );
+        await pumpUntil(() => controller.status == ChatStatus.awaitingApproval);
 
       controller.addToolApprovalResponse(
         approvalId: 'approval_c1',
         approved: true,
       );
+      await pumpUntil(() => agent.invocations.length == 2);
+      agent.invocations.last.emitText('final answer');
+      await agent.invocations.last.finish(finalText: 'final answer');
       await pumpUntil(() => controller.status == ChatStatus.ready);
 
-      expect(controller.pendingApprovalRequests, isEmpty);
-      expect(controller.messages.last.role, ModelMessageRole.assistant);
-      expect(controller.messages.last.content, 'final answer');
-      // The latest-turn getters reflect the final (text) step, which carried
-      // no tool calls / results / sources of its own.
-      expect(controller.lastToolCalls, isEmpty);
-      expect(controller.lastToolResults, isEmpty);
-      expect(controller.lastSources, isEmpty);
-      controller.dispose();
-    });
+        expect(controller.pendingApprovalRequests, isEmpty);
+        expect(controller.messages.last.role, ModelMessageRole.assistant);
+        expect(controller.messages.last.content, 'final answer');
+        expect(controller.lastToolCalls, [call]);
+        expect(controller.lastToolResults, [result]);
+        expect(controller.lastSources, [source]);
+        controller.dispose();
+      },
+    );
 
     test('an agent.stream() that throws synchronously is caught', () async {
       Object? captured;

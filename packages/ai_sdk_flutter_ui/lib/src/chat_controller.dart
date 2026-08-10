@@ -320,12 +320,14 @@ class ChatController extends ChangeNotifier {
     _activeAbortSignal = abortSignal;
     _streamBuffer.clear();
     _streamingReasoning = '';
-    _reasoningText = '';
-    _lastUsage = null;
-    _lastSources = const [];
-    _lastToolCalls = const [];
-    _lastToolResults = const [];
     _pendingApprovalRequests = const [];
+    if (!consumeApprovals) {
+      _reasoningText = '';
+      _lastUsage = null;
+      _lastSources = const [];
+      _lastToolCalls = const [];
+      _lastToolResults = const [];
+    }
     _status = ChatStatus.submitted;
     _error = null;
     _notifyListenersSafely(immediate: true, status: true, content: true);
@@ -367,7 +369,13 @@ class ChatController extends ChangeNotifier {
           _streamBuffer.write(delta);
           _notifyListenersSafely(immediate: false, content: true);
         },
-        onDone: () => unawaited(_finalizeTurn(streamResult, requestId)),
+        onDone: () => unawaited(
+          _finalizeTurn(
+            streamResult,
+            requestId,
+            mergeMetadata: consumeApprovals,
+          ),
+        ),
         onError: (Object err) => _handleError(err, requestId),
         cancelOnError: true,
       );
@@ -382,8 +390,9 @@ class ChatController extends ChangeNotifier {
   /// assistant message.
   Future<void> _finalizeTurn(
     StreamTextResult streamResult,
-    int requestId,
-  ) async {
+    int requestId, {
+    required bool mergeMetadata,
+  }) async {
     _activeSubscription = null;
     unawaited(_errorSubscription?.cancel());
     _errorSubscription = null;
@@ -394,14 +403,19 @@ class ChatController extends ChangeNotifier {
     }
 
     var approvals = const <LanguageModelV3ToolApprovalRequestPart>[];
+    LanguageModelV3Usage? usage;
+    List<LanguageModelV3SourcePart> sources = const [];
+    List<LanguageModelV3ToolCallPart> toolCalls = const [];
+    List<LanguageModelV3ToolResultPart> toolResults = const [];
+    String reasoningText = '';
     try {
       final steps = await streamResult.steps;
       approvals = [for (final step in steps) ...step.toolApprovalRequests];
-      _lastUsage = await streamResult.totalUsage ?? await streamResult.usage;
-      _lastSources = await streamResult.sources;
-      _lastToolCalls = await streamResult.toolCalls;
-      _lastToolResults = await streamResult.toolResults;
-      _reasoningText = await streamResult.reasoningText;
+      usage = await streamResult.totalUsage ?? await streamResult.usage;
+      sources = await streamResult.sources;
+      toolCalls = await streamResult.toolCalls;
+      toolResults = await streamResult.toolResults;
+      reasoningText = await streamResult.reasoningText;
     } catch (_) {
       // Metadata is best-effort; a late stream error must not break finalize.
     }
@@ -413,6 +427,19 @@ class ChatController extends ChangeNotifier {
 
     _activeRequestId = null;
     _activeAbortSignal = null;
+    _lastUsage = usage ?? _lastUsage;
+    _lastSources = mergeMetadata
+        ? _mergeSources(_lastSources, sources)
+        : sources;
+    _lastToolCalls = mergeMetadata
+        ? _mergeToolCalls(_lastToolCalls, toolCalls)
+        : toolCalls;
+    _lastToolResults = mergeMetadata
+        ? _mergeToolResults(_lastToolResults, toolResults)
+        : toolResults;
+    if (reasoningText.isNotEmpty || !mergeMetadata) {
+      _reasoningText = reasoningText;
+    }
 
     if (approvals.isNotEmpty) {
       _pendingApprovalRequests = approvals;
@@ -433,6 +460,57 @@ class ChatController extends ChangeNotifier {
     _status = ChatStatus.ready;
     _notifyListenersSafely(immediate: true, status: true, content: true);
     onFinish?.call(assistantMessage);
+  }
+
+  List<LanguageModelV3SourcePart> _mergeSources(
+    List<LanguageModelV3SourcePart> previous,
+    List<LanguageModelV3SourcePart> current,
+  ) {
+    if (previous.isEmpty) return current;
+    if (current.isEmpty) return previous;
+
+    final merged = <String, LanguageModelV3SourcePart>{};
+    for (final source in previous) {
+      merged['${source.id}|${source.url}'] = source;
+    }
+    for (final source in current) {
+      merged['${source.id}|${source.url}'] = source;
+    }
+    return merged.values.toList(growable: false);
+  }
+
+  List<LanguageModelV3ToolCallPart> _mergeToolCalls(
+    List<LanguageModelV3ToolCallPart> previous,
+    List<LanguageModelV3ToolCallPart> current,
+  ) {
+    if (previous.isEmpty) return current;
+    if (current.isEmpty) return previous;
+
+    final merged = <String, LanguageModelV3ToolCallPart>{};
+    for (final call in previous) {
+      merged[call.toolCallId] = call;
+    }
+    for (final call in current) {
+      merged[call.toolCallId] = call;
+    }
+    return merged.values.toList(growable: false);
+  }
+
+  List<LanguageModelV3ToolResultPart> _mergeToolResults(
+    List<LanguageModelV3ToolResultPart> previous,
+    List<LanguageModelV3ToolResultPart> current,
+  ) {
+    if (previous.isEmpty) return current;
+    if (current.isEmpty) return previous;
+
+    final merged = <String, LanguageModelV3ToolResultPart>{};
+    for (final result in previous) {
+      merged[result.toolCallId] = result;
+    }
+    for (final result in current) {
+      merged[result.toolCallId] = result;
+    }
+    return merged.values.toList(growable: false);
   }
 
   void _handleError(Object err, int requestId) {

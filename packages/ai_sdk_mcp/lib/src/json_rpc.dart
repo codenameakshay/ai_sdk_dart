@@ -140,6 +140,25 @@ class MCPTransportException extends MCPException {
   }
 }
 
+/// Exception thrown when an MCP Streamable HTTP session has expired.
+///
+/// Per the MCP 2025-06-18 transport spec, a `404 Not Found` response to a
+/// request carrying `Mcp-Session-Id` means the client must start a new session
+/// with a fresh initialize request.
+class MCPSessionExpiredException extends MCPTransportException {
+  MCPSessionExpiredException({
+    required String method,
+    required Uri uri,
+    int? statusCode,
+    String? context,
+  }) : super(
+         method: method,
+         uri: uri,
+         statusCode: statusCode,
+         context: context,
+       );
+}
+
 // ---------------------------------------------------------------------------
 // Transport interface
 // ---------------------------------------------------------------------------

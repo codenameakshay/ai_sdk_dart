@@ -5,446 +5,553 @@ import 'package:http/http.dart' as http;
 
 import 'json_rpc.dart';
 
-// ---------------------------------------------------------------------------
-// HTTP (request/response) transport
-// ---------------------------------------------------------------------------
-
-/// Plain HTTP request/response transport for MCP.
+/// Streamable HTTP transport for MCP 2025-06-18.
 ///
-/// Each [send] performs a single `POST` to [postUrl] with the JSON-RPC request
-/// body and parses the HTTP response body as the JSON-RPC response. This is a
-/// simple, stateless transport that works anywhere `package:http` works —
-/// including Flutter web — but it cannot receive server-initiated messages
-/// (notifications / server→client requests). For server push, use
-/// [SseClientTransport].
-class HttpClientTransport implements MCPTransport {
-  HttpClientTransport({required this.url, Uri? postUrl, this.headers})
-    : postUrl = postUrl ?? url;
-
-  /// Base URL for the transport. Used as the default [postUrl].
-  final Uri url;
-
-  /// URL that JSON-RPC requests are POSTed to.
-  final Uri postUrl;
-
-  /// Extra headers sent with every request.
-  final Map<String, String>? headers;
-
-  final _client = http.Client();
-
-  Map<String, String> get _jsonHeaders => {
-    'Content-Type': 'application/json',
-    'Accept': 'application/json',
-    ...?headers,
-  };
-
-  Never _throwHttpStatusError({
-    required int statusCode,
-    required String method,
-    required Uri uri,
-    required String responseBody,
-  }) {
-    throw MCPTransportException(
-      method: method,
-      uri: uri,
-      statusCode: statusCode,
-      context: _safeResponseContext(responseBody),
-    );
-  }
-
-  String? _safeResponseContext(String responseBody) {
-    if (responseBody.trim().isEmpty) return 'empty response body';
-    return null;
-  }
-
-  @override
-  Stream<Map<String, dynamic>> get notifications => const Stream.empty();
-
-  @override
-  Future<JsonRpcResponse> send(JsonRpcRequest request) async {
-    final response = await _client.post(
-      postUrl,
-      headers: _jsonHeaders,
-      body: jsonEncode(request.toJson()),
-    );
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      _throwHttpStatusError(
-        statusCode: response.statusCode,
-        method: 'POST',
-        uri: postUrl,
-        responseBody: response.body,
-      );
-    }
-    final body = jsonDecode(response.body);
-    if (body is! Map) {
-      throw MCPException('Unexpected MCP response format: $body');
-    }
-    return JsonRpcResponse.fromJson(body.cast<String, dynamic>());
-  }
-
-  @override
-  Future<void> sendNotification(JsonRpcNotification notification) async {
-    final response = await _client.post(
-      postUrl,
-      headers: _jsonHeaders,
-      body: jsonEncode(notification.toJson()),
-    );
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      _throwHttpStatusError(
-        statusCode: response.statusCode,
-        method: 'POST',
-        uri: postUrl,
-        responseBody: response.body,
-      );
-    }
-  }
-
-  @override
-  Future<void> close() async {
-    _client.close();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// SSE transport (MCP HTTP+SSE, protocol 2024-11-05)
-// ---------------------------------------------------------------------------
-
-/// Real Server-Sent-Events transport for MCP (HTTP+SSE, protocol 2024-11-05).
-///
-/// This transport opens a long-lived streaming `GET` to the server's SSE
-/// endpoint ([url]). The server's first event is an `endpoint` event whose data
-/// is the (possibly relative) URL that client→server requests must be POSTed
-/// to. All server→client traffic — responses, notifications, and server→client
-/// requests — arrives over the SSE stream as `message` events carrying a
-/// JSON-RPC payload.
-///
-/// Because responses arrive over the stream rather than as the body of the
-/// POST, [send] correlates the outgoing request id with the incoming stream
-/// message. Server-initiated messages (those without a matching pending id, or
-/// with no id at all) are surfaced via [notifications].
-///
-/// Works anywhere `package:http` works, including Flutter web.
-///
-/// ```dart
-/// final transport = SseClientTransport(
-///   url: Uri.parse('http://localhost:3000/sse'),
-/// );
-/// ```
-class SseClientTransport implements MCPTransport {
-  SseClientTransport({
+/// This transport uses a single HTTP endpoint for POST, GET, and DELETE. It
+/// supports:
+/// - JSON or SSE responses to POSTed JSON-RPC requests
+/// - optional server-push notifications over a GET SSE listener
+/// - session IDs via `Mcp-Session-Id`
+/// - negotiated protocol version headers on post-initialize requests
+class StreamableHttpClientTransport implements MCPTransport {
+  StreamableHttpClientTransport({
     required this.url,
-    Uri? postUrl,
     this.headers,
-    this.connectTimeout = const Duration(seconds: 30),
     this.requestTimeout = const Duration(seconds: 30),
+    this.listenerReconnectDelay = const Duration(milliseconds: 250),
     http.Client? client,
-  }) : _explicitPostUrl = postUrl,
-       _client = client ?? http.Client();
+  }) : _client = client ?? http.Client(),
+       _ownsClient = client == null;
 
-  /// SSE endpoint opened with a streaming `GET`.
   final Uri url;
-
-  /// Extra headers sent with the SSE `GET` and every POST.
   final Map<String, String>? headers;
-
-  /// How long to wait for the SSE connection (and the initial `endpoint`
-  /// event) before failing.
-  final Duration connectTimeout;
-
-  /// How long to wait for a JSON-RPC response to arrive over the stream.
   final Duration requestTimeout;
-
-  /// When set, overrides the POST URL advertised by the server's `endpoint`
-  /// event. Mainly useful for servers that do not emit an `endpoint` event.
-  final Uri? _explicitPostUrl;
+  final Duration listenerReconnectDelay;
 
   final http.Client _client;
-
-  Map<String, String> get _requestHeaders => {
-    'Content-Type': 'application/json',
-    'Accept': 'application/json, text/event-stream',
-    ...?headers,
-  };
-
-  /// Broadcast stream of server-initiated messages (no matching pending id).
+  final bool _ownsClient;
   final _notifications = StreamController<Map<String, dynamic>>.broadcast();
 
-  /// Pending requests keyed by JSON-RPC id, awaiting a response over the SSE
-  /// stream.
-  final _pending = <int, Completer<JsonRpcResponse>>{};
+  StreamSubscription<_SseEvent>? _listenerSubscription;
+  Timer? _listenerReconnectTimer;
+  bool _listenerConnecting = false;
+  bool _listenerStarted = false;
+  bool _listenerUnsupported = false;
 
-  /// Completes once the SSE connection is open and (if the server emits one)
-  /// the `endpoint` event has been received.
-  Completer<void>? _ready;
-
-  /// The URL to POST client→server requests to, resolved from the server's
-  /// `endpoint` event (or [_explicitPostUrl] / [url] as a fallback).
-  Uri? _postUrl;
-
-  StreamSubscription<_SseEvent>? _eventSub;
-
-  /// Bounds the wait for the `endpoint` event so callers don't hang. Held in a
-  /// field so it can be cancelled once the endpoint arrives or the transport
-  /// closes, rather than firing after the fact.
-  Timer? _connectTimer;
+  String? _sessionId;
+  String? _protocolVersion;
+  String? _lastEventId;
+  bool _sessionExpired = false;
   bool _closed = false;
 
   @override
   Stream<Map<String, dynamic>> get notifications => _notifications.stream;
 
-  /// The resolved POST endpoint, once known. Exposed for diagnostics/tests.
-  Uri? get resolvedPostUrl => _postUrl;
-
-  Future<void> _ensureConnected() async {
-    if (_closed) throw const MCPException('SSE transport is closed');
-    final existing = _ready;
-    if (existing != null) return existing.future;
-
-    final ready = Completer<void>();
-    _ready = ready;
-
-    // If a POST URL was supplied explicitly, we don't need the endpoint event
-    // to start sending — but we still resolve it from the server if it arrives.
-    if (_explicitPostUrl != null) {
-      _postUrl = _explicitPostUrl;
-    }
-
-    try {
-      final request = http.Request('GET', url);
-      request.headers.addAll({
-        'Accept': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        ...?headers,
-      });
-
-      final streamed = await _client.send(request).timeout(connectTimeout);
-
-      if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
-        throw MCPException('SSE connect failed: HTTP ${streamed.statusCode}');
-      }
-
-      _eventSub = _parseSse(streamed.stream).listen(
-        _handleEvent,
-        onError: _handleStreamError,
-        onDone: _handleStreamDone,
-        cancelOnError: false,
-      );
-
-      // If we already have a POST URL we can proceed without waiting for the
-      // endpoint event; otherwise wait for it (bounded by connectTimeout).
-      if (_postUrl != null && !ready.isCompleted) {
-        ready.complete();
-      } else {
-        // Time out the wait for the endpoint event so callers don't hang.
-        _connectTimer = Timer(connectTimeout, () {
-          _connectTimer = null;
-          if (!ready.isCompleted) {
-            // No endpoint event arrived; fall back to the SSE url itself.
-            _postUrl ??= url;
-            ready.complete();
-          }
-        });
-      }
-    } catch (e) {
-      // Route the failure to the single `ready` future the caller awaits — and
-      // do NOT also rethrow. Rethrowing would surface the error twice: once to
-      // the caller (as the raw, unwrapped exception) and once as an *unhandled*
-      // error on `ready.future`, which nobody else observes.
-      _ready = null;
-      _connectTimer?.cancel();
-      _connectTimer = null;
-      if (!ready.isCompleted) {
-        ready.completeError(
-          e is MCPException ? e : MCPException('SSE connect failed: $e'),
-        );
-      }
-    }
-
-    return ready.future;
+  /// Called by [MCPClient] after initialize negotiation succeeds.
+  void setProtocolVersion(String protocolVersion) {
+    _protocolVersion = protocolVersion;
+    _sessionExpired = false;
   }
 
-  void _handleEvent(_SseEvent event) {
-    switch (event.event) {
-      case 'endpoint':
-        // The data is the (possibly relative) URL to POST requests to.
-        final resolved = _resolveEndpoint(event.data.trim());
-        _postUrl = resolved;
-        _connectTimer?.cancel();
-        _connectTimer = null;
-        final ready = _ready;
-        if (ready != null && !ready.isCompleted) ready.complete();
-      case 'message':
-      case '':
-      default:
-        // Default SSE event name is "message". Treat anything carrying a JSON
-        // payload as a JSON-RPC message.
+  /// Called by [MCPClient] after `notifications/initialized` is sent.
+  Future<void> startNotificationListener() async {
+    if (_closed || _listenerUnsupported || _listenerStarted) {
+      return;
+    }
+    _listenerStarted = true;
+    unawaited(_ensureListenerRunning());
+  }
+
+  Map<String, String> _baseHeaders() => {...?headers};
+
+  Map<String, String> _postHeaders({required bool includeSessionAndVersion}) {
+    return {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/event-stream',
+      ..._baseHeaders(),
+      if (includeSessionAndVersion && _protocolVersion != null)
+        'MCP-Protocol-Version': _protocolVersion!,
+      if (includeSessionAndVersion && _sessionId != null)
+        'Mcp-Session-Id': _sessionId!,
+    };
+  }
+
+  Map<String, String> _getHeaders() {
+    return {
+      'Accept': 'text/event-stream',
+      ..._baseHeaders(),
+      if (_protocolVersion != null) 'MCP-Protocol-Version': _protocolVersion!,
+      if (_sessionId != null) 'Mcp-Session-Id': _sessionId!,
+      if (_lastEventId != null) 'Last-Event-ID': _lastEventId!,
+    };
+  }
+
+  Map<String, String> _deleteHeaders() {
+    return {
+      ..._baseHeaders(),
+      if (_protocolVersion != null) 'MCP-Protocol-Version': _protocolVersion!,
+      if (_sessionId != null) 'Mcp-Session-Id': _sessionId!,
+    };
+  }
+
+  String? _responseHeader(Map<String, String> headers, String name) {
+    return headers[name] ?? headers[name.toLowerCase()];
+  }
+
+  bool _isJsonContentType(String? contentType) {
+    return contentType != null &&
+        contentType.toLowerCase().startsWith('application/json');
+  }
+
+  bool _isSseContentType(String? contentType) {
+    return contentType != null &&
+        contentType.toLowerCase().startsWith('text/event-stream');
+  }
+
+  String? _safeResponseContext(String responseBody) {
+    if (responseBody.trim().isEmpty) {
+      return 'empty response body';
+    }
+    return null;
+  }
+
+  MCPTransportException _transportError({
+    required String method,
+    required Uri uri,
+    int? statusCode,
+    String? context,
+  }) {
+    return MCPTransportException(
+      method: method,
+      uri: uri,
+      statusCode: statusCode,
+      context: context,
+    );
+  }
+
+  MCPSessionExpiredException _sessionExpiredError({
+    required String method,
+    required Uri uri,
+  }) {
+    return MCPSessionExpiredException(
+      method: method,
+      uri: uri,
+      statusCode: 404,
+      context: 'session expired',
+    );
+  }
+
+  void _ensureOpen() {
+    if (_closed) {
+      throw const MCPException('Streamable HTTP transport is closed');
+    }
+  }
+
+  void _ensureSessionUsable(String method) {
+    if (_sessionExpired) {
+      throw _sessionExpiredError(method: method, uri: url);
+    }
+  }
+
+  void _captureSessionId(http.StreamedResponse response) {
+    final sessionId = _responseHeader(response.headers, 'mcp-session-id');
+    if (sessionId == null) {
+      return;
+    }
+    if (!_isVisibleAscii(sessionId)) {
+      throw const MCPException(
+        'Invalid Mcp-Session-Id header: expected visible ASCII characters only',
+      );
+    }
+    _sessionId = sessionId;
+    _sessionExpired = false;
+  }
+
+  bool _isVisibleAscii(String value) {
+    if (value.isEmpty) {
+      return false;
+    }
+    for (final codeUnit in value.codeUnits) {
+      if (codeUnit < 0x21 || codeUnit > 0x7e) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  void _markSessionExpired() {
+    _sessionExpired = true;
+    _listenerStarted = false;
+    _listenerUnsupported = false;
+    _lastEventId = null;
+    unawaited(_stopListener());
+  }
+
+  Future<http.StreamedResponse> _sendRequest(http.BaseRequest request) async {
+    try {
+      return await _client.send(request).timeout(requestTimeout);
+    } catch (error) {
+      throw _transportError(
+        method: request.method,
+        uri: request.url,
+        context: error.runtimeType.toString(),
+      );
+    }
+  }
+
+  Future<http.StreamedResponse> _post(
+    Map<String, dynamic> body, {
+    required bool includeSessionAndVersion,
+  }) async {
+    final request = http.Request('POST', url);
+    request.headers.addAll(
+      _postHeaders(includeSessionAndVersion: includeSessionAndVersion),
+    );
+    request.body = jsonEncode(body);
+    return _sendRequest(request);
+  }
+
+  Future<void> _drainResponse(http.StreamedResponse response) async {
+    await response.stream.drain<void>();
+  }
+
+  Future<JsonRpcResponse> _parseJsonResponse(
+    http.StreamedResponse response, {
+    required int expectedId,
+  }) async {
+    final bodyText = await response.stream.bytesToString();
+    final decoded = jsonDecode(bodyText);
+    if (decoded is! Map) {
+      throw MCPException('Unexpected MCP response format: $decoded');
+    }
+    return JsonRpcResponse.fromJson(decoded.cast<String, dynamic>());
+  }
+
+  void _dispatchMessage(Map<String, dynamic> message) {
+    if (_notifications.isClosed) {
+      return;
+    }
+    _notifications.add(message);
+  }
+
+  Future<JsonRpcResponse> _parseSseResponse(
+    http.StreamedResponse response,
+    JsonRpcRequest request,
+  ) async {
+    final completer = Completer<JsonRpcResponse>();
+    unawaited(completer.future.then<void>((_) {}, onError: (_, __) {}));
+
+    late final StreamSubscription<_SseEvent> subscription;
+    subscription = _parseSse(response.stream).listen(
+      (event) {
         final data = event.data.trim();
-        if (data.isEmpty) return;
+        if (data.isEmpty) {
+          return;
+        }
         Object? decoded;
         try {
           decoded = jsonDecode(data);
         } catch (_) {
-          return; // Ignore non-JSON keep-alive lines.
+          return;
         }
-        if (decoded is! Map) return;
-        _dispatchMessage(decoded.cast<String, dynamic>());
-    }
-  }
-
-  Uri _resolveEndpoint(String raw) {
-    final parsed = Uri.parse(raw);
-    if (parsed.hasScheme) return parsed;
-    // Resolve relative endpoints against the SSE url.
-    return url.resolveUri(parsed);
-  }
-
-  void _dispatchMessage(Map<String, dynamic> json) {
-    final id = json['id'];
-    if (id is int && _pending.containsKey(id)) {
-      _pending.remove(id)!.complete(JsonRpcResponse.fromJson(json));
-      return;
-    }
-    // Server-initiated message (notification or server→client request).
-    if (!_notifications.isClosed) {
-      _notifications.add(json);
-    }
-  }
-
-  void _handleStreamError(Object error, StackTrace stackTrace) {
-    _failAllPending(MCPException('SSE stream error: $error'));
-  }
-
-  void _handleStreamDone() {
-    if (_closed) return;
-    _failAllPending(const MCPException('SSE stream closed by server'));
-    // Reset so a subsequent send() reconnects.
-    _ready = null;
-    _postUrl = _explicitPostUrl;
-  }
-
-  void _failAllPending(MCPException error) {
-    final pending = List.of(_pending.values);
-    _pending.clear();
-    for (final c in pending) {
-      if (!c.isCompleted) c.completeError(error);
-    }
-  }
-
-  Future<Uri> _requirePostUrl() async {
-    if (_closed) throw const MCPException('SSE transport is closed');
-    await _ensureConnected();
-
-    final postUrl = _postUrl;
-    if (postUrl == null) {
-      throw const MCPException(
-        'SSE transport has no POST endpoint (no `endpoint` event received)',
-      );
-    }
-    return postUrl;
-  }
-
-  Future<http.Response> _postMessage(Map<String, dynamic> message) async {
-    final postUrl = await _requirePostUrl();
-    try {
-      return await _client
-          .post(postUrl, headers: _requestHeaders, body: jsonEncode(message))
-          .timeout(requestTimeout);
-    } catch (e) {
-      throw MCPException('SSE POST failed: $e');
-    }
-  }
-
-  @override
-  Future<JsonRpcResponse> send(JsonRpcRequest request) async {
-    final completer = Completer<JsonRpcResponse>();
-    _pending[request.id] = completer;
-    // Ensure the raw completer future is always observed: the value/error is
-    // delivered to the caller through the `.timeout` future below, but if that
-    // wrapper has already settled (e.g. timed out) when `close()` rejects the
-    // completer, the bare future would otherwise raise an unhandled error.
-    unawaited(completer.future.then((_) {}, onError: (_) {}));
-
-    http.Response response;
-    try {
-      response = await _postMessage(request.toJson());
-    } on MCPException catch (e) {
-      _pending.remove(request.id);
-      throw e;
-    }
-
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      _pending.remove(request.id);
-      throw MCPException('HTTP ${response.statusCode}: ${response.body}');
-    }
-
-    // Some servers reply inline (200 with the JSON-RPC body) instead of, or in
-    // addition to, delivering the response over the SSE stream. Honor that.
-    final body = response.body.trim();
-    if (body.isNotEmpty) {
-      try {
-        final decoded = jsonDecode(body);
-        if (decoded is Map &&
-            (decoded.containsKey('result') || decoded.containsKey('error')) &&
-            decoded['id'] == request.id) {
-          _pending.remove(request.id);
+        if (decoded is! Map) {
+          return;
+        }
+        final message = decoded.cast<String, dynamic>();
+        if (message['id'] == request.id &&
+            (message.containsKey('result') || message.containsKey('error'))) {
           if (!completer.isCompleted) {
-            completer.complete(
-              JsonRpcResponse.fromJson(decoded.cast<String, dynamic>()),
-            );
+            completer.complete(JsonRpcResponse.fromJson(message));
           }
+          unawaited(subscription.cancel());
+          return;
         }
-      } catch (_) {
-        // Not an inline JSON-RPC response (e.g. "Accepted"); wait for SSE.
-      }
-    }
+        _dispatchMessage(message);
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        if (!completer.isCompleted) {
+          completer.completeError(
+            MCPException('SSE response stream error: $error'),
+            stackTrace,
+          );
+        }
+      },
+      onDone: () {
+        if (!completer.isCompleted) {
+          completer.completeError(
+            MCPException(
+              'SSE response stream closed before responding to ${request.method}',
+            ),
+          );
+        }
+      },
+      cancelOnError: false,
+    );
 
     return completer.future.timeout(
       requestTimeout,
       onTimeout: () {
-        _pending.remove(request.id);
+        unawaited(subscription.cancel());
+        unawaited(
+          _sendCancelledNotification(
+            request.id,
+            'Request timed out after ${requestTimeout.inMilliseconds}ms',
+          ),
+        );
         throw MCPException(
-          'Timeout waiting for SSE response to ${request.method}',
+          'Request timed out waiting for ${request.method} response',
         );
       },
     );
   }
 
+  Future<void> _sendCancelledNotification(int requestId, String reason) async {
+    if (_closed || _sessionExpired) {
+      return;
+    }
+    try {
+      await sendNotification(
+        JsonRpcNotification(
+          method: 'notifications/cancelled',
+          params: {'requestId': requestId, 'reason': reason},
+        ),
+      );
+    } catch (_) {
+      // Cancellation is best-effort; timeout callers must still return promptly.
+    }
+  }
+
+  @override
+  Future<JsonRpcResponse> send(JsonRpcRequest request) async {
+    _ensureOpen();
+    final isInitialize = request.method == 'initialize';
+    if (!isInitialize) {
+      _ensureSessionUsable('POST');
+    }
+
+    final response = await _post(
+      request.toJson(),
+      includeSessionAndVersion: !isInitialize,
+    );
+
+    if (!isInitialize && _sessionId != null && response.statusCode == 404) {
+      await _drainResponse(response);
+      _markSessionExpired();
+      throw _sessionExpiredError(method: 'POST', uri: url);
+    }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final bodyText = await response.stream.bytesToString();
+      throw _transportError(
+        method: 'POST',
+        uri: url,
+        statusCode: response.statusCode,
+        context: _safeResponseContext(bodyText),
+      );
+    }
+
+    if (isInitialize) {
+      _captureSessionId(response);
+    }
+
+    final contentType = _responseHeader(response.headers, 'content-type');
+    if (_isJsonContentType(contentType)) {
+      return _parseJsonResponse(response, expectedId: request.id);
+    }
+    if (_isSseContentType(contentType)) {
+      return _parseSseResponse(response, request);
+    }
+
+    await _drainResponse(response);
+    throw MCPException(
+      'Unexpected MCP response Content-Type: ${contentType ?? 'missing'}',
+    );
+  }
+
   @override
   Future<void> sendNotification(JsonRpcNotification notification) async {
-    final response = await _postMessage(notification.toJson());
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw MCPException('HTTP ${response.statusCode}: ${response.body}');
+    _ensureOpen();
+    _ensureSessionUsable('POST');
+
+    final response = await _post(
+      notification.toJson(),
+      includeSessionAndVersion: true,
+    );
+
+    if (_sessionId != null && response.statusCode == 404) {
+      await _drainResponse(response);
+      _markSessionExpired();
+      throw _sessionExpiredError(method: 'POST', uri: url);
     }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final bodyText = await response.stream.bytesToString();
+      throw _transportError(
+        method: 'POST',
+        uri: url,
+        statusCode: response.statusCode,
+        context: _safeResponseContext(bodyText),
+      );
+    }
+
+    await _drainResponse(response);
+  }
+
+  Future<void> _ensureListenerRunning() async {
+    if (_closed ||
+        !_listenerStarted ||
+        _listenerUnsupported ||
+        _listenerConnecting ||
+        _listenerSubscription != null ||
+        _sessionExpired ||
+        _sessionId == null ||
+        _protocolVersion == null) {
+      return;
+    }
+
+    _listenerConnecting = true;
+    try {
+      final request = http.Request('GET', url);
+      request.headers.addAll(_getHeaders());
+      final response = await _sendRequest(request);
+
+      if (_closed || !_listenerStarted) {
+        await _drainResponse(response);
+        return;
+      }
+
+      if (_sessionId != null && response.statusCode == 404) {
+        await _drainResponse(response);
+        _markSessionExpired();
+        return;
+      }
+
+      if (response.statusCode == 405) {
+        await _drainResponse(response);
+        _listenerUnsupported = true;
+        _listenerStarted = false;
+        return;
+      }
+
+      final contentType = _responseHeader(response.headers, 'content-type');
+      if (response.statusCode < 200 ||
+          response.statusCode >= 300 ||
+          !_isSseContentType(contentType)) {
+        await _drainResponse(response);
+        _scheduleListenerReconnect();
+        return;
+      }
+
+      _listenerSubscription = _parseSse(response.stream).listen(
+        _handleListenerEvent,
+        onError: (_, __) {
+          _listenerSubscription = null;
+          _scheduleListenerReconnect();
+        },
+        onDone: () {
+          _listenerSubscription = null;
+          _scheduleListenerReconnect();
+        },
+        cancelOnError: false,
+      );
+    } catch (_) {
+      _scheduleListenerReconnect();
+    } finally {
+      _listenerConnecting = false;
+    }
+  }
+
+  void _handleListenerEvent(_SseEvent event) {
+    if (event.id != null && event.id!.isNotEmpty) {
+      _lastEventId = event.id;
+    }
+
+    final data = event.data.trim();
+    if (data.isEmpty) {
+      return;
+    }
+
+    Object? decoded;
+    try {
+      decoded = jsonDecode(data);
+    } catch (_) {
+      return;
+    }
+    if (decoded is! Map) {
+      return;
+    }
+    _dispatchMessage(decoded.cast<String, dynamic>());
+  }
+
+  void _scheduleListenerReconnect() {
+    if (_closed ||
+        !_listenerStarted ||
+        _listenerUnsupported ||
+        _sessionExpired ||
+        _listenerReconnectTimer != null) {
+      return;
+    }
+    _listenerReconnectTimer = Timer(listenerReconnectDelay, () {
+      _listenerReconnectTimer = null;
+      unawaited(_ensureListenerRunning());
+    });
+  }
+
+  Future<void> _stopListener() async {
+    _listenerReconnectTimer?.cancel();
+    _listenerReconnectTimer = null;
+    final subscription = _listenerSubscription;
+    _listenerSubscription = null;
+    await subscription?.cancel();
   }
 
   @override
   Future<void> close() async {
-    if (_closed)
-      return; // Idempotent: safe to call repeatedly / on error paths.
-    _closed = true;
-    _connectTimer?.cancel();
-    _connectTimer = null;
-    // Fail a connect still in progress (no endpoint event yet) so the awaiting
-    // caller gets a single error instead of hanging until connectTimeout.
-    final ready = _ready;
-    _ready = null;
-    if (ready != null && !ready.isCompleted) {
-      ready.completeError(const MCPException('SSE transport closed'));
+    if (_closed) {
+      return;
     }
-    final sub = _eventSub;
-    _eventSub = null;
-    await sub?.cancel();
-    _failAllPending(const MCPException('SSE transport closed'));
-    if (!_notifications.isClosed) await _notifications.close();
-    _client.close();
+    _closed = true;
+
+    Object? closeError;
+    await _stopListener();
+
+    if (_sessionId != null && !_sessionExpired && _protocolVersion != null) {
+      final request = http.Request('DELETE', url);
+      request.headers.addAll(_deleteHeaders());
+      try {
+        final response = await _sendRequest(request);
+        if (!((response.statusCode >= 200 && response.statusCode < 300) ||
+            response.statusCode == 405)) {
+          final bodyText = await response.stream.bytesToString();
+          closeError = _transportError(
+            method: 'DELETE',
+            uri: url,
+            statusCode: response.statusCode,
+            context: _safeResponseContext(bodyText),
+          );
+        } else {
+          await _drainResponse(response);
+        }
+      } catch (error) {
+        closeError = error;
+      }
+    }
+
+    _sessionId = null;
+    _protocolVersion = null;
+    _lastEventId = null;
+    _sessionExpired = false;
+    if (!_notifications.isClosed) {
+      await _notifications.close();
+    }
+    if (_ownsClient) {
+      _client.close();
+    }
+    if (closeError != null) {
+      throw closeError;
+    }
   }
 
-  /// Parse a byte stream of `text/event-stream` data into [_SseEvent]s.
-  ///
-  /// Implements the SSE wire format: lines `field:value` grouped into events
-  /// separated by blank lines. Recognizes `event:` and `data:` fields; multiple
-  /// `data:` lines are joined with `\n`. Comment lines (starting with `:`) are
-  /// ignored.
   Stream<_SseEvent> _parseSse(Stream<List<int>> byteStream) {
     return Stream<_SseEvent>.eventTransformed(
       byteStream.transform(utf8.decoder).transform(const LineSplitter()),
@@ -453,23 +560,24 @@ class SseClientTransport implements MCPTransport {
   }
 }
 
-/// A single parsed SSE event.
 class _SseEvent {
-  _SseEvent(this.event, this.data);
+  _SseEvent({required this.event, required this.data, this.id});
+
   final String event;
   final String data;
+  final String? id;
 }
 
-/// EventSink that accumulates SSE lines into [_SseEvent]s, flushing on blank
-/// lines.
 class _SseLineSink implements EventSink<String> {
   _SseLineSink(this._out);
 
   final EventSink<_SseEvent> _out;
   String _event = '';
+  String? _id;
   final _data = StringBuffer();
-  bool _hasData = false;
   bool _hasEvent = false;
+  bool _hasData = false;
+  bool _hasId = false;
 
   @override
   void add(String line) {
@@ -478,41 +586,45 @@ class _SseLineSink implements EventSink<String> {
       return;
     }
     if (line.startsWith(':')) {
-      // Comment / keep-alive — ignore.
       return;
     }
-    final colon = line.indexOf(':');
-    String field;
-    String value;
-    if (colon == -1) {
-      field = line;
-      value = '';
-    } else {
-      field = line.substring(0, colon);
-      value = line.substring(colon + 1);
-      if (value.startsWith(' ')) value = value.substring(1);
+
+    final separator = line.indexOf(':');
+    final field = separator == -1 ? line : line.substring(0, separator);
+    var value = separator == -1 ? '' : line.substring(separator + 1);
+    if (value.startsWith(' ')) {
+      value = value.substring(1);
     }
+
     switch (field) {
       case 'event':
         _event = value;
         _hasEvent = true;
       case 'data':
-        if (_hasData) _data.write('\n');
+        if (_hasData) {
+          _data.write('\n');
+        }
         _data.write(value);
         _hasData = true;
+      case 'id':
+        _id = value;
+        _hasId = true;
       default:
-        // Ignore `id:` / `retry:` / unknown fields for our purposes.
         break;
     }
   }
 
   void _flush() {
-    if (!_hasData && !_hasEvent) return;
-    _out.add(_SseEvent(_event, _data.toString()));
+    if (!_hasEvent && !_hasData && !_hasId) {
+      return;
+    }
+    _out.add(_SseEvent(event: _event, data: _data.toString(), id: _id));
     _event = '';
+    _id = null;
     _data.clear();
-    _hasData = false;
     _hasEvent = false;
+    _hasData = false;
+    _hasId = false;
   }
 
   @override

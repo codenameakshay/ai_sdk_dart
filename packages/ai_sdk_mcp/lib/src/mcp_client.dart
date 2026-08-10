@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 
+import 'http_transport.dart';
 import 'json_rpc.dart';
 
 // Re-export the stable JSON-RPC transport surface so callers implementing
@@ -13,10 +14,11 @@ export 'json_rpc.dart'
         JsonRpcNotification,
         MCPTransport,
         MCPException,
-        MCPTransportException;
+        MCPTransportException,
+        MCPSessionExpiredException;
 
-// Web-safe HTTP/SSE transports (no dart:io).
-export 'http_transport.dart' show HttpClientTransport, SseClientTransport;
+// Web-safe HTTP transport (no dart:io).
+export 'http_transport.dart' show StreamableHttpClientTransport;
 
 // Stdio transport: real (dart:io) on native, throwing stub on web. The
 // top-level library never imports `dart:io` directly — it is reachable only
@@ -164,7 +166,9 @@ class MCPReconnectPolicy {
 ///
 /// ```dart
 /// final client = MCPClient(
-///   transport: SseClientTransport(url: Uri.parse('http://localhost:3000/sse')),
+///   transport: StreamableHttpClientTransport(
+///     url: Uri.parse('http://localhost:3000/mcp'),
+///   ),
 ///   reconnectPolicy: MCPReconnectPolicy(),
 /// );
 /// await client.initialize();
@@ -327,7 +331,7 @@ class MCPClient {
         method: 'initialize',
         id: _id,
         params: {
-          'protocolVersion': '2024-11-05',
+          'protocolVersion': '2025-06-18',
           'capabilities': {
             'tools': {},
             'prompts': {},
@@ -340,13 +344,25 @@ class MCPClient {
     if (response.isError) {
       throw MCPException('Initialize failed: ${response.error}');
     }
-    // Send initialized notification (fire-and-forget, no response expected).
-    try {
-      await transport.sendNotification(
-        JsonRpcNotification(method: 'notifications/initialized'),
-      );
-    } catch (_) {
-      // Notifications may not return a response — ignore errors.
+
+    final result = response.result;
+    final negotiatedProtocolVersion =
+        result is Map && result['protocolVersion'] is String
+        ? result['protocolVersion'] as String
+        : '2025-06-18';
+
+    if (transport
+        case final StreamableHttpClientTransport streamableTransport) {
+      streamableTransport.setProtocolVersion(negotiatedProtocolVersion);
+    }
+
+    await transport.sendNotification(
+      JsonRpcNotification(method: 'notifications/initialized'),
+    );
+
+    if (transport
+        case final StreamableHttpClientTransport streamableTransport) {
+      await streamableTransport.startNotificationListener();
     }
     _initialized = true;
   }
@@ -355,11 +371,21 @@ class MCPClient {
   Future<JsonRpcResponse> _send(JsonRpcRequest request) async {
     final policy = reconnectPolicy;
     if (policy == null) {
-      return transport.send(request);
+      try {
+        return await transport.send(request);
+      } on MCPSessionExpiredException {
+        _initialized = false;
+        await _doInitialize();
+        return transport.send(request);
+      }
     }
     for (var attempt = 0; attempt <= policy.maxAttempts; attempt++) {
       try {
         return await transport.send(request);
+      } on MCPSessionExpiredException {
+        _initialized = false;
+        await _doInitialize();
+        return transport.send(request);
       } catch (e) {
         if (attempt >= policy.maxAttempts) rethrow;
         // Try to reconnect.
@@ -601,9 +627,9 @@ class MCPClient {
   /// The subscription is automatically cancelled when the stream is cancelled.
   ///
   /// The server must support `resources/subscribe`. When the transport is an
-  /// [SseClientTransport], server-pushed `notifications/resources/updated`
-  /// messages are delivered automatically. For transports without server push
-  /// (e.g. [HttpClientTransport]), call [notifyResourceUpdated] yourself.
+  /// [StreamableHttpClientTransport], server-pushed
+  /// `notifications/resources/updated` messages are delivered automatically.
+  /// For transports without server push, call [notifyResourceUpdated] yourself.
   Stream<MCPResourceContent> subscribeResource(String uri) {
     final existing = _resourceSubscriptions[uri];
     if (existing != null && !existing.controller.isClosed) {
@@ -663,7 +689,8 @@ class MCPClient {
 
   /// Push a resource update to all active subscribers for [uri].
   ///
-  /// Called automatically for [SseClientTransport] when the server sends a
+  /// Called automatically for [StreamableHttpClientTransport] when the server
+  /// sends a
   /// `notifications/resources/updated` message. Call it manually when using a
   /// transport without server push.
   void notifyResourceUpdated(String uri, MCPResourceContent content) {

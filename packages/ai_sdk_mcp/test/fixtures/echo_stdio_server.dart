@@ -52,7 +52,7 @@ Future<void> main() async {
         'jsonrpc': '2.0',
         'id': id,
         'result': {
-          'protocolVersion': '2024-11-05',
+          'protocolVersion': '2025-06-18',
           'capabilities': {'tools': {}},
           'serverInfo': {'name': 'echo-stdio', 'version': '1.0.0'},
         },

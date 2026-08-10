@@ -4,7 +4,10 @@ import 'dart:io';
 
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_mcp/ai_sdk_mcp.dart';
+import 'package:http/http.dart' as http;
 import 'package:test/test.dart';
+
+import 'support/fake_streamable_http_server.dart';
 
 // ---------------------------------------------------------------------------
 // Mock plain-HTTP JSON-RPC server (mirrors the conformance helper).
@@ -36,14 +39,19 @@ class _MockHttpServer {
       _responseQueue.add(_CannedResponse(jsonBody: response));
 
   /// Queue a raw HTTP response (status + raw body) — used for error/parse paths.
-  void enqueueRaw({required int status, required String body}) =>
-      _responseQueue.add(_CannedResponse(status: status, rawBody: body));
+  void enqueueRaw({
+    required int status,
+    required String body,
+    String? contentType,
+  }) => _responseQueue.add(
+    _CannedResponse(status: status, rawBody: body, contentType: contentType),
+  );
 
   void enqueueInitialize() {
     enqueueJson({
       'jsonrpc': '2.0',
       'result': {
-        'protocolVersion': '2024-11-05',
+        'protocolVersion': '2025-06-18',
         'capabilities': {'tools': {}},
         'serverInfo': {'name': 'test', 'version': '1.0.0'},
       },
@@ -53,6 +61,12 @@ class _MockHttpServer {
 
   Future<void> _serve() async {
     await for (final request in _server) {
+      if (request.method == 'GET' || request.method == 'DELETE') {
+        request.response.statusCode = 405;
+        await request.response.close();
+        continue;
+      }
+
       headerLog.add(request.headers);
       final bodyText = await utf8.decoder.bind(request).join();
       Object? id;
@@ -85,11 +99,17 @@ class _MockHttpServer {
 }
 
 class _CannedResponse {
-  _CannedResponse({this.jsonBody, this.status = 200, this.rawBody});
+  _CannedResponse({
+    this.jsonBody,
+    this.status = 200,
+    this.rawBody,
+    this.contentType,
+  });
 
   final Map<String, dynamic>? jsonBody;
   final int status;
   final String? rawBody;
+  final String? contentType;
 
   void write(HttpResponse res, Object? id) {
     res.statusCode = status;
@@ -97,6 +117,9 @@ class _CannedResponse {
       res.headers.contentType = ContentType.json;
       res.write(jsonEncode(Map.of(jsonBody!)..['id'] = id));
     } else {
+      if (contentType != null) {
+        res.headers.set('Content-Type', contentType!);
+      }
       res.write(rawBody ?? '');
     }
   }
@@ -169,17 +192,35 @@ JsonRpcResponse _err(JsonRpcRequest req, String message) =>
     JsonRpcResponse(error: {'code': -32000, 'message': message}, id: req.id);
 
 JsonRpcResponse _initResult(JsonRpcRequest req) => _ok(req, {
-  'protocolVersion': '2024-11-05',
+  'protocolVersion': '2025-06-18',
   'capabilities': {'tools': {}},
   'serverInfo': {'name': 'fake', 'version': '1.0.0'},
 });
 
+class _TrackingClient extends http.BaseClient {
+  _TrackingClient(this._inner);
+
+  final http.Client _inner;
+  bool closed = false;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) {
+    return _inner.send(request);
+  }
+
+  @override
+  void close() {
+    closed = true;
+    _inner.close();
+  }
+}
+
 void main() {
   // =========================================================================
-  // HttpClientTransport edge paths
+  // StreamableHttpClientTransport edge paths
   // =========================================================================
 
-  group('HttpClientTransport', () {
+  group('StreamableHttpClientTransport', () {
     test(
       'throws a typed transport error on non-2xx HTTP status without leaking the response body',
       () async {
@@ -209,10 +250,7 @@ void main() {
           body: 'service unavailable token=super-secret body=${'x' * 256}',
         );
 
-        final transport = HttpClientTransport(
-          url: mock.uri,
-          postUrl: secretUri,
-        );
+        final transport = StreamableHttpClientTransport(url: secretUri);
         addTearDown(transport.close);
 
         final future = transport.send(JsonRpcRequest(method: 'ping', id: 1));
@@ -281,7 +319,7 @@ void main() {
       mock.enqueueRaw(status: 401, body: 'Bearer top-secret should never leak');
       mock.enqueueRaw(status: 401, body: 'Bearer top-secret should never leak');
 
-      final transport = HttpClientTransport(url: mock.uri, postUrl: secretUri);
+      final transport = StreamableHttpClientTransport(url: secretUri);
       addTearDown(transport.close);
 
       final future = transport.sendNotification(
@@ -327,9 +365,13 @@ void main() {
     test('throws MCPException when body is not a JSON object', () async {
       final mock = await _MockHttpServer.start();
       addTearDown(mock.close);
-      mock.enqueueRaw(status: 200, body: '["not", "an", "object"]');
+      mock.enqueueRaw(
+        status: 200,
+        body: '["not", "an", "object"]',
+        contentType: 'application/json',
+      );
 
-      final transport = HttpClientTransport(url: mock.uri);
+      final transport = StreamableHttpClientTransport(url: mock.uri);
       addTearDown(transport.close);
 
       await expectLater(
@@ -349,7 +391,7 @@ void main() {
       addTearDown(mock.close);
       mock.enqueueJson({'jsonrpc': '2.0', 'result': {}});
 
-      final transport = HttpClientTransport(
+      final transport = StreamableHttpClientTransport(
         url: mock.uri,
         headers: {'Authorization': 'Bearer secret-token'},
       );
@@ -364,12 +406,12 @@ void main() {
       );
     });
 
-    test('notifications stream is empty', () async {
-      final transport = HttpClientTransport(
+    test('notifications getter returns a stream', () async {
+      final transport = StreamableHttpClientTransport(
         url: Uri.parse('http://localhost:1/mcp'),
       );
       addTearDown(transport.close);
-      expect(await transport.notifications.isEmpty, isTrue);
+      expect(transport.notifications, isA<Stream<Map<String, dynamic>>>());
     });
 
     test(
@@ -379,7 +421,7 @@ void main() {
         addTearDown(mock.close);
         mock.enqueueRaw(status: 202, body: '');
 
-        final transport = HttpClientTransport(url: mock.uri);
+        final transport = StreamableHttpClientTransport(url: mock.uri);
         addTearDown(transport.close);
 
         await transport.sendNotification(
@@ -392,497 +434,113 @@ void main() {
         expect(sent.containsKey('id'), isFalse);
       },
     );
-  });
-
-  // =========================================================================
-  // SseClientTransport edge paths (using the conformance-style SSE flow is
-  // covered elsewhere; here we target the uncovered error/inline/header lines).
-  // =========================================================================
-
-  group('SseClientTransport edge paths', () {
-    test('uses explicit postUrl without waiting for an endpoint event '
-        'and parses an inline JSON-RPC response body', () async {
-      // Server: GET /sse opens a stream that never emits an `endpoint` event;
-      // POST replies inline with the JSON-RPC body (200). This drives the
-      // `_explicitPostUrl` branch (line 156) and the inline-response branch
-      // (lines 325-331).
-      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      addTearDown(() => server.close(force: true));
-      final headerSeen = Completer<String?>();
-
-      server.listen((request) async {
-        if (request.method == 'GET') {
-          request.response.statusCode = 200;
-          request.response.headers.set('Content-Type', 'text/event-stream');
-          request.response.bufferOutput = false;
-          // Flush headers (so the client's streamed GET resolves) via a
-          // comment line, but never advertise an endpoint.
-          request.response.write(': open\n\n');
-          await request.response.flush();
-          return;
-        }
-        // POST: reply inline with a JSON-RPC result.
-        if (!headerSeen.isCompleted) {
-          headerSeen.complete(request.headers.value('authorization'));
-        }
-        final bodyText = await utf8.decoder.bind(request).join();
-        final body = (jsonDecode(bodyText) as Map).cast<String, dynamic>();
-        request.response.statusCode = 200;
-        request.response.headers.contentType = ContentType.json;
-        request.response.write(
-          jsonEncode({
-            'jsonrpc': '2.0',
-            'id': body['id'],
-            'result': {
-              'protocolVersion': '2024-11-05',
-              'capabilities': {'tools': {}},
-              'serverInfo': {'name': 'inline', 'version': '1.0.0'},
-            },
-          }),
-        );
-        await request.response.close();
-      });
-
-      final sseUri = Uri.parse(
-        'http://${server.address.address}:${server.port}/sse',
-      );
-      final postUri = Uri.parse(
-        'http://${server.address.address}:${server.port}/messages',
-      );
-
-      final transport = SseClientTransport(
-        url: sseUri,
-        postUrl: postUri,
-        headers: {'Authorization': 'Bearer abc'},
-        connectTimeout: const Duration(seconds: 5),
-        requestTimeout: const Duration(seconds: 5),
-      );
-      addTearDown(transport.close);
-
-      final resp = await transport.send(
-        JsonRpcRequest(method: 'initialize', id: 1),
-      );
-      expect(resp.isError, isFalse);
-      expect((resp.result as Map)['protocolVersion'], '2024-11-05');
-      expect(transport.resolvedPostUrl, postUri);
-      expect(await headerSeen.future, 'Bearer abc');
-    });
-
     test(
-      'throws MCPException when the SSE connect returns a non-2xx status',
+      'request timeout sends notifications/cancelled and returns promptly',
       () async {
-        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-        addTearDown(() => server.close(force: true));
-        server.listen((request) async {
-          request.response.statusCode = 401;
-          request.response.write('unauthorized');
-          await request.response.close();
-        });
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse(sessionId: 'session-1');
+        server.queueSseResponse(const [], closeStream: false);
 
-        final transport = SseClientTransport(
-          url: Uri.parse('http://${server.address.address}:${server.port}/sse'),
-          connectTimeout: const Duration(seconds: 5),
+        final client = MCPClient(
+          transport: StreamableHttpClientTransport(
+            url: server.uri,
+            requestTimeout: const Duration(milliseconds: 80),
+          ),
         );
-        addTearDown(transport.close);
+        addTearDown(client.close);
 
         await expectLater(
-          transport.send(JsonRpcRequest(method: 'ping', id: 1)),
+          client.tools(),
           throwsA(
             isA<MCPException>().having(
               (e) => e.message,
               'message',
-              contains('SSE connect failed: HTTP 401'),
+              contains('timed out'),
             ),
           ),
         );
-      },
-    );
 
-    test('falls back to the SSE url for POSTs when no endpoint event arrives '
-        'within connectTimeout', () async {
-      // No `endpoint` event and no explicit postUrl → after connectTimeout the
-      // transport falls back to the SSE url itself (lines 188/190/191). The
-      // POST then succeeds inline.
-      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      addTearDown(() => server.close(force: true));
-
-      server.listen((request) async {
-        if (request.method == 'GET') {
-          request.response.statusCode = 200;
-          request.response.headers.set('Content-Type', 'text/event-stream');
-          request.response.bufferOutput = false;
-          // Flush headers so the streamed GET resolves; emit no endpoint event.
-          request.response.write(': open\n\n');
-          await request.response.flush();
-          return; // keep open, no endpoint event
-        }
-        final bodyText = await utf8.decoder.bind(request).join();
-        final body = (jsonDecode(bodyText) as Map).cast<String, dynamic>();
-        request.response.statusCode = 200;
-        request.response.headers.contentType = ContentType.json;
-        request.response.write(
-          jsonEncode({'jsonrpc': '2.0', 'id': body['id'], 'result': {}}),
-        );
-        await request.response.close();
-      });
-
-      final sseUri = Uri.parse(
-        'http://${server.address.address}:${server.port}/sse',
-      );
-      final transport = SseClientTransport(
-        url: sseUri,
-        connectTimeout: const Duration(milliseconds: 150),
-        requestTimeout: const Duration(seconds: 5),
-      );
-      addTearDown(transport.close);
-
-      final resp = await transport.send(JsonRpcRequest(method: 'ping', id: 1));
-      expect(resp.isError, isFalse);
-      expect(transport.resolvedPostUrl, sseUri);
-    });
-
-    test('throws MCPException when POST returns a non-2xx status', () async {
-      // Endpoint event is advertised so we get past _ensureConnected, then the
-      // POST itself fails with a 500 (lines 315/316).
-      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      addTearDown(() => server.close(force: true));
-
-      server.listen((request) async {
-        if (request.method == 'GET') {
-          request.response.statusCode = 200;
-          request.response.headers.set('Content-Type', 'text/event-stream');
-          request.response.bufferOutput = false;
-          request.response.write('event: endpoint\n');
-          request.response.write('data: /messages\n\n');
-          return;
-        }
-        request.response.statusCode = 500;
-        request.response.write('boom');
-        await request.response.close();
-      });
-
-      final transport = SseClientTransport(
-        url: Uri.parse('http://${server.address.address}:${server.port}/sse'),
-        connectTimeout: const Duration(seconds: 5),
-        requestTimeout: const Duration(seconds: 5),
-      );
-      addTearDown(transport.close);
-
-      await expectLater(
-        transport.send(JsonRpcRequest(method: 'ping', id: 1)),
-        throwsA(
-          isA<MCPException>().having(
-            (e) => e.message,
-            'message',
-            allOf(contains('HTTP 500'), contains('boom')),
-          ),
-        ),
-      );
-    });
-
-    test('stream error fails pending requests (SSE stream error path)', () async {
-      // GET /sse advertises the endpoint then abruptly closes the underlying
-      // socket. The POST request is in flight (the POST handler never replies),
-      // so the pending completer must be failed when the stream errors/ends
-      // (lines 254/255 + 258-263).
-      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      addTearDown(() => server.close(force: true));
-
-      HttpResponse? sseResponse;
-      server.listen((request) async {
-        if (request.method == 'GET') {
-          request.response.statusCode = 200;
-          request.response.headers.set('Content-Type', 'text/event-stream');
-          request.response.bufferOutput = false;
-          request.response.write('event: endpoint\n');
-          request.response.write('data: /messages\n\n');
-          sseResponse = request.response;
-          return;
-        }
-        // POST: ack but never deliver a response, then sever the SSE stream so
-        // the pending request fails.
-        request.response.statusCode = 202;
-        request.response.write('Accepted');
-        await request.response.close();
         await Future<void>.delayed(const Duration(milliseconds: 50));
-        await sseResponse?.close();
-      });
-
-      final transport = SseClientTransport(
-        url: Uri.parse('http://${server.address.address}:${server.port}/sse'),
-        connectTimeout: const Duration(seconds: 5),
-        requestTimeout: const Duration(seconds: 5),
-      );
-      addTearDown(transport.close);
-
-      await expectLater(
-        transport.send(JsonRpcRequest(method: 'ping', id: 1)),
-        throwsA(
-          isA<MCPException>().having(
-            (e) => e.message,
-            'message',
-            contains('SSE stream closed by server'),
-          ),
-        ),
-      );
-    });
-
-    test('times out waiting for an SSE response (requestTimeout)', () async {
-      // Endpoint advertised; POST is acked 202 but a matching response never
-      // arrives over the stream, so the request completer times out (the
-      // `onTimeout` callback in send()).
-      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      addTearDown(() => server.close(force: true));
-
-      server.listen((request) async {
-        if (request.method == 'GET') {
-          request.response.statusCode = 200;
-          request.response.headers.set('Content-Type', 'text/event-stream');
-          request.response.bufferOutput = false;
-          request.response.write('event: endpoint\n');
-          request.response.write('data: /messages\n\n');
-          await request.response.flush();
-          return; // keep open, never deliver a response
-        }
-        request.response.statusCode = 202;
-        request.response.write('Accepted');
-        await request.response.close();
-      });
-
-      final transport = SseClientTransport(
-        url: Uri.parse('http://${server.address.address}:${server.port}/sse'),
-        connectTimeout: const Duration(seconds: 5),
-        requestTimeout: const Duration(milliseconds: 200),
-      );
-      addTearDown(transport.close);
-
-      await expectLater(
-        transport.send(JsonRpcRequest(method: 'slow', id: 1)),
-        throwsA(
-          isA<MCPException>().having(
-            (e) => e.message,
-            'message',
-            contains('Timeout waiting for SSE response to slow'),
-          ),
-        ),
-      );
-    });
-
-    test(
-      'close() during an in-progress connect fails the awaiting caller',
-      () async {
-        // GET opens the stream (flushes headers) but never advertises an endpoint,
-        // and there is no explicit postUrl, so _ensureConnected is parked waiting
-        // for the endpoint event. Closing mid-connect must complete the pending
-        // `_ready` with an error rather than hang until connectTimeout.
-        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-        addTearDown(() => server.close(force: true));
-
-        server.listen((request) async {
-          if (request.method == 'GET') {
-            request.response.statusCode = 200;
-            request.response.headers.set('Content-Type', 'text/event-stream');
-            request.response.bufferOutput = false;
-            request.response.write(': open\n\n');
-            await request.response.flush();
-            return; // keep open, no endpoint event
-          }
-          request.response.statusCode = 202;
-          await request.response.close();
-        });
-
-        final transport = SseClientTransport(
-          url: Uri.parse('http://${server.address.address}:${server.port}/sse'),
-          // Long connect timeout so the only way out is close().
-          connectTimeout: const Duration(seconds: 30),
-          requestTimeout: const Duration(seconds: 30),
+        expect(server.cancelNotificationCount, 1);
+        final cancelled = server.requestLog.lastWhere(
+          (request) => request.body?['method'] == 'notifications/cancelled',
         );
-
-        final pending = transport.send(JsonRpcRequest(method: 'ping', id: 1));
-        // Attach the expectation NOW (before close()) so the error that close()
-        // triggers on `pending` is observed rather than escaping as unhandled.
-        final expectation = expectLater(
-          pending,
-          throwsA(
-            isA<MCPException>().having(
-              (e) => e.message,
-              'message',
-              contains('SSE transport closed'),
-            ),
-          ),
-        );
-        // Let the connect park on the missing endpoint event, then close.
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-        await transport.close();
-        await expectation;
+        expect((cancelled.body?['params'] as Map)['requestId'], isA<int>());
+        expect((cancelled.body?['params'] as Map)['reason'], isNotEmpty);
       },
     );
 
-    test('an errored SSE byte stream fails pending requests via the '
-        'stream onError path', () async {
-      // Use a RAW TCP server so we can promise a large Content-Length, send the
-      // endpoint event, then destroy the socket before the body completes. The
-      // client's HTTP parser surfaces this truncation as a STREAM ERROR (not a
-      // clean done), driving _handleStreamError and SseLineSink.addError.
-      final tcp = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-      addTearDown(() async {
-        try {
-          await tcp.close();
-        } catch (_) {}
-      });
+    test(
+      'close sends DELETE, accepts 405, and does not close an injected client',
+      () async {
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.deleteStatusCode = 405;
+        server.queueInitializeResponse(sessionId: 'session-1');
 
-      Socket? sseSocket;
-      tcp.listen((socket) {
-        final buffer = StringBuffer();
-        socket.cast<List<int>>().transform(utf8.decoder).listen((chunk) async {
-          buffer.write(chunk);
-          // Wait until we have a full request (headers end with a blank line).
-          if (!buffer.toString().contains('\r\n\r\n')) return;
-          final requestText = buffer.toString();
-          buffer.clear();
-          final isGet = requestText.startsWith('GET');
-          if (isGet) {
-            // Promise more body than we will actually send, then sever the
-            // connection mid-stream → truncated body → client stream error.
-            sseSocket = socket;
-            socket.write(
-              'HTTP/1.1 200 OK\r\n'
-              'Content-Type: text/event-stream\r\n'
-              'Content-Length: 100000\r\n'
-              '\r\n'
-              'event: endpoint\n'
-              'data: /messages\n\n',
-            );
-            await socket.flush();
-          } else {
-            // POST: ack with 202 then destroy the SSE socket shortly after.
-            socket.write(
-              'HTTP/1.1 202 Accepted\r\n'
-              'Content-Length: 8\r\n'
-              '\r\n'
-              'Accepted',
-            );
-            await socket.flush();
-            await Future<void>.delayed(const Duration(milliseconds: 50));
-            sseSocket?.destroy();
-          }
-        });
-      });
+        final trackingClient = _TrackingClient(http.Client());
+        final transport = StreamableHttpClientTransport(
+          url: server.uri,
+          client: trackingClient,
+        );
+        final client = MCPClient(transport: transport);
 
-      final transport = SseClientTransport(
-        url: Uri.parse('http://${tcp.address.address}:${tcp.port}/sse'),
-        connectTimeout: const Duration(seconds: 5),
-        requestTimeout: const Duration(seconds: 5),
+        await client.initialize();
+        await client.close();
+        await client.close();
+
+        expect(server.deleteRequestCount, 1);
+        expect(trackingClient.closed, isFalse);
+      },
+    );
+
+    test('rejects invalid Mcp-Session-Id values from initialize', () async {
+      final server = await FakeStreamableHttpServer.start();
+      addTearDown(server.close);
+      server.queueInitializeResponse(sessionId: 'bad session');
+
+      final client = MCPClient(
+        transport: StreamableHttpClientTransport(url: server.uri),
       );
-      addTearDown(transport.close);
+      addTearDown(client.close);
 
       await expectLater(
-        transport.send(JsonRpcRequest(method: 'ping', id: 1)),
+        client.initialize(),
         throwsA(
           isA<MCPException>().having(
             (e) => e.message,
             'message',
-            anyOf(
-              contains('SSE stream error'),
-              contains('SSE stream closed by server'),
-            ),
+            contains('Mcp-Session-Id'),
           ),
         ),
       );
     });
 
     test(
-      'sendNotification posts without an id and does not wait for SSE reply',
+      'throws a typed session-expired error on a 404 for an active session',
       () async {
-        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-        addTearDown(() => server.close(force: true));
-        final seenBodies = <Map<String, dynamic>>[];
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse(sessionId: 'session-1');
 
-        server.listen((request) async {
-          if (request.method == 'GET') {
-            request.response.statusCode = 200;
-            request.response.headers.set('Content-Type', 'text/event-stream');
-            request.response.bufferOutput = false;
-            request.response.write('event: endpoint\ndata: /messages\n\n');
-            await request.response.flush();
-            return;
-          }
-
-          final bodyText = await utf8.decoder.bind(request).join();
-          seenBodies.add((jsonDecode(bodyText) as Map).cast<String, dynamic>());
-          request.response.statusCode = 202;
-          await request.response.close();
-        });
-
-        final transport = SseClientTransport(
-          url: Uri.parse('http://${server.address.address}:${server.port}/sse'),
-          connectTimeout: const Duration(seconds: 2),
-          requestTimeout: const Duration(seconds: 2),
-        );
+        final transport = StreamableHttpClientTransport(url: server.uri);
         addTearDown(transport.close);
 
-        await transport
-            .sendNotification(
-              JsonRpcNotification(method: 'notifications/initialized'),
-            )
-            .timeout(const Duration(seconds: 2));
+        final initResp = await transport.send(
+          JsonRpcRequest(method: 'initialize', id: 1),
+        );
+        expect((initResp.result as Map)['protocolVersion'], '2025-06-18');
 
-        expect(seenBodies, hasLength(1));
-        expect(seenBodies.single['method'], 'notifications/initialized');
-        expect(seenBodies.single.containsKey('id'), isFalse);
+        transport.setProtocolVersion('2025-06-18');
+        server.expireCurrentSession();
+
+        await expectLater(
+          transport.send(JsonRpcRequest(method: 'ping', id: 2)),
+          throwsA(isA<MCPSessionExpiredException>()),
+        );
       },
     );
-  });
-
-  // =========================================================================
-  // SseLineSink: addError + close paths (lines 436/438/441/443/444)
-  // =========================================================================
-
-  group('SSE line parser ($_SseLabel)', () {
-    test('forwards a stream error and closes on done', () async {
-      // Drive _parseSse via a real SSE GET whose stream emits an event then is
-      // closed by the server. The eventTransformed sink's close() (and the
-      // underlying addError path on an upstream error) are exercised here.
-      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      addTearDown(() => server.close(force: true));
-
-      server.listen((request) async {
-        request.response.statusCode = 200;
-        request.response.headers.set('Content-Type', 'text/event-stream');
-        request.response.bufferOutput = false;
-        // Emit a notification with NO trailing blank line, then close — this
-        // forces the sink's close()/_flush() to emit the buffered event.
-        request.response.write('event: message\n');
-        request.response.write(
-          'data: ${jsonEncode({'jsonrpc': '2.0', 'method': 'notifications/x'})}\n',
-        );
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-        await request.response.close();
-      });
-
-      final transport = SseClientTransport(
-        url: Uri.parse('http://${server.address.address}:${server.port}/sse'),
-        postUrl: Uri.parse(
-          'http://${server.address.address}:${server.port}/messages',
-        ),
-        connectTimeout: const Duration(seconds: 5),
-      );
-      addTearDown(transport.close);
-
-      final received = <Map<String, dynamic>>[];
-      final sub = transport.notifications.listen(received.add);
-      addTearDown(sub.cancel);
-
-      // Force the SSE connection to open.
-      // ignore: unawaited_futures
-      transport
-          .send(JsonRpcRequest(method: 'noop', id: 99))
-          .catchError((_) => const JsonRpcResponse(result: {}));
-
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-      // The event buffered before close() was flushed and surfaced.
-      expect(received.any((m) => m['method'] == 'notifications/x'), isTrue);
-    });
   });
 
   // =========================================================================
@@ -1623,7 +1281,7 @@ void main() {
             .send(JsonRpcRequest(method: 'initialize', id: 1))
             .timeout(const Duration(seconds: 20));
         expect(initResp.isError, isFalse);
-        expect((initResp.result as Map)['protocolVersion'], '2024-11-05');
+        expect((initResp.result as Map)['protocolVersion'], '2025-06-18');
 
         // A second send reuses the already-started process (line 29 early return).
         final toolsResp = await transport
@@ -1907,7 +1565,3 @@ void main() {
     });
   });
 }
-
-/// Label used in a group name to keep the SSE-parser group description unique
-/// and self-documenting.
-const _SseLabel = '_SseLineSink';

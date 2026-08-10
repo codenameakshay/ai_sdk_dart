@@ -23,7 +23,7 @@ class StdioMCPTransport implements MCPTransport {
 
   static const _unsupported =
       'Stdio MCP transport is not available on web/Flutter web. '
-      'Use SseClientTransport or HttpClientTransport instead.';
+      'Use StreamableHttpClientTransport instead.';
 
   @override
   Stream<Map<String, dynamic>> get notifications =>

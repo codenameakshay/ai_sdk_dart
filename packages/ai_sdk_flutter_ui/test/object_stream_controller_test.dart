@@ -149,5 +149,53 @@ void main() {
       expect(controller.value!['title'], 'B');
       controller.dispose();
     });
+
+    test('clear cancels the active bind and ignores late events', () async {
+      final source = StreamController<int>();
+      addTearDown(source.close);
+      final controller = ObjectStreamController<int>();
+
+      unawaited(controller.bind(source.stream));
+      source.add(1);
+      await pumpUntil(() => controller.value == 1);
+
+      controller.clear();
+
+      expect(controller.value, isNull);
+      expect(controller.error, isNull);
+      expect(controller.isLoading, isFalse);
+      expect(controller.isStreaming, isFalse);
+
+      source.add(2);
+      source.addError(StateError('late'));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.value, isNull);
+      expect(controller.error, isNull);
+      controller.dispose();
+    });
+
+    test('dispose cancels the active bind and stops notifications', () async {
+      final source = StreamController<int>();
+      addTearDown(source.close);
+      final controller = ObjectStreamController<int>();
+      var notifications = 0;
+      controller.addListener(() {
+        notifications++;
+      });
+
+      unawaited(controller.bind(source.stream));
+      source.add(1);
+      await pumpUntil(() => controller.value == 1);
+      final beforeDispose = notifications;
+
+      controller.dispose();
+
+      source.add(2);
+      source.addError(StateError('late'));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(notifications, beforeDispose);
+    });
   });
 }

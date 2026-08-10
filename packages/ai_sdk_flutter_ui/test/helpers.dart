@@ -131,8 +131,163 @@ class ThrowingStreamAgent extends ToolLoopAgent {
     String? prompt,
     List<ModelMessage>? messages,
     List<LanguageModelV3ToolApprovalResponse> toolApprovalResponses = const [],
+    CancellationToken? abortSignal,
+    Duration? timeout,
   }) async {
     throw error;
+  }
+}
+
+class RecordedStreamInvocation {
+  RecordedStreamInvocation({
+    required this.abortSignal,
+    required this.prompt,
+    required this.messages,
+    required this.toolApprovalResponses,
+  });
+
+  final CancellationToken? abortSignal;
+  final String? prompt;
+  final List<ModelMessage>? messages;
+  final List<LanguageModelV3ToolApprovalResponse> toolApprovalResponses;
+
+  late final StreamController<String> _textController =
+      StreamController<String>(
+        onCancel: () {
+          textSubscriptionCancelled = true;
+        },
+      );
+  late final StreamController<StreamTextEvent> _fullController =
+      StreamController<StreamTextEvent>(
+        onCancel: () {
+          fullStreamSubscriptionCancelled = true;
+        },
+      );
+  final Completer<String> _textCompleter = Completer<String>();
+  final Completer<Object?> _outputCompleter = Completer<Object?>();
+  final Completer<List<LanguageModelV3ContentPart>> _contentCompleter =
+      Completer<List<LanguageModelV3ContentPart>>();
+  final Completer<String> _reasoningTextCompleter = Completer<String>();
+  final Completer<List<GenerateTextStep>> _stepsCompleter =
+      Completer<List<GenerateTextStep>>();
+  final Completer<LanguageModelV3Usage?> _usageCompleter =
+      Completer<LanguageModelV3Usage?>();
+  final Completer<LanguageModelV3Usage?> _totalUsageCompleter =
+      Completer<LanguageModelV3Usage?>();
+  final Completer<List<LanguageModelV3SourcePart>> _sourcesCompleter =
+      Completer<List<LanguageModelV3SourcePart>>();
+  final Completer<List<LanguageModelV3ToolCallPart>> _toolCallsCompleter =
+      Completer<List<LanguageModelV3ToolCallPart>>();
+  final Completer<List<LanguageModelV3ToolResultPart>> _toolResultsCompleter =
+      Completer<List<LanguageModelV3ToolResultPart>>();
+
+  bool textSubscriptionCancelled = false;
+  bool fullStreamSubscriptionCancelled = false;
+
+  StreamTextResult<Object?> buildResult() {
+    return StreamTextResult<Object?>(
+      stream: const Stream.empty(),
+      fullStream: _fullController.stream,
+      textStream: _textController.stream,
+      partialOutputStream: const Stream.empty(),
+      elementStream: const Stream.empty(),
+      text: _textCompleter.future,
+      output: _outputCompleter.future,
+      content: _contentCompleter.future,
+      reasoning: Future.value(const []),
+      reasoningText: _reasoningTextCompleter.future,
+      files: Future.value(const []),
+      sources: _sourcesCompleter.future,
+      toolCalls: _toolCallsCompleter.future,
+      toolResults: _toolResultsCompleter.future,
+      finishReason: Future.value(LanguageModelV3FinishReason.stop),
+      rawFinishReason: Future.value('stop'),
+      usage: _usageCompleter.future,
+      totalUsage: _totalUsageCompleter.future,
+      warnings: Future.value(const []),
+      steps: _stepsCompleter.future,
+      request: Future.value(
+        const GenerateTextRequest(system: null, messages: []),
+      ),
+      response: Future.value(
+        const GenerateTextResponse(messages: [], body: null, metadata: null),
+      ),
+      providerMetadata: Future.value(null),
+      finish: Future.value(
+        const StreamPartFinish(
+          finishReason: LanguageModelV3FinishReason.stop,
+          rawFinishReason: 'stop',
+        ),
+      ),
+    );
+  }
+
+  void emitText(String delta) {
+    _textController.add(delta);
+  }
+
+  void emitReasoning(String delta, {String id = 'reasoning-1'}) {
+    _fullController.add(StreamTextReasoningDeltaEvent(id: id, delta: delta));
+  }
+
+  void emitError(Object error) {
+    _fullController.add(StreamTextErrorEvent(error: error));
+  }
+
+  Future<void> finish({
+    String finalText = '',
+    String reasoningText = '',
+    LanguageModelV3Usage? usage,
+    List<GenerateTextStep> steps = const [],
+    List<LanguageModelV3SourcePart> sources = const [],
+    List<LanguageModelV3ToolCallPart> toolCalls = const [],
+    List<LanguageModelV3ToolResultPart> toolResults = const [],
+  }) async {
+    if (!_textCompleter.isCompleted) _textCompleter.complete(finalText);
+    if (!_outputCompleter.isCompleted) _outputCompleter.complete(finalText);
+    if (!_contentCompleter.isCompleted) {
+      _contentCompleter.complete([
+        if (finalText.isNotEmpty) LanguageModelV3TextPart(text: finalText),
+      ]);
+    }
+    if (!_reasoningTextCompleter.isCompleted) {
+      _reasoningTextCompleter.complete(reasoningText);
+    }
+    if (!_stepsCompleter.isCompleted) _stepsCompleter.complete(steps);
+    if (!_usageCompleter.isCompleted) _usageCompleter.complete(usage);
+    if (!_totalUsageCompleter.isCompleted) _totalUsageCompleter.complete(usage);
+    if (!_sourcesCompleter.isCompleted) _sourcesCompleter.complete(sources);
+    if (!_toolCallsCompleter.isCompleted)
+      _toolCallsCompleter.complete(toolCalls);
+    if (!_toolResultsCompleter.isCompleted) {
+      _toolResultsCompleter.complete(toolResults);
+    }
+    await _fullController.close();
+    await _textController.close();
+  }
+}
+
+class RecordingStreamAgent extends ToolLoopAgent {
+  RecordingStreamAgent() : super(model: MockLanguageModelV3());
+
+  final List<RecordedStreamInvocation> invocations = [];
+
+  @override
+  Future<StreamTextResult> stream({
+    String? prompt,
+    List<ModelMessage>? messages,
+    List<LanguageModelV3ToolApprovalResponse> toolApprovalResponses = const [],
+    CancellationToken? abortSignal,
+    Duration? timeout,
+  }) async {
+    final invocation = RecordedStreamInvocation(
+      abortSignal: abortSignal,
+      prompt: prompt,
+      messages: messages,
+      toolApprovalResponses: toolApprovalResponses,
+    );
+    invocations.add(invocation);
+    return invocation.buildResult();
   }
 }
 

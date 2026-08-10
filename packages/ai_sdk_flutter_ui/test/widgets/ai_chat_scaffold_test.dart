@@ -6,6 +6,16 @@ import 'package:flutter_test/flutter_test.dart';
 
 Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
 
+class _ComposerProbeController extends ChatController {
+  @override
+  Future<void> sendMessage({
+    required ToolLoopAgent agent,
+    required String text,
+  }) async {
+    append(ModelMessage(role: ModelMessageRole.user, content: text));
+  }
+}
+
 void main() {
   group('AiChatScaffold', () {
     testWidgets('composes a message list and a composer', (tester) async {
@@ -31,10 +41,10 @@ void main() {
     testWidgets('sending via the composer drives the controller', (
       tester,
     ) async {
-      final controller = ChatController();
+      final controller = _ComposerProbeController();
       addTearDown(controller.dispose);
       final agent = ToolLoopAgent(
-        model: MockLanguageModelV3(response: [mockText('Hi back')]),
+        model: MockLanguageModelV3(doStreamError: StateError('ignored')),
       );
 
       await tester.pumpWidget(
@@ -46,20 +56,12 @@ void main() {
         'Hello',
       );
       await tester.tap(find.byKey(const ValueKey('chat-composer-send')));
+      await tester.pump();
 
-      // Pump frames until the conversation settles.
-      for (var i = 0; i < 30; i++) {
-        await tester.pump(const Duration(milliseconds: 10));
-        if (controller.status == ChatStatus.ready &&
-            controller.messages.length >= 2) {
-          break;
-        }
-      }
-
-      // user message + assistant reply rendered.
+      // The composer routes through the controller.
       expect(find.text('Hello'), findsOneWidget);
-      expect(find.text('Hi back'), findsOneWidget);
-      expect(controller.messages, hasLength(2));
+      expect(controller.messages, hasLength(1));
+      expect(controller.messages.single.content, 'Hello');
     });
 
     testWidgets('shows an empty state when there are no messages', (

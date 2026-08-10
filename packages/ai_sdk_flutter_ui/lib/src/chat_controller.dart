@@ -121,10 +121,66 @@ class ChatController extends ChangeNotifier {
   final StringBuffer _streamBuffer = StringBuffer();
   StreamSubscription<String>? _activeSubscription;
   StreamSubscription<StreamTextEvent>? _errorSubscription;
+  CancellationToken? _activeAbortSignal;
   ToolLoopAgent? _lastAgent;
+  int _nextRequestId = 0;
+  int? _activeRequestId;
+  bool _isDisposed = false;
 
   // Pending tool-approval responses indexed by approvalId.
   final Map<String, LanguageModelV3ToolApprovalResponse> _pendingApprovals = {};
+
+  bool _isCurrentRequest(int requestId) =>
+      !_isDisposed && _activeRequestId == requestId;
+
+  void _notifyListenersSafely() {
+    if (!_isDisposed) notifyListeners();
+  }
+
+  void _cancelActiveRequestSync({bool commitPartial = false}) {
+    _activeRequestId = null;
+    _activeAbortSignal?.cancel();
+    _activeAbortSignal = null;
+    unawaited(_activeSubscription?.cancel());
+    _activeSubscription = null;
+    unawaited(_errorSubscription?.cancel());
+    _errorSubscription = null;
+    if (commitPartial && _streamBuffer.isNotEmpty) {
+      _messages.add(
+        ModelMessage(
+          role: ModelMessageRole.assistant,
+          content: _streamBuffer.toString(),
+        ),
+      );
+    }
+    _streamBuffer.clear();
+    _streamingReasoning = '';
+  }
+
+  Future<void> _cancelActiveRequest({bool commitPartial = false}) async {
+    _activeRequestId = null;
+    _activeAbortSignal?.cancel();
+    _activeAbortSignal = null;
+    await _activeSubscription?.cancel();
+    _activeSubscription = null;
+    await _errorSubscription?.cancel();
+    _errorSubscription = null;
+    if (commitPartial && _streamBuffer.isNotEmpty) {
+      _messages.add(
+        ModelMessage(
+          role: ModelMessageRole.assistant,
+          content: _streamBuffer.toString(),
+        ),
+      );
+    }
+    _streamBuffer.clear();
+    _streamingReasoning = '';
+  }
+
+  void _discardApprovalState() {
+    _pendingApprovalRequests = const [];
+    _pendingApprovals.clear();
+  }
 
   /// Submit [text] as a user message and stream the assistant response.
   Future<void> sendMessage({
@@ -132,6 +188,7 @@ class ChatController extends ChangeNotifier {
     required String text,
   }) async {
     _lastAgent = agent;
+    _discardApprovalState();
     append(ModelMessage(role: ModelMessageRole.user, content: text));
     await _runGeneration(agent);
   }
@@ -150,12 +207,13 @@ class ChatController extends ChangeNotifier {
   Future<void> reload({ToolLoopAgent? agent}) async {
     final effectiveAgent = agent ?? _lastAgent;
     if (effectiveAgent == null) return;
+    _discardApprovalState();
 
     // Remove trailing assistant message to allow regeneration.
     if (_messages.isNotEmpty &&
         _messages.last.role == ModelMessageRole.assistant) {
       _messages.removeLast();
-      notifyListeners();
+      _notifyListenersSafely();
     }
 
     await _runGeneration(effectiveAgent);
@@ -195,14 +253,14 @@ class ChatController extends ChangeNotifier {
     _pendingApprovalRequests = _pendingApprovalRequests
         .where((request) => request.approvalId != approvalId)
         .toList();
-    notifyListeners();
+    _notifyListenersSafely();
 
     // Once every paused request has a decision, replay the turn with the
     // collected responses so the agent can execute (or skip) the tools.
     if (_status == ChatStatus.awaitingApproval &&
         _pendingApprovalRequests.isEmpty &&
         _lastAgent != null) {
-      unawaited(_runGeneration(_lastAgent!));
+      unawaited(_runGeneration(_lastAgent!, consumeApprovals: true));
     }
   }
 
@@ -214,7 +272,15 @@ class ChatController extends ChangeNotifier {
     return result;
   }
 
-  Future<void> _runGeneration(ToolLoopAgent agent) async {
+  Future<void> _runGeneration(
+    ToolLoopAgent agent, {
+    bool consumeApprovals = false,
+  }) async {
+    _cancelActiveRequestSync();
+    final requestId = ++_nextRequestId;
+    final abortSignal = CancellationToken();
+    _activeRequestId = requestId;
+    _activeAbortSignal = abortSignal;
     _streamBuffer.clear();
     _streamingReasoning = '';
     _reasoningText = '';
@@ -225,15 +291,19 @@ class ChatController extends ChangeNotifier {
     _pendingApprovalRequests = const [];
     _status = ChatStatus.submitted;
     _error = null;
-    notifyListeners();
+    _notifyListenersSafely();
 
     try {
       final streamResult = await agent.stream(
         messages: messages,
-        toolApprovalResponses: _consumeApprovals(),
+        toolApprovalResponses: consumeApprovals
+            ? _consumeApprovals()
+            : const [],
+        abortSignal: abortSignal,
       );
+      if (!_isCurrentRequest(requestId)) return;
       _status = ChatStatus.streaming;
-      notifyListeners();
+      _notifyListenersSafely();
 
       // The result's `text`/`output` futures reject on a streaming error; we
       // surface errors via [fullStream] instead, so swallow those completions
@@ -245,44 +315,51 @@ class ChatController extends ChangeNotifier {
       // stream), so watch both: text for content, fullStream for errors and
       // live reasoning deltas.
       _errorSubscription = streamResult.fullStream.listen((event) {
+        if (!_isCurrentRequest(requestId)) return;
         if (event is StreamTextErrorEvent) {
-          _handleError(event.error);
+          _handleError(event.error, requestId);
         } else if (event is StreamTextReasoningDeltaEvent) {
           _streamingReasoning += event.delta;
-          notifyListeners();
+          _notifyListenersSafely();
         }
-      }, onError: _handleError);
+      }, onError: (Object err) => _handleError(err, requestId));
 
       _activeSubscription = streamResult.textStream.listen(
         (delta) {
+          if (!_isCurrentRequest(requestId)) return;
           _streamBuffer.write(delta);
-          notifyListeners();
+          _notifyListenersSafely();
         },
-        onDone: () => unawaited(_finalizeTurn(streamResult)),
-        onError: _handleError,
+        onDone: () => unawaited(_finalizeTurn(streamResult, requestId)),
+        onError: (Object err) => _handleError(err, requestId),
         cancelOnError: true,
       );
     } catch (err) {
-      _handleError(err);
+      if (!_isCurrentRequest(requestId) || abortSignal.isCancelled) return;
+      _handleError(err, requestId);
     }
   }
 
   /// Finalize a completed (or approval-paused) turn: capture the turn's
   /// metadata, then either surface pending approval requests or commit the
   /// assistant message.
-  Future<void> _finalizeTurn(StreamTextResult streamResult) async {
+  Future<void> _finalizeTurn(
+    StreamTextResult streamResult,
+    int requestId,
+  ) async {
+    _activeSubscription = null;
     unawaited(_errorSubscription?.cancel());
     _errorSubscription = null;
 
     // An error event may already have moved us out of streaming.
-    if (_status != ChatStatus.streaming) return;
+    if (!_isCurrentRequest(requestId) || _status != ChatStatus.streaming) {
+      return;
+    }
 
     var approvals = const <LanguageModelV3ToolApprovalRequestPart>[];
     try {
       final steps = await streamResult.steps;
-      approvals = [
-        for (final step in steps) ...step.toolApprovalRequests,
-      ];
+      approvals = [for (final step in steps) ...step.toolApprovalRequests];
       _lastUsage = await streamResult.totalUsage ?? await streamResult.usage;
       _lastSources = await streamResult.sources;
       _lastToolCalls = await streamResult.toolCalls;
@@ -293,14 +370,19 @@ class ChatController extends ChangeNotifier {
     }
 
     // A late error may have arrived while awaiting the result futures.
-    if (_status != ChatStatus.streaming) return;
+    if (!_isCurrentRequest(requestId) || _status != ChatStatus.streaming) {
+      return;
+    }
+
+    _activeRequestId = null;
+    _activeAbortSignal = null;
 
     if (approvals.isNotEmpty) {
       _pendingApprovalRequests = approvals;
       _streamBuffer.clear();
       _streamingReasoning = '';
       _status = ChatStatus.awaitingApproval;
-      notifyListeners();
+      _notifyListenersSafely();
       return;
     }
 
@@ -312,71 +394,55 @@ class ChatController extends ChangeNotifier {
     _streamBuffer.clear();
     _streamingReasoning = '';
     _status = ChatStatus.ready;
-    notifyListeners();
+    _notifyListenersSafely();
     onFinish?.call(assistantMessage);
   }
 
-  void _handleError(Object err) {
-    if (_status == ChatStatus.error) return; // first error wins
+  void _handleError(Object err, int requestId) {
+    if (!_isCurrentRequest(requestId) || _status == ChatStatus.error) return;
+    _activeRequestId = null;
+    _activeAbortSignal = null;
     unawaited(_activeSubscription?.cancel());
     _activeSubscription = null;
     unawaited(_errorSubscription?.cancel());
     _errorSubscription = null;
     _error = err;
     _streamBuffer.clear();
+    _streamingReasoning = '';
     _status = ChatStatus.error;
-    notifyListeners();
+    _notifyListenersSafely();
     onError?.call(err);
   }
 
   /// Cancel the active stream.
   Future<void> stop() async {
-    await _activeSubscription?.cancel();
-    _activeSubscription = null;
-    await _errorSubscription?.cancel();
-    _errorSubscription = null;
-    if (_streamBuffer.isNotEmpty) {
-      _messages.add(
-        ModelMessage(
-          role: ModelMessageRole.assistant,
-          content: _streamBuffer.toString(),
-        ),
-      );
-      _streamBuffer.clear();
-    }
-    _streamingReasoning = '';
-    _pendingApprovalRequests = const [];
+    await _cancelActiveRequest(commitPartial: true);
+    _discardApprovalState();
     _status = ChatStatus.ready;
-    notifyListeners();
+    _notifyListenersSafely();
   }
 
   /// Remove all messages and reset to initial state.
   void clear() {
-    unawaited(_activeSubscription?.cancel());
-    _activeSubscription = null;
-    unawaited(_errorSubscription?.cancel());
-    _errorSubscription = null;
+    _cancelActiveRequestSync();
     _messages
       ..clear()
       ..addAll(initialMessages);
-    _streamBuffer.clear();
-    _streamingReasoning = '';
     _reasoningText = '';
     _lastUsage = null;
     _lastSources = const [];
     _lastToolCalls = const [];
     _lastToolResults = const [];
-    _pendingApprovalRequests = const [];
-    _pendingApprovals.clear();
+    _discardApprovalState();
     _status = ChatStatus.ready;
     _error = null;
-    notifyListeners();
+    _notifyListenersSafely();
   }
 
   @override
   void dispose() {
-    _activeSubscription?.cancel();
-    _errorSubscription?.cancel();
+    _isDisposed = true;
+    _cancelActiveRequestSync();
     super.dispose();
   }
 }

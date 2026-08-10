@@ -172,5 +172,70 @@ void main() {
       expect(controller.lastUsage?.totalTokens, 8);
       controller.dispose();
     });
+
+    test('a second complete supersedes the active request and ignores stale '
+        'events from the first request', () async {
+      final agent = RecordingStreamAgent();
+      final controller = CompletionController(agent: agent);
+
+      unawaited(controller.complete('first'));
+      await pumpUntil(() => agent.invocations.length == 1);
+      final first = agent.invocations.first;
+      first.emitText('old');
+      await pumpUntil(() => controller.completion == 'old');
+
+      unawaited(controller.complete('second'));
+      await pumpUntil(() => agent.invocations.length == 2);
+      final second = agent.invocations.last;
+
+      expect(first.abortSignal, isNotNull);
+      expect(first.abortSignal!.isCancelled, isTrue);
+      expect(first.textSubscriptionCancelled, isTrue);
+      expect(first.fullStreamSubscriptionCancelled, isTrue);
+
+      second.emitText('new');
+      await second.finish(finalText: 'new');
+      await pumpUntil(
+        () => !controller.isLoading && controller.completion == 'new',
+      );
+
+      first.emitText(' stale');
+      first.emitError(StateError('stale'));
+      await first.finish(finalText: 'old stale');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.completion, 'new');
+      expect(controller.error, isNull);
+      controller.dispose();
+    });
+
+    test('clear cancels the active request and ignores late events', () async {
+      final agent = RecordingStreamAgent();
+      final controller = CompletionController(agent: agent);
+
+      unawaited(controller.complete('go'));
+      await pumpUntil(() => agent.invocations.length == 1);
+      final invocation = agent.invocations.single;
+      invocation.emitText('partial');
+      await pumpUntil(() => controller.completion == 'partial');
+
+      controller.clear();
+
+      expect(invocation.abortSignal, isNotNull);
+      expect(invocation.abortSignal!.isCancelled, isTrue);
+      expect(invocation.textSubscriptionCancelled, isTrue);
+      expect(invocation.fullStreamSubscriptionCancelled, isTrue);
+      expect(controller.completion, isEmpty);
+      expect(controller.error, isNull);
+
+      invocation.emitText(' late');
+      invocation.emitError(StateError('late'));
+      await invocation.finish(finalText: 'late');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.completion, isEmpty);
+      expect(controller.error, isNull);
+      controller.dispose();
+    });
   });
 }

@@ -193,34 +193,36 @@ void main() {
       controller.dispose();
     });
 
-    test('stop mid-stream flushes the partial buffer as an assistant message',
-        () async {
-      final controller = ChatController();
-      final model = HoldingTextModel('partial answer');
+    test(
+      'stop mid-stream flushes the partial buffer as an assistant message',
+      () async {
+        final controller = ChatController();
+        final model = HoldingTextModel('partial answer');
 
-      // Don't await: the holding model keeps the stream open so we can stop
-      // while content is buffered but the turn hasn't finished.
-      unawaited(
-        controller.sendMessage(
-          agent: ToolLoopAgent(model: model),
-          text: 'q',
-        ),
-      );
-      await pumpUntil(() => controller.streamingContent.isNotEmpty);
-      expect(controller.streamingContent, 'partial answer');
+        // Don't await: the holding model keeps the stream open so we can stop
+        // while content is buffered but the turn hasn't finished.
+        unawaited(
+          controller.sendMessage(
+            agent: ToolLoopAgent(model: model),
+            text: 'q',
+          ),
+        );
+        await pumpUntil(() => controller.streamingContent.isNotEmpty);
+        expect(controller.streamingContent, 'partial answer');
 
-      await controller.stop();
+        await controller.stop();
 
-      // The buffered text is committed as a trailing assistant message and the
-      // buffer is cleared.
-      expect(controller.status, ChatStatus.ready);
-      expect(controller.streamingContent, isEmpty);
-      expect(controller.messages.last.role, ModelMessageRole.assistant);
-      expect(controller.messages.last.content, 'partial answer');
+        // The buffered text is committed as a trailing assistant message and the
+        // buffer is cleared.
+        expect(controller.status, ChatStatus.ready);
+        expect(controller.streamingContent, isEmpty);
+        expect(controller.messages.last.role, ModelMessageRole.assistant);
+        expect(controller.messages.last.content, 'partial answer');
 
-      model.finish();
-      controller.dispose();
-    });
+        model.finish();
+        controller.dispose();
+      },
+    );
 
     test(
       'a pending tool approval is consumed by the next generation',
@@ -370,6 +372,81 @@ void main() {
       expect(controller.status, ChatStatus.ready);
       expect(controller.pendingApprovalRequests, isEmpty);
       expect(controller.messages, isEmpty);
+      controller.dispose();
+    });
+
+    test('a second sendMessage supersedes the active turn and ignores stale '
+        'events from the first turn', () async {
+      final agent = RecordingStreamAgent();
+      final controller = ChatController();
+
+      unawaited(controller.sendMessage(agent: agent, text: 'first'));
+      await pumpUntil(() => agent.invocations.length == 1);
+      final first = agent.invocations.first;
+      first.emitText('old answer');
+      await pumpUntil(() => controller.streamingContent == 'old answer');
+
+      unawaited(controller.sendMessage(agent: agent, text: 'second'));
+      await pumpUntil(() => agent.invocations.length == 2);
+      final second = agent.invocations.last;
+
+      expect(first.abortSignal, isNotNull);
+      expect(first.abortSignal!.isCancelled, isTrue);
+      expect(first.textSubscriptionCancelled, isTrue);
+      expect(first.fullStreamSubscriptionCancelled, isTrue);
+      expect(controller.streamingContent, isEmpty);
+
+      second.emitText('new answer');
+      await second.finish(finalText: 'new answer');
+      await pumpUntil(
+        () =>
+            controller.status == ChatStatus.ready &&
+            controller.messages.length == 3,
+      );
+
+      first.emitText(' stale');
+      first.emitError(StateError('stale'));
+      await first.finish(finalText: 'old stale');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.messages.map((message) => message.content).toList(), [
+        'first',
+        'second',
+        'new answer',
+      ]);
+      expect(controller.messages.last.role, ModelMessageRole.assistant);
+      expect(controller.status, ChatStatus.ready);
+      expect(controller.error, isNull);
+      controller.dispose();
+    });
+
+    test('clear cancels the active turn and ignores late events', () async {
+      final agent = RecordingStreamAgent();
+      final controller = ChatController();
+
+      unawaited(controller.sendMessage(agent: agent, text: 'first'));
+      await pumpUntil(() => agent.invocations.length == 1);
+      final invocation = agent.invocations.single;
+      invocation.emitText('partial');
+      await pumpUntil(() => controller.streamingContent == 'partial');
+
+      controller.clear();
+
+      expect(invocation.abortSignal, isNotNull);
+      expect(invocation.abortSignal!.isCancelled, isTrue);
+      expect(invocation.textSubscriptionCancelled, isTrue);
+      expect(invocation.fullStreamSubscriptionCancelled, isTrue);
+      expect(controller.messages, isEmpty);
+      expect(controller.streamingContent, isEmpty);
+      expect(controller.status, ChatStatus.ready);
+
+      invocation.emitText(' late');
+      invocation.emitError(StateError('late'));
+      await invocation.finish(finalText: 'late');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.messages, isEmpty);
+      expect(controller.error, isNull);
       controller.dispose();
     });
   });

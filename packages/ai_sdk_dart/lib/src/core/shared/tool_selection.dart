@@ -1,7 +1,9 @@
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+import 'package:meta/meta.dart';
 
 import '../../tools/tool.dart';
 
+@internal
 class ResolvedToolSelection {
   const ResolvedToolSelection({
     required this.exposedTools,
@@ -12,6 +14,7 @@ class ResolvedToolSelection {
   final LanguageModelV3ToolChoice? toolChoice;
 }
 
+@internal
 ToolSet selectActiveTools(ToolSet tools, List<String>? activeToolNames) {
   if (activeToolNames == null) {
     return tools;
@@ -27,6 +30,7 @@ ToolSet selectActiveTools(ToolSet tools, List<String>? activeToolNames) {
   return selected;
 }
 
+@internal
 ResolvedToolSelection resolveToolSelection({
   required ToolSet tools,
   required LanguageModelV3ToolChoice? toolChoice,
@@ -68,6 +72,7 @@ ResolvedToolSelection resolveToolSelection({
   ); // coverage:ignore-line
 }
 
+@internal
 void validateToolChoiceForCalls({
   required Iterable<LanguageModelV3ToolCallPart> toolCalls,
   required ToolSet tools,

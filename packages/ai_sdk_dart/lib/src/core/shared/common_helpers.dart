@@ -1,10 +1,12 @@
 import 'dart:convert';
 
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+import 'package:meta/meta.dart';
 
 import '../../messages/model_message.dart';
 import '../../tools/tool.dart';
 
+@internal
 LanguageModelV3Message toLanguageModelMessage(ModelMessage message) {
   return LanguageModelV3Message(
     role: switch (message.role) {
@@ -18,12 +20,14 @@ LanguageModelV3Message toLanguageModelMessage(ModelMessage message) {
   );
 }
 
+@internal
 void safeInvoke(void Function() action) {
   try {
     action();
   } catch (_) {}
 }
 
+@internal
 dynamic parseToolInput({
   required Tool<dynamic, dynamic> tool,
   required Object rawInput,
@@ -42,6 +46,7 @@ dynamic parseToolInput({
   return tool.inputSchema.fromJson(rawInput.cast<String, dynamic>());
 }
 
+@internal
 String stringifyToolOutput(Object? output) {
   if (output == null) return 'null';
   if (output is String) return output;
@@ -53,6 +58,7 @@ String stringifyToolOutput(Object? output) {
   }
 }
 
+@internal
 LanguageModelV3Usage? sumUsage(Iterable<LanguageModelV3Usage?> usages) {
   var input = 0;
   var output = 0;

@@ -1,7 +1,10 @@
 import 'dart:convert';
 
+import 'package:meta/meta.dart';
+
 import '../../output/output.dart';
 
+@internal
 String buildOutputSystemInstruction<T>(String? system, Output<T> output) {
   switch (output) {
     case TextOutput():

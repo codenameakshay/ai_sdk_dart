@@ -1,5 +1,8 @@
 import 'dart:async';
 
+import 'package:meta/meta.dart';
+
+@internal
 extension CompleteIfPending<T> on Completer<T> {
   void completeIfPending(T value) {
     if (!isCompleted) complete(value);
@@ -10,6 +13,7 @@ extension CompleteIfPending<T> on Completer<T> {
   }
 }
 
+@internal
 Stream<T> terminalAwareBroadcastStream<T>({
   required Stream<T> source,
   required bool Function() isTerminal,

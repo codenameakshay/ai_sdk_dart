@@ -1,4 +1,4 @@
-## Unreleased
+## 2.0.0
 
 - Migrated generation, streaming, middleware, mocks, and tools to the V4
   language-model contract.

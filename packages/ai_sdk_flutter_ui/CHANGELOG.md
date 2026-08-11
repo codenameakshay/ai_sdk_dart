@@ -1,4 +1,4 @@
-## Unreleased
+## 2.0.0
 
 - Hardened controller cancellation/disposal and coalesced streaming updates to
   frame boundaries.

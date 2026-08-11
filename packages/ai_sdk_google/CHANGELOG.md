@@ -1,7 +1,8 @@
-## Unreleased
+## 2.0.0
 
 - Migrated Gemini generation and streaming to V4 lifecycle, response formats,
   nested usage, and complete tool-call events.
+- Mapped cached content tokens into the nested input-token usage breakdown.
 - Fixed streamed usage accounting and added in-flight request cancellation.
 
 ---

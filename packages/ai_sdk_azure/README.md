@@ -6,8 +6,8 @@ Azure OpenAI provider for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart). U
 
 ```yaml
 dependencies:
-  ai_sdk_dart: ^1.2.0
-  ai_sdk_azure: ^1.2.0
+  ai_sdk_dart: ^2.0.0
+  ai_sdk_azure: ^2.0.0
 ```
 
 ## Usage

@@ -1,4 +1,4 @@
-# Next release audit and implementation report
+# AI SDK Dart 2.0.0 audit and implementation report
 
 This release is a broad reliability and product-quality pass across the Dart AI
 SDK, its provider adapters, MCP transports, Flutter UI package, and examples.
@@ -108,7 +108,7 @@ contract used by this release.
 - Repository format and analyzer gates pass with no issues.
 - The complete Dart/Flutter package matrix and both offline example-app suites
   pass.
-- Combined line coverage is **99.16% (7103/7163)**, above the enforced 99%
+- Combined line coverage is **99.16% (7107/7167)**, above the enforced 99%
   release threshold.
 - Both Flutter web examples build successfully.
 - The structured-stream benchmark passes its six-scenario JSON regression

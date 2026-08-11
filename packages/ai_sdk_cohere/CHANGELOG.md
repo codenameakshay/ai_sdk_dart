@@ -1,4 +1,4 @@
-## Unreleased
+## 2.0.0
 
 - Migrated Cohere streaming to explicit V4 text and tool-input lifecycle parts
   with one complete tool call and reliable message-end finalization.

@@ -48,7 +48,7 @@ void main() {
     }
   });
 
-  testWidgets('tools chat clears old sources when a new turn has none', (
+  testWidgets('tools chat keeps citations on the turn that produced them', (
     tester,
   ) async {
     final runner = _QueuedToolsRunner([
@@ -57,7 +57,7 @@ void main() {
           StreamTextStartStepEvent(stepNumber: 1),
           StreamTextTextDeltaEvent(id: 'text-1', delta: 'Tokyo is sunny.'),
           StreamTextSourceEvent(
-            source: LanguageModelV3SourcePart(
+            source: LanguageModelV4SourcePart(
               id: 'source-1',
               url: 'https://weather.example.com/tokyo',
               title: 'Tokyo weather',
@@ -99,7 +99,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(find.text('Paris has no source.'), findsOneWidget);
-    expect(find.text('Tokyo weather'), findsNothing);
+    expect(find.text('Tokyo weather'), findsOneWidget);
+    expect(find.byType(SourceCitations), findsOneWidget);
   });
 
   testWidgets(
@@ -188,6 +189,54 @@ void main() {
 
       expect(find.textContaining(fixture.value), findsOneWidget);
     }
+  });
+
+  testWidgets(
+    'tools chat fixture is consumed after leaving the initial route',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(
+        const App(
+          initialPage: AdvancedExamplePage.toolsChat,
+          initialToolsFixture: ToolsChatFixture.normal,
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('Offline fixture reply'), findsOneWidget);
+
+      await _selectDrawerItem(tester, 'Provider Chat');
+      await _selectDrawerItem(tester, 'Tools Chat');
+
+      expect(find.text('Offline fixture reply'), findsNothing);
+      expect(find.byType(ChatComposer), findsOneWidget);
+      expect(
+        find.textContaining('Try "What\'s the weather in Tokyo?"'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets('non-tools initial pages ignore screenshot fixtures later', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      const App(
+        initialPage: AdvancedExamplePage.providerChat,
+        initialToolsFixture: ToolsChatFixture.normal,
+      ),
+    );
+    await tester.pump();
+
+    await _selectDrawerItem(tester, 'Tools Chat');
+
+    expect(find.text('Offline fixture reply'), findsNothing);
+    expect(find.byType(ChatComposer), findsOneWidget);
   });
 
   testWidgets('widget gallery renders the prebuilt widgets offline', (
@@ -297,28 +346,28 @@ StreamTextResult<Object?> _completedStreamResult({
   required String finalText,
 }) {
   return StreamTextResult<Object?>(
-    stream: const Stream<LanguageModelV3StreamPart>.empty(),
+    stream: const Stream<LanguageModelV4StreamPart>.empty(),
     fullStream: Stream<StreamTextEvent>.fromIterable(events),
     textStream: const Stream<String>.empty(),
     partialOutputStream: const Stream<Object?>.empty(),
     elementStream: const Stream<Object?>.empty(),
     text: Future<String>.value(finalText),
     output: Future<Object?>.value(finalText),
-    content: Future<List<LanguageModelV3ContentPart>>.value(
-      finalText.isEmpty ? const [] : [LanguageModelV3TextPart(text: finalText)],
+    content: Future<List<LanguageModelV4ContentPart>>.value(
+      finalText.isEmpty ? const [] : [LanguageModelV4TextPart(text: finalText)],
     ),
-    reasoning: Future<List<LanguageModelV3ReasoningPart>>.value(const []),
+    reasoning: Future<List<LanguageModelV4ReasoningPart>>.value(const []),
     reasoningText: Future<String>.value(''),
-    files: Future<List<LanguageModelV3FilePart>>.value(const []),
-    sources: Future<List<LanguageModelV3SourcePart>>.value(const []),
-    toolCalls: Future<List<LanguageModelV3ToolCallPart>>.value(const []),
-    toolResults: Future<List<LanguageModelV3ToolResultPart>>.value(const []),
-    finishReason: Future<LanguageModelV3FinishReason?>.value(
-      LanguageModelV3FinishReason.stop,
+    files: Future<List<LanguageModelV4FilePart>>.value(const []),
+    sources: Future<List<LanguageModelV4SourcePart>>.value(const []),
+    toolCalls: Future<List<LanguageModelV4ToolCallPart>>.value(const []),
+    toolResults: Future<List<LanguageModelV4ToolResultPart>>.value(const []),
+    finishReason: Future<LanguageModelV4FinishReason?>.value(
+      LanguageModelV4FinishReason.stop,
     ),
     rawFinishReason: Future<String?>.value('stop'),
-    usage: Future<LanguageModelV3Usage?>.value(null),
-    totalUsage: Future<LanguageModelV3Usage?>.value(null),
+    usage: Future<LanguageModelV4Usage?>.value(null),
+    totalUsage: Future<LanguageModelV4Usage?>.value(null),
     warnings: Future<List<String>>.value(const []),
     steps: Future<List<GenerateTextStep>>.value(const []),
     request: Future<GenerateTextRequest>.value(
@@ -330,7 +379,7 @@ StreamTextResult<Object?> _completedStreamResult({
     providerMetadata: Future<ProviderMetadata?>.value(null),
     finish: Future<StreamPartFinish?>.value(
       const StreamPartFinish(
-        finishReason: LanguageModelV3FinishReason.stop,
+        finishReason: LanguageModelV4FinishReason.stop,
         rawFinishReason: 'stop',
       ),
     ),

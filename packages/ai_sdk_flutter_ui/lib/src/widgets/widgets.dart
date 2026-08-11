@@ -16,6 +16,7 @@ export 'message_media.dart';
 export 'object_stream_view.dart';
 export 'prompt_suggestions.dart';
 export 'reasoning_view.dart';
+export 'scroll_bottom_policy.dart';
 export 'scroll_to_bottom_button.dart';
 export 'source_citations.dart';
 export 'streaming_text_view.dart';

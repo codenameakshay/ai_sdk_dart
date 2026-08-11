@@ -36,10 +36,11 @@ class App extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final toolsFixture = initialToolsFixture ?? _initialToolsFixtureFromUri();
+    final routePage = initialPage ?? _initialPageFromUri();
+    final toolsFixture =
+        initialToolsFixture ?? _initialToolsFixtureFromUri(routePage);
     final page =
-        initialPage ??
-        _initialPageFromUri() ??
+        routePage ??
         (toolsFixture == null
             ? AdvancedExamplePage.providerChat
             : AdvancedExamplePage.toolsChat);
@@ -79,6 +80,7 @@ class _Shell extends StatefulWidget {
 
 class _ShellState extends State<_Shell> with RestorationMixin {
   late final RestorableInt _selectedIndex;
+  ToolsChatFixture? _initialToolsFixture;
 
   static const _navItems = [
     _NavItem(
@@ -113,6 +115,9 @@ class _ShellState extends State<_Shell> with RestorationMixin {
   void initState() {
     super.initState();
     _selectedIndex = RestorableInt(_indexForPage(widget.initialPage));
+    _initialToolsFixture = widget.initialPage == AdvancedExamplePage.toolsChat
+        ? widget.initialToolsFixture
+        : null;
   }
 
   @override
@@ -121,6 +126,9 @@ class _ShellState extends State<_Shell> with RestorationMixin {
   @override
   void restoreState(RestorationBucket? oldBucket, bool initialRestore) {
     registerForRestoration(_selectedIndex, 'selected-index');
+    if (_navItems[_selectedIndex.value].page != AdvancedExamplePage.toolsChat) {
+      _initialToolsFixture = null;
+    }
   }
 
   @override
@@ -151,7 +159,12 @@ class _ShellState extends State<_Shell> with RestorationMixin {
                 title: Text(item.label),
                 selected: _selectedIndex.value == i,
                 onTap: () {
-                  setState(() => _selectedIndex.value = i);
+                  setState(() {
+                    _selectedIndex.value = i;
+                    if (item.page != AdvancedExamplePage.toolsChat) {
+                      _initialToolsFixture = null;
+                    }
+                  });
                   Navigator.pop(context);
                 },
               );
@@ -167,7 +180,7 @@ class _ShellState extends State<_Shell> with RestorationMixin {
     return switch (page) {
       AdvancedExamplePage.providerChat => const ProviderChatPage(),
       AdvancedExamplePage.toolsChat => ToolsChatPage(
-        fixture: widget.initialToolsFixture,
+        fixture: _initialToolsFixture,
       ),
       AdvancedExamplePage.imageGen => const ImageGenPage(),
       AdvancedExamplePage.multimodal => const MultimodalPage(),
@@ -211,7 +224,8 @@ AdvancedExamplePage? _initialPageFromUri() {
   };
 }
 
-ToolsChatFixture? _initialToolsFixtureFromUri() {
+ToolsChatFixture? _initialToolsFixtureFromUri(AdvancedExamplePage? page) {
+  if (page != null && page != AdvancedExamplePage.toolsChat) return null;
   final state = Uri.base.queryParameters['state'];
   return switch (state) {
     'normal' => ToolsChatFixture.normal,

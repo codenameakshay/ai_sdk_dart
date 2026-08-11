@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
-import 'package:ai_sdk_flutter_ui/src/widgets/scroll_bottom_policy.dart';
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:flutter/material.dart';
@@ -44,7 +43,7 @@ class ToolsChatPage extends StatefulWidget {
 class _ToolsChatPageState extends State<ToolsChatPage> {
   // extractReasoningMiddleware turns `<think>…</think>` spans into reasoning
   // parts, so the model's chain-of-thought shows up in the ReasoningView.
-  late final LanguageModelV3 _model = wrapLanguageModel(
+  late final LanguageModelV4 _model = wrapLanguageModel(
     model: OpenAIProvider(apiKey: openAiApiKey)('gpt-4.1-mini'),
     middleware: [extractReasoningMiddleware(tagName: 'think')],
   );
@@ -58,7 +57,7 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
   late bool _ownsScrollController;
   final List<ModelMessage> _history = [];
   final List<_Item> _items = [];
-  final List<LanguageModelV3SourcePart> _sources = [];
+  final List<LanguageModelV4SourcePart> _pendingSources = [];
   final StringBuffer _turnText = StringBuffer();
 
   _TextItem? _currentAssistant;
@@ -138,7 +137,7 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
     setState(() {
       _history.add(ModelMessage(role: ModelMessageRole.user, content: text));
       _items.add(_TextItem(ModelMessageRole.user, text));
-      _sources.clear();
+      _pendingSources.clear();
       _streaming = true;
       _currentAssistant = null;
       _currentReasoning = null;
@@ -181,6 +180,10 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
         final item = _currentAssistant ??= _push(
           _TextItem(ModelMessageRole.assistant, ''),
         );
+        if (_pendingSources.isNotEmpty) {
+          item.sources.addAll(_pendingSources);
+          _pendingSources.clear();
+        }
         item.text += delta;
         _bump();
       case StreamTextReasoningDeltaEvent(:final delta):
@@ -195,7 +198,7 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
         _currentAssistant = null;
         _push(
           _ToolItem(
-            LanguageModelV3ToolCallPart(
+            LanguageModelV4ToolCallPart(
               toolCallId: toolCallId,
               toolName: toolName,
               input: input,
@@ -212,7 +215,12 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
         }
         _bump();
       case StreamTextSourceEvent(:final source):
-        _sources.add(source);
+        final item = _currentAssistant;
+        if (item == null) {
+          _pendingSources.add(source);
+        } else {
+          item.sources.add(source);
+        }
         _bump();
       case StreamTextErrorEvent(:final error):
         _onError(error);
@@ -239,6 +247,14 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
     }
     if (!mounted) return;
     setState(() {
+      if (_currentAssistant != null && _pendingSources.isNotEmpty) {
+        _currentAssistant!.sources.addAll(_pendingSources);
+      } else if (_pendingSources.isNotEmpty) {
+        _items.add(
+          _SourcesItem(List<LanguageModelV4SourcePart>.from(_pendingSources)),
+        );
+      }
+      _pendingSources.clear();
       _streaming = false;
       _currentAssistant = null;
       _currentReasoning = null;
@@ -258,7 +274,7 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
     setState(() {
       _history.clear();
       _items.clear();
-      _sources.clear();
+      _pendingSources.clear();
       _turnText.clear();
       _currentAssistant = null;
       _currentReasoning = null;
@@ -339,9 +355,9 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
         ],
         panels: [
           ToolApprovalCard(
-            request: const LanguageModelV3ToolApprovalRequestPart(
+            request: const LanguageModelV4ToolApprovalRequestPart(
               approvalId: 'approval-delete',
-              toolCall: LanguageModelV3ToolCallPart(
+              toolCall: LanguageModelV4ToolCallPart(
                 toolCallId: 'call-delete',
                 toolName: 'deleteFile',
                 input: {'path': '/Users/me/reports/q3.pdf'},
@@ -384,12 +400,12 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
           ),
           _FixtureReasoning(text: 'Use the weather tool and cite the source.'),
           _FixtureTool(
-            call: LanguageModelV3ToolCallPart(
+            call: LanguageModelV4ToolCallPart(
               toolCallId: 'call-weather',
               toolName: 'getWeather',
               input: {'city': 'Tokyo'},
             ),
-            result: LanguageModelV3ToolResultPart(
+            result: LanguageModelV4ToolResultPart(
               toolCallId: 'call-weather',
               toolName: 'getWeather',
               output: ToolResultOutputText('Sunny, 22°C in Tokyo.'),
@@ -401,7 +417,7 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
           ),
         ],
         sources: const [
-          LanguageModelV3SourcePart(
+          LanguageModelV4SourcePart(
             id: 'source-weather',
             url: 'https://weather.example.com/tokyo',
             title: 'Example Weather Feed',
@@ -467,14 +483,7 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
                         horizontal: 16,
                         vertical: 12,
                       ),
-                      children: [
-                        for (final item in _items) _buildItem(item),
-                        if (_sources.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 12),
-                            child: SourceCitations(sources: _sources),
-                          ),
-                      ],
+                      children: [for (final item in _items) _buildItem(item)],
                     ),
                   ),
           ),
@@ -491,9 +500,20 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
 
   Widget _buildItem(_Item item) {
     return switch (item) {
-      _TextItem() => ChatMessageBubble(
-        message: ModelMessage(role: item.role, content: item.text),
-        isStreaming: _streaming && identical(item, _currentAssistant),
+      _TextItem() => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ChatMessageBubble(
+            message: ModelMessage(role: item.role, content: item.text),
+            isStreaming: _streaming && identical(item, _currentAssistant),
+          ),
+          if (item.role == ModelMessageRole.assistant &&
+              item.sources.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6, bottom: 6),
+              child: SourceCitations(sources: item.sources),
+            ),
+        ],
       ),
       _ReasoningItem() => Align(
         alignment: Alignment.centerLeft,
@@ -505,6 +525,10 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
         ),
       ),
       _ToolItem() => ToolCallCard(call: item.call, result: item.result),
+      _SourcesItem() => Padding(
+        padding: const EdgeInsets.only(top: 6, bottom: 6),
+        child: SourceCitations(sources: item.sources),
+      ),
     };
   }
 
@@ -581,6 +605,7 @@ class _TextItem extends _Item {
   _TextItem(this.role, this.text);
   final ModelMessageRole role;
   String text;
+  final List<LanguageModelV4SourcePart> sources = [];
 }
 
 class _ReasoningItem extends _Item {
@@ -590,8 +615,13 @@ class _ReasoningItem extends _Item {
 
 class _ToolItem extends _Item {
   _ToolItem(this.call);
-  final LanguageModelV3ToolCallPart call;
-  LanguageModelV3ToolResultPart? result;
+  final LanguageModelV4ToolCallPart call;
+  LanguageModelV4ToolResultPart? result;
+}
+
+class _SourcesItem extends _Item {
+  _SourcesItem(this.sources);
+  final List<LanguageModelV4SourcePart> sources;
 }
 
 class _EmptyState extends StatelessWidget {
@@ -639,8 +669,8 @@ class _FixtureReasoning extends _FixtureItem {
 class _FixtureTool extends _FixtureItem {
   const _FixtureTool({required this.call, this.result});
 
-  final LanguageModelV3ToolCallPart call;
-  final LanguageModelV3ToolResultPart? result;
+  final LanguageModelV4ToolCallPart call;
+  final LanguageModelV4ToolResultPart? result;
 }
 
 class _FixtureScaffold extends StatelessWidget {
@@ -654,7 +684,7 @@ class _FixtureScaffold extends StatelessWidget {
   final List<_FixtureItem> items;
   final Widget composer;
   final List<Widget> panels;
-  final List<LanguageModelV3SourcePart> sources;
+  final List<LanguageModelV4SourcePart> sources;
 
   @override
   Widget build(BuildContext context) {

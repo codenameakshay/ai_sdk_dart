@@ -508,7 +508,7 @@ make test
 make analyze
 ```
 
-Or run the pinned toolchain commands directly:
+Or run a smaller set of pinned toolchain smoke checks directly:
 
 ```sh
 fvm dart analyze .

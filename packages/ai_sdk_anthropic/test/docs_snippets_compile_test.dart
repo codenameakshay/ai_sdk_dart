@@ -35,14 +35,32 @@ void main() {
         model: anthropic('claude-opus-4-5'),
         prompt: 'Prove that sqrt(2) is irrational.',
         providerOptions: {
-          'anthropic': AnthropicThinkingOptions(
-            budgetTokens: 5000,
-          ).toMap(),
+          'anthropic': AnthropicThinkingOptions(budgetTokens: 5000).toMap(),
         },
       );
       print(result.text);
     }
 
-    expect([streaming, reasoningMiddleware, thinkingOptions], hasLength(3));
+    Future<void> defaultSettingsSnippet() async {
+      final model = wrapLanguageModel(
+        model: anthropic('claude-sonnet-4-5'),
+        middleware: defaultSettingsMiddleware(
+          temperature: 0.3,
+          maxOutputTokens: 512,
+        ),
+      );
+      final result = await generateText(
+        model: model,
+        prompt: 'Summarise the Dart language in three bullet points.',
+      );
+      print(result.text);
+    }
+
+    expect([
+      streaming,
+      reasoningMiddleware,
+      thinkingOptions,
+      defaultSettingsSnippet,
+    ], hasLength(4));
   });
 }

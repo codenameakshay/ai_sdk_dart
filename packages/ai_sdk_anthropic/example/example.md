@@ -136,7 +136,10 @@ print(result.output); // {capital: Paris, population: 68000000}
 ```dart
 final model = wrapLanguageModel(
   model: anthropic('claude-sonnet-4-5'),
-  middleware: defaultSettingsMiddleware(temperature: 0.3, maxTokens: 512),
+  middleware: defaultSettingsMiddleware(
+    temperature: 0.3,
+    maxOutputTokens: 512,
+  ),
 );
 
 final result = await generateText(

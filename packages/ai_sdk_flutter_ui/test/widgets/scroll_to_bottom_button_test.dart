@@ -16,7 +16,7 @@ Future<void> _tabUntilActivated(
     await tester.pump();
     if (activated()) return;
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pump();
+    await tester.pumpAndSettle();
   }
   fail('Unable to activate target after $maxTabs tabs');
 }

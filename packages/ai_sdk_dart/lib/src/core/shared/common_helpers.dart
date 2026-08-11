@@ -7,16 +7,16 @@ import '../../messages/model_message.dart';
 import '../../tools/tool.dart';
 
 @internal
-LanguageModelV3Message toLanguageModelMessage(ModelMessage message) {
-  return LanguageModelV3Message(
+LanguageModelV4Message toLanguageModelMessage(ModelMessage message) {
+  return LanguageModelV4Message(
     role: switch (message.role) {
-      ModelMessageRole.system => LanguageModelV3Role.system,
-      ModelMessageRole.user => LanguageModelV3Role.user,
-      ModelMessageRole.assistant => LanguageModelV3Role.assistant,
-      ModelMessageRole.tool => LanguageModelV3Role.tool,
+      ModelMessageRole.system => LanguageModelV4Role.system,
+      ModelMessageRole.user => LanguageModelV4Role.user,
+      ModelMessageRole.assistant => LanguageModelV4Role.assistant,
+      ModelMessageRole.tool => LanguageModelV4Role.tool,
     },
     content:
-        message.parts ?? [LanguageModelV3TextPart(text: message.content ?? '')],
+        message.parts ?? [LanguageModelV4TextPart(text: message.content ?? '')],
   );
 }
 
@@ -59,29 +59,59 @@ String stringifyToolOutput(Object? output) {
 }
 
 @internal
-LanguageModelV3Usage? sumUsage(Iterable<LanguageModelV3Usage?> usages) {
-  var input = 0;
-  var output = 0;
-  var total = 0;
-  var hasAny = false;
+LanguageModelV4Usage? sumUsage(Iterable<LanguageModelV4Usage?> usages) {
+  final inputTotals = <int>[];
+  final inputNoCache = <int>[];
+  final inputCacheRead = <int>[];
+  final inputCacheWrite = <int>[];
+  final outputTotals = <int>[];
+  final outputText = <int>[];
+  final outputReasoning = <int>[];
+  var hasReportedUsage = false;
 
   for (final usage in usages) {
-    if (usage == null) {
-      continue;
-    }
-    hasAny = true;
-    input += usage.inputTokens ?? 0;
-    output += usage.outputTokens ?? 0;
-    total += usage.totalTokens ?? 0;
+    if (usage == null) continue;
+    final input = usage.inputTokens;
+    final output = usage.outputTokens;
+    final values = [
+      input.total,
+      input.noCache,
+      input.cacheRead,
+      input.cacheWrite,
+      output.total,
+      output.text,
+      output.reasoning,
+    ];
+    if (usage.raw == null && values.every((value) => value == null)) continue;
+
+    hasReportedUsage = true;
+    if (input.total case final value?) inputTotals.add(value);
+    if (input.noCache case final value?) inputNoCache.add(value);
+    if (input.cacheRead case final value?) inputCacheRead.add(value);
+    if (input.cacheWrite case final value?) inputCacheWrite.add(value);
+    if (output.total case final value?) outputTotals.add(value);
+    if (output.text case final value?) outputText.add(value);
+    if (output.reasoning case final value?) outputReasoning.add(value);
   }
 
-  if (!hasAny) {
-    return null;
-  }
+  if (!hasReportedUsage) return null;
 
-  return LanguageModelV3Usage(
-    inputTokens: input == 0 ? null : input,
-    outputTokens: output == 0 ? null : output,
-    totalTokens: total == 0 ? null : total,
+  return LanguageModelV4Usage(
+    inputTokens: LanguageModelV4InputTokenUsage(
+      total: _sumReported(inputTotals),
+      noCache: _sumReported(inputNoCache),
+      cacheRead: _sumReported(inputCacheRead),
+      cacheWrite: _sumReported(inputCacheWrite),
+    ),
+    outputTokens: LanguageModelV4OutputTokenUsage(
+      total: _sumReported(outputTotals),
+      text: _sumReported(outputText),
+      reasoning: _sumReported(outputReasoning),
+    ),
   );
+}
+
+int? _sumReported(List<int> values) {
+  if (values.isEmpty) return null;
+  return values.fold<int>(0, (sum, value) => sum + value);
 }

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'cancellation.dart';
+import 'timeout_helpers.dart';
 import '../errors/ai_errors.dart';
 import '../tools/tool.dart';
 
@@ -53,7 +54,8 @@ void debugResetRetryHooksForTests() {
 
 Future<T> withRetry<T>({
   required int maxRetries,
-  required Duration? timeout,
+  required Duration? totalTimeout,
+  required Duration? stepTimeout,
   CancellationToken? abortSignal,
   required Future<T> Function(Duration? attemptTimeout) fn,
 }) async {
@@ -64,11 +66,15 @@ Future<T> withRetry<T>({
     throwIfCancelled(abortSignal);
 
     final attemptTimeout = _remainingTimeout(
-      totalTimeout: timeout,
+      totalTimeout: totalTimeout,
+      stepTimeout: stepTimeout,
       elapsed: _elapsedSinceStart(stopwatch),
     );
     if (retryCount > 0 && attemptTimeout == Duration.zero) {
-      throw TimeoutException('Retry budget exhausted.', timeout);
+      throw TimeoutException(
+        'Retry budget exhausted.',
+        minTimeout(totalTimeout, stepTimeout),
+      );
     }
     _retryHooks.onAttempt?.call(
       RetryAttemptObservation(
@@ -90,20 +96,24 @@ Future<T> withRetry<T>({
       }
 
       final remaining = _remainingTimeout(
-        totalTimeout: timeout,
+        totalTimeout: totalTimeout,
+        stepTimeout: stepTimeout,
         elapsed: _elapsedSinceStart(stopwatch),
       );
       if (remaining == Duration.zero) {
-        throw TimeoutException('Retry budget exhausted.', timeout);
+        throw TimeoutException(
+          'Retry budget exhausted.',
+          minTimeout(totalTimeout, stepTimeout),
+        );
       }
 
       final requestedDelay = _retryDelayFor(
         retryAttempt: retryCount + 1,
         error: error,
       );
-      final delay = timeout == null
+      final delay = remaining == null
           ? requestedDelay
-          : _minDuration(requestedDelay, remaining!);
+          : _minDuration(requestedDelay, remaining);
       if (delay > Duration.zero) {
         final cancelled = await _sleepWithCancellation(
           duration: delay,
@@ -187,12 +197,13 @@ Duration? _retryAfterDelay(Object error) {
 
 Duration? _remainingTimeout({
   required Duration? totalTimeout,
+  required Duration? stepTimeout,
   required Duration elapsed,
 }) {
-  if (totalTimeout == null) return null;
-
-  if (elapsed >= totalTimeout) return Duration.zero;
-  return totalTimeout - elapsed;
+  return minTimeout(
+    remainingTimeout(timeout: totalTimeout, elapsed: elapsed),
+    remainingTimeout(timeout: stepTimeout, elapsed: elapsed),
+  );
 }
 
 Duration _minDuration(Duration left, Duration right) {

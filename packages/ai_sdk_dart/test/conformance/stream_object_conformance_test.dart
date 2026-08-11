@@ -13,12 +13,12 @@ void main() {
 
     // Streams a JSON object character-by-character so partial parses occur.
     FakeStreamModel chunked(String json) {
-      final parts = <LanguageModelV3StreamPart>[
+      final parts = <LanguageModelV4StreamPart>[
         const StreamPartTextStart(id: 't1'),
         for (final ch in json.split(''))
           StreamPartTextDelta(id: 't1', delta: ch),
         const StreamPartTextEnd(id: 't1'),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
       ];
       return FakeStreamModel(parts);
     }
@@ -48,31 +48,33 @@ void main() {
       expect(text, '{"x":true}');
     });
 
-    test('patchStream emits replace ops consistent with the final object',
-        () async {
-      final model = chunked('{"a":1,"b":2}');
-      final result = await streamObject(
-        model: model,
-        schema: schema,
-        prompt: 'json',
-      );
+    test(
+      'patchStream emits replace ops consistent with the final object',
+      () async {
+        final model = chunked('{"a":1,"b":2}');
+        final result = await streamObject(
+          model: model,
+          schema: schema,
+          prompt: 'json',
+        );
 
-      final patches = await result.patchStream.toList();
-      expect(patches, isNotEmpty);
-      // The document is materialized via a full-document replace at the root.
-      final firstBatch = patches.first;
-      expect(firstBatch.first.op, 'replace');
-      expect(firstBatch.first.path, '');
-      // The patch stream is consistent with the completed object.
-      expect(await result.object, {'a': 1, 'b': 2});
-    });
+        final patches = await result.patchStream.toList();
+        expect(patches, isNotEmpty);
+        // The document is materialized via a full-document replace at the root.
+        final firstBatch = patches.first;
+        expect(firstBatch.first.op, 'replace');
+        expect(firstBatch.first.path, '');
+        // The patch stream is consistent with the completed object.
+        expect(await result.object, {'a': 1, 'b': 2});
+      },
+    );
 
     test('object future errors when no valid object is generated', () async {
       final model = FakeStreamModel([
         const StreamPartTextStart(id: 't1'),
         const StreamPartTextDelta(id: 't1', delta: 'not json'),
         const StreamPartTextEnd(id: 't1'),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
       ]);
       final result = await streamObject(
         model: model,
@@ -94,7 +96,7 @@ void main() {
         const StreamPartTextStart(id: 't1'),
         const StreamPartTextDelta(id: 't1', delta: '{"a":1}'),
         StreamPartError(error: StateError('boom')),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.error),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.error),
       ]);
       final result = await streamObject(
         model: model,
@@ -107,7 +109,7 @@ void main() {
       );
     });
 
-    test('parses responseMetadata from rawResponse envelope', () async {
+    test('parses typed response metadata from stream result', () async {
       final model = _MetadataStreamModel();
       final result = await streamObject(
         model: model,
@@ -150,107 +152,106 @@ void main() {
           ModelMessage(role: ModelMessageRole.tool, content: 't'),
         ],
       );
-      final roles =
-          model.lastOptions!.prompt.messages.map((m) => m.role.name).toList();
+      final roles = model.lastOptions!.prompt.messages
+          .map((m) => m.role.name)
+          .toList();
       expect(roles, ['system', 'user', 'assistant', 'tool']);
     });
 
-    test('timeout throws when the model is too slow to start streaming',
-        () async {
-      final model = _SlowStreamModel(const Duration(milliseconds: 200));
-      expect(
-        () => streamObject(
-          model: model,
-          schema: schema,
-          prompt: 'json',
-          timeout: const Duration(milliseconds: 10),
-        ),
-        throwsA(isA<Object>()),
-      );
-    });
+    test(
+      'timeout throws when the model is too slow to start streaming',
+      () async {
+        final model = _SlowStreamModel(const Duration(milliseconds: 200));
+        expect(
+          () => streamObject(
+            model: model,
+            schema: schema,
+            prompt: 'json',
+            timeout: const Duration(milliseconds: 10),
+          ),
+          throwsA(isA<Object>()),
+        );
+      },
+    );
   });
 }
 
-/// Stream model whose rawResponse carries responseMetadata but emits no
+/// Stream model whose typed response metadata emits no
 /// parseable object, exercising the metadata-extraction branch.
-class _MetadataStreamModel implements LanguageModelV3 {
+class _MetadataStreamModel extends LanguageModelV4 {
   @override
   String get provider => 'fake';
   @override
   String get modelId => 'meta-model';
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
-  ) async =>
-      LanguageModelV3GenerateResult(
-        content: const [],
-        finishReason: LanguageModelV3FinishReason.stop,
-      );
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
+  ) async => LanguageModelV4GenerateResult(
+    content: const [],
+    finishReason: LanguageModelV4FinishReason.stop,
+  );
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable([
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable([
         const StreamPartTextStart(id: 't1'),
         const StreamPartTextDelta(id: 't1', delta: 'garbage'),
         const StreamPartTextEnd(id: 't1'),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
       ]),
-      rawResponse: <Object?, Object?>{
-        'responseMetadata': {
-          'id': 'resp-1',
-          'modelId': 'm-1',
-          'timestamp': '2024-01-01T00:00:00Z',
-        },
-        'body': {'ok': true},
-        'requestBody': {'q': 'json'},
-      },
+      request: const LanguageModelV4RequestMetadata(body: {'q': 'json'}),
+      response: LanguageModelV4ResponseMetadata(
+        id: 'resp-1',
+        modelId: 'm-1',
+        timestamp: DateTime.parse('2024-01-01T00:00:00Z'),
+        body: const {'ok': true},
+      ),
     );
   }
 }
 
 /// Captures the last call options for inspection.
-class _CapturingStreamModel implements LanguageModelV3 {
-  LanguageModelV3CallOptions? lastOptions;
+class _CapturingStreamModel extends LanguageModelV4 {
+  LanguageModelV4CallOptions? lastOptions;
 
   @override
   String get provider => 'fake';
   @override
   String get modelId => 'capture-model';
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
-  ) async =>
-      LanguageModelV3GenerateResult(
-        content: const [],
-        finishReason: LanguageModelV3FinishReason.stop,
-      );
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
+  ) async => LanguageModelV4GenerateResult(
+    content: const [],
+    finishReason: LanguageModelV4FinishReason.stop,
+  );
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     lastOptions = options;
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable([
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable([
         const StreamPartTextStart(id: 't1'),
         const StreamPartTextDelta(id: 't1', delta: '{"a":1}'),
         const StreamPartTextEnd(id: 't1'),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
       ]),
     );
   }
 }
 
-class _SlowStreamModel implements LanguageModelV3 {
+class _SlowStreamModel extends LanguageModelV4 {
   _SlowStreamModel(this.delay);
   final Duration delay;
 
@@ -259,24 +260,23 @@ class _SlowStreamModel implements LanguageModelV3 {
   @override
   String get modelId => 'slow-stream-model';
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
-  ) async =>
-      LanguageModelV3GenerateResult(
-        content: const [],
-        finishReason: LanguageModelV3FinishReason.stop,
-      );
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
+  ) async => LanguageModelV4GenerateResult(
+    content: const [],
+    finishReason: LanguageModelV4FinishReason.stop,
+  );
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     await Future<void>.delayed(delay);
-    return LanguageModelV3StreamResult(
-      stream: const Stream<LanguageModelV3StreamPart>.empty(),
+    return LanguageModelV4StreamResult(
+      stream: const Stream<LanguageModelV4StreamPart>.empty(),
     );
   }
 }

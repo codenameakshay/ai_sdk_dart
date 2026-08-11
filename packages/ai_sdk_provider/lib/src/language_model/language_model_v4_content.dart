@@ -1,35 +1,35 @@
 import 'dart:typed_data';
 
-import 'language_model_v3_data_content.dart';
+import 'language_model_v4_data_content.dart';
 
 /// A part of a language model message content.
 ///
 /// Messages can have multi-modal content — text, images, files,
 /// tool calls, and tool results.
-sealed class LanguageModelV3ContentPart {
-  const LanguageModelV3ContentPart();
+sealed class LanguageModelV4ContentPart {
+  const LanguageModelV4ContentPart();
 }
 
 // ─── User / System content parts ─────────────────────────────────────────────
 
 /// A plain text content part.
-class LanguageModelV3TextPart extends LanguageModelV3ContentPart {
-  const LanguageModelV3TextPart({required this.text, this.providerOptions});
+class LanguageModelV4TextPart extends LanguageModelV4ContentPart {
+  const LanguageModelV4TextPart({required this.text, this.providerOptions});
 
   final String text;
   final Map<String, dynamic>? providerOptions;
 }
 
 /// An image content part.
-class LanguageModelV3ImagePart extends LanguageModelV3ContentPart {
-  const LanguageModelV3ImagePart({
+class LanguageModelV4ImagePart extends LanguageModelV4ContentPart {
+  const LanguageModelV4ImagePart({
     required this.image,
     this.mediaType,
     this.providerOptions,
   });
 
   /// The image data — bytes, base64 string, or URL.
-  final LanguageModelV3DataContent image;
+  final LanguageModelV4DataContent image;
 
   /// Optional IANA media type (e.g., 'image/png').
   final String? mediaType;
@@ -38,15 +38,15 @@ class LanguageModelV3ImagePart extends LanguageModelV3ContentPart {
 }
 
 /// A file content part.
-class LanguageModelV3FilePart extends LanguageModelV3ContentPart {
-  const LanguageModelV3FilePart({
+class LanguageModelV4FilePart extends LanguageModelV4ContentPart {
+  const LanguageModelV4FilePart({
     required this.data,
     required this.mediaType,
     this.filename,
     this.providerOptions,
   });
 
-  final LanguageModelV3DataContent data;
+  final LanguageModelV4DataContent data;
 
   /// IANA media type (e.g., 'application/pdf').
   final String mediaType;
@@ -58,8 +58,8 @@ class LanguageModelV3FilePart extends LanguageModelV3ContentPart {
 // ─── Assistant content parts ──────────────────────────────────────────────────
 
 /// A reasoning / chain-of-thought part from the assistant.
-class LanguageModelV3ReasoningPart extends LanguageModelV3ContentPart {
-  const LanguageModelV3ReasoningPart({
+class LanguageModelV4ReasoningPart extends LanguageModelV4ContentPart {
+  const LanguageModelV4ReasoningPart({
     required this.text,
     this.signature,
     this.providerOptions,
@@ -73,8 +73,8 @@ class LanguageModelV3ReasoningPart extends LanguageModelV3ContentPart {
 }
 
 /// A redacted reasoning part (provider hides the content).
-class LanguageModelV3RedactedReasoningPart extends LanguageModelV3ContentPart {
-  const LanguageModelV3RedactedReasoningPart({
+class LanguageModelV4RedactedReasoningPart extends LanguageModelV4ContentPart {
+  const LanguageModelV4RedactedReasoningPart({
     required this.data,
     this.providerOptions,
   });
@@ -84,8 +84,8 @@ class LanguageModelV3RedactedReasoningPart extends LanguageModelV3ContentPart {
 }
 
 /// A tool call initiated by the assistant.
-class LanguageModelV3ToolCallPart extends LanguageModelV3ContentPart {
-  const LanguageModelV3ToolCallPart({
+class LanguageModelV4ToolCallPart extends LanguageModelV4ContentPart {
+  const LanguageModelV4ToolCallPart({
     required this.toolCallId,
     required this.toolName,
     required this.input,
@@ -102,39 +102,39 @@ class LanguageModelV3ToolCallPart extends LanguageModelV3ContentPart {
 }
 
 /// A tool execution approval request (needsApproval tools).
-class LanguageModelV3ToolApprovalRequestPart
-    extends LanguageModelV3ContentPart {
-  const LanguageModelV3ToolApprovalRequestPart({
+class LanguageModelV4ToolApprovalRequestPart
+    extends LanguageModelV4ContentPart {
+  const LanguageModelV4ToolApprovalRequestPart({
     required this.approvalId,
     required this.toolCall,
   });
 
   final String approvalId;
-  final LanguageModelV3ToolCallPart toolCall;
+  final LanguageModelV4ToolCallPart toolCall;
 }
 
 // ─── Tool result content parts ────────────────────────────────────────────────
 
 /// The result of a tool execution.
-sealed class LanguageModelV3ToolResultOutput {
-  const LanguageModelV3ToolResultOutput();
+sealed class LanguageModelV4ToolResultOutput {
+  const LanguageModelV4ToolResultOutput();
 }
 
 /// A text tool result.
-class ToolResultOutputText extends LanguageModelV3ToolResultOutput {
+class ToolResultOutputText extends LanguageModelV4ToolResultOutput {
   const ToolResultOutputText(this.text);
   final String text;
 }
 
 /// A multi-part content tool result (for rich media outputs).
-class ToolResultOutputContent extends LanguageModelV3ToolResultOutput {
+class ToolResultOutputContent extends LanguageModelV4ToolResultOutput {
   const ToolResultOutputContent(this.parts);
-  final List<LanguageModelV3ContentPart> parts;
+  final List<LanguageModelV4ContentPart> parts;
 }
 
 /// A tool result message part.
-class LanguageModelV3ToolResultPart extends LanguageModelV3ContentPart {
-  const LanguageModelV3ToolResultPart({
+class LanguageModelV4ToolResultPart extends LanguageModelV4ContentPart {
+  const LanguageModelV4ToolResultPart({
     required this.toolCallId,
     required this.toolName,
     required this.output,
@@ -144,14 +144,14 @@ class LanguageModelV3ToolResultPart extends LanguageModelV3ContentPart {
 
   final String toolCallId;
   final String toolName;
-  final LanguageModelV3ToolResultOutput output;
+  final LanguageModelV4ToolResultOutput output;
   final bool isError;
   final Map<String, dynamic>? providerOptions;
 }
 
 /// A source reference (returned by web-search / RAG models).
-class LanguageModelV3SourcePart extends LanguageModelV3ContentPart {
-  const LanguageModelV3SourcePart({
+class LanguageModelV4SourcePart extends LanguageModelV4ContentPart {
+  const LanguageModelV4SourcePart({
     required this.id,
     required this.url,
     this.title,
@@ -165,8 +165,8 @@ class LanguageModelV3SourcePart extends LanguageModelV3ContentPart {
 }
 
 /// A tool approval response (user approved or denied a tool call).
-class LanguageModelV3ToolApprovalResponse extends LanguageModelV3ContentPart {
-  const LanguageModelV3ToolApprovalResponse({
+class LanguageModelV4ToolApprovalResponse extends LanguageModelV4ContentPart {
+  const LanguageModelV4ToolApprovalResponse({
     required this.approvalId,
     required this.approved,
     this.reason,

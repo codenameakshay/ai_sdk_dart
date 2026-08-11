@@ -115,30 +115,30 @@ class ChatController extends ChangeNotifier {
   String _reasoningText = '';
 
   /// Token usage reported by the most recent completed turn, if any.
-  LanguageModelV3Usage? get lastUsage => _lastUsage;
-  LanguageModelV3Usage? _lastUsage;
+  LanguageModelV4Usage? get lastUsage => _lastUsage;
+  LanguageModelV4Usage? _lastUsage;
 
   /// Source citations gathered from the most recent completed turn.
-  List<LanguageModelV3SourcePart> get lastSources =>
+  List<LanguageModelV4SourcePart> get lastSources =>
       List.unmodifiable(_lastSources);
-  List<LanguageModelV3SourcePart> _lastSources = const [];
+  List<LanguageModelV4SourcePart> _lastSources = const [];
 
   /// Tool calls made during the most recent completed turn.
-  List<LanguageModelV3ToolCallPart> get lastToolCalls =>
+  List<LanguageModelV4ToolCallPart> get lastToolCalls =>
       List.unmodifiable(_lastToolCalls);
-  List<LanguageModelV3ToolCallPart> _lastToolCalls = const [];
+  List<LanguageModelV4ToolCallPart> _lastToolCalls = const [];
 
   /// Tool results produced during the most recent completed turn.
-  List<LanguageModelV3ToolResultPart> get lastToolResults =>
+  List<LanguageModelV4ToolResultPart> get lastToolResults =>
       List.unmodifiable(_lastToolResults);
-  List<LanguageModelV3ToolResultPart> _lastToolResults = const [];
+  List<LanguageModelV4ToolResultPart> _lastToolResults = const [];
 
   /// Tool-approval requests awaiting a decision. Non-empty only while
   /// [status] is [ChatStatus.awaitingApproval]. Render each with
   /// `ToolApprovalCard` and answer via [addToolApprovalResponse].
-  List<LanguageModelV3ToolApprovalRequestPart> get pendingApprovalRequests =>
+  List<LanguageModelV4ToolApprovalRequestPart> get pendingApprovalRequests =>
       List.unmodifiable(_pendingApprovalRequests);
-  List<LanguageModelV3ToolApprovalRequestPart> _pendingApprovalRequests =
+  List<LanguageModelV4ToolApprovalRequestPart> _pendingApprovalRequests =
       const [];
 
   final StringBuffer _streamBuffer = StringBuffer();
@@ -151,7 +151,7 @@ class ChatController extends ChangeNotifier {
   bool _isDisposed = false;
 
   // Pending tool-approval responses indexed by approvalId.
-  final Map<String, LanguageModelV3ToolApprovalResponse> _pendingApprovals = {};
+  final Map<String, LanguageModelV4ToolApprovalResponse> _pendingApprovals = {};
 
   bool _isCurrentRequest(int requestId) =>
       !_isDisposed && _activeRequestId == requestId;
@@ -282,7 +282,7 @@ class ChatController extends ChangeNotifier {
     required bool approved,
     String? reason,
   }) {
-    _pendingApprovals[approvalId] = LanguageModelV3ToolApprovalResponse(
+    _pendingApprovals[approvalId] = LanguageModelV4ToolApprovalResponse(
       approvalId: approvalId,
       approved: approved,
       reason: reason,
@@ -302,7 +302,7 @@ class ChatController extends ChangeNotifier {
   }
 
   /// Returns any pending tool-approval responses and clears the buffer.
-  List<LanguageModelV3ToolApprovalResponse> _consumeApprovals() {
+  List<LanguageModelV4ToolApprovalResponse> _consumeApprovals() {
     if (_pendingApprovals.isEmpty) return const [];
     final result = _pendingApprovals.values.toList();
     _pendingApprovals.clear();
@@ -402,11 +402,11 @@ class ChatController extends ChangeNotifier {
       return;
     }
 
-    var approvals = const <LanguageModelV3ToolApprovalRequestPart>[];
-    LanguageModelV3Usage? usage;
-    List<LanguageModelV3SourcePart> sources = const [];
-    List<LanguageModelV3ToolCallPart> toolCalls = const [];
-    List<LanguageModelV3ToolResultPart> toolResults = const [];
+    var approvals = const <LanguageModelV4ToolApprovalRequestPart>[];
+    LanguageModelV4Usage? usage;
+    List<LanguageModelV4SourcePart> sources = const [];
+    List<LanguageModelV4ToolCallPart> toolCalls = const [];
+    List<LanguageModelV4ToolResultPart> toolResults = const [];
     String reasoningText = '';
     try {
       final steps = await streamResult.steps;
@@ -462,14 +462,14 @@ class ChatController extends ChangeNotifier {
     onFinish?.call(assistantMessage);
   }
 
-  List<LanguageModelV3SourcePart> _mergeSources(
-    List<LanguageModelV3SourcePart> previous,
-    List<LanguageModelV3SourcePart> current,
+  List<LanguageModelV4SourcePart> _mergeSources(
+    List<LanguageModelV4SourcePart> previous,
+    List<LanguageModelV4SourcePart> current,
   ) {
     if (previous.isEmpty) return current;
     if (current.isEmpty) return previous;
 
-    final merged = <String, LanguageModelV3SourcePart>{};
+    final merged = <String, LanguageModelV4SourcePart>{};
     for (final source in previous) {
       merged['${source.id}|${source.url}'] = source;
     }
@@ -479,14 +479,14 @@ class ChatController extends ChangeNotifier {
     return merged.values.toList(growable: false);
   }
 
-  List<LanguageModelV3ToolCallPart> _mergeToolCalls(
-    List<LanguageModelV3ToolCallPart> previous,
-    List<LanguageModelV3ToolCallPart> current,
+  List<LanguageModelV4ToolCallPart> _mergeToolCalls(
+    List<LanguageModelV4ToolCallPart> previous,
+    List<LanguageModelV4ToolCallPart> current,
   ) {
     if (previous.isEmpty) return current;
     if (current.isEmpty) return previous;
 
-    final merged = <String, LanguageModelV3ToolCallPart>{};
+    final merged = <String, LanguageModelV4ToolCallPart>{};
     for (final call in previous) {
       merged[call.toolCallId] = call;
     }
@@ -496,14 +496,14 @@ class ChatController extends ChangeNotifier {
     return merged.values.toList(growable: false);
   }
 
-  List<LanguageModelV3ToolResultPart> _mergeToolResults(
-    List<LanguageModelV3ToolResultPart> previous,
-    List<LanguageModelV3ToolResultPart> current,
+  List<LanguageModelV4ToolResultPart> _mergeToolResults(
+    List<LanguageModelV4ToolResultPart> previous,
+    List<LanguageModelV4ToolResultPart> current,
   ) {
     if (previous.isEmpty) return current;
     if (current.isEmpty) return previous;
 
-    final merged = <String, LanguageModelV3ToolResultPart>{};
+    final merged = <String, LanguageModelV4ToolResultPart>{};
     for (final result in previous) {
       merged[result.toolCallId] = result;
     }

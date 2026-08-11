@@ -16,14 +16,14 @@ void main() {
         final message = ModelMessage.parts(
           role: ModelMessageRole.assistant,
           parts: const [
-            LanguageModelV3ReasoningPart(text: 'thinking hard'),
-            LanguageModelV3TextPart(text: 'Here is the answer'),
-            LanguageModelV3ToolCallPart(
+            LanguageModelV4ReasoningPart(text: 'thinking hard'),
+            LanguageModelV4TextPart(text: 'Here is the answer'),
+            LanguageModelV4ToolCallPart(
               toolCallId: 'c1',
               toolName: 'search',
               input: {'q': 'flutter'},
             ),
-            LanguageModelV3SourcePart(
+            LanguageModelV4SourcePart(
               id: 's1',
               url: 'https://example.com',
               title: 'Example',
@@ -83,7 +83,7 @@ void main() {
       final message = ModelMessage.parts(
         role: ModelMessageRole.assistant,
         parts: const [
-          LanguageModelV3ToolCallPart(
+          LanguageModelV4ToolCallPart(
             toolCallId: 'c1',
             toolName: 'search',
             input: {'q': 'flutter'},
@@ -96,7 +96,7 @@ void main() {
           AssistantMessageView(
             message: message,
             toolResults: const [
-              LanguageModelV3ToolResultPart(
+              LanguageModelV4ToolResultPart(
                 toolCallId: 'c1',
                 toolName: 'search',
                 output: ToolResultOutputText('found it'),
@@ -117,9 +117,9 @@ void main() {
       final message = ModelMessage.parts(
         role: ModelMessageRole.assistant,
         parts: const [
-          LanguageModelV3ToolApprovalRequestPart(
+          LanguageModelV4ToolApprovalRequestPart(
             approvalId: 'approval_c1',
-            toolCall: LanguageModelV3ToolCallPart(
+            toolCall: LanguageModelV4ToolCallPart(
               toolCallId: 'c1',
               toolName: 'deleteFile',
               input: {'path': '/x'},
@@ -163,23 +163,23 @@ void main() {
       final message = ModelMessage.parts(
         role: ModelMessageRole.assistant,
         parts: [
-          LanguageModelV3ImagePart(
+          LanguageModelV4ImagePart(
             image: DataContentUrl(Uri.parse('https://example.com/a.png')),
           ),
-          LanguageModelV3FilePart(
+          LanguageModelV4FilePart(
             data: DataContentUrl(Uri.parse('https://example.com/f.pdf')),
             mediaType: 'application/pdf',
             filename: 'paper.pdf',
           ),
-          LanguageModelV3RedactedReasoningPart(
+          LanguageModelV4RedactedReasoningPart(
             data: Uint8List.fromList(const [1, 2, 3]),
           ),
-          const LanguageModelV3ToolResultPart(
+          const LanguageModelV4ToolResultPart(
             toolCallId: 'c1',
             toolName: 'x',
             output: ToolResultOutputText('y'),
           ),
-          const LanguageModelV3ToolApprovalResponse(
+          const LanguageModelV4ToolApprovalResponse(
             approvalId: 'a1',
             approved: true,
           ),
@@ -207,9 +207,9 @@ void main() {
       final message = ModelMessage.parts(
         role: ModelMessageRole.assistant,
         parts: const [
-          LanguageModelV3ToolApprovalRequestPart(
+          LanguageModelV4ToolApprovalRequestPart(
             approvalId: 'a1',
-            toolCall: LanguageModelV3ToolCallPart(
+            toolCall: LanguageModelV4ToolCallPart(
               toolCallId: 'c1',
               toolName: 'doThing',
               input: {'a': 1},

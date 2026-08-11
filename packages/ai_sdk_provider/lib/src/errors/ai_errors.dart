@@ -1,7 +1,7 @@
 import 'dart:convert';
 
-import '../language_model/language_model_v3_generate_result.dart';
-import '../language_model/language_model_v3_usage.dart';
+import '../language_model/language_model_v4_generate_result.dart';
+import '../language_model/language_model_v4_usage.dart';
 
 /// Base class for all AI SDK errors.
 sealed class AiSdkError implements Exception {
@@ -192,8 +192,8 @@ class AiNoObjectGeneratedError extends AiSdkError {
   }) : super(message);
 
   final String text;
-  final LanguageModelV3ResponseMetadata? response;
-  final LanguageModelV3Usage? usage;
+  final LanguageModelV4ResponseMetadata? response;
+  final LanguageModelV4Usage? usage;
   final Object? cause;
 
   static bool isInstance(Object error) => error is AiNoObjectGeneratedError;

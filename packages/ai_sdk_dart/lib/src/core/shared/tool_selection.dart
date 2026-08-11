@@ -11,7 +11,7 @@ class ResolvedToolSelection {
   });
 
   final ToolSet exposedTools;
-  final LanguageModelV3ToolChoice? toolChoice;
+  final LanguageModelV4ToolChoice? toolChoice;
 }
 
 @internal
@@ -33,7 +33,7 @@ ToolSet selectActiveTools(ToolSet tools, List<String>? activeToolNames) {
 @internal
 ResolvedToolSelection resolveToolSelection({
   required ToolSet tools,
-  required LanguageModelV3ToolChoice? toolChoice,
+  required LanguageModelV4ToolChoice? toolChoice,
 }) {
   final choice = toolChoice;
   if (choice == null || choice is ToolChoiceAuto) {
@@ -74,9 +74,9 @@ ResolvedToolSelection resolveToolSelection({
 
 @internal
 void validateToolChoiceForCalls({
-  required Iterable<LanguageModelV3ToolCallPart> toolCalls,
+  required Iterable<LanguageModelV4ToolCallPart> toolCalls,
   required ToolSet tools,
-  required LanguageModelV3ToolChoice? toolChoice,
+  required LanguageModelV4ToolChoice? toolChoice,
   required int stepNumber,
 }) {
   final calls = toolCalls.toList(growable: false);

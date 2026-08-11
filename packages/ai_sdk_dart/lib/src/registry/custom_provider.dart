@@ -24,20 +24,20 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 /// ```
 class CustomProvider {
   const CustomProvider._({
-    required Map<String, LanguageModelV3> languageModels,
+    required Map<String, LanguageModelV4> languageModels,
     required Map<String, EmbeddingModelV2<String>> embeddingModels,
     required Map<String, ImageModelV3> imageModels,
     required Map<String, SpeechModelV1> speechModels,
     required Map<String, TranscriptionModelV1> transcriptionModels,
     required _ProviderFallback? fallback,
-  })  : _languageModels = languageModels,
-        _embeddingModels = embeddingModels,
-        _imageModels = imageModels,
-        _speechModels = speechModels,
-        _transcriptionModels = transcriptionModels,
-        _fallback = fallback;
+  }) : _languageModels = languageModels,
+       _embeddingModels = embeddingModels,
+       _imageModels = imageModels,
+       _speechModels = speechModels,
+       _transcriptionModels = transcriptionModels,
+       _fallback = fallback;
 
-  final Map<String, LanguageModelV3> _languageModels;
+  final Map<String, LanguageModelV4> _languageModels;
   final Map<String, EmbeddingModelV2<String>> _embeddingModels;
   final Map<String, ImageModelV3> _imageModels;
   final Map<String, SpeechModelV1> _speechModels;
@@ -48,7 +48,7 @@ class CustomProvider {
   ///
   /// If not found in this provider's map, delegates to the fallback.
   /// Throws [ArgumentError] when neither map nor fallback knows the id.
-  LanguageModelV3 languageModel(String modelId) {
+  LanguageModelV4 languageModel(String modelId) {
     if (_languageModels.containsKey(modelId)) {
       return _languageModels[modelId]!;
     }
@@ -123,7 +123,7 @@ class CustomProvider {
 /// Implement this to delegate unknown model IDs to another provider.
 abstract interface class _ProviderFallback {
   bool supportsLanguageModel(String modelId);
-  LanguageModelV3 languageModel(String modelId);
+  LanguageModelV4 languageModel(String modelId);
 
   bool supportsEmbeddingModel(String modelId);
   EmbeddingModelV2<String> textEmbeddingModel(String modelId);
@@ -148,7 +148,7 @@ class _FunctionFallback implements _ProviderFallback {
     this.transcriptionModelFactory,
   });
 
-  final LanguageModelV3 Function(String)? languageModelFactory;
+  final LanguageModelV4 Function(String)? languageModelFactory;
   final EmbeddingModelV2<String> Function(String)? embeddingModelFactory;
   final ImageModelV3 Function(String)? imageModelFactory;
   final SpeechModelV1 Function(String)? speechModelFactory;
@@ -157,7 +157,7 @@ class _FunctionFallback implements _ProviderFallback {
   @override
   bool supportsLanguageModel(String id) => languageModelFactory != null;
   @override
-  LanguageModelV3 languageModel(String id) => languageModelFactory!(id);
+  LanguageModelV4 languageModel(String id) => languageModelFactory!(id);
 
   @override
   bool supportsEmbeddingModel(String id) => embeddingModelFactory != null;
@@ -188,7 +188,7 @@ class _FunctionFallback implements _ProviderFallback {
 /// Mirrors `customProvider()` from the JS AI SDK v6.
 ///
 /// Parameters:
-/// - [languageModels] — map of model ID → [LanguageModelV3] instance.
+/// - [languageModels] — map of model ID → [LanguageModelV4] instance.
 /// - [embeddingModels] — map of model ID → [EmbeddingModelV2] instance.
 /// - [imageModels] — map of model ID → [ImageModelV3] instance.
 /// - [speechModels] — map of model ID → [SpeechModelV1] instance.
@@ -197,18 +197,19 @@ class _FunctionFallback implements _ProviderFallback {
 /// - [fallbackEmbeddingModel] — factory to resolve unknown embedding model IDs.
 /// - [fallbackImageModel] — factory to resolve unknown image model IDs.
 CustomProvider customProvider({
-  Map<String, LanguageModelV3>? languageModels,
+  Map<String, LanguageModelV4>? languageModels,
   Map<String, EmbeddingModelV2<String>>? embeddingModels,
   Map<String, ImageModelV3>? imageModels,
   Map<String, SpeechModelV1>? speechModels,
   Map<String, TranscriptionModelV1>? transcriptionModels,
-  LanguageModelV3 Function(String modelId)? fallbackLanguageModel,
+  LanguageModelV4 Function(String modelId)? fallbackLanguageModel,
   EmbeddingModelV2<String> Function(String modelId)? fallbackEmbeddingModel,
   ImageModelV3 Function(String modelId)? fallbackImageModel,
   SpeechModelV1 Function(String modelId)? fallbackSpeechModel,
   TranscriptionModelV1 Function(String modelId)? fallbackTranscriptionModel,
 }) {
-  final hasFallback = fallbackLanguageModel != null ||
+  final hasFallback =
+      fallbackLanguageModel != null ||
       fallbackEmbeddingModel != null ||
       fallbackImageModel != null ||
       fallbackSpeechModel != null ||

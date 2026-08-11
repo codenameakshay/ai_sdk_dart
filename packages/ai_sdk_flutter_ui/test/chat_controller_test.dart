@@ -272,10 +272,9 @@ void main() {
   group('ChatController surfacing', () {
     test('captures the last usage after a turn', () async {
       final controller = ChatController();
-      const usage = LanguageModelV3Usage(
-        inputTokens: 7,
-        outputTokens: 11,
-        totalTokens: 18,
+      const usage = LanguageModelV4Usage(
+        inputTokens: LanguageModelV4InputTokenUsage(total: 7),
+        outputTokens: LanguageModelV4OutputTokenUsage(total: 11),
       );
 
       await controller.sendMessage(
@@ -284,7 +283,8 @@ void main() {
       );
       await pumpUntil(() => controller.status == ChatStatus.ready);
 
-      expect(controller.lastUsage?.totalTokens, 18);
+      expect(controller.lastUsage?.inputTokens.total, 7);
+      expect(controller.lastUsage?.outputTokens.total, 11);
       controller.dispose();
     });
 
@@ -327,22 +327,22 @@ void main() {
       () async {
         final controller = ChatController();
         final agent = RecordingStreamAgent();
-        const source = LanguageModelV3SourcePart(
+        const source = LanguageModelV4SourcePart(
           id: 'source-1',
           url: 'https://example.com/weather',
           title: 'Weather source',
         );
-        const call = LanguageModelV3ToolCallPart(
+        const call = LanguageModelV4ToolCallPart(
           toolCallId: 'c1',
           toolName: 'deleteFile',
           input: {'path': '/x'},
         );
-        const result = LanguageModelV3ToolResultPart(
+        const result = LanguageModelV4ToolResultPart(
           toolCallId: 'c1',
           toolName: 'deleteFile',
           output: ToolResultOutputText('done'),
         );
-        const request = LanguageModelV3ToolApprovalRequestPart(
+        const request = LanguageModelV4ToolApprovalRequestPart(
           approvalId: 'approval_c1',
           toolCall: call,
         );
@@ -358,12 +358,12 @@ void main() {
               toolCalls: [call],
               toolResults: [result],
               toolApprovalRequests: [request],
-              response: LanguageModelV3GenerateResult(
+              response: LanguageModelV4GenerateResult(
                 content: [call, source],
-                finishReason: LanguageModelV3FinishReason.toolCalls,
+                finishReason: LanguageModelV4FinishReason.toolCalls,
               ),
               text: '',
-              finishReason: LanguageModelV3FinishReason.toolCalls,
+              finishReason: LanguageModelV4FinishReason.toolCalls,
             ),
           ],
           sources: const [source],
@@ -387,6 +387,91 @@ void main() {
         expect(controller.lastToolCalls, [call]);
         expect(controller.lastToolResults, [result]);
         expect(controller.lastSources, [source]);
+        controller.dispose();
+      },
+    );
+
+    test(
+      'approval resume merges prior and resumed metadata without duplicates',
+      () async {
+        final controller = ChatController();
+        final agent = RecordingStreamAgent();
+        const firstSource = LanguageModelV4SourcePart(
+          id: 'source-1',
+          url: 'https://example.com/one',
+          title: 'First source',
+        );
+        const secondSource = LanguageModelV4SourcePart(
+          id: 'source-2',
+          url: 'https://example.com/two',
+          title: 'Second source',
+        );
+        const firstCall = LanguageModelV4ToolCallPart(
+          toolCallId: 'c1',
+          toolName: 'toolOne',
+          input: {'step': 1},
+        );
+        const secondCall = LanguageModelV4ToolCallPart(
+          toolCallId: 'c2',
+          toolName: 'toolTwo',
+          input: {'step': 2},
+        );
+        const firstResult = LanguageModelV4ToolResultPart(
+          toolCallId: 'c1',
+          toolName: 'toolOne',
+          output: ToolResultOutputText('first'),
+        );
+        const secondResult = LanguageModelV4ToolResultPart(
+          toolCallId: 'c2',
+          toolName: 'toolTwo',
+          output: ToolResultOutputText('second'),
+        );
+        const request = LanguageModelV4ToolApprovalRequestPart(
+          approvalId: 'approval_c1',
+          toolCall: firstCall,
+        );
+
+        unawaited(controller.sendMessage(agent: agent, text: 'go'));
+        await pumpUntil(() => agent.invocations.length == 1);
+        await agent.invocations.first.finish(
+          finalText: '',
+          steps: const [
+            GenerateTextStep(
+              stepNumber: 1,
+              content: [firstCall, firstSource],
+              toolCalls: [firstCall],
+              toolResults: [firstResult],
+              toolApprovalRequests: [request],
+              response: LanguageModelV4GenerateResult(
+                content: [firstCall, firstSource],
+                finishReason: LanguageModelV4FinishReason.toolCalls,
+              ),
+              text: '',
+              finishReason: LanguageModelV4FinishReason.toolCalls,
+            ),
+          ],
+          sources: const [firstSource],
+          toolCalls: const [firstCall],
+          toolResults: const [firstResult],
+        );
+        await pumpUntil(() => controller.status == ChatStatus.awaitingApproval);
+
+        controller.addToolApprovalResponse(
+          approvalId: 'approval_c1',
+          approved: true,
+        );
+        await pumpUntil(() => agent.invocations.length == 2);
+        await agent.invocations.last.finish(
+          finalText: 'merged answer',
+          sources: const [secondSource],
+          toolCalls: const [secondCall],
+          toolResults: const [secondResult],
+        );
+        await pumpUntil(() => controller.status == ChatStatus.ready);
+
+        expect(controller.lastSources, [firstSource, secondSource]);
+        expect(controller.lastToolCalls, [firstCall, secondCall]);
+        expect(controller.lastToolResults, [firstResult, secondResult]);
         controller.dispose();
       },
     );
@@ -495,6 +580,40 @@ void main() {
       expect(controller.error, isNull);
       controller.dispose();
     });
+
+    test(
+      'forwards full-stream subscription errors to controller error state',
+      () async {
+        final agent = RecordingStreamAgent();
+        final controller = ChatController();
+
+        unawaited(controller.sendMessage(agent: agent, text: 'go'));
+        await pumpUntil(() => agent.invocations.length == 1);
+        await pumpUntil(() => controller.status == ChatStatus.streaming);
+        final invocation = agent.invocations.single;
+
+        invocation.emitFullStreamFailure(StateError('full stream failed'));
+        await pumpUntil(() => controller.status == ChatStatus.error);
+
+        expect(controller.error, isA<StateError>());
+        controller.dispose();
+      },
+    );
+
+    test(
+      'forwards addListener/removeListener/hasListeners to the root listenable',
+      () {
+        final controller = ChatController();
+        void listener() {}
+
+        expect(controller.hasListeners, isFalse);
+        controller.addListener(listener);
+        expect(controller.hasListeners, isTrue);
+        controller.removeListener(listener);
+        expect(controller.hasListeners, isFalse);
+        controller.dispose();
+      },
+    );
 
     test('streaming deltas coalesce per frame and approval-free completion '
         'flushes without duplicate notifications', () async {

@@ -17,22 +17,22 @@ void main() {
       final model = provider('command-r-plus');
       expect(model.provider, 'cohere');
       expect(model.modelId, 'command-r-plus');
-      expect(model.specificationVersion, 'v3');
+      expect(model.specificationVersion, 'v4');
     });
 
     test('creates embedding model with correct provider/spec', () {
       final provider = CohereProvider(apiKey: 'test-key');
-      final model = provider.embedding('embed-english-v3.0');
+      final model = provider.embedding('embed-english-v4.0');
       expect(model.provider, 'cohere');
-      expect(model.modelId, 'embed-english-v3.0');
+      expect(model.modelId, 'embed-english-v4.0');
       expect(model.specificationVersion, 'v2');
     });
 
     test('creates rerank model with correct provider/spec', () {
       final provider = CohereProvider(apiKey: 'test-key');
-      final model = provider.rerank('rerank-english-v3.0');
+      final model = provider.rerank('rerank-english-v4.0');
       expect(model.provider, 'cohere');
-      expect(model.modelId, 'rerank-english-v3.0');
+      expect(model.modelId, 'rerank-english-v4.0');
       expect(model.specificationVersion, 'v1');
     });
 
@@ -54,7 +54,7 @@ void main() {
   group('RerankModelV1 interface', () {
     test('implements RerankModelV1', () {
       final provider = CohereProvider(apiKey: 'key');
-      final model = provider.rerank('rerank-english-v3.0');
+      final model = provider.rerank('rerank-english-v4.0');
       expect(model, isA<RerankModelV1>());
     });
   });
@@ -62,16 +62,16 @@ void main() {
   group('EmbeddingModelV2 interface', () {
     test('implements EmbeddingModelV2<String>', () {
       final provider = CohereProvider(apiKey: 'key');
-      final model = provider.embedding('embed-english-v3.0');
+      final model = provider.embedding('embed-english-v4.0');
       expect(model, isA<EmbeddingModelV2<String>>());
     });
   });
 
-  group('LanguageModelV3 interface', () {
-    test('implements LanguageModelV3', () {
+  group('LanguageModelV4 interface', () {
+    test('extends LanguageModelV4', () {
       final provider = CohereProvider(apiKey: 'key');
       final model = provider('command-r-plus');
-      expect(model, isA<LanguageModelV3>());
+      expect(model, isA<LanguageModelV4>());
     });
   });
 
@@ -122,14 +122,14 @@ void main() {
         ).call('command-r-plus');
 
         final result = await model.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
               messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
                   content: [
-                    LanguageModelV3TextPart(text: 'describe this'),
-                    LanguageModelV3ImagePart(
+                    LanguageModelV4TextPart(text: 'describe this'),
+                    LanguageModelV4ImagePart(
                       image: DataContentBytes(
                         Uint8List.fromList(utf8.encode('img')),
                       ),
@@ -140,7 +140,7 @@ void main() {
               ],
             ),
             tools: const [
-              LanguageModelV3FunctionTool(
+              LanguageModelV4FunctionTool(
                 name: 'weather',
                 description: 'Get the weather',
                 inputSchema: {'type': 'object'},
@@ -172,14 +172,14 @@ void main() {
         );
 
         // Tool calls parsed out of the response.
-        expect(result.finishReason, LanguageModelV3FinishReason.toolCalls);
+        expect(result.finishReason, LanguageModelV4FinishReason.toolCalls);
         final toolCall = result.content
-            .whereType<LanguageModelV3ToolCallPart>()
+            .whereType<LanguageModelV4ToolCallPart>()
             .single;
         expect(toolCall.toolName, 'weather');
         expect(toolCall.input, {'city': 'Paris'});
-        expect(result.usage?.inputTokens, 12);
-        expect(result.usage?.outputTokens, 7);
+        expect(result.usage.inputTokens.total, 12);
+        expect(result.usage.outputTokens.total, 7);
       },
     );
 
@@ -213,13 +213,13 @@ void main() {
       ).call('command-r-plus');
 
       await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.tool,
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.tool,
                 content: [
-                  LanguageModelV3ToolResultPart(
+                  LanguageModelV4ToolResultPart(
                     toolCallId: 'call_1',
                     toolName: 'weather',
                     output: ToolResultOutputText('sunny'),
@@ -229,7 +229,7 @@ void main() {
             ],
           ),
           tools: const [
-            LanguageModelV3FunctionTool(
+            LanguageModelV4FunctionTool(
               name: 'weather',
               inputSchema: {'type': 'object'},
             ),
@@ -275,12 +275,12 @@ void main() {
 
       await provider
           .call('command-r-plus')
-          .doGenerate(LanguageModelV3CallOptions(prompt: _userPrompt('first')));
+          .doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('first')));
       token = 'second-key';
       await provider
           .call('command-r-plus')
           .doGenerate(
-            LanguageModelV3CallOptions(prompt: _userPrompt('second')),
+            LanguageModelV4CallOptions(prompt: _userPrompt('second')),
           );
 
       expect(authorizations, ['Bearer first-key', 'Bearer second-key']);
@@ -324,14 +324,95 @@ void main() {
 
       await provider
           .call('command-r-plus')
-          .doGenerate(LanguageModelV3CallOptions(prompt: _userPrompt('first')));
+          .doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('first')));
       await provider
           .call('command-r-plus')
           .doGenerate(
-            LanguageModelV3CallOptions(prompt: _userPrompt('second')),
+            LanguageModelV4CallOptions(prompt: _userPrompt('second')),
           );
 
       expect(interceptedRequests, 2);
+    });
+
+    test(
+      'doGenerate cancels an in-flight Dio request via abortSignal',
+      () async {
+        final adapter = _CancellationHttpClientAdapter();
+        final client = _cancellationClient(adapter, 'http://localhost');
+        addTearDown(() => client.close(force: true));
+        final abortSignal = _TestAbortSignal();
+        final model = CohereProvider(
+          apiKey: 'test',
+          baseUrl: 'http://localhost',
+          client: client,
+        ).call('command-r-plus');
+
+        final future = model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: _userPrompt('hi'),
+            abortSignal: abortSignal,
+          ),
+        );
+
+        await adapter.fetchStarted.future;
+        expect(adapter.lastOptions?.cancelToken, isNotNull);
+        abortSignal.cancel();
+
+        await expectLater(future, throwsA(isA<AiOperationCancelledError>()));
+        expect(adapter.fetchCount, 1);
+      },
+    );
+
+    test(
+      'doGenerate surfaces AiOperationCancelledError for a pre-cancelled abortSignal',
+      () async {
+        final adapter = _CancellationHttpClientAdapter();
+        final client = _cancellationClient(adapter, 'http://localhost');
+        addTearDown(() => client.close(force: true));
+        final abortSignal = _TestAbortSignal()..cancel();
+        final model = CohereProvider(
+          apiKey: 'test',
+          baseUrl: 'http://localhost',
+          client: client,
+        ).call('command-r-plus');
+
+        await expectLater(
+          model.doGenerate(
+            LanguageModelV4CallOptions(
+              prompt: _userPrompt('hi'),
+              abortSignal: abortSignal,
+            ),
+          ),
+          throwsA(isA<AiOperationCancelledError>()),
+        );
+        expect(adapter.fetchCount, 0);
+      },
+    );
+
+    test('doStream cancels the Dio handshake via abortSignal', () async {
+      final adapter = _CancellationHttpClientAdapter();
+      final client = _cancellationClient(adapter, 'http://localhost');
+      addTearDown(() => client.close(force: true));
+      final abortSignal = _TestAbortSignal();
+      final model = CohereProvider(
+        apiKey: 'test',
+        baseUrl: 'http://localhost',
+        client: client,
+      ).call('command-r-plus');
+
+      final future = model.doStream(
+        LanguageModelV4CallOptions(
+          prompt: _userPrompt('hi'),
+          abortSignal: abortSignal,
+        ),
+      );
+
+      await adapter.fetchStarted.future;
+      expect(adapter.lastOptions?.cancelToken, isNotNull);
+      abortSignal.cancel();
+
+      await expectLater(future, throwsA(isA<AiOperationCancelledError>()));
+      expect(adapter.fetchCount, 1);
     });
 
     test(
@@ -407,7 +488,7 @@ void main() {
         final stream = await provider
             .call('command-r-plus')
             .doStream(
-              LanguageModelV3CallOptions(prompt: _userPrompt('stream')),
+              LanguageModelV4CallOptions(prompt: _userPrompt('stream')),
             );
         await stream.stream.drain<void>();
 
@@ -418,7 +499,7 @@ void main() {
 
         token = 'rerank-token';
         await provider
-            .rerank('rerank-v3.5')
+            .rerank('rerank-v4.5')
             .doRerank(
               const RerankModelV1CallOptions(query: 'q', documents: ['doc']),
             );
@@ -460,7 +541,7 @@ void main() {
           ownedProvider
               .call('command-r-plus')
               .doGenerate(
-                LanguageModelV3CallOptions(
+                LanguageModelV4CallOptions(
                   prompt: _userPrompt('after-dispose'),
                 ),
               ),
@@ -479,7 +560,7 @@ void main() {
         await injectedProvider
             .call('command-r-plus')
             .doGenerate(
-              LanguageModelV3CallOptions(prompt: _userPrompt('still-open')),
+              LanguageModelV4CallOptions(prompt: _userPrompt('still-open')),
             );
 
         expect(adapter.closeCount, 0);
@@ -545,12 +626,12 @@ void main() {
       ).call('command-r-plus');
 
       final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'weather?')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'weather?')],
               ),
             ],
           ),
@@ -558,15 +639,18 @@ void main() {
       );
 
       final parts = await streamResult.stream.toList();
-      final start = parts.whereType<StreamPartToolCallStart>().single;
+      final start = parts.whereType<StreamPartToolInputStart>().single;
       expect(start.toolName, 'weather');
-      expect(start.toolCallId, 'call_1');
-      final end = parts.whereType<StreamPartToolCallEnd>().single;
-      expect(end.input, {'city': 'Paris'});
+      expect(start.id, 'call_1');
+      final end = parts.whereType<StreamPartToolInputEnd>().single;
+      expect(end.id, 'call_1');
+      expect(parts.whereType<StreamPartToolCall>().single.toolCall.input, {
+        'city': 'Paris',
+      });
       final finish = parts.whereType<StreamPartFinish>().single;
-      expect(finish.finishReason, LanguageModelV3FinishReason.toolCalls);
-      expect(finish.usage?.inputTokens, 3);
-      expect(finish.usage?.outputTokens, 4);
+      expect(finish.finishReason, LanguageModelV4FinishReason.toolCalls);
+      expect(finish.usage.inputTokens.total, 3);
+      expect(finish.usage.outputTokens.total, 4);
     });
 
     test('finalizes buffered tool calls once at message end', () async {
@@ -622,12 +706,12 @@ void main() {
       ).call('command-r-plus');
 
       final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'weather?')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'weather?')],
               ),
             ],
           ),
@@ -635,29 +719,33 @@ void main() {
       );
 
       final parts = await streamResult.stream.toList();
-      final start = parts.whereType<StreamPartToolCallStart>().single;
-      expect(start.toolCallId, 'call_implicit_end');
+      final start = parts.whereType<StreamPartToolInputStart>().single;
+      expect(start.id, 'call_implicit_end');
       expect(start.toolName, 'weather');
 
-      final deltas = parts.whereType<StreamPartToolCallDelta>().toList();
+      final deltas = parts.whereType<StreamPartToolInputDelta>().toList();
       expect(deltas, hasLength(2));
       expect(
-        deltas.map((delta) => delta.argsTextDelta).join(),
+        deltas.map((delta) => delta.delta).join(),
         '{"city":"Paris","unit":"C"}',
       );
 
-      final ends = parts.whereType<StreamPartToolCallEnd>().toList();
+      final ends = parts.whereType<StreamPartToolInputEnd>().toList();
       expect(ends, hasLength(1));
       final end = ends.single;
-      expect(end.toolCallId, 'call_implicit_end');
-      expect(end.toolName, 'weather');
-      expect(end.input, {'city': 'Paris', 'unit': 'C'});
+      expect(end.id, 'call_implicit_end');
+
+      final toolCallPart = parts.whereType<StreamPartToolCall>().single;
+      expect(toolCallPart.toolCall.toolCallId, 'call_implicit_end');
+      expect(toolCallPart.toolCall.toolName, 'weather');
+      expect(toolCallPart.toolCall.input, {'city': 'Paris', 'unit': 'C'});
 
       final finish = parts.whereType<StreamPartFinish>().single;
-      expect(parts.indexOf(end), lessThan(parts.indexOf(finish)));
-      expect(finish.finishReason, LanguageModelV3FinishReason.toolCalls);
-      expect(finish.usage?.inputTokens, 6);
-      expect(finish.usage?.outputTokens, 8);
+      expect(parts.indexOf(end), lessThan(parts.indexOf(toolCallPart)));
+      expect(parts.indexOf(toolCallPart), lessThan(parts.indexOf(finish)));
+      expect(finish.finishReason, LanguageModelV4FinishReason.toolCalls);
+      expect(finish.usage.inputTokens.total, 6);
+      expect(finish.usage.outputTokens.total, 8);
     });
 
     test('does not duplicate an explicit tool-call-end at message end', () async {
@@ -703,12 +791,12 @@ void main() {
       ).call('command-r-plus');
 
       final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'weather?')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'weather?')],
               ),
             ],
           ),
@@ -716,16 +804,20 @@ void main() {
       );
 
       final parts = await streamResult.stream.toList();
-      final ends = parts.whereType<StreamPartToolCallEnd>().toList();
+      final ends = parts.whereType<StreamPartToolInputEnd>().toList();
       expect(ends, hasLength(1));
-      expect(ends.single.toolCallId, 'call_explicit_end');
-      expect(ends.single.toolName, 'weather');
-      expect(ends.single.input, {'city': 'Berlin'});
+      expect(ends.single.id, 'call_explicit_end');
+
+      final toolCallPart = parts.whereType<StreamPartToolCall>().single;
+      expect(toolCallPart.toolCall.toolCallId, 'call_explicit_end');
+      expect(toolCallPart.toolCall.toolName, 'weather');
+      expect(toolCallPart.toolCall.input, {'city': 'Berlin'});
 
       final finish = parts.whereType<StreamPartFinish>().single;
-      expect(parts.indexOf(ends.single), lessThan(parts.indexOf(finish)));
-      expect(finish.usage?.inputTokens, 2);
-      expect(finish.usage?.outputTokens, 3);
+      expect(parts.indexOf(ends.single), lessThan(parts.indexOf(toolCallPart)));
+      expect(parts.indexOf(toolCallPart), lessThan(parts.indexOf(finish)));
+      expect(finish.usage.inputTokens.total, 2);
+      expect(finish.usage.outputTokens.total, 3);
     });
 
     test(
@@ -811,12 +903,12 @@ void main() {
         ).call('command-r-plus');
 
         final streamResult = await model.doStream(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
               messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
-                  content: [LanguageModelV3TextPart(text: 'weather?')],
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'weather?')],
                 ),
               ],
             ),
@@ -824,39 +916,52 @@ void main() {
         );
 
         final parts = await streamResult.stream.toList();
-        final ends = parts.whereType<StreamPartToolCallEnd>().toList();
+        final ends = parts.whereType<StreamPartToolInputEnd>().toList();
         expect(ends, hasLength(2));
-        expect(ends.map((end) => end.toolCallId).toList(), [
-          'call_1',
-          'call_2',
-        ]);
-        expect(ends.map((end) => end.toolName).toList(), [
+        expect(ends.map((end) => end.id).toList(), ['call_1', 'call_2']);
+        final toolCalls = parts.whereType<StreamPartToolCall>().toList();
+        expect(toolCalls, hasLength(2));
+        expect(toolCalls.map((part) => part.toolCall.toolName).toList(), [
           'weather',
           'forecast',
         ]);
-        expect(ends[0].input, {'city': 'Paris'});
-        expect(ends[1].input, {'days': 5, 'unit': 'C'});
+        expect(toolCalls[0].toolCall.input, {'city': 'Paris'});
+        expect(toolCalls[1].toolCall.input, {'days': 5, 'unit': 'C'});
 
         final finish = parts.whereType<StreamPartFinish>().single;
-        expect(parts.indexOf(ends[0]), lessThan(parts.indexOf(ends[1])));
-        expect(parts.indexOf(ends[1]), lessThan(parts.indexOf(finish)));
-        expect(finish.finishReason, LanguageModelV3FinishReason.toolCalls);
-        expect(finish.usage?.inputTokens, 7);
-        expect(finish.usage?.outputTokens, 9);
+        expect(parts.indexOf(ends[0]), lessThan(parts.indexOf(toolCalls[0])));
+        expect(parts.indexOf(toolCalls[0]), lessThan(parts.indexOf(ends[1])));
+        expect(parts.indexOf(ends[1]), lessThan(parts.indexOf(toolCalls[1])));
+        expect(parts.indexOf(toolCalls[1]), lessThan(parts.indexOf(finish)));
+        expect(finish.finishReason, LanguageModelV4FinishReason.toolCalls);
+        expect(finish.usage.inputTokens.total, 7);
+        expect(finish.usage.outputTokens.total, 9);
       },
     );
   });
 }
 
-LanguageModelV3Prompt _userPrompt(String text) {
-  return LanguageModelV3Prompt(
+LanguageModelV4Prompt _userPrompt(String text) {
+  return LanguageModelV4Prompt(
     messages: [
-      LanguageModelV3Message(
-        role: LanguageModelV3Role.user,
-        content: [LanguageModelV3TextPart(text: text)],
+      LanguageModelV4Message(
+        role: LanguageModelV4Role.user,
+        content: [LanguageModelV4TextPart(text: text)],
       ),
     ],
   );
+}
+
+Dio _cancellationClient(HttpClientAdapter adapter, String baseUrl) {
+  final client = Dio(
+    BaseOptions(
+      baseUrl: baseUrl,
+      headers: {'Content-Type': 'application/json'},
+      responseType: ResponseType.json,
+    ),
+  );
+  client.httpClientAdapter = adapter;
+  return client;
 }
 
 class _TestServer {
@@ -879,4 +984,56 @@ class _TestServer {
   String get baseUrl => 'http://${_server.address.host}:${_server.port}';
 
   Future<void> close() => _server.close(force: true);
+}
+
+class _TestAbortSignal implements LanguageModelV4AbortSignal {
+  final Completer<void> _completer = Completer<void>();
+  bool _isCancelled = false;
+
+  @override
+  bool get isCancelled => _isCancelled;
+
+  @override
+  Future<void> get onCancelled => _completer.future;
+
+  void cancel() {
+    if (_isCancelled) return;
+    _isCancelled = true;
+    _completer.complete();
+  }
+}
+
+class _CancellationHttpClientAdapter implements HttpClientAdapter {
+  int fetchCount = 0;
+  RequestOptions? lastOptions;
+  final Completer<void> fetchStarted = Completer<void>();
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) {
+    fetchCount++;
+    lastOptions = options;
+    if (!fetchStarted.isCompleted) {
+      fetchStarted.complete();
+    }
+
+    final completer = Completer<ResponseBody>();
+    cancelFuture?.then((_) {
+      if (!completer.isCompleted) {
+        completer.completeError(
+          DioException.requestCancelled(
+            requestOptions: options,
+            reason: 'abortSignal',
+          ),
+        );
+      }
+    });
+    return completer.future;
+  }
+
+  @override
+  void close({bool force = false}) {}
 }

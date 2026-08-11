@@ -5,17 +5,29 @@ import 'package:test/test.dart';
 
 void main() {
   group('provider value types', () {
+    test(
+      'language model base contract supplies default specification values',
+      () async {
+        final model = _FakeLanguageModel();
+
+        expect(model.specificationVersion, 'v4');
+        expect(model.provider, 'fake');
+        expect(model.modelId, 'fake-model');
+        expect(await model.supportedUrls, isEmpty);
+      },
+    );
+
     test('language model contracts expose configured values', () {
-      final prompt = LanguageModelV3Prompt(
+      final prompt = LanguageModelV4Prompt(
         system: 'system',
         messages: [
-          LanguageModelV3Message(
-            role: LanguageModelV3Role.user,
-            content: const [LanguageModelV3TextPart(text: 'hello')],
+          LanguageModelV4Message(
+            role: LanguageModelV4Role.user,
+            content: const [LanguageModelV4TextPart(text: 'hello')],
           ),
         ],
       );
-      final tool = LanguageModelV3FunctionTool(
+      final tool = LanguageModelV4FunctionTool(
         name: 'lookup',
         description: 'Finds records',
         strict: true,
@@ -24,17 +36,16 @@ void main() {
           {'query': 'widgets'},
         ],
       );
-      final providerTool = LanguageModelV3ProviderDefinedTool(
+      final providerTool = LanguageModelV4ProviderDefinedTool(
         id: 'provider.lookup',
         name: 'lookup',
         description: 'Provider-defined lookup',
         args: const {'region': 'us'},
       );
       final toolChoice = const ToolChoiceSpecific(toolName: 'lookup');
-      final options = LanguageModelV3CallOptions(
+      final options = LanguageModelV4CallOptions(
         prompt: prompt,
-        tools: [tool],
-        providerDefinedTools: [providerTool],
+        tools: [tool, providerTool],
         toolChoice: toolChoice,
         maxOutputTokens: 64,
         temperature: 0.7,
@@ -48,35 +59,37 @@ void main() {
         providerOptions: const {
           'openai': {'reasoningEffort': 'medium'},
         },
-        outputSchema: const {'type': 'object'},
+        responseFormat: const LanguageModelV4JsonResponseFormat(
+          schema: {'type': 'object'},
+        ),
       );
       final imageBytes = Uint8List.fromList([1, 2, 3]);
       final imageData = DataContentBytes(imageBytes);
       final base64Data = const DataContentBase64('AQID');
       final urlData = DataContentUrl(Uri.parse('https://example.com/file.bin'));
-      final source = const LanguageModelV3SourcePart(
+      final source = const LanguageModelV4SourcePart(
         id: 'src-1',
         url: 'https://example.com',
         title: 'Example',
         providerMetadata: {'openai': true},
       );
-      final filePart = LanguageModelV3FilePart(
+      final filePart = LanguageModelV4FilePart(
         data: imageData,
         mediaType: 'application/pdf',
         filename: 'doc.pdf',
         providerOptions: const {'kind': 'file'},
       );
-      final toolCall = const LanguageModelV3ToolCallPart(
+      final toolCall = const LanguageModelV4ToolCallPart(
         toolCallId: 'call-1',
         toolName: 'lookup',
         input: {'query': 'widgets'},
         providerOptions: {'strict': true},
       );
-      final toolApprovalRequest = LanguageModelV3ToolApprovalRequestPart(
+      final toolApprovalRequest = LanguageModelV4ToolApprovalRequestPart(
         approvalId: 'approval-1',
         toolCall: toolCall,
       );
-      final toolResult = const LanguageModelV3ToolResultPart(
+      final toolResult = const LanguageModelV4ToolResultPart(
         toolCallId: 'call-1',
         toolName: 'lookup',
         output: ToolResultOutputText('done'),
@@ -84,49 +97,50 @@ void main() {
         providerOptions: {'fromCache': false},
       );
       final contentOutput = ToolResultOutputContent([
-        const LanguageModelV3TextPart(text: 'nested'),
+        const LanguageModelV4TextPart(text: 'nested'),
       ]);
-      final responseMetadata = LanguageModelV3ResponseMetadata(
+      const requestMetadata = LanguageModelV4RequestMetadata(
+        body: {'messages': 1},
+      );
+      final responseMetadata = LanguageModelV4ResponseMetadata(
         id: 'resp-1',
         modelId: 'model-1',
         timestamp: DateTime.utc(2026, 8, 10),
         headers: const {'x-response': '1'},
         body: const {'ok': true},
-        requestBody: const {'messages': 1},
       );
-      final usage = const LanguageModelV3Usage(
-        inputTokens: 10,
-        outputTokens: 5,
-        totalTokens: 15,
-        inputTokenDetails: LanguageModelV3InputTokenDetails(
-          noCacheTokens: 4,
-          cacheReadTokens: 3,
-          cacheWriteTokens: 3,
+      final usage = const LanguageModelV4Usage(
+        inputTokens: LanguageModelV4InputTokenUsage(
+          total: 10,
+          noCache: 4,
+          cacheRead: 3,
+          cacheWrite: 3,
         ),
-        outputTokenDetails: LanguageModelV3OutputTokenDetails(
-          textTokens: 4,
-          reasoningTokens: 1,
+        outputTokens: LanguageModelV4OutputTokenUsage(
+          total: 5,
+          text: 4,
+          reasoning: 1,
         ),
         raw: {'provider': 'openai'},
       );
-      final generateResult = LanguageModelV3GenerateResult(
+      final generateResult = LanguageModelV4GenerateResult(
         content: [
-          const LanguageModelV3TextPart(
+          const LanguageModelV4TextPart(
             text: 'hello',
             providerOptions: {'tone': 'neutral'},
           ),
-          LanguageModelV3ImagePart(
+          LanguageModelV4ImagePart(
             image: base64Data,
             mediaType: 'image/png',
             providerOptions: const {'detail': 'high'},
           ),
           filePart,
-          const LanguageModelV3ReasoningPart(
+          const LanguageModelV4ReasoningPart(
             text: 'think',
             signature: 'sig',
             providerOptions: {'hidden': false},
           ),
-          LanguageModelV3RedactedReasoningPart(
+          LanguageModelV4RedactedReasoningPart(
             data: Uint8List.fromList([9, 9]),
             providerOptions: const {'redacted': true},
           ),
@@ -134,46 +148,58 @@ void main() {
           toolApprovalRequest,
           toolResult,
           source,
-          const LanguageModelV3ToolApprovalResponse(
+          const LanguageModelV4ToolApprovalResponse(
             approvalId: 'approval-1',
             approved: false,
             reason: 'denied',
           ),
         ],
-        finishReason: LanguageModelV3FinishReason.toolCalls,
+        finishReason: LanguageModelV4FinishReason.toolCalls,
         rawFinishReason: 'tool_calls',
         usage: usage,
-        warnings: const ['warn'],
+        warnings: const [
+          LanguageModelV4UnsupportedWarning(
+            feature: 'topK',
+            details: 'Provider ignored topK.',
+          ),
+          LanguageModelV4OtherWarning(message: 'warn'),
+        ],
+        request: requestMetadata,
         response: responseMetadata,
         providerMetadata: const {
           'openai': {'id': 'resp-1'},
         },
       );
-      final streamResult = LanguageModelV3StreamResult(
-        stream: Stream<LanguageModelV3StreamPart>.fromIterable([
+      final streamResult = LanguageModelV4StreamResult(
+        stream: Stream<LanguageModelV4StreamPart>.fromIterable([
+          StreamPartStreamStart(
+            warnings: [LanguageModelV4CompatibilityWarning(feature: 'urls')],
+          ),
           const StreamPartTextStart(id: 'text-1'),
           const StreamPartTextDelta(id: 'text-1', delta: 'hel'),
           const StreamPartTextEnd(id: 'text-1'),
-          const StreamPartReasoningDelta(delta: 'thinking'),
+          StreamPartReasoningStart(id: 'reasoning-1'),
+          const StreamPartReasoningDelta(id: 'reasoning-1', delta: 'thinking'),
+          StreamPartReasoningEnd(id: 'reasoning-1'),
           StreamPartSource(source: source),
           StreamPartFile(file: filePart),
-          const StreamPartToolCallStart(
-            toolCallId: 'call-1',
-            toolName: 'lookup',
+          const StreamPartToolInputStart(id: 'call-1', toolName: 'lookup'),
+          const StreamPartToolInputDelta(id: 'call-1', delta: '{"query":'),
+          const StreamPartToolInputEnd(id: 'call-1'),
+          const StreamPartToolCall(
+            toolCall: LanguageModelV4ToolCallPart(
+              toolCallId: 'call-1',
+              toolName: 'lookup',
+              input: {'query': 'widgets'},
+            ),
           ),
-          const StreamPartToolCallDelta(
-            toolCallId: 'call-1',
-            toolName: 'lookup',
-            argsTextDelta: '{"query":',
-          ),
-          const StreamPartToolCallEnd(
-            toolCallId: 'call-1',
-            toolName: 'lookup',
-            input: {'query': 'widgets'},
-          ),
+          StreamPartToolResult(toolResult: toolResult, preliminary: true),
+          StreamPartToolApprovalRequest(approvalRequest: toolApprovalRequest),
+          StreamPartResponseMetadata(metadata: responseMetadata),
+          StreamPartRaw(rawValue: {'chunk': 1}),
           const StreamPartError(error: 'boom'),
           StreamPartFinish(
-            finishReason: LanguageModelV3FinishReason.stop,
+            finishReason: LanguageModelV4FinishReason.stop,
             rawFinishReason: 'stop',
             usage: usage,
             providerMetadata: const {
@@ -181,23 +207,38 @@ void main() {
             },
           ),
         ]),
-        rawResponse: const {'raw': true},
+        warnings: const [
+          LanguageModelV4DeprecatedWarning(
+            setting: 'legacy-mode',
+            message: 'Use the default mode.',
+          ),
+        ],
+        request: requestMetadata,
+        response: responseMetadata,
       );
 
       expect(options.prompt.system, 'system');
-      expect(options.tools.single.name, 'lookup');
-      expect(options.providerDefinedTools.single.id, 'provider.lookup');
+      expect(options.functionTools.single.name, 'lookup');
+      expect(options.providerTools.single.id, 'provider.lookup');
       expect((options.toolChoice as ToolChoiceSpecific).toolName, 'lookup');
       expect(options.maxOutputTokens, 64);
       expect(options.stopSequences, ['STOP']);
       expect(options.providerOptions?['openai']?['reasoningEffort'], 'medium');
-      expect(options.outputSchema?['type'], 'object');
+      expect(
+        (options.responseFormat as LanguageModelV4JsonResponseFormat)
+            .schema?['type'],
+        'object',
+      );
+      expect(
+        LanguageModelV4TextResponseFormat(),
+        isA<LanguageModelV4ResponseFormat>(),
+      );
 
       expect(imageData.bytes, same(imageBytes));
       expect(base64Data.base64, 'AQID');
       expect(urlData.url.host, 'example.com');
 
-      final imagePart = generateResult.content[1] as LanguageModelV3ImagePart;
+      final imagePart = generateResult.content[1] as LanguageModelV4ImagePart;
       expect(imagePart.mediaType, 'image/png');
       expect(imagePart.providerOptions?['detail'], 'high');
       expect(filePart.filename, 'doc.pdf');
@@ -205,60 +246,100 @@ void main() {
       expect(toolApprovalRequest.toolCall.toolName, 'lookup');
       expect((toolResult.output as ToolResultOutputText).text, 'done');
       expect(
-        (contentOutput.parts.single as LanguageModelV3TextPart).text,
+        (contentOutput.parts.single as LanguageModelV4TextPart).text,
         'nested',
       );
       expect(source.providerMetadata?['openai'], true);
 
       expect(
         generateResult.finishReason,
-        LanguageModelV3FinishReason.toolCalls,
+        LanguageModelV4FinishReason.toolCalls,
       );
       expect(generateResult.rawFinishReason, 'tool_calls');
-      expect(generateResult.usage?.totalTokens, 15);
+      expect(generateResult.usage.inputTokens.total, 10);
+      expect(generateResult.usage.outputTokens.total, 5);
+      expect(generateResult.request?.body, {'messages': 1});
       expect(generateResult.response?.headers?['x-response'], '1');
       expect(generateResult.providerMetadata?['openai']?['id'], 'resp-1');
+      expect(usage.toString(), 'LanguageModelV4Usage(input: 10, output: 5)');
+      expect(usage.inputTokens.cacheRead, 3);
+      expect(usage.outputTokens.reasoning, 1);
       expect(
-        usage.toString(),
-        'LanguageModelV3Usage(input: 10, output: 5, total: 15)',
+        (generateResult.warnings.first as LanguageModelV4UnsupportedWarning)
+            .feature,
+        'topK',
       );
-      expect(usage.inputTokenDetails?.cacheReadTokens, 3);
-      expect(usage.outputTokenDetails?.reasoningTokens, 1);
 
-      expect(streamResult.rawResponse, {'raw': true});
-      expect(
+      expect(streamResult.request?.body, {'messages': 1});
+      expect(streamResult.response?.headers?['x-response'], '1');
+      expect(streamResult.warnings, hasLength(1));
+      expectLater(
         streamResult.stream,
         emitsInOrder([
+          isA<StreamPartStreamStart>(),
           isA<StreamPartTextStart>(),
           isA<StreamPartTextDelta>(),
           isA<StreamPartTextEnd>(),
+          isA<StreamPartReasoningStart>(),
           isA<StreamPartReasoningDelta>(),
+          isA<StreamPartReasoningEnd>(),
           isA<StreamPartSource>(),
           isA<StreamPartFile>(),
-          isA<StreamPartToolCallStart>(),
-          isA<StreamPartToolCallDelta>(),
-          isA<StreamPartToolCallEnd>(),
+          isA<StreamPartToolInputStart>(),
+          isA<StreamPartToolInputDelta>(),
+          isA<StreamPartToolInputEnd>(),
+          isA<StreamPartToolCall>(),
+          isA<StreamPartToolResult>(),
+          isA<StreamPartToolApprovalRequest>(),
+          isA<StreamPartResponseMetadata>(),
+          isA<StreamPartRaw>(),
           isA<StreamPartError>(),
-          isA<StreamPartFinish>(),
+          predicate<StreamPartFinish>((part) {
+            return part.finishReason == LanguageModelV4FinishReason.stop &&
+                part.usage.outputTokens.total == 5;
+          }),
           emitsDone,
         ]),
       );
 
-      expect(const ToolChoiceAuto(), isA<LanguageModelV3ToolChoice>());
-      expect(const ToolChoiceNone(), isA<LanguageModelV3ToolChoice>());
-      expect(const ToolChoiceRequired(), isA<LanguageModelV3ToolChoice>());
+      expect(const ToolChoiceAuto(), isA<LanguageModelV4ToolChoice>());
+      expect(const ToolChoiceNone(), isA<LanguageModelV4ToolChoice>());
+      expect(const ToolChoiceRequired(), isA<LanguageModelV4ToolChoice>());
       expect(
-        LanguageModelV3FinishReason.values,
+        LanguageModelV4FinishReason.values,
         containsAll([
-          LanguageModelV3FinishReason.stop,
-          LanguageModelV3FinishReason.length,
-          LanguageModelV3FinishReason.contentFilter,
-          LanguageModelV3FinishReason.toolCalls,
-          LanguageModelV3FinishReason.error,
-          LanguageModelV3FinishReason.other,
-          LanguageModelV3FinishReason.unknown,
+          LanguageModelV4FinishReason.stop,
+          LanguageModelV4FinishReason.length,
+          LanguageModelV4FinishReason.contentFilter,
+          LanguageModelV4FinishReason.toolCalls,
+          LanguageModelV4FinishReason.error,
+          LanguageModelV4FinishReason.other,
+          LanguageModelV4FinishReason.unknown,
         ]),
       );
+    });
+
+    test('warning variants expose stable types and payloads', () {
+      final compatibility = LanguageModelV4CompatibilityWarning(
+        feature: 'sources',
+        details: 'Provider may omit source URLs.',
+      );
+      final deprecated = LanguageModelV4DeprecatedWarning(
+        setting: 'legacy-mode',
+        message: 'Use the default mode.',
+      );
+      final other = LanguageModelV4OtherWarning(message: 'Heads up.');
+
+      expect(compatibility.type, 'compatibility');
+      expect(compatibility.feature, 'sources');
+      expect(compatibility.details, 'Provider may omit source URLs.');
+
+      expect(deprecated.type, 'deprecated');
+      expect(deprecated.setting, 'legacy-mode');
+      expect(deprecated.message, 'Use the default mode.');
+
+      expect(other.type, 'other');
+      expect(other.message, 'Heads up.');
     });
 
     test(
@@ -411,8 +492,10 @@ void main() {
       final noObject = AiNoObjectGeneratedError(
         message: 'no object',
         text: '{}',
-        response: const LanguageModelV3ResponseMetadata(id: 'resp'),
-        usage: const LanguageModelV3Usage(totalTokens: 1),
+        response: const LanguageModelV4ResponseMetadata(id: 'resp'),
+        usage: const LanguageModelV4Usage(
+          outputTokens: LanguageModelV4OutputTokenUsage(total: 1),
+        ),
         cause: const FormatException('bad json'),
       );
       final repairError = const AiToolCallRepairError(
@@ -454,7 +537,7 @@ void main() {
 
       expect(noObject.text, '{}');
       expect(noObject.response?.id, 'resp');
-      expect(noObject.usage?.totalTokens, 1);
+      expect(noObject.usage?.outputTokens.total, 1);
       expect(noObject.cause, isA<FormatException>());
       expect(AiNoObjectGeneratedError.isInstance(noObject), isTrue);
 
@@ -479,4 +562,26 @@ void main() {
       expect(AiDownloadError.isInstance(downloadError), isTrue);
     });
   });
+}
+
+class _FakeLanguageModel extends LanguageModelV4 {
+  @override
+  String get provider => 'fake';
+
+  @override
+  String get modelId => 'fake-model';
+
+  @override
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
+  ) async {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
+  ) async {
+    throw UnimplementedError();
+  }
 }

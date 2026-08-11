@@ -143,7 +143,12 @@ class _ScriptedTransport implements MCPTransport {
   void pushNotification(Map<String, dynamic> message) =>
       _notifications.add(message);
 
-  void pushError(Object error) => _notifications.addError(error);
+  void pushError(Object error) {
+    if (_notifications.isClosed) {
+      return;
+    }
+    _notifications.addError(error);
+  }
 
   @override
   Stream<Map<String, dynamic>> get notifications => _notifications.stream;
@@ -216,6 +221,75 @@ class _TrackingClient extends http.BaseClient {
     closed = true;
     _inner.close();
   }
+}
+
+class _StreamedResponseClient extends http.BaseClient {
+  _StreamedResponseClient(this._handler);
+
+  final Future<http.StreamedResponse> Function(http.BaseRequest request)
+  _handler;
+  bool closed = false;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) {
+    return _handler(request);
+  }
+
+  @override
+  void close() {
+    closed = true;
+  }
+}
+
+class _FakeProcess implements Process {
+  _FakeProcess({
+    IOSink? stdin,
+    Stream<List<int>>? stdout,
+    Stream<List<int>>? stderr,
+    Future<int>? exitCode,
+  }) : stdin = stdin ?? IOSink(StreamController<List<int>>().sink),
+       stdout = stdout ?? const Stream<List<int>>.empty(),
+       stderr = stderr ?? const Stream<List<int>>.empty(),
+       _exitCode = exitCode ?? Completer<int>().future;
+
+  final Future<int> _exitCode;
+  bool killed = false;
+
+  @override
+  final IOSink stdin;
+
+  @override
+  final Stream<List<int>> stdout;
+
+  @override
+  final Stream<List<int>> stderr;
+
+  @override
+  Future<int> get exitCode => _exitCode;
+
+  @override
+  int get pid => 4242;
+
+  @override
+  bool kill([ProcessSignal signal = ProcessSignal.sigterm]) {
+    killed = true;
+    return true;
+  }
+}
+
+class _ThrowingStreamConsumer implements StreamConsumer<List<int>> {
+  _ThrowingStreamConsumer(this.error);
+
+  final Object error;
+
+  @override
+  Future<void> addStream(Stream<List<int>> stream) async {
+    await stream.drain<void>();
+    throw error;
+  }
+
+  @override
+  Future<void> close() async {}
 }
 
 void main() {
@@ -603,6 +677,204 @@ void main() {
         );
       },
     );
+
+    test(
+      'sendNotification marks the session expired on a 404 and later calls fail before the network',
+      () async {
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse(sessionId: 'session-1');
+
+        final transport = StreamableHttpClientTransport(url: server.uri);
+        addTearDown(transport.close);
+
+        final initResp = await transport.send(
+          JsonRpcRequest(method: 'initialize', id: 1),
+        );
+        expect((initResp.result as Map)['protocolVersion'], '2025-06-18');
+
+        transport.setProtocolVersion('2025-06-18');
+        server.expireCurrentSession();
+
+        await expectLater(
+          transport.sendNotification(
+            JsonRpcNotification(method: 'notifications/ping'),
+          ),
+          throwsA(isA<MCPSessionExpiredException>()),
+        );
+
+        final requestCountAfter404 = server.requestLog.length;
+        await expectLater(
+          transport.send(JsonRpcRequest(method: 'ping', id: 2)),
+          throwsA(isA<MCPSessionExpiredException>()),
+        );
+        expect(server.requestLog, hasLength(requestCountAfter404));
+      },
+    );
+
+    test(
+      'throws when a 2xx response uses an unexpected Content-Type',
+      () async {
+        final mock = await _MockHttpServer.start();
+        addTearDown(mock.close);
+        mock.enqueueRaw(
+          status: 200,
+          body: '{"jsonrpc":"2.0","id":1,"result":{"ok":true}}',
+          contentType: 'text/plain',
+        );
+
+        final transport = StreamableHttpClientTransport(url: mock.uri);
+        addTearDown(transport.close);
+
+        await expectLater(
+          transport.send(JsonRpcRequest(method: 'ping', id: 1)),
+          throwsA(
+            isA<MCPException>().having(
+              (e) => e.message,
+              'message',
+              contains('Unexpected MCP response Content-Type'),
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'rejects JSON-RPC payloads with an unexpected jsonrpc version',
+      () async {
+        final mock = await _MockHttpServer.start();
+        addTearDown(mock.close);
+        mock.enqueueJson({
+          'jsonrpc': '1.0',
+          'result': {'ok': true},
+        });
+
+        final transport = StreamableHttpClientTransport(url: mock.uri);
+        addTearDown(transport.close);
+
+        await expectLater(
+          transport.send(JsonRpcRequest(method: 'ping', id: 1)),
+          throwsA(
+            isA<MCPException>().having(
+              (e) => e.message,
+              'message',
+              contains('Unexpected JSON-RPC response format'),
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'rejects JSON-RPC payloads that contain both result and error',
+      () async {
+        final mock = await _MockHttpServer.start();
+        addTearDown(mock.close);
+        mock.enqueueJson({
+          'jsonrpc': '2.0',
+          'result': {'ok': true},
+          'error': {'code': -1, 'message': 'boom'},
+        });
+
+        final transport = StreamableHttpClientTransport(url: mock.uri);
+        addTearDown(transport.close);
+
+        await expectLater(
+          transport.send(JsonRpcRequest(method: 'ping', id: 1)),
+          throwsA(
+            isA<MCPException>().having(
+              (e) => e.message,
+              'message',
+              contains('Unexpected JSON-RPC response format'),
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'surfaces SSE notifications before failing when the stream closes without a response',
+      () async {
+        final client = _StreamedResponseClient((request) async {
+          expect(request.method, 'POST');
+          return http.StreamedResponse(
+            Stream<List<int>>.fromIterable([
+              utf8.encode(
+                'data: {"jsonrpc":"2.0","method":"notifications/progress","params":{"step":1}}\n\n',
+              ),
+            ]),
+            200,
+            headers: const {'content-type': 'text/event-stream'},
+          );
+        });
+        final transport = StreamableHttpClientTransport(
+          url: Uri.parse('http://example.com/mcp'),
+          client: client,
+          requestTimeout: const Duration(milliseconds: 200),
+        );
+        addTearDown(transport.close);
+
+        final notifications = <Map<String, dynamic>>[];
+        final sub = transport.notifications.listen(notifications.add);
+        addTearDown(sub.cancel);
+
+        await expectLater(
+          transport.send(JsonRpcRequest(method: 'ping', id: 1)),
+          throwsA(
+            isA<MCPException>().having(
+              (e) => e.message,
+              'message',
+              contains('closed before responding'),
+            ),
+          ),
+        );
+
+        expect(
+          notifications.single,
+          containsPair('method', 'notifications/progress'),
+        );
+      },
+    );
+
+    test('surfaces SSE byte-stream errors as MCPException', () async {
+      final controller = StreamController<List<int>>();
+      final client = _StreamedResponseClient((request) async {
+        expect(request.method, 'POST');
+        return http.StreamedResponse(
+          controller.stream,
+          200,
+          headers: const {'content-type': 'text/event-stream'},
+        );
+      });
+      final transport = StreamableHttpClientTransport(
+        url: Uri.parse('http://example.com/mcp'),
+        client: client,
+        requestTimeout: const Duration(milliseconds: 200),
+      );
+      addTearDown(() async {
+        await controller.close();
+        await transport.close();
+      });
+
+      final future = transport.send(JsonRpcRequest(method: 'ping', id: 1));
+      controller.add(
+        utf8.encode(
+          'data: {"jsonrpc":"2.0","method":"notifications/progress"}\n\n',
+        ),
+      );
+      controller.addError(StateError('sse boom'));
+
+      await expectLater(
+        future,
+        throwsA(
+          isA<MCPException>().having(
+            (e) => e.message,
+            'message',
+            contains('SSE response stream error'),
+          ),
+        ),
+      );
+    });
   });
 
   // =========================================================================
@@ -1288,6 +1560,111 @@ void main() {
 
       await expectLater(client.tools(), throwsA(isA<MCPException>()));
     });
+
+    test(
+      'resource refresh queues a trailing replay when a second update lands mid-read',
+      () async {
+        final readRelease = Completer<void>();
+        var readCount = 0;
+        final transport = _ScriptedTransport((req) async {
+          switch (req.method) {
+            case 'initialize':
+              return _initResult(req);
+            case 'notifications/initialized':
+              return _ok(req, {});
+            case 'resources/subscribe':
+              return _ok(req, {});
+            case 'resources/read':
+              readCount++;
+              if (readCount == 1) {
+                await readRelease.future;
+              }
+              return _ok(req, {
+                'contents': [
+                  {
+                    'uri': 'memory://doc',
+                    'mimeType': 'text/plain',
+                    'text': 'value-$readCount',
+                  },
+                ],
+              });
+            default:
+              return _ok(req, {});
+          }
+        });
+        final client = MCPClient(transport: transport);
+        addTearDown(client.close);
+
+        final updates = <MCPResourceContent>[];
+        final sub = client
+            .subscribeResource('memory://doc')
+            .listen(updates.add);
+        addTearDown(sub.cancel);
+
+        await Future<void>.delayed(Duration.zero);
+        transport.pushNotification({
+          'jsonrpc': '2.0',
+          'method': 'notifications/resources/updated',
+          'params': {'uri': 'memory://doc'},
+        });
+        await Future<void>.delayed(Duration.zero);
+        transport.pushNotification({
+          'jsonrpc': '2.0',
+          'method': 'notifications/resources/updated',
+          'params': {'uri': 'memory://doc'},
+        });
+
+        readRelease.complete();
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+
+        expect(readCount, 2);
+        expect(updates.map((update) => update.text).toList(), [
+          'value-1',
+          'value-2',
+        ]);
+      },
+    );
+
+    test('policy retries reinitialize after session expiry', () async {
+      var initializeCalls = 0;
+      var toolsListCalls = 0;
+      final transport = _ScriptedTransport((req) {
+        switch (req.method) {
+          case 'initialize':
+            initializeCalls++;
+            return _initResult(req);
+          case 'notifications/initialized':
+            return _ok(req, {});
+          case 'tools/list':
+            toolsListCalls++;
+            if (toolsListCalls == 1) {
+              throw MCPSessionExpiredException(
+                method: 'POST',
+                uri: Uri(),
+                statusCode: 404,
+                context: 'session expired',
+              );
+            }
+            return _ok(req, {'tools': []});
+          default:
+            return _ok(req, {});
+        }
+      });
+      final client = MCPClient(
+        transport: transport,
+        reconnectPolicy: const MCPReconnectPolicy(
+          maxAttempts: 1,
+          initialDelayMs: 1,
+          maxDelayMs: 1,
+        ),
+      );
+      addTearDown(client.close);
+
+      final tools = await client.tools();
+      expect(tools, isEmpty);
+      expect(initializeCalls, 2);
+      expect(toolsListCalls, 2);
+    });
   });
 
   // =========================================================================
@@ -1625,5 +2002,163 @@ void main() {
       await transport.close();
       expect(await transport.notifications.isEmpty, isTrue);
     });
+
+    test('wraps non-MCP startup failures with process context', () async {
+      final transport = StdioMCPTransport(
+        command: 'missing-command',
+        processStarter: (command, args) async {
+          throw StateError('spawn failed');
+        },
+      );
+
+      await expectLater(
+        transport.send(JsonRpcRequest(method: 'initialize', id: 1)),
+        throwsA(
+          isA<MCPException>().having(
+            (e) => e.message,
+            'message',
+            contains('Failed to start stdio MCP process'),
+          ),
+        ),
+      );
+    });
+
+    test(
+      'stdout decoding errors terminate pending calls and future writes',
+      () async {
+        final process = _FakeProcess(
+          stdout: Stream<List<int>>.error(StateError('stdout blew up')),
+          stderr: const Stream<List<int>>.empty(),
+        );
+        final transport = StdioMCPTransport(
+          command: 'fake',
+          processStarter: (command, args) async => process,
+        );
+        addTearDown(transport.close);
+
+        final pending = transport.send(
+          JsonRpcRequest(method: 'initialize', id: 1),
+        );
+
+        final matcher = throwsA(
+          isA<MCPException>().having(
+            (e) => e.message,
+            'message',
+            contains('stdout stream error'),
+          ),
+        );
+        await expectLater(pending, matcher);
+        await expectLater(
+          transport.sendNotification(
+            JsonRpcNotification(method: 'notifications/ping'),
+          ),
+          matcher,
+        );
+        expect(process.killed, isTrue);
+      },
+    );
+
+    test('process exits without stderr and surfaces the exit code', () async {
+      final exitCode = Completer<int>();
+      final process = _FakeProcess(exitCode: exitCode.future);
+      final transport = StdioMCPTransport(
+        command: 'fake',
+        processStarter: (command, args) async => process,
+      );
+      addTearDown(transport.close);
+
+      final pending = transport.send(
+        JsonRpcRequest(method: 'initialize', id: 1),
+      );
+      exitCode.complete(9);
+
+      await expectLater(
+        pending,
+        throwsA(
+          isA<MCPException>().having(
+            (e) => e.message,
+            'message',
+            contains('exited with code 9'),
+          ),
+        ),
+      );
+    });
+
+    test(
+      'write failures surface for both requests and notifications',
+      () async {
+        final writeError = StateError('stdin flush failed');
+        final process = _FakeProcess(
+          stdin: IOSink(_ThrowingStreamConsumer(writeError)),
+        );
+        final transport = StdioMCPTransport(
+          command: 'fake',
+          processStarter: (command, args) async => process,
+        );
+        addTearDown(transport.close);
+
+        await expectLater(
+          transport.send(JsonRpcRequest(method: 'initialize', id: 1)),
+          throwsA(
+            isA<MCPException>().having(
+              (e) => e.message,
+              'message',
+              contains('Failed to write to stdio MCP process'),
+            ),
+          ),
+        );
+        await expectLater(
+          transport.sendNotification(
+            JsonRpcNotification(method: 'notifications/initialized'),
+          ),
+          throwsA(
+            isA<MCPException>().having(
+              (e) => e.message,
+              'message',
+              contains('Failed to write notification to stdio MCP process'),
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'partial JSON over 1 MiB terminates without leaking buffered frame contents',
+      () async {
+        final overflowFragment = '{' * ((1024 * 1024) + 1);
+        final process = _FakeProcess(
+          stdout: Stream<List<int>>.fromIterable([
+            utf8.encode('$overflowFragment\n'),
+          ]),
+        );
+        final transport = StdioMCPTransport(
+          command: 'fake',
+          processStarter: (command, args) async => process,
+        );
+        addTearDown(transport.close);
+
+        final pending = transport
+            .send(JsonRpcRequest(method: 'initialize', id: 1))
+            .timeout(const Duration(seconds: 2));
+
+        final matcher = throwsA(
+          isA<MCPException>()
+              .having((e) => e.message, 'message', contains('frame exceeded'))
+              .having(
+                (e) => e.message,
+                'message',
+                isNot(contains(overflowFragment.substring(0, 64))),
+              ),
+        );
+        await expectLater(pending, matcher);
+        await expectLater(
+          transport.sendNotification(
+            JsonRpcNotification(method: 'notifications/initialized'),
+          ),
+          matcher,
+        );
+        expect(process.killed, isTrue);
+      },
+    );
   });
 }

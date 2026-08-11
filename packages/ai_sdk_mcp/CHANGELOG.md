@@ -1,3 +1,13 @@
+## Unreleased
+
+- Hardened Streamable HTTP reconnection, session cleanup, cancellation
+  notifications, response trust boundaries, and concurrent shutdown.
+- Removed stdio lifecycle races and prevented cleanup from suppressing
+  unexpected MCP client errors.
+- Stdio JSON frames are capped at 1 MiB and terminate safely on overflow.
+
+---
+
 ## 1.2.0
 
 ### Breaking

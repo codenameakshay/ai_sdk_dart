@@ -96,8 +96,8 @@ TOutput parseStreamingOutput<TOutput>(Output<TOutput> output, String text) {
 TOutput parseStreamingOutputWithNoObjectError<TOutput>({
   required Output<TOutput> output,
   required String text,
-  required LanguageModelV3Usage? usage,
-  required LanguageModelV3ResponseMetadata? response,
+  required LanguageModelV4Usage? usage,
+  required LanguageModelV4ResponseMetadata? response,
 }) {
   try {
     return parseStreamingOutput(output, text);

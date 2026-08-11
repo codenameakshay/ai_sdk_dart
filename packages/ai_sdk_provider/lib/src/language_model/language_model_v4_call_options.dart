@@ -1,17 +1,17 @@
 import '../shared/json_value.dart';
-import 'language_model_v3_prompt.dart';
-import 'language_model_v3_tool.dart';
-import 'language_model_v3_tool_choice.dart';
+import 'language_model_v4_prompt.dart';
+import 'language_model_v4_response_format.dart';
+import 'language_model_v4_tool.dart';
+import 'language_model_v4_tool_choice.dart';
 
-/// Call options for [LanguageModelV3] generation.
+/// Call options for [LanguageModelV4] generation.
 ///
 /// Contains [prompt], [tools], [toolChoice], [maxOutputTokens], [temperature],
 /// and other provider-agnostic settings.
-class LanguageModelV3CallOptions {
-  const LanguageModelV3CallOptions({
+class LanguageModelV4CallOptions {
+  const LanguageModelV4CallOptions({
     required this.prompt,
     this.tools = const [],
-    this.providerDefinedTools = const [],
     this.toolChoice,
     this.maxOutputTokens,
     this.temperature,
@@ -23,13 +23,15 @@ class LanguageModelV3CallOptions {
     this.seed,
     this.headers,
     this.providerOptions,
-    this.outputSchema,
+    this.responseFormat,
+    this.includeRawChunks = false,
+    this.abortSignal,
+    this.reasoning = LanguageModelV4Reasoning.providerDefault,
   });
 
-  final LanguageModelV3Prompt prompt;
-  final List<LanguageModelV3FunctionTool> tools;
-  final List<LanguageModelV3ProviderDefinedTool> providerDefinedTools;
-  final LanguageModelV3ToolChoice? toolChoice;
+  final LanguageModelV4Prompt prompt;
+  final List<LanguageModelV4Tool> tools;
+  final LanguageModelV4ToolChoice? toolChoice;
   final int? maxOutputTokens;
   final double? temperature;
   final double? topP;
@@ -40,12 +42,33 @@ class LanguageModelV3CallOptions {
   final int? seed;
   final Map<String, String>? headers;
   final ProviderOptions? providerOptions;
+  final LanguageModelV4ResponseFormat? responseFormat;
+  final bool includeRawChunks;
+  final LanguageModelV4AbortSignal? abortSignal;
+  final LanguageModelV4Reasoning reasoning;
+}
 
-  /// JSON Schema for the expected response structure.
-  ///
-  /// When set, capable providers (e.g. OpenAI with `response_format:
-  /// json_schema`) use native structured-output APIs rather than relying solely
-  /// on prompt engineering. Providers that do not implement native structured
-  /// output safely ignore this field.
-  final Map<String, dynamic>? outputSchema;
+extension LanguageModelV4ToolGroups on LanguageModelV4CallOptions {
+  Iterable<LanguageModelV4FunctionTool> get functionTools =>
+      tools.whereType<LanguageModelV4FunctionTool>();
+
+  Iterable<LanguageModelV4ProviderDefinedTool> get providerTools =>
+      tools.whereType<LanguageModelV4ProviderDefinedTool>();
+}
+
+/// Provider-facing cancellation signal.
+abstract interface class LanguageModelV4AbortSignal {
+  bool get isCancelled;
+  Future<void> get onCancelled;
+}
+
+/// Provider-independent reasoning effort.
+enum LanguageModelV4Reasoning {
+  providerDefault,
+  none,
+  minimal,
+  low,
+  medium,
+  high,
+  xhigh,
 }

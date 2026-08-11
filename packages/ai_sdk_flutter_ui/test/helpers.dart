@@ -9,25 +9,25 @@ import 'package:flutter/foundation.dart';
 
 /// Builds a [ToolLoopAgent] whose model streams [text] as a single text part.
 ToolLoopAgent textAgent(String text) {
-  return ToolLoopAgent(model: MockLanguageModelV3(response: [mockText(text)]));
+  return ToolLoopAgent(model: MockLanguageModelV4(response: [mockText(text)]));
 }
 
 /// A language model that emits a text delta and then *holds* the stream open
 /// (no finish part) until [finish] is called — useful for asserting transient
 /// streaming UI (e.g. the optimistic in-flight bubble) that an immediate mock
 /// would race past.
-class HoldingTextModel implements LanguageModelV3 {
+class HoldingTextModel extends LanguageModelV4 {
   HoldingTextModel(this.text);
 
   final String text;
-  final _controller = StreamController<LanguageModelV3StreamPart>();
+  final _controller = StreamController<LanguageModelV4StreamPart>();
 
   /// Emits the finish part and closes the stream.
   void finish() {
     if (_controller.isClosed) return;
     _controller.add(
       const StreamPartFinish(
-        finishReason: LanguageModelV3FinishReason.stop,
+        finishReason: LanguageModelV4FinishReason.stop,
         rawFinishReason: 'stop',
       ),
     );
@@ -39,28 +39,28 @@ class HoldingTextModel implements LanguageModelV3 {
   @override
   String get modelId => 'holding-text';
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3GenerateResult(
-      content: [LanguageModelV3TextPart(text: text)],
-      finishReason: LanguageModelV3FinishReason.stop,
+    return LanguageModelV4GenerateResult(
+      content: [LanguageModelV4TextPart(text: text)],
+      finishReason: LanguageModelV4FinishReason.stop,
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     const id = 'text-1';
     _controller
       ..add(const StreamPartTextStart(id: id))
       ..add(StreamPartTextDelta(id: id, delta: text))
       ..add(const StreamPartTextEnd(id: id));
-    return LanguageModelV3StreamResult(stream: _controller.stream);
+    return LanguageModelV4StreamResult(stream: _controller.stream);
   }
 }
 
@@ -80,14 +80,14 @@ Future<void> pumpUntil(bool Function() condition, {int tries = 200}) async {
 /// Builds a [ToolLoopAgent] whose model throws on stream, to exercise error
 /// paths.
 ToolLoopAgent erroringAgent(Object error) {
-  return ToolLoopAgent(model: MockLanguageModelV3(doStreamError: error));
+  return ToolLoopAgent(model: MockLanguageModelV4(doStreamError: error));
 }
 
 /// A language model that throws [error] synchronously from `doStream`, before
 /// any stream is opened — so the `await agent.stream(...)` call itself rejects
 /// and is handled by the controller's surrounding try/catch rather than its
 /// stream-error listener.
-class _SyncThrowingModel implements LanguageModelV3 {
+class _SyncThrowingModel extends LanguageModelV4 {
   _SyncThrowingModel(this.error);
 
   final Object error;
@@ -97,18 +97,18 @@ class _SyncThrowingModel implements LanguageModelV3 {
   @override
   String get modelId => 'sync-throwing';
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) {
     throw error;
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) {
     throw error;
   }
@@ -124,7 +124,7 @@ ToolLoopAgent syncThrowingAgent(Object error) {
 /// `agent.stream(...)` call rejects and is handled by the controller's
 /// surrounding try/catch (rather than its stream-error listener).
 class ThrowingStreamAgent extends ToolLoopAgent {
-  ThrowingStreamAgent(this.error) : super(model: MockLanguageModelV3());
+  ThrowingStreamAgent(this.error) : super(model: MockLanguageModelV4());
 
   final Object error;
 
@@ -132,9 +132,9 @@ class ThrowingStreamAgent extends ToolLoopAgent {
   Future<StreamTextResult> stream({
     String? prompt,
     List<ModelMessage>? messages,
-    List<LanguageModelV3ToolApprovalResponse> toolApprovalResponses = const [],
+    List<LanguageModelV4ToolApprovalResponse> toolApprovalResponses = const [],
     CancellationToken? abortSignal,
-    Duration? timeout,
+    TimeoutConfiguration? timeout,
   }) async {
     throw error;
   }
@@ -151,7 +151,7 @@ class RecordedStreamInvocation {
   final CancellationToken? abortSignal;
   final String? prompt;
   final List<ModelMessage>? messages;
-  final List<LanguageModelV3ToolApprovalResponse> toolApprovalResponses;
+  final List<LanguageModelV4ToolApprovalResponse> toolApprovalResponses;
 
   late final StreamController<String> _textController =
       StreamController<String>(
@@ -167,21 +167,21 @@ class RecordedStreamInvocation {
       );
   final Completer<String> _textCompleter = Completer<String>();
   final Completer<Object?> _outputCompleter = Completer<Object?>();
-  final Completer<List<LanguageModelV3ContentPart>> _contentCompleter =
-      Completer<List<LanguageModelV3ContentPart>>();
+  final Completer<List<LanguageModelV4ContentPart>> _contentCompleter =
+      Completer<List<LanguageModelV4ContentPart>>();
   final Completer<String> _reasoningTextCompleter = Completer<String>();
   final Completer<List<GenerateTextStep>> _stepsCompleter =
       Completer<List<GenerateTextStep>>();
-  final Completer<LanguageModelV3Usage?> _usageCompleter =
-      Completer<LanguageModelV3Usage?>();
-  final Completer<LanguageModelV3Usage?> _totalUsageCompleter =
-      Completer<LanguageModelV3Usage?>();
-  final Completer<List<LanguageModelV3SourcePart>> _sourcesCompleter =
-      Completer<List<LanguageModelV3SourcePart>>();
-  final Completer<List<LanguageModelV3ToolCallPart>> _toolCallsCompleter =
-      Completer<List<LanguageModelV3ToolCallPart>>();
-  final Completer<List<LanguageModelV3ToolResultPart>> _toolResultsCompleter =
-      Completer<List<LanguageModelV3ToolResultPart>>();
+  final Completer<LanguageModelV4Usage?> _usageCompleter =
+      Completer<LanguageModelV4Usage?>();
+  final Completer<LanguageModelV4Usage?> _totalUsageCompleter =
+      Completer<LanguageModelV4Usage?>();
+  final Completer<List<LanguageModelV4SourcePart>> _sourcesCompleter =
+      Completer<List<LanguageModelV4SourcePart>>();
+  final Completer<List<LanguageModelV4ToolCallPart>> _toolCallsCompleter =
+      Completer<List<LanguageModelV4ToolCallPart>>();
+  final Completer<List<LanguageModelV4ToolResultPart>> _toolResultsCompleter =
+      Completer<List<LanguageModelV4ToolResultPart>>();
 
   bool textSubscriptionCancelled = false;
   bool fullStreamSubscriptionCancelled = false;
@@ -202,11 +202,11 @@ class RecordedStreamInvocation {
       sources: _sourcesCompleter.future,
       toolCalls: _toolCallsCompleter.future,
       toolResults: _toolResultsCompleter.future,
-      finishReason: Future.value(LanguageModelV3FinishReason.stop),
+      finishReason: Future.value(LanguageModelV4FinishReason.stop),
       rawFinishReason: Future.value('stop'),
       usage: _usageCompleter.future,
       totalUsage: _totalUsageCompleter.future,
-      warnings: Future.value(const []),
+      warnings: Future.value(const <LanguageModelV4Warning>[]),
       steps: _stepsCompleter.future,
       request: Future.value(
         const GenerateTextRequest(system: null, messages: []),
@@ -217,7 +217,7 @@ class RecordedStreamInvocation {
       providerMetadata: Future.value(null),
       finish: Future.value(
         const StreamPartFinish(
-          finishReason: LanguageModelV3FinishReason.stop,
+          finishReason: LanguageModelV4FinishReason.stop,
           rawFinishReason: 'stop',
         ),
       ),
@@ -236,20 +236,33 @@ class RecordedStreamInvocation {
     _fullController.add(StreamTextErrorEvent(error: error));
   }
 
+  void emitFullStreamFailure(Object error) {
+    _fullController.addError(error);
+  }
+
+  void failUsage(Object error) {
+    _usageCompleter.future.catchError((_) => null);
+    _totalUsageCompleter.future.catchError((_) => null);
+    if (!_usageCompleter.isCompleted) _usageCompleter.completeError(error);
+    if (!_totalUsageCompleter.isCompleted) {
+      _totalUsageCompleter.completeError(error);
+    }
+  }
+
   Future<void> finish({
     String finalText = '',
     String reasoningText = '',
-    LanguageModelV3Usage? usage,
+    LanguageModelV4Usage? usage,
     List<GenerateTextStep> steps = const [],
-    List<LanguageModelV3SourcePart> sources = const [],
-    List<LanguageModelV3ToolCallPart> toolCalls = const [],
-    List<LanguageModelV3ToolResultPart> toolResults = const [],
+    List<LanguageModelV4SourcePart> sources = const [],
+    List<LanguageModelV4ToolCallPart> toolCalls = const [],
+    List<LanguageModelV4ToolResultPart> toolResults = const [],
   }) async {
     if (!_textCompleter.isCompleted) _textCompleter.complete(finalText);
     if (!_outputCompleter.isCompleted) _outputCompleter.complete(finalText);
     if (!_contentCompleter.isCompleted) {
       _contentCompleter.complete([
-        if (finalText.isNotEmpty) LanguageModelV3TextPart(text: finalText),
+        if (finalText.isNotEmpty) LanguageModelV4TextPart(text: finalText),
       ]);
     }
     if (!_reasoningTextCompleter.isCompleted) {
@@ -271,7 +284,7 @@ class RecordedStreamInvocation {
 }
 
 class RecordingStreamAgent extends ToolLoopAgent {
-  RecordingStreamAgent() : super(model: MockLanguageModelV3());
+  RecordingStreamAgent() : super(model: MockLanguageModelV4());
 
   final List<RecordedStreamInvocation> invocations = [];
 
@@ -279,9 +292,9 @@ class RecordingStreamAgent extends ToolLoopAgent {
   Future<StreamTextResult> stream({
     String? prompt,
     List<ModelMessage>? messages,
-    List<LanguageModelV3ToolApprovalResponse> toolApprovalResponses = const [],
+    List<LanguageModelV4ToolApprovalResponse> toolApprovalResponses = const [],
     CancellationToken? abortSignal,
-    Duration? timeout,
+    TimeoutConfiguration? timeout,
   }) async {
     final invocation = RecordedStreamInvocation(
       abortSignal: abortSignal,
@@ -306,9 +319,9 @@ final Schema<Map<String, dynamic>> mapSchema = Schema<Map<String, dynamic>>(
 );
 
 /// Builds a [ToolLoopAgent] that streams [text] and reports [usage] on finish.
-ToolLoopAgent textAgentWithUsage(String text, LanguageModelV3Usage usage) {
+ToolLoopAgent textAgentWithUsage(String text, LanguageModelV4Usage usage) {
   return ToolLoopAgent(
-    model: MockLanguageModelV3(response: [mockText(text)], usage: usage),
+    model: MockLanguageModelV4(response: [mockText(text)], usage: usage),
   );
 }
 
@@ -318,7 +331,7 @@ ToolLoopAgent reasoningAgent({
   required String text,
 }) {
   return ToolLoopAgent(
-    model: MockLanguageModelV3(
+    model: MockLanguageModelV4(
       response: [mockReasoning(reasoning), mockText(text)],
     ),
   );
@@ -329,11 +342,11 @@ ToolLoopAgent reasoningAgent({
 ///
 /// Lets a test drive a multi-step tool loop — e.g. `[[toolCall], [toolCall],
 /// [text]]` models "call a tool, re-issue it after approval, then answer".
-class QueuedStreamModel implements LanguageModelV3 {
+class QueuedStreamModel extends LanguageModelV4 {
   QueuedStreamModel(this.responses, {this.usage});
 
-  final List<List<LanguageModelV3ContentPart>> responses;
-  final LanguageModelV3Usage? usage;
+  final List<List<LanguageModelV4ContentPart>> responses;
+  final LanguageModelV4Usage? usage;
   int _call = 0;
 
   @override
@@ -341,74 +354,71 @@ class QueuedStreamModel implements LanguageModelV3 {
   @override
   String get modelId => 'queued';
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
-  List<LanguageModelV3ContentPart> _nextResponse() {
+  List<LanguageModelV4ContentPart> _nextResponse() {
     final index = _call < responses.length ? _call : responses.length - 1;
     _call++;
     return responses[index];
   }
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3GenerateResult(
+    return LanguageModelV4GenerateResult(
       content: _nextResponse(),
-      finishReason: LanguageModelV3FinishReason.stop,
+      finishReason: LanguageModelV4FinishReason.stop,
       usage: usage,
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     final response = _nextResponse();
-    final parts = <LanguageModelV3StreamPart>[];
+    final parts = <LanguageModelV4StreamPart>[];
     var i = 0;
     for (final part in response) {
       final id = 'text-$_call-$i';
-      if (part is LanguageModelV3TextPart) {
+      if (part is LanguageModelV4TextPart) {
         parts
           ..add(StreamPartTextStart(id: id))
           ..add(StreamPartTextDelta(id: id, delta: part.text))
           ..add(StreamPartTextEnd(id: id));
-      } else if (part is LanguageModelV3ReasoningPart) {
-        parts.add(StreamPartReasoningDelta(delta: part.text));
-      } else if (part is LanguageModelV3ToolCallPart) {
+      } else if (part is LanguageModelV4ReasoningPart) {
+        parts
+          ..add(StreamPartReasoningStart(id: id))
+          ..add(StreamPartReasoningDelta(id: id, delta: part.text))
+          ..add(StreamPartReasoningEnd(id: id));
+      } else if (part is LanguageModelV4ToolCallPart) {
         parts
           ..add(
-            StreamPartToolCallStart(
-              toolCallId: part.toolCallId,
+            StreamPartToolInputStart(
+              id: part.toolCallId,
               toolName: part.toolName,
             ),
           )
           ..add(
-            StreamPartToolCallDelta(
-              toolCallId: part.toolCallId,
-              toolName: part.toolName,
-              argsTextDelta: jsonEncode(part.input),
+            StreamPartToolInputDelta(
+              id: part.toolCallId,
+              delta: jsonEncode(part.input),
             ),
           )
-          ..add(
-            StreamPartToolCallEnd(
-              toolCallId: part.toolCallId,
-              toolName: part.toolName,
-              input: part.input,
-            ),
-          );
+          ..add(StreamPartToolInputEnd(id: part.toolCallId))
+          ..add(StreamPartToolCall(toolCall: part));
       }
       i++;
     }
     parts.add(
       StreamPartFinish(
-        finishReason: LanguageModelV3FinishReason.stop,
+        finishReason: LanguageModelV4FinishReason.stop,
         rawFinishReason: 'stop',
         usage: usage,
       ),
     );
-    return LanguageModelV3StreamResult(stream: Stream.fromIterable(parts));
+    return LanguageModelV4StreamResult(stream: Stream.fromIterable(parts));
   }
 }
 
@@ -419,7 +429,7 @@ Tool<Map<String, dynamic>, String> approvalTool(String output) {
       jsonSchema: const {'type': 'object'},
       fromJson: (json) => json,
     ),
-    requiresApproval: true,
+    approvalPolicy: ToolApprovalPolicy.always,
     executeDynamic: (input, options) async => output,
   );
 }

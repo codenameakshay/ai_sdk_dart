@@ -24,11 +24,11 @@ class ToolCallCard extends StatelessWidget {
   const ToolCallCard({super.key, required this.call, this.result});
 
   /// The tool call to render.
-  final LanguageModelV3ToolCallPart call;
+  final LanguageModelV4ToolCallPart call;
 
-  /// Optional result for [call]. When [LanguageModelV3ToolResultPart.isError]
+  /// Optional result for [call]. When [LanguageModelV4ToolResultPart.isError]
   /// is true, it is rendered in the error color.
-  final LanguageModelV3ToolResultPart? result;
+  final LanguageModelV4ToolResultPart? result;
 
   @override
   Widget build(BuildContext context) {
@@ -128,7 +128,7 @@ class ToolCallCard extends StatelessWidget {
     }
   }
 
-  static String _stringifyOutput(LanguageModelV3ToolResultOutput output) {
+  static String _stringifyOutput(LanguageModelV4ToolResultOutput output) {
     if (output is ToolResultOutputText) return output.text;
     if (output is ToolResultOutputContent) {
       return output.parts.map((p) => p.runtimeType).join(', ');

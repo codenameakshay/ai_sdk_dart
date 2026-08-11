@@ -53,7 +53,7 @@ class OpenAIProvider {
   /// Built on the shared `ai_sdk_openai_compatible` base; OpenAI-specific
   /// `reasoning_effort` / `reasoning_summary` and pass-through provider options
   /// are injected via the config's `extraBody` hook.
-  LanguageModelV3 call(String modelId) => OpenAICompatibleChatLanguageModel(
+  LanguageModelV4 call(String modelId) => OpenAICompatibleChatLanguageModel(
     modelId: modelId,
     config: OpenAICompatibleConfig(
       provider: 'openai',
@@ -96,13 +96,22 @@ final openai = OpenAIProvider();
 /// Builds the OpenAI-specific request-body additions for the shared base's
 /// `extraBody` hook: reasoning_effort / reasoning_summary (accepting both
 /// camelCase and snake_case keys) plus any other pass-through provider options.
-Map<String, dynamic>? _openAiExtraBody(LanguageModelV3CallOptions options) {
+Map<String, dynamic>? _openAiExtraBody(LanguageModelV4CallOptions options) {
   final po = options.providerOptions?['openai'];
   final (reasoningEffort, reasoningSummary, cleanedPo) =
       _extractReasoningOptions(po);
+  final standardReasoning = switch (options.reasoning) {
+    LanguageModelV4Reasoning.providerDefault => null,
+    LanguageModelV4Reasoning.none => 'none',
+    LanguageModelV4Reasoning.minimal => 'minimal',
+    LanguageModelV4Reasoning.low => 'low',
+    LanguageModelV4Reasoning.medium => 'medium',
+    LanguageModelV4Reasoning.high => 'high',
+    LanguageModelV4Reasoning.xhigh => 'xhigh',
+  };
   final out = <String, dynamic>{
-    if (reasoningEffort != null) 'reasoning_effort': reasoningEffort,
-    if (reasoningSummary != null) 'reasoning_summary': reasoningSummary,
+    'reasoning_effort': ?reasoningEffort ?? standardReasoning,
+    'reasoning_summary': ?reasoningSummary,
     ...?cleanedPo,
   };
   return out.isEmpty ? null : out;
@@ -139,7 +148,7 @@ class _OpenAIEmbeddingModel implements EmbeddingModelV2<String> {
       response = await client.post<Map<String, dynamic>>(
         '/embeddings',
         data: {'model': modelId, 'input': options.values, ...?providerOptions},
-        options: Options(headers: {...resolvedHeaders, ...?options.headers}),
+        options: Options(headers: {...?options.headers, ...resolvedHeaders}),
       );
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);
@@ -214,7 +223,7 @@ class _OpenAIImageModel implements ImageModelV3 {
           if (!modelId.startsWith('gpt-image')) 'response_format': 'b64_json',
           ...?providerOptions,
         },
-        options: Options(headers: {...resolvedHeaders, ...?options.headers}),
+        options: Options(headers: {...?options.headers, ...resolvedHeaders}),
       );
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);
@@ -304,7 +313,7 @@ class _OpenAISpeechModel implements SpeechModelV1 {
         data: requestBody,
         options: Options(
           responseType: ResponseType.bytes,
-          headers: {...resolvedHeaders, ...?options.headers},
+          headers: {...?options.headers, ...resolvedHeaders},
         ),
       );
     } on DioException catch (e) {
@@ -358,7 +367,7 @@ class _OpenAITranscriptionModel implements TranscriptionModelV1 {
       response = await client.post<Map<String, dynamic>>(
         '/audio/transcriptions',
         data: formData,
-        options: Options(headers: {...resolvedHeaders, ...?options.headers}),
+        options: Options(headers: {...?options.headers, ...resolvedHeaders}),
       );
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);

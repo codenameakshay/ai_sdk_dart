@@ -15,7 +15,7 @@ streaming **once** so the four providers above inherit them. See
 import 'package:ai_sdk_openai_compatible/ai_sdk_openai_compatible.dart';
 import 'package:dio/dio.dart';
 
-LanguageModelV3 myModel(String modelId) => OpenAICompatibleChatLanguageModel(
+LanguageModelV4 myModel(String modelId) => OpenAICompatibleChatLanguageModel(
   config: OpenAICompatibleConfig(
     provider: 'groq',
     baseUrl: 'https://api.groq.com/openai/v1',

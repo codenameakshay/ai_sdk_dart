@@ -85,7 +85,7 @@ class _ChatPageState extends State<ChatPage> {
                   final msg = _chat.messages[i];
                   return ListTile(
                     title: Text(msg.role.name),
-                    subtitle: Text(msg.content),
+                    subtitle: Text(msg.content ?? ''),
                   );
                 },
               ),

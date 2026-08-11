@@ -16,25 +16,25 @@ void main() {
   // ---------------------------------------------------------------------------
 
   group('generateText generation parameters', () {
-    test('passes topK to LanguageModelV3CallOptions', () async {
+    test('passes topK to LanguageModelV4CallOptions', () async {
       final model = FakeCapturingModel(responseText: 'ok');
       await generateText(model: model, prompt: 'hi', topK: 40);
       expect(model.capturedOptions.last.topK, 40);
     });
 
-    test('passes presencePenalty to LanguageModelV3CallOptions', () async {
+    test('passes presencePenalty to LanguageModelV4CallOptions', () async {
       final model = FakeCapturingModel(responseText: 'ok');
       await generateText(model: model, prompt: 'hi', presencePenalty: 0.5);
       expect(model.capturedOptions.last.presencePenalty, 0.5);
     });
 
-    test('passes frequencyPenalty to LanguageModelV3CallOptions', () async {
+    test('passes frequencyPenalty to LanguageModelV4CallOptions', () async {
       final model = FakeCapturingModel(responseText: 'ok');
       await generateText(model: model, prompt: 'hi', frequencyPenalty: 0.3);
       expect(model.capturedOptions.last.frequencyPenalty, 0.3);
     });
 
-    test('passes stopSequences to LanguageModelV3CallOptions', () async {
+    test('passes stopSequences to LanguageModelV4CallOptions', () async {
       final model = FakeCapturingModel(responseText: 'ok');
       await generateText(
         model: model,
@@ -44,13 +44,13 @@ void main() {
       expect(model.capturedOptions.last.stopSequences, ['STOP', 'END']);
     });
 
-    test('passes seed to LanguageModelV3CallOptions', () async {
+    test('passes seed to LanguageModelV4CallOptions', () async {
       final model = FakeCapturingModel(responseText: 'ok');
       await generateText(model: model, prompt: 'hi', seed: 42);
       expect(model.capturedOptions.last.seed, 42);
     });
 
-    test('passes headers to LanguageModelV3CallOptions', () async {
+    test('passes headers to LanguageModelV4CallOptions', () async {
       final model = FakeCapturingModel(responseText: 'ok');
       await generateText(
         model: model,
@@ -72,9 +72,9 @@ void main() {
               isRetryable: true,
             );
           }
-          return LanguageModelV3GenerateResult(
-            content: [LanguageModelV3TextPart(text: 'success')],
-            finishReason: LanguageModelV3FinishReason.stop,
+          return LanguageModelV4GenerateResult(
+            content: [LanguageModelV4TextPart(text: 'success')],
+            finishReason: LanguageModelV4FinishReason.stop,
           );
         },
       );
@@ -147,9 +147,9 @@ void main() {
         final model = _CountingFakeModel(
           onCall: () {
             callCount++;
-            return LanguageModelV3GenerateResult(
-              content: [LanguageModelV3TextPart(text: 'unexpected')],
-              finishReason: LanguageModelV3FinishReason.stop,
+            return LanguageModelV4GenerateResult(
+              content: [LanguageModelV4TextPart(text: 'unexpected')],
+              finishReason: LanguageModelV4FinishReason.stop,
             );
           },
         );
@@ -177,9 +177,9 @@ void main() {
           onCall: () async {
             callCount++;
             await gate.future;
-            return LanguageModelV3GenerateResult(
-              content: [LanguageModelV3TextPart(text: 'late')],
-              finishReason: LanguageModelV3FinishReason.stop,
+            return LanguageModelV4GenerateResult(
+              content: [LanguageModelV4TextPart(text: 'late')],
+              finishReason: LanguageModelV4FinishReason.stop,
             );
           },
         );
@@ -259,9 +259,9 @@ void main() {
               responseHeaders: {'Retry-After': '3'},
             );
           }
-          return LanguageModelV3GenerateResult(
-            content: [LanguageModelV3TextPart(text: 'success')],
-            finishReason: LanguageModelV3FinishReason.stop,
+          return LanguageModelV4GenerateResult(
+            content: [LanguageModelV4TextPart(text: 'success')],
+            finishReason: LanguageModelV4FinishReason.stop,
           );
         },
       );
@@ -317,7 +317,7 @@ void main() {
           tools: {
             'wait': tool<Map<String, dynamic>, String>(
               inputSchema: jsonSchema({'type': 'object'}),
-              execute: (_, __) async {
+              execute: (_, _) async {
                 await gate.future;
                 return 'late';
               },
@@ -347,7 +347,7 @@ void main() {
           tools: {
             'wait': tool<Map<String, dynamic>, String>(
               inputSchema: jsonSchema({'type': 'object'}),
-              execute: (_, __) async {
+              execute: (_, _) async {
                 await gate.future;
                 return 'late';
               },
@@ -369,14 +369,14 @@ void main() {
   // ---------------------------------------------------------------------------
 
   group('streamText generation parameters', () {
-    test('passes topK to LanguageModelV3CallOptions', () async {
+    test('passes topK to LanguageModelV4CallOptions', () async {
       final model = FakeCapturingModel(responseText: 'ok');
       final result = await streamText(model: model, prompt: 'hi', topK: 40);
       await result.text; // drain the stream
       expect(model.capturedOptions.last.topK, 40);
     });
 
-    test('passes presencePenalty to LanguageModelV3CallOptions', () async {
+    test('passes presencePenalty to LanguageModelV4CallOptions', () async {
       final model = FakeCapturingModel(responseText: 'ok');
       final result = await streamText(
         model: model,
@@ -387,7 +387,7 @@ void main() {
       expect(model.capturedOptions.last.presencePenalty, 0.5);
     });
 
-    test('passes frequencyPenalty to LanguageModelV3CallOptions', () async {
+    test('passes frequencyPenalty to LanguageModelV4CallOptions', () async {
       final model = FakeCapturingModel(responseText: 'ok');
       final result = await streamText(
         model: model,
@@ -398,7 +398,7 @@ void main() {
       expect(model.capturedOptions.last.frequencyPenalty, 0.3);
     });
 
-    test('passes stopSequences to LanguageModelV3CallOptions', () async {
+    test('passes stopSequences to LanguageModelV4CallOptions', () async {
       final model = FakeCapturingModel(responseText: 'ok');
       final result = await streamText(
         model: model,
@@ -409,14 +409,14 @@ void main() {
       expect(model.capturedOptions.last.stopSequences, ['STOP']);
     });
 
-    test('passes seed to LanguageModelV3CallOptions', () async {
+    test('passes seed to LanguageModelV4CallOptions', () async {
       final model = FakeCapturingModel(responseText: 'ok');
       final result = await streamText(model: model, prompt: 'hi', seed: 99);
       await result.text;
       expect(model.capturedOptions.last.seed, 99);
     });
 
-    test('passes headers to LanguageModelV3CallOptions', () async {
+    test('passes headers to LanguageModelV4CallOptions', () async {
       final model = FakeCapturingModel(responseText: 'ok');
       final result = await streamText(
         model: model,
@@ -439,9 +439,9 @@ void main() {
               isRetryable: true,
             );
           }
-          return LanguageModelV3GenerateResult(
-            content: [LanguageModelV3TextPart(text: 'streamed')],
-            finishReason: LanguageModelV3FinishReason.stop,
+          return LanguageModelV4GenerateResult(
+            content: [LanguageModelV4TextPart(text: 'streamed')],
+            finishReason: LanguageModelV4FinishReason.stop,
           );
         },
         isStream: true,
@@ -488,9 +488,9 @@ void main() {
         final model = _CountingFakeModel(
           onCall: () {
             callCount++;
-            return LanguageModelV3GenerateResult(
-              content: [LanguageModelV3TextPart(text: 'unexpected')],
-              finishReason: LanguageModelV3FinishReason.stop,
+            return LanguageModelV4GenerateResult(
+              content: [LanguageModelV4TextPart(text: 'unexpected')],
+              finishReason: LanguageModelV4FinishReason.stop,
             );
           },
           isStream: true,
@@ -521,9 +521,9 @@ void main() {
           onCall: () async {
             callCount++;
             await gate.future;
-            return LanguageModelV3GenerateResult(
-              content: [LanguageModelV3TextPart(text: 'late')],
-              finishReason: LanguageModelV3FinishReason.stop,
+            return LanguageModelV4GenerateResult(
+              content: [LanguageModelV4TextPart(text: 'late')],
+              finishReason: LanguageModelV4FinishReason.stop,
             );
           },
           isStream: true,
@@ -570,9 +570,9 @@ void main() {
                 isRetryable: true,
               );
             }
-            return LanguageModelV3GenerateResult(
-              content: [LanguageModelV3TextPart(text: 'streamed')],
-              finishReason: LanguageModelV3FinishReason.stop,
+            return LanguageModelV4GenerateResult(
+              content: [LanguageModelV4TextPart(text: 'streamed')],
+              finishReason: LanguageModelV4FinishReason.stop,
             );
           },
           isStream: true,
@@ -644,7 +644,7 @@ void main() {
           tools: {
             'wait': tool<Map<String, dynamic>, String>(
               inputSchema: jsonSchema({'type': 'object'}),
-              execute: (_, __) async {
+              execute: (_, _) async {
                 await gate.future;
                 return 'late';
               },
@@ -677,7 +677,7 @@ void main() {
           tools: {
             'wait': tool<Map<String, dynamic>, String>(
               inputSchema: jsonSchema({'type': 'object'}),
-              execute: (_, __) async {
+              execute: (_, _) async {
                 await gate.future;
                 return 'late';
               },
@@ -737,10 +737,10 @@ void main() {
 // Helper fake models
 // ---------------------------------------------------------------------------
 
-typedef _GenerateCallback = FutureOr<LanguageModelV3GenerateResult> Function();
+typedef _GenerateCallback = FutureOr<LanguageModelV4GenerateResult> Function();
 
 /// A fake model that delegates to a callback, allowing controlled failures.
-class _CountingFakeModel implements LanguageModelV3 {
+class _CountingFakeModel extends LanguageModelV4 {
   _CountingFakeModel({required this.onCall, this.isStream = false});
 
   final _GenerateCallback onCall;
@@ -753,25 +753,25 @@ class _CountingFakeModel implements LanguageModelV3 {
   final String modelId = 'fake-counting-model';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     return await onCall();
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     final result = await onCall();
     final text = result.content
-        .whereType<LanguageModelV3TextPart>()
+        .whereType<LanguageModelV4TextPart>()
         .map((p) => p.text)
         .join();
-    return LanguageModelV3StreamResult(
+    return LanguageModelV4StreamResult(
       stream: simulateReadableStream(
         parts: [
           StreamPartTextStart(id: 'text-1'),

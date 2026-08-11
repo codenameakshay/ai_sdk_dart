@@ -55,8 +55,8 @@ class CompletionController extends ChangeNotifier {
   bool get isStreaming => _isStreaming;
 
   /// Token usage reported by the most recent completion, if any.
-  LanguageModelV3Usage? get lastUsage => _lastUsage;
-  LanguageModelV3Usage? _lastUsage;
+  LanguageModelV4Usage? get lastUsage => _lastUsage;
+  LanguageModelV4Usage? _lastUsage;
 
   StreamSubscription<String>? _activeSubscription;
   StreamSubscription<StreamTextEvent>? _errorSubscription;

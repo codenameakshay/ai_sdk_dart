@@ -29,12 +29,12 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
 
-      Future<void> call(LanguageModelV3ToolChoice toolChoice) {
+      Future<void> call(LanguageModelV4ToolChoice toolChoice) {
         return model.doGenerate(
-          LanguageModelV3CallOptions(
+          LanguageModelV4CallOptions(
             prompt: _userPrompt('hi'),
             tools: const [
-              LanguageModelV3FunctionTool(
+              LanguageModelV4FunctionTool(
                 name: 'weather',
                 description: 'Get the weather',
                 inputSchema: {'type': 'object'},
@@ -68,6 +68,38 @@ void main() {
       expect(fn['parameters'], {'type': 'object'});
     });
 
+    test('serializes provider-defined tools verbatim', () async {
+      late Map<String, dynamic> captured;
+      final server = await _TestServer.start((request) async {
+        captured = await _captureBody(request);
+        _writeOk(request);
+      });
+      addTearDown(server.close);
+
+      final model = _bearerModel(server.baseUrl);
+      await model.doGenerate(
+        LanguageModelV4CallOptions(
+          prompt: _userPrompt('hi'),
+          tools: const [
+            LanguageModelV4ProviderDefinedTool(
+              id: 'test.search',
+              name: 'search',
+              description: 'Provider-native search',
+              args: {'max_results': 5},
+            ),
+          ],
+        ),
+      );
+
+      final tools = (captured['tools'] as List).cast<Map<String, dynamic>>();
+      expect(tools.single, {
+        'type': 'test.search',
+        'name': 'search',
+        'description': 'Provider-native search',
+        'max_results': 5,
+      });
+    });
+
     test('omits tools when supportsTools is false', () async {
       late Map<String, dynamic> captured;
       final server = await _TestServer.start((request) async {
@@ -88,10 +120,10 @@ void main() {
       );
 
       await model.doGenerate(
-        LanguageModelV3CallOptions(
+        LanguageModelV4CallOptions(
           prompt: _userPrompt('hi'),
           tools: const [
-            LanguageModelV3FunctionTool(
+            LanguageModelV4FunctionTool(
               name: 'weather',
               inputSchema: {'type': 'object'},
             ),
@@ -117,20 +149,20 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
                 content: [
-                  LanguageModelV3TextPart(text: 'describe'),
-                  LanguageModelV3ImagePart(
+                  LanguageModelV4TextPart(text: 'describe'),
+                  LanguageModelV4ImagePart(
                     image: DataContentBytes(
                       Uint8List.fromList(utf8.encode('img')),
                     ),
                     mediaType: 'image/png',
                   ),
-                  LanguageModelV3FilePart(
+                  LanguageModelV4FilePart(
                     data: DataContentBytes(
                       Uint8List.fromList(utf8.encode('audio')),
                     ),
@@ -176,14 +208,14 @@ void main() {
         ),
       );
       await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
                 content: [
-                  LanguageModelV3TextPart(text: 'describe'),
-                  LanguageModelV3ImagePart(
+                  LanguageModelV4TextPart(text: 'describe'),
+                  LanguageModelV4ImagePart(
                     image: DataContentBytes(
                       Uint8List.fromList(utf8.encode('img')),
                     ),
@@ -202,7 +234,7 @@ void main() {
     });
 
     // ── response_format json_schema ──────────────────────────────────────
-    test('serializes response_format json_schema from outputSchema', () async {
+    test('serializes a JSON response format', () async {
       late Map<String, dynamic> captured;
       final server = await _TestServer.start((request) async {
         captured = await _captureBody(request);
@@ -212,15 +244,17 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       await model.doGenerate(
-        LanguageModelV3CallOptions(
+        LanguageModelV4CallOptions(
           prompt: _userPrompt('weather'),
-          outputSchema: const {
-            'type': 'object',
-            'properties': {
-              'city': {'type': 'string'},
+          responseFormat: const LanguageModelV4JsonResponseFormat(
+            schema: {
+              'type': 'object',
+              'properties': {
+                'city': {'type': 'string'},
+              },
+              'required': ['city'],
             },
-            'required': ['city'],
-          },
+          ),
         ),
       );
 
@@ -230,6 +264,32 @@ void main() {
       expect(js['name'], 'response');
       expect(js['strict'], isTrue);
       expect(js['schema'], isA<Map>());
+    });
+
+    test('serializes JSON response format descriptions', () async {
+      late Map<String, dynamic> captured;
+      final server = await _TestServer.start((request) async {
+        captured = await _captureBody(request);
+        _writeOk(request);
+      });
+      addTearDown(server.close);
+
+      final model = _bearerModel(server.baseUrl);
+      await model.doGenerate(
+        LanguageModelV4CallOptions(
+          prompt: _userPrompt('weather'),
+          responseFormat: const LanguageModelV4JsonResponseFormat(
+            name: 'weather_response',
+            description: 'Structured weather response.',
+            schema: {'type': 'object'},
+          ),
+        ),
+      );
+
+      final rf = captured['response_format'] as Map<String, dynamic>;
+      final js = rf['json_schema'] as Map<String, dynamic>;
+      expect(js['name'], 'weather_response');
+      expect(js['description'], 'Structured weather response.');
     });
 
     test('omits response_format when flag disabled', () async {
@@ -251,9 +311,11 @@ void main() {
         ),
       );
       await model.doGenerate(
-        LanguageModelV3CallOptions(
+        LanguageModelV4CallOptions(
           prompt: _userPrompt('hi'),
-          outputSchema: const {'type': 'object'},
+          responseFormat: const LanguageModelV4JsonResponseFormat(
+            schema: {'type': 'object'},
+          ),
         ),
       );
 
@@ -295,17 +357,18 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       final result = await model.doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('weather')),
+        LanguageModelV4CallOptions(prompt: _userPrompt('weather')),
       );
 
-      expect(result.finishReason, LanguageModelV3FinishReason.toolCalls);
-      expect(result.usage?.totalTokens, 15);
+      expect(result.finishReason, LanguageModelV4FinishReason.toolCalls);
+      expect(result.usage.inputTokens.total, 10);
+      expect(result.usage.outputTokens.total, 5);
       expect(
-        result.content.whereType<LanguageModelV3TextPart>().single.text,
+        result.content.whereType<LanguageModelV4TextPart>().single.text,
         'checking',
       );
       final toolCall = result.content
-          .whereType<LanguageModelV3ToolCallPart>()
+          .whereType<LanguageModelV4ToolCallPart>()
           .single;
       expect(toolCall.toolName, 'weather');
       expect(toolCall.input, {'city': 'Paris'});
@@ -327,7 +390,7 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
       );
 
       final parts = await streamResult.stream.toList();
@@ -336,17 +399,18 @@ void main() {
         parts.whereType<StreamPartTextDelta>().map((p) => p.delta).join(),
         'Hello',
       );
-      expect(parts.whereType<StreamPartToolCallStart>().length, 1);
+      expect(parts.whereType<StreamPartToolInputStart>().length, 1);
       expect(
-        parts.whereType<StreamPartToolCallDelta>().length,
+        parts.whereType<StreamPartToolInputDelta>().length,
         greaterThanOrEqualTo(1),
       );
-      final end = parts.whereType<StreamPartToolCallEnd>().single;
-      expect(end.toolName, 'weather');
-      expect(end.input, {'city': 'Paris'});
+      expect(parts.whereType<StreamPartToolInputEnd>().length, 1);
+      final toolCall = parts.whereType<StreamPartToolCall>().single.toolCall;
+      expect(toolCall.toolName, 'weather');
+      expect(toolCall.input, {'city': 'Paris'});
       expect(
         parts.whereType<StreamPartFinish>().single.finishReason,
-        LanguageModelV3FinishReason.toolCalls,
+        LanguageModelV4FinishReason.toolCalls,
       );
     });
 
@@ -362,22 +426,73 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
       );
-      final finish = (await streamResult.stream.toList())
-          .whereType<StreamPartFinish>()
-          .single;
-      expect(finish.usage?.totalTokens, 12);
+      final parts = await streamResult.stream.toList();
+      final finish = parts.whereType<StreamPartFinish>().single;
+      expect(finish.usage.inputTokens.total, 9);
+      expect(finish.usage.outputTokens.total, 3);
       expect(finish.providerMetadata?['test']?['id'], 'chatcmpl_123');
+      expect(finish.providerMetadata?['test']?['warnings'], contains('other'));
       expect(
-        finish.providerMetadata?['test']?['warnings'],
-        contains('careful'),
+        parts.whereType<StreamPartStreamStart>().single.warnings,
+        contains(
+          isA<LanguageModelV4OtherWarning>().having(
+            (warning) => warning.message,
+            'message',
+            'careful',
+          ),
+        ),
       );
     });
 
+    test('emits raw chunks when includeRawChunks is enabled', () async {
+      final server = await _TestServer.start((request) async {
+        _writeSse(request, [
+          '{"id":"chatcmpl_raw","model":"m","choices":[{"delta":{"content":"Hi"}}]}',
+          '{"id":"chatcmpl_raw","model":"m","choices":[{"delta":{},"finish_reason":"stop"}]}',
+          '[DONE]',
+        ]);
+      });
+      addTearDown(server.close);
+
+      final model = _bearerModel(server.baseUrl);
+      final streamResult = await model.doStream(
+        LanguageModelV4CallOptions(
+          prompt: _userPrompt('hi'),
+          includeRawChunks: true,
+        ),
+      );
+      final parts = await streamResult.stream.toList();
+      final rawParts = parts.whereType<StreamPartRaw>().toList();
+      expect(rawParts, hasLength(2));
+      expect(
+        (rawParts.first.rawValue as Map<String, dynamic>)['id'],
+        'chatcmpl_raw',
+      );
+    });
+
+    test(
+      'emits a stream-start part even when the stream has no JSON chunks',
+      () async {
+        final server = await _TestServer.start((request) async {
+          _writeSse(request, ['[DONE]']);
+        });
+        addTearDown(server.close);
+
+        final model = _bearerModel(server.baseUrl);
+        final streamResult = await model.doStream(
+          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        );
+        final parts = await streamResult.stream.toList();
+        expect(parts.whereType<StreamPartStreamStart>(), hasLength(1));
+        expect(parts.whereType<StreamPartFinish>(), isEmpty);
+      },
+    );
+
     // ── finish-reason mapping ────────────────────────────────────────────
     test('maps finish reasons', () async {
-      Future<LanguageModelV3FinishReason> reasonFor(String? raw) async {
+      Future<LanguageModelV4FinishReason> reasonFor(String? raw) async {
         final server = await _TestServer.start((request) async {
           _writeJson(request, {
             'choices': [
@@ -391,24 +506,24 @@ void main() {
         addTearDown(server.close);
         final model = _bearerModel(server.baseUrl);
         final result = await model.doGenerate(
-          LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
         );
         await server.close();
         return result.finishReason;
       }
 
-      expect(await reasonFor('stop'), LanguageModelV3FinishReason.stop);
-      expect(await reasonFor('length'), LanguageModelV3FinishReason.length);
+      expect(await reasonFor('stop'), LanguageModelV4FinishReason.stop);
+      expect(await reasonFor('length'), LanguageModelV4FinishReason.length);
       expect(
         await reasonFor('content_filter'),
-        LanguageModelV3FinishReason.contentFilter,
+        LanguageModelV4FinishReason.contentFilter,
       );
       expect(
         await reasonFor('tool_calls'),
-        LanguageModelV3FinishReason.toolCalls,
+        LanguageModelV4FinishReason.toolCalls,
       );
-      expect(await reasonFor(null), LanguageModelV3FinishReason.unknown);
-      expect(await reasonFor('weird'), LanguageModelV3FinishReason.other);
+      expect(await reasonFor(null), LanguageModelV4FinishReason.unknown);
+      expect(await reasonFor('weird'), LanguageModelV4FinishReason.other);
     });
 
     // ── config quirks ────────────────────────────────────────────────────
@@ -432,7 +547,7 @@ void main() {
         ),
       );
       await model.doGenerate(
-        LanguageModelV3CallOptions(
+        LanguageModelV4CallOptions(
           prompt: _userPrompt('hi'),
           seed: 42,
           maxOutputTokens: 128,
@@ -455,7 +570,7 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       await model.doGenerate(
-        LanguageModelV3CallOptions(
+        LanguageModelV4CallOptions(
           prompt: _userPrompt('hi'),
           seed: 7,
           maxOutputTokens: 64,
@@ -485,7 +600,7 @@ void main() {
         ),
       );
       await model.doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
       );
 
       expect(capturedQuery, contains('api-version=2024-02-15-preview'));
@@ -512,7 +627,7 @@ void main() {
         );
 
         await model.doGenerate(
-          LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
         );
 
         expect(capturedPath, '/v1/chat/completions');
@@ -537,7 +652,7 @@ void main() {
         ),
       );
       await apiKeyModel.doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
       );
       expect(apiKeyHeaders.value('api-key'), 'secret-key');
       expect(apiKeyHeaders.value('authorization'), isNull);
@@ -550,7 +665,7 @@ void main() {
       addTearDown(bearerServer.close);
       final bearerModel = _bearerModel(bearerServer.baseUrl);
       await bearerModel.doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
       );
       expect(bearerHeaders.value('authorization'), 'Bearer test-token');
       expect(bearerHeaders.value('api-key'), isNull);
@@ -576,22 +691,24 @@ void main() {
       );
 
       await model.doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
       );
       token = 'second-token';
       await model.doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('again')),
+        LanguageModelV4CallOptions(prompt: _userPrompt('again')),
       );
 
       expect(authorizations, ['Bearer first-token', 'Bearer second-token']);
     });
 
     test(
-      'request headers override provider headers without mutating base options',
+      'provider auth wins while custom request headers remain per-call',
       () async {
         String? authorization;
+        String? traceId;
         final server = await _TestServer.start((request) async {
           authorization = request.headers.value('authorization');
+          traceId = request.headers.value('x-trace-id');
           _writeOk(request);
         });
         addTearDown(server.close);
@@ -608,13 +725,17 @@ void main() {
         );
 
         await model.doGenerate(
-          LanguageModelV3CallOptions(
+          LanguageModelV4CallOptions(
             prompt: _userPrompt('hi'),
-            headers: const {'Authorization': 'Bearer request-token'},
+            headers: const {
+              'Authorization': 'Bearer request-token',
+              'X-Trace-Id': 'trace-1',
+            },
           ),
         );
 
-        expect(authorization, 'Bearer request-token');
+        expect(authorization, 'Bearer provider-token');
+        expect(traceId, 'trace-1');
         expect(client.options.headers.containsKey('Authorization'), isFalse);
       },
     );
@@ -653,10 +774,10 @@ void main() {
       );
 
       final first = model.doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('first')),
+        LanguageModelV4CallOptions(prompt: _userPrompt('first')),
       );
       final second = model.doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('second')),
+        LanguageModelV4CallOptions(prompt: _userPrompt('second')),
       );
 
       gates[1].complete();
@@ -698,13 +819,106 @@ void main() {
       );
 
       await model.doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
       );
       await model.doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('again')),
+        LanguageModelV4CallOptions(prompt: _userPrompt('again')),
       );
 
       expect(interceptedRequests, 2);
+    });
+
+    test(
+      'doGenerate cancels an in-flight Dio request via abortSignal',
+      () async {
+        final adapter = _CancellationHttpClientAdapter();
+        final client = _cancellationClient(adapter, 'http://localhost/v1');
+        addTearDown(() => client.close(force: true));
+        final abortSignal = _TestAbortSignal();
+        final model = OpenAICompatibleChatLanguageModel(
+          modelId: 'm',
+          config: OpenAICompatibleConfig(
+            provider: 'test',
+            baseUrl: 'http://localhost/v1',
+            client: client,
+            headers: () => {'Authorization': 'Bearer test-token'},
+          ),
+        );
+
+        final future = model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: _userPrompt('hi'),
+            abortSignal: abortSignal,
+          ),
+        );
+
+        await adapter.fetchStarted.future;
+        expect(adapter.lastOptions?.cancelToken, isNotNull);
+        abortSignal.cancel();
+
+        await expectLater(future, throwsA(isA<AiOperationCancelledError>()));
+        expect(adapter.fetchCount, 1);
+      },
+    );
+
+    test(
+      'doGenerate surfaces AiOperationCancelledError for a pre-cancelled abortSignal',
+      () async {
+        final adapter = _CancellationHttpClientAdapter();
+        final client = _cancellationClient(adapter, 'http://localhost/v1');
+        addTearDown(() => client.close(force: true));
+        final abortSignal = _TestAbortSignal()..cancel();
+        final model = OpenAICompatibleChatLanguageModel(
+          modelId: 'm',
+          config: OpenAICompatibleConfig(
+            provider: 'test',
+            baseUrl: 'http://localhost/v1',
+            client: client,
+            headers: () => {'Authorization': 'Bearer test-token'},
+          ),
+        );
+
+        await expectLater(
+          model.doGenerate(
+            LanguageModelV4CallOptions(
+              prompt: _userPrompt('hi'),
+              abortSignal: abortSignal,
+            ),
+          ),
+          throwsA(isA<AiOperationCancelledError>()),
+        );
+        expect(adapter.fetchCount, 0);
+      },
+    );
+
+    test('doStream cancels the Dio handshake via abortSignal', () async {
+      final adapter = _CancellationHttpClientAdapter();
+      final client = _cancellationClient(adapter, 'http://localhost/v1');
+      addTearDown(() => client.close(force: true));
+      final abortSignal = _TestAbortSignal();
+      final model = OpenAICompatibleChatLanguageModel(
+        modelId: 'm',
+        config: OpenAICompatibleConfig(
+          provider: 'test',
+          baseUrl: 'http://localhost/v1',
+          client: client,
+          headers: () => {'Authorization': 'Bearer test-token'},
+        ),
+      );
+
+      final future = model.doStream(
+        LanguageModelV4CallOptions(
+          prompt: _userPrompt('hi'),
+          abortSignal: abortSignal,
+        ),
+      );
+
+      await adapter.fetchStarted.future;
+      expect(adapter.lastOptions?.cancelToken, isNotNull);
+      abortSignal.cancel();
+
+      await expectLater(future, throwsA(isA<AiOperationCancelledError>()));
+      expect(adapter.fetchCount, 1);
     });
 
     test('extraBody hook injects provider-specific fields', () async {
@@ -725,12 +939,12 @@ void main() {
           extraBody: (options) {
             final po = options.providerOptions?['openai'];
             final effort = po?['reasoning_effort'] ?? po?['reasoningEffort'];
-            return {if (effort != null) 'reasoning_effort': effort};
+            return {'reasoning_effort': ?effort};
           },
         ),
       );
       await model.doGenerate(
-        LanguageModelV3CallOptions(
+        LanguageModelV4CallOptions(
           prompt: _userPrompt('hi'),
           providerOptions: const {
             'openai': {'reasoningEffort': 'high'},
@@ -751,28 +965,28 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.assistant,
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.assistant,
                 content: [
-                  LanguageModelV3ToolCallPart(
+                  LanguageModelV4ToolCallPart(
                     toolCallId: 'call_1',
                     toolName: 'weather',
                     input: {'city': 'Paris'},
                   ),
                 ],
               ),
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.tool,
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.tool,
                 content: [
-                  LanguageModelV3ToolResultPart(
+                  LanguageModelV4ToolResultPart(
                     toolCallId: 'call_1',
                     toolName: 'weather',
                     isError: true,
                     output: ToolResultOutputContent([
-                      LanguageModelV3TextPart(text: 'failed'),
+                      LanguageModelV4TextPart(text: 'failed'),
                     ]),
                   ),
                 ],
@@ -800,7 +1014,7 @@ void main() {
     test('exposes provider and specificationVersion', () {
       final model = _bearerModel('http://localhost/v1');
       expect(model.provider, 'test');
-      expect(model.specificationVersion, 'v3');
+      expect(model.specificationVersion, 'v4');
     });
 
     // ── sampling params + system prompt + stop sequences ─────────────────
@@ -816,13 +1030,13 @@ void main() {
 
         final model = _bearerModel(server.baseUrl);
         await model.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
               system: 'You are concise.',
               messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
-                  content: [LanguageModelV3TextPart(text: 'hi')],
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'hi')],
                 ),
               ],
             ),
@@ -855,10 +1069,10 @@ void main() {
 
       final model1 = _bearerModel(emptyChoicesServer.baseUrl);
       final result1 = await model1.doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
       );
       expect(result1.content, isEmpty);
-      expect(result1.finishReason, LanguageModelV3FinishReason.unknown);
+      expect(result1.finishReason, LanguageModelV4FinishReason.unknown);
 
       final missingMessageServer = await _TestServer.start((request) async {
         // A choice with no `message` and a tool_call whose `function` is absent.
@@ -879,10 +1093,10 @@ void main() {
 
       final model2 = _bearerModel(missingMessageServer.baseUrl);
       final result2 = await model2.doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
       );
       final call = result2.content
-          .whereType<LanguageModelV3ToolCallPart>()
+          .whereType<LanguageModelV4ToolCallPart>()
           .single;
       // Missing function name/arguments fall back to defaults.
       expect(call.toolName, 'unknown_tool');
@@ -923,17 +1137,17 @@ void main() {
 
         final model = _bearerModel(server.baseUrl);
         final result = await model.doGenerate(
-          LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
         );
 
         final source = result.content
-            .whereType<LanguageModelV3SourcePart>()
+            .whereType<LanguageModelV4SourcePart>()
             .single;
         expect(source.url, 'https://example.com');
         expect(source.title, 'Example');
         expect(source.id, 'test_source_0');
 
-        final file = result.content.whereType<LanguageModelV3FilePart>().single;
+        final file = result.content.whereType<LanguageModelV4FilePart>().single;
         expect(
           (file.data as DataContentUrl).url.toString(),
           'test://file/file_123',
@@ -955,7 +1169,7 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
       );
       final parts = await streamResult.stream.toList();
 
@@ -986,7 +1200,7 @@ void main() {
 
         final model = _bearerModel(server.baseUrl);
         final streamResult = await model.doStream(
-          LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
         );
         final parts = await streamResult.stream.toList();
 
@@ -1016,7 +1230,7 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
       );
       final parts = await streamResult.stream.toList();
 
@@ -1038,7 +1252,7 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
       );
       final parts = await streamResult.stream.toList();
 
@@ -1060,7 +1274,7 @@ void main() {
 
         final model = _bearerModel(server.baseUrl);
         final streamResult = await model.doStream(
-          LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
         );
         final parts = await streamResult.stream.toList();
 
@@ -1089,7 +1303,7 @@ void main() {
         ),
       );
       final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
       );
       final parts = await streamResult.stream.toList();
 
@@ -1120,14 +1334,14 @@ void main() {
 
         final model = _bearerModel(server.baseUrl);
         final result = await model.doGenerate(
-          LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
         );
 
         final reasoning = result.content
-            .whereType<LanguageModelV3ReasoningPart>()
+            .whereType<LanguageModelV4ReasoningPart>()
             .single;
         expect(reasoning.text, 'I reasoned about it.');
-        final text = result.content.whereType<LanguageModelV3TextPart>().single;
+        final text = result.content.whereType<LanguageModelV4TextPart>().single;
         expect(text.text, 'Final answer.');
       },
     );
@@ -1147,10 +1361,10 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       final result = await model.doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
       );
 
-      expect(result.content.whereType<LanguageModelV3ReasoningPart>(), isEmpty);
+      expect(result.content.whereType<LanguageModelV4ReasoningPart>(), isEmpty);
     });
 
     // ── streaming tool call without explicit id/function ─────────────────
@@ -1168,15 +1382,19 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
       );
       final parts = await streamResult.stream.toList();
 
-      final start = parts.whereType<StreamPartToolCallStart>().single;
-      expect(start.toolCallId, startsWith('tool-'));
+      final start = parts.whereType<StreamPartToolInputStart>().single;
+      expect(start.id, startsWith('tool-'));
       expect(start.toolName, 'unknown_tool');
-      final end = parts.whereType<StreamPartToolCallEnd>().single;
-      expect(end.toolCallId, startsWith('tool-'));
+      final end = parts.whereType<StreamPartToolInputEnd>().single;
+      expect(end.id, startsWith('tool-'));
+      expect(
+        parts.whereType<StreamPartToolCall>().single.toolCall.toolCallId,
+        startsWith('tool-'),
+      );
     });
 
     // ── streaming error path ─────────────────────────────────────────────
@@ -1196,7 +1414,7 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
       );
       // Just draining is enough; the finally{} closes the controller.
       final parts = await streamResult.stream.toList();
@@ -1219,21 +1437,21 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
                 content: [
                   // A FilePart with an image/ media type -> image_url.
-                  LanguageModelV3FilePart(
+                  LanguageModelV4FilePart(
                     data: DataContentBytes(
                       Uint8List.fromList(utf8.encode('img')),
                     ),
                     mediaType: 'image/png',
                   ),
                   // A generic (non-image, non-audio) FilePart -> file.
-                  LanguageModelV3FilePart(
+                  LanguageModelV4FilePart(
                     data: DataContentBytes(
                       Uint8List.fromList(utf8.encode('pdf')),
                     ),
@@ -1276,13 +1494,13 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
                 content: [
-                  LanguageModelV3ImagePart(
+                  LanguageModelV4ImagePart(
                     image: DataContentBase64(imgB64),
                     mediaType: 'image/jpeg',
                   ),
@@ -1316,13 +1534,13 @@ void main() {
 
         final model = _bearerModel(server.baseUrl);
         await model.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
               messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
                   content: [
-                    LanguageModelV3ImagePart(
+                    LanguageModelV4ImagePart(
                       image: DataContentUrl(
                         Uri.parse('https://img.example/a.png'),
                       ),
@@ -1360,25 +1578,25 @@ void main() {
 
         final model = _bearerModel(server.baseUrl);
         await model.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
               messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.tool,
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.tool,
                   content: [
-                    LanguageModelV3ToolResultPart(
+                    LanguageModelV4ToolResultPart(
                       toolCallId: 'call_1',
                       toolName: 'lookup',
                       isError: true,
                       output: ToolResultOutputContent([
-                        LanguageModelV3TextPart(text: 'summary'),
-                        LanguageModelV3ImagePart(
+                        LanguageModelV4TextPart(text: 'summary'),
+                        LanguageModelV4ImagePart(
                           image: DataContentBytes(
                             Uint8List.fromList(utf8.encode('img')),
                           ),
                           mediaType: 'image/png',
                         ),
-                        LanguageModelV3FilePart(
+                        LanguageModelV4FilePart(
                           data: DataContentUrl(
                             Uri.parse('https://files.example/a.pdf'),
                           ),
@@ -1386,7 +1604,7 @@ void main() {
                           filename: 'a.pdf',
                         ),
                         // An unsupported-for-this-path part (source) -> 'unsupported'.
-                        LanguageModelV3SourcePart(
+                        LanguageModelV4SourcePart(
                           id: 's1',
                           url: 'https://src.example',
                         ),
@@ -1428,13 +1646,13 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.tool,
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.tool,
                 content: [
-                  LanguageModelV3ToolResultPart(
+                  LanguageModelV4ToolResultPart(
                     toolCallId: 'call_1',
                     toolName: 'echo',
                     output: ToolResultOutputText('plain result'),
@@ -1462,13 +1680,13 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.tool,
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.tool,
                 content: [
-                  LanguageModelV3ToolResultPart(
+                  LanguageModelV4ToolResultPart(
                     toolCallId: 'call_1',
                     toolName: 'echo',
                     isError: true,
@@ -1513,13 +1731,12 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       final result = await model.doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
       );
       // String prompt_tokens, num completion_tokens, string total_tokens all
       // coerced via _intOrNull.
-      expect(result.usage?.inputTokens, 9);
-      expect(result.usage?.outputTokens, 3);
-      expect(result.usage?.totalTokens, 12);
+      expect(result.usage.inputTokens.total, 9);
+      expect(result.usage.outputTokens.total, 3);
     });
 
     // ── tool call id generation when none is returned ────────────────────
@@ -1545,10 +1762,10 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       final result = await model.doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
       );
       final call = result.content
-          .whereType<LanguageModelV3ToolCallPart>()
+          .whereType<LanguageModelV4ToolCallPart>()
           .single;
       expect(call.toolCallId, startsWith('call-'));
     });
@@ -1567,14 +1784,14 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
       );
 
       final parts = await streamResult.stream.toList();
       // No text/tool parts (delta was empty), but a Finish part is emitted.
       expect(parts.whereType<StreamPartTextStart>(), isEmpty);
       final finish = parts.whereType<StreamPartFinish>().single;
-      expect(finish.finishReason, LanguageModelV3FinishReason.stop);
+      expect(finish.finishReason, LanguageModelV4FinishReason.stop);
     });
 
     // ── stream: malformed chunk surfaces a StreamPartError deterministically ─
@@ -1593,12 +1810,81 @@ void main() {
 
         final model = _bearerModel(server.baseUrl);
         final streamResult = await model.doStream(
-          LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
         );
 
         final parts = await streamResult.stream.toList();
+        expect(parts.first, isA<StreamPartStreamStart>());
         final error = parts.whereType<StreamPartError>().single;
         expect(error.error, isA<TypeError>());
+      },
+    );
+
+    test(
+      'structured warning maps are surfaced on stream-start and finish metadata',
+      () async {
+        final server = await _TestServer.start((request) async {
+          _writeSse(request, [
+            '{"id":"chatcmpl_warn","model":"m","warnings":[{"type":"unsupported","feature":"tools","details":"Disabled"},{"type":"compatibility","feature":"reasoning"},{"type":"deprecated","feature":"legacy-mode","details":"Use default mode"},{"type":"other","message":"fallback"},{"unexpected":"shape"},7],"choices":[{"delta":{"content":"Hi"}}]}',
+            '{"id":"chatcmpl_warn","model":"m","choices":[{"delta":{},"finish_reason":"stop"}]}',
+            '[DONE]',
+          ]);
+        });
+        addTearDown(server.close);
+
+        final model = _bearerModel(server.baseUrl);
+        final streamResult = await model.doStream(
+          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        );
+        final parts = await streamResult.stream.toList();
+
+        final start = parts.whereType<StreamPartStreamStart>().single;
+        expect(start.warnings, hasLength(6));
+        expect(start.warnings[0], isA<LanguageModelV4UnsupportedWarning>());
+        expect(start.warnings[1], isA<LanguageModelV4CompatibilityWarning>());
+        expect(start.warnings[2], isA<LanguageModelV4DeprecatedWarning>());
+        expect(start.warnings[3], isA<LanguageModelV4OtherWarning>());
+        expect(
+          (start.warnings[4] as LanguageModelV4OtherWarning).message,
+          '{"unexpected":"shape"}',
+        );
+        expect((start.warnings[5] as LanguageModelV4OtherWarning).message, '7');
+
+        final finish = parts.whereType<StreamPartFinish>().single;
+        expect(finish.providerMetadata?['test']?['warnings'], [
+          'unsupported',
+          'compatibility',
+          'deprecated',
+          'other',
+          'other',
+          'other',
+        ]);
+      },
+    );
+
+    test(
+      'emits stream-start before StreamPartError when the response stream fails before the first chunk',
+      () async {
+        final adapter = _ErroredStreamHttpClientAdapter();
+        final client = Dio(BaseOptions(baseUrl: 'http://unused'))
+          ..httpClientAdapter = adapter;
+        final model = OpenAICompatibleChatLanguageModel(
+          modelId: 'm',
+          config: OpenAICompatibleConfig(
+            provider: 'test',
+            baseUrl: 'http://unused/v1',
+            client: client,
+            headers: () => {'Authorization': 'Bearer k'},
+          ),
+        );
+
+        final streamResult = await model.doStream(
+          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        );
+        final parts = await streamResult.stream.toList();
+
+        expect(parts.first, isA<StreamPartStreamStart>());
+        expect(parts.last, isA<StreamPartError>());
       },
     );
 
@@ -1613,20 +1899,20 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.tool,
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.tool,
                 content: [
-                  LanguageModelV3ToolResultPart(
+                  LanguageModelV4ToolResultPart(
                     toolCallId: 'call_1',
                     toolName: 'lookup',
                     isError: true,
                     output: ToolResultOutputContent([
                       // An image whose data is a URL (not bytes) exercises the
                       // `if (part.image is DataContentUrl) 'url': ...` branch.
-                      LanguageModelV3ImagePart(
+                      LanguageModelV4ImagePart(
                         image: DataContentUrl(
                           Uri.parse('https://img.example/a.png'),
                         ),
@@ -1671,7 +1957,7 @@ void main() {
       );
 
       await expectLater(
-        model.doStream(LanguageModelV3CallOptions(prompt: _userPrompt('hi'))),
+        model.doStream(LanguageModelV4CallOptions(prompt: _userPrompt('hi'))),
         throwsA(
           isA<StateError>().having(
             (e) => e.message,
@@ -1708,12 +1994,18 @@ Dio _testClient(String baseUrl) {
   );
 }
 
-LanguageModelV3Prompt _userPrompt(String text) {
-  return LanguageModelV3Prompt(
+Dio _cancellationClient(HttpClientAdapter adapter, String baseUrl) {
+  final client = _testClient(baseUrl);
+  client.httpClientAdapter = adapter;
+  return client;
+}
+
+LanguageModelV4Prompt _userPrompt(String text) {
+  return LanguageModelV4Prompt(
     messages: [
-      LanguageModelV3Message(
-        role: LanguageModelV3Role.user,
-        content: [LanguageModelV3TextPart(text: text)],
+      LanguageModelV4Message(
+        role: LanguageModelV4Role.user,
+        content: [LanguageModelV4TextPart(text: text)],
       ),
     ],
   );
@@ -1782,4 +2074,76 @@ class _TestServer {
   String get baseUrl => 'http://${_server.address.host}:${_server.port}/v1';
 
   Future<void> close() => _server.close(force: true);
+}
+
+class _TestAbortSignal implements LanguageModelV4AbortSignal {
+  final Completer<void> _completer = Completer<void>();
+  bool _isCancelled = false;
+
+  @override
+  bool get isCancelled => _isCancelled;
+
+  @override
+  Future<void> get onCancelled => _completer.future;
+
+  void cancel() {
+    if (_isCancelled) return;
+    _isCancelled = true;
+    _completer.complete();
+  }
+}
+
+class _CancellationHttpClientAdapter implements HttpClientAdapter {
+  int fetchCount = 0;
+  RequestOptions? lastOptions;
+  final Completer<void> fetchStarted = Completer<void>();
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) {
+    fetchCount++;
+    lastOptions = options;
+    if (!fetchStarted.isCompleted) {
+      fetchStarted.complete();
+    }
+
+    final completer = Completer<ResponseBody>();
+    cancelFuture?.then((_) {
+      if (!completer.isCompleted) {
+        completer.completeError(
+          DioException.requestCancelled(
+            requestOptions: options,
+            reason: 'abortSignal',
+          ),
+        );
+      }
+    });
+    return completer.future;
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
+class _ErroredStreamHttpClientAdapter implements HttpClientAdapter {
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    return ResponseBody(
+      Stream<Uint8List>.error(StateError('stream failed before first chunk')),
+      200,
+      headers: {
+        Headers.contentTypeHeader: ['text/event-stream'],
+      },
+    );
+  }
+
+  @override
+  void close({bool force = false}) {}
 }

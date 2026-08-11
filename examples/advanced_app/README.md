@@ -9,7 +9,7 @@ A comprehensive Flutter app demonstrating all major AI SDK capabilities: multipl
 | Provider Chat | `ChatController` + `createProviderRegistry` | `AiChatScaffold`, `PromptSuggestions` | OpenAI, Anthropic, Google |
 | Tools Chat | `streamText` + `tools` + `extractReasoningMiddleware` | `ChatComposer`, `ChatMessageBubble`, `ToolCallCard`, `ReasoningView`, `SourceCitations` | OpenAI |
 | Image Generation | `generateImage` | — | OpenAI (`gpt-image-1`) |
-| Multimodal | `streamText` + `LanguageModelV3ImagePart` | `StreamingTextView` | OpenAI |
+| Multimodal | `streamText` + `LanguageModelV4ImagePart` | `StreamingTextView` | OpenAI |
 | Embeddings | `embed`, `cosineSimilarity` | — | OpenAI, Google |
 | Text-to-Speech | `generateSpeech` | — | OpenAI |
 | Speech-to-Text | `transcribe` | — | OpenAI |

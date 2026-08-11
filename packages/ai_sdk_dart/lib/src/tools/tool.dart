@@ -15,7 +15,7 @@ typedef UntypedToolExecutor =
 /// cancellation is requested.
 ///
 /// Mirrors the JS `AbortSignal` concept for the Dart/Flutter world.
-class CancellationToken {
+class CancellationToken implements LanguageModelV4AbortSignal {
   CancellationToken() {
     _completer = Completer<void>();
   }
@@ -24,9 +24,11 @@ class CancellationToken {
   bool _isCancelled = false;
 
   /// Whether this token has been cancelled.
+  @override
   bool get isCancelled => _isCancelled;
 
   /// A future that completes when cancellation is requested.
+  @override
   Future<void> get onCancelled => _completer.future;
 
   /// Cancel the operation.  Idempotent — safe to call multiple times.
@@ -42,33 +44,45 @@ class CancellationToken {
 ///
 /// - [toolCallId] — unique ID for this specific tool invocation.
 /// - [messages] — conversation history at the point of the tool call
-///   (provider-level messages; typed as [LanguageModelV3Message]).
+///   (provider-level messages; typed as [LanguageModelV4Message]).
 /// - [abortSignal] — [CancellationToken] that fires if the generation is
 ///   cancelled; check [CancellationToken.isCancelled] in long-running tools.
-/// - [experimentalContext] — arbitrary key/value context map threaded from
-///   the `experimentalContext` parameter of [generateText]/[streamText].
+/// - [runtimeContext] — arbitrary key/value context map threaded from
+///   the `runtimeContext` parameter of [generateText]/[streamText].
 class ToolExecutionOptions {
   const ToolExecutionOptions({
     this.toolCallId,
     this.messages,
     this.abortSignal,
-    this.experimentalContext,
+    this.runtimeContext,
   });
 
   final String? toolCallId;
-  final List<LanguageModelV3Message>? messages;
+  final List<LanguageModelV4Message>? messages;
 
   /// Cancellation token — non-null when the caller provided an abort signal.
   final CancellationToken? abortSignal;
 
   /// Caller-supplied context; strongly typed as a string-keyed map.
-  final Map<String, Object?>? experimentalContext;
+  final Map<String, Object?>? runtimeContext;
 }
 
 typedef ToolNeedsApproval<INPUT> =
     FutureOr<bool> Function(INPUT input, ToolExecutionOptions options);
 typedef UntypedToolNeedsApproval =
     FutureOr<bool> Function(Object? input, ToolExecutionOptions options);
+
+/// How the core decides whether a tool call requires user approval.
+enum ToolApprovalPolicy {
+  /// Execute without asking for approval.
+  never,
+
+  /// Evaluate the tool's [Tool.needsApproval] callback for each call.
+  conditional,
+
+  /// Require approval for every call.
+  always,
+}
 
 /// Example input for a tool; helps the model understand expected usage.
 class ToolInputExample {
@@ -102,7 +116,7 @@ class Tool<INPUT, OUTPUT> {
     this.inputExamples = const [],
     this.needsApproval,
     this.needsApprovalDynamic,
-    this.requiresApproval = false,
+    this.approvalPolicy = ToolApprovalPolicy.never,
     this.dynamic = false,
   });
 
@@ -114,7 +128,7 @@ class Tool<INPUT, OUTPUT> {
   final List<ToolInputExample> inputExamples;
   final ToolNeedsApproval<INPUT>? needsApproval;
   final UntypedToolNeedsApproval? needsApprovalDynamic;
-  final bool requiresApproval;
+  final ToolApprovalPolicy approvalPolicy;
   final bool dynamic;
 }
 
@@ -138,6 +152,7 @@ Tool<INPUT, OUTPUT> tool<INPUT, OUTPUT>({
   bool? strict,
   List<ToolInputExample> inputExamples = const [],
   ToolNeedsApproval<INPUT>? needsApproval,
+  ToolApprovalPolicy? approvalPolicy,
 }) {
   return Tool<INPUT, OUTPUT>(
     inputSchema: inputSchema,
@@ -152,7 +167,11 @@ Tool<INPUT, OUTPUT> tool<INPUT, OUTPUT>({
     needsApprovalDynamic: needsApproval == null
         ? null
         : (input, options) => needsApproval(input as INPUT, options),
-    requiresApproval: needsApproval != null,
+    approvalPolicy:
+        approvalPolicy ??
+        (needsApproval == null
+            ? ToolApprovalPolicy.never
+            : ToolApprovalPolicy.conditional),
   );
 }
 
@@ -178,6 +197,7 @@ Tool<Object?, OUTPUT> dynamicTool<OUTPUT>({
   bool? strict,
   List<ToolInputExample> inputExamples = const [],
   ToolNeedsApproval<Object?>? needsApproval,
+  ToolApprovalPolicy? approvalPolicy,
 }) {
   return Tool<Object?, OUTPUT>(
     inputSchema: Schema<Object?>(
@@ -191,7 +211,11 @@ Tool<Object?, OUTPUT> dynamicTool<OUTPUT>({
     inputExamples: inputExamples,
     needsApproval: needsApproval,
     needsApprovalDynamic: needsApproval,
-    requiresApproval: needsApproval != null,
+    approvalPolicy:
+        approvalPolicy ??
+        (needsApproval == null
+            ? ToolApprovalPolicy.never
+            : ToolApprovalPolicy.conditional),
     dynamic: true,
   );
 }

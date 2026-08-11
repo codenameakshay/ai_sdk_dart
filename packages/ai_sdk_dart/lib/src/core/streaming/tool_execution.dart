@@ -6,6 +6,7 @@ import 'package:meta/meta.dart';
 import '../cancellation.dart';
 import '../generate_text.dart';
 import '../shared/common_helpers.dart';
+import '../timeout_helpers.dart';
 import '../../tools/tool.dart';
 
 @internal
@@ -16,20 +17,21 @@ class StreamingToolExecutionResult {
     this.toolError,
   });
 
-  final LanguageModelV3ToolResultPart? toolResult;
-  final LanguageModelV3ToolApprovalRequestPart? approvalRequest;
+  final LanguageModelV4ToolResultPart? toolResult;
+  final LanguageModelV4ToolApprovalRequestPart? approvalRequest;
   final Object? toolError;
 }
 
 @internal
 Future<StreamingToolExecutionResult> executeStreamingToolCall({
   required ToolSet tools,
-  required LanguageModelV3ToolCallPart call,
-  required List<LanguageModelV3Message> messages,
-  required Map<String, LanguageModelV3ToolApprovalResponse> approvalById,
+  required LanguageModelV4ToolCallPart call,
+  required List<LanguageModelV4Message> messages,
+  required Map<String, LanguageModelV4ToolApprovalResponse> approvalById,
   required void Function(Object? value) onPreliminaryResult,
   CancellationToken? abortSignal,
-  Map<String, Object?>? experimentalContext,
+  Duration? timeout,
+  Map<String, Object?>? runtimeContext,
   GenerateTextExperimentalOnToolCallStart? onToolCallStart,
   GenerateTextExperimentalOnToolCallFinish? onToolCallFinish,
 }) async {
@@ -40,7 +42,7 @@ Future<StreamingToolExecutionResult> executeStreamingToolCall({
   if (tool == null) {
     final error = 'Tool not found.';
     return StreamingToolExecutionResult(
-      toolResult: LanguageModelV3ToolResultPart(
+      toolResult: LanguageModelV4ToolResultPart(
         toolCallId: call.toolCallId,
         toolName: call.toolName,
         isError: true,
@@ -55,38 +57,47 @@ Future<StreamingToolExecutionResult> executeStreamingToolCall({
   final rawInput = call.input;
 
   try {
+    final timeoutStopwatch = Stopwatch()..start();
     final parsedInput = parseToolInput(tool: tool, rawInput: rawInput);
     final options = ToolExecutionOptions(
       toolCallId: call.toolCallId,
       messages: messages,
       abortSignal: abortSignal,
-      experimentalContext: experimentalContext,
+      runtimeContext: runtimeContext,
     );
 
     final approvalEvaluator = tool.needsApprovalDynamic;
     final approvalResponse = approvalById[approvalId];
     throwIfCancelled(abortSignal);
-    if (tool.requiresApproval && approvalResponse == null) {
+    final needsApproval = switch (tool.approvalPolicy) {
+      ToolApprovalPolicy.never => false,
+      ToolApprovalPolicy.always => true,
+      ToolApprovalPolicy.conditional =>
+        approvalEvaluator == null
+            ? false
+            : await _awaitStreamingToolOperation(
+                () => Future.value(approvalEvaluator(parsedInput, options)),
+                toolName: call.toolName,
+                abortSignal: abortSignal,
+                timeout: _remainingStreamingToolTimeout(
+                  timeout,
+                  timeoutStopwatch,
+                ),
+              ),
+    };
+    if (needsApproval && approvalResponse == null) {
       return StreamingToolExecutionResult(
-        approvalRequest: LanguageModelV3ToolApprovalRequestPart(
+        approvalRequest: LanguageModelV4ToolApprovalRequestPart(
           approvalId: approvalId,
           toolCall: call,
         ),
       );
     }
-
-    var needsApproval = false;
-    if (approvalEvaluator != null) {
-      needsApproval = await raceWithCancellation(
-        Future.value(approvalEvaluator(parsedInput, options)),
-        abortSignal,
-      );
-    }
-    if (tool.requiresApproval &&
+    if (needsApproval &&
         approvalResponse != null &&
         !approvalResponse.approved) {
       return StreamingToolExecutionResult(
-        toolResult: LanguageModelV3ToolResultPart(
+        toolResult: LanguageModelV4ToolResultPart(
           toolCallId: call.toolCallId,
           toolName: call.toolName,
           isError: true,
@@ -98,24 +109,11 @@ Future<StreamingToolExecutionResult> executeStreamingToolCall({
       );
     }
 
-    // Defensive: an approval-requiring tool with no response is already
-    // short-circuited by the earlier `approvalResponse == null` guard.
-    // coverage:ignore-start
-    if (tool.requiresApproval && needsApproval && approvalResponse == null) {
-      return StreamingToolExecutionResult(
-        approvalRequest: LanguageModelV3ToolApprovalRequestPart(
-          approvalId: approvalId,
-          toolCall: call,
-        ),
-      );
-    }
-    // coverage:ignore-end
-
     final executor = tool.executeDynamic;
     if (executor == null) {
       const error = 'Tool has no executor.';
       return StreamingToolExecutionResult(
-        toolResult: LanguageModelV3ToolResultPart(
+        toolResult: LanguageModelV4ToolResultPart(
           toolCallId: call.toolCallId,
           toolName: call.toolName,
           isError: true,
@@ -136,14 +134,18 @@ Future<StreamingToolExecutionResult> executeStreamingToolCall({
     );
     final stopwatch = Stopwatch()..start();
     try {
-      final output = await raceWithCancellation(
-        executor(parsedInput, options),
-        abortSignal,
+      final output = await _awaitStreamingToolOperation(
+        () => executor(parsedInput, options),
+        toolName: call.toolName,
+        abortSignal: abortSignal,
+        timeout: _remainingStreamingToolTimeout(timeout, timeoutStopwatch),
       );
       final finalOutput = await _resolveFinalStreamingToolOutput(
         output,
         onPreliminaryResult: onPreliminaryResult,
         abortSignal: abortSignal,
+        timeout: timeout,
+        timeoutStopwatch: timeoutStopwatch,
       );
       stopwatch.stop();
       safeInvoke(
@@ -157,7 +159,7 @@ Future<StreamingToolExecutionResult> executeStreamingToolCall({
         ),
       );
       return StreamingToolExecutionResult(
-        toolResult: LanguageModelV3ToolResultPart(
+        toolResult: LanguageModelV4ToolResultPart(
           toolCallId: call.toolCallId,
           toolName: call.toolName,
           output: ToolResultOutputText(stringifyToolOutput(finalOutput)),
@@ -178,11 +180,11 @@ Future<StreamingToolExecutionResult> executeStreamingToolCall({
       rethrow;
     }
   } catch (error) {
-    if (error is AiOperationCancelledError) {
+    if (error is AiOperationCancelledError || error is TimeoutException) {
       rethrow;
     }
     return StreamingToolExecutionResult(
-      toolResult: LanguageModelV3ToolResultPart(
+      toolResult: LanguageModelV4ToolResultPart(
         toolCallId: call.toolCallId,
         toolName: call.toolName,
         isError: true,
@@ -197,13 +199,20 @@ Future<Object?> _resolveFinalStreamingToolOutput(
   Object? output, {
   required void Function(Object? value) onPreliminaryResult,
   CancellationToken? abortSignal,
+  Duration? timeout,
+  Stopwatch? timeoutStopwatch,
 }) async {
   if (output is Stream) {
     Object? previous;
     var seenAny = false;
     final iterator = StreamIterator<Object?>(output.cast<Object?>());
     try {
-      while (await moveNextOrCancellation(iterator, abortSignal)) {
+      while (await _moveNextWithStreamingToolTimeout(
+        iterator,
+        abortSignal: abortSignal,
+        timeout: timeout,
+        timeoutStopwatch: timeoutStopwatch,
+      )) {
         final item = iterator.current;
         if (seenAny) {
           onPreliminaryResult(previous);
@@ -220,4 +229,44 @@ Future<Object?> _resolveFinalStreamingToolOutput(
     return previous;
   }
   return output;
+}
+
+Future<T> _awaitStreamingToolOperation<T>(
+  Future<T> Function() operation, {
+  required String toolName,
+  CancellationToken? abortSignal,
+  Duration? timeout,
+}) {
+  final guarded = raceWithCancellation(operation(), abortSignal);
+  if (timeout == null) return guarded;
+  return guarded.timeout(
+    timeout,
+    onTimeout: () =>
+        throw TimeoutException('Tool "$toolName" timed out.', timeout),
+  );
+}
+
+Duration? _remainingStreamingToolTimeout(
+  Duration? timeout,
+  Stopwatch stopwatch,
+) {
+  return remainingTimeout(timeout: timeout, elapsed: stopwatch.elapsed);
+}
+
+Future<bool> _moveNextWithStreamingToolTimeout(
+  StreamIterator<Object?> iterator, {
+  CancellationToken? abortSignal,
+  Duration? timeout,
+  Stopwatch? timeoutStopwatch,
+}) {
+  final moveNext = moveNextOrCancellation(iterator, abortSignal);
+  final remaining = timeoutStopwatch == null
+      ? timeout
+      : _remainingStreamingToolTimeout(timeout, timeoutStopwatch);
+  if (remaining == null) return moveNext;
+  return moveNext.timeout(
+    remaining,
+    onTimeout: () =>
+        throw TimeoutException('Tool stream timed out.', remaining),
+  );
 }

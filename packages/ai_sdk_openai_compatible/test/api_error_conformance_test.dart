@@ -59,11 +59,11 @@ void main() {
           ),
         );
 
-    LanguageModelV3Prompt userPrompt(String text) => LanguageModelV3Prompt(
+    LanguageModelV4Prompt userPrompt(String text) => LanguageModelV4Prompt(
       messages: [
-        LanguageModelV3Message(
-          role: LanguageModelV3Role.user,
-          content: [LanguageModelV3TextPart(text: text)],
+        LanguageModelV4Message(
+          role: LanguageModelV4Role.user,
+          content: [LanguageModelV4TextPart(text: text)],
         ),
       ],
     );
@@ -73,7 +73,7 @@ void main() {
       await expectLater(
         model(
           baseUrl,
-        ).doGenerate(LanguageModelV3CallOptions(prompt: userPrompt('hi'))),
+        ).doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('hi'))),
         throwsA(
           isA<AiApiCallError>()
               .having((e) => e.message, 'message', 'model not found')
@@ -93,7 +93,7 @@ void main() {
       await expectLater(
         model(
           baseUrl,
-        ).doStream(LanguageModelV3CallOptions(prompt: userPrompt('hi'))),
+        ).doStream(LanguageModelV4CallOptions(prompt: userPrompt('hi'))),
         throwsA(
           isA<AiApiCallError>()
               .having((e) => e.message, 'message', 'invalid api key')

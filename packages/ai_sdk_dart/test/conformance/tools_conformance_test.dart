@@ -183,7 +183,7 @@ void main() {
                 jsonSchema: const {'type': 'object'},
                 fromJson: (json) => json,
               ),
-              execute: (_, __) async => 'executed',
+              execute: (_, _) async => 'executed',
             ),
           },
         );
@@ -215,14 +215,14 @@ void main() {
                 jsonSchema: const {'type': 'object'},
                 fromJson: (json) => json,
               ),
-              execute: (_, __) async => 'a',
+              execute: (_, _) async => 'a',
             ),
             'toolB': tool<Map<String, dynamic>, String>(
               inputSchema: Schema<Map<String, dynamic>>(
                 jsonSchema: const {'type': 'object'},
                 fromJson: (json) => json,
               ),
-              execute: (_, __) async => 'b',
+              execute: (_, _) async => 'b',
             ),
           },
         );
@@ -302,7 +302,8 @@ void main() {
             },
           );
 
-          final providerTool = capturingModel.capturedOptions.first.tools.first;
+          final providerTool =
+              capturingModel.capturedOptions.first.functionTools.first;
           expect(providerTool.inputExamples, isNotNull);
           expect(providerTool.inputExamples!.length, 1);
         },
@@ -334,19 +335,19 @@ void main() {
     group('multi-step tool loop', () {
       test('tool results feed into next step automatically', () async {
         final model = FakeMultiStepModel([
-          LanguageModelV3GenerateResult(
+          LanguageModelV4GenerateResult(
             content: [
-              const LanguageModelV3ToolCallPart(
+              const LanguageModelV4ToolCallPart(
                 toolCallId: 'c1',
                 toolName: 'add',
                 input: {'a': 1, 'b': 2},
               ),
             ],
-            finishReason: LanguageModelV3FinishReason.toolCalls,
+            finishReason: LanguageModelV4FinishReason.toolCalls,
           ),
-          const LanguageModelV3GenerateResult(
-            content: [LanguageModelV3TextPart(text: 'Result is 3')],
-            finishReason: LanguageModelV3FinishReason.stop,
+          const LanguageModelV4GenerateResult(
+            content: [LanguageModelV4TextPart(text: 'Result is 3')],
+            finishReason: LanguageModelV4FinishReason.stop,
           ),
         ]);
 
@@ -375,15 +376,15 @@ void main() {
         var callCount = 0;
         final model = _CountingToolModel(() {
           callCount++;
-          return LanguageModelV3GenerateResult(
+          return LanguageModelV4GenerateResult(
             content: [
-              LanguageModelV3ToolCallPart(
+              LanguageModelV4ToolCallPart(
                 toolCallId: 'c$callCount',
                 toolName: 'loop',
                 input: {'n': callCount},
               ),
             ],
-            finishReason: LanguageModelV3FinishReason.toolCalls,
+            finishReason: LanguageModelV4FinishReason.toolCalls,
           );
         });
 
@@ -397,7 +398,7 @@ void main() {
                 jsonSchema: const {'type': 'object'},
                 fromJson: (json) => json,
               ),
-              execute: (_, __) async => 'continuing',
+              execute: (_, _) async => 'continuing',
             ),
           },
         );
@@ -417,7 +418,7 @@ void main() {
                 jsonSchema: const {'type': 'object'},
                 fromJson: (json) => json,
               ),
-              execute: (_, __) async {
+              execute: (_, _) async {
                 return Stream.fromIterable(['first', 'second', 'final-value']);
               },
             ),
@@ -451,7 +452,7 @@ void main() {
                   fromJson: (json) => json,
                 ),
                 needsApproval: (input, _) async => true,
-                execute: (_, __) async => 'executed',
+                execute: (_, _) async => 'executed',
               ),
             },
           );
@@ -465,10 +466,10 @@ void main() {
 }
 
 // Helper model that calls a factory function for each doGenerate
-class _CountingToolModel implements LanguageModelV3 {
+class _CountingToolModel extends LanguageModelV4 {
   _CountingToolModel(this._factory);
 
-  final LanguageModelV3GenerateResult Function() _factory;
+  final LanguageModelV4GenerateResult Function() _factory;
 
   @override
   String get provider => 'fake';
@@ -477,18 +478,18 @@ class _CountingToolModel implements LanguageModelV3 {
   String get modelId => 'counting-tool-model';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     return _factory();
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }

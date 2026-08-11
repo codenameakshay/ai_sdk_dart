@@ -13,6 +13,6 @@
 /// final model = provider('my-gpt4-deployment');
 /// final embedder = provider.embedding('my-ada-deployment');
 /// ```
-library ai_sdk_azure;
+library;
 
 export 'src/azure_provider.dart';

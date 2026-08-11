@@ -8,7 +8,7 @@ import '../theme/ai_motion.dart';
 /// A human-in-the-loop prompt for a tool call that requires approval.
 ///
 /// Renders the requested tool's name and pretty-printed input, plus Approve and
-/// Deny buttons. Feed it a [LanguageModelV3ToolApprovalRequestPart] from
+/// Deny buttons. Feed it a [LanguageModelV4ToolApprovalRequestPart] from
 /// `ChatController.pendingApprovalRequests` (or `result.steps`) and wire the
 /// callbacks to `ChatController.addToolApprovalResponse(...)`:
 ///
@@ -39,7 +39,7 @@ class ToolApprovalCard extends StatefulWidget {
   });
 
   /// The approval request to render.
-  final LanguageModelV3ToolApprovalRequestPart request;
+  final LanguageModelV4ToolApprovalRequestPart request;
 
   /// Called with the (optional) reason when the user approves.
   final ValueChanged<String?> onApprove;

@@ -11,10 +11,13 @@ import 'package:dio/dio.dart';
 /// failures (timeouts, connection errors) are wrapped with the Dio message so
 /// the caller still receives an [AiApiCallError] rather than a bare
 /// `DioException`.
-Future<AiApiCallError> apiErrorFromDioException(
+Future<AiSdkError> apiErrorFromDioException(
   DioException error, {
   required String provider,
 }) async {
+  if (error.type == DioExceptionType.cancel || CancelToken.isCancel(error)) {
+    return const AiOperationCancelledError();
+  }
   final response = error.response;
   final body = await _materializeBody(response?.data) ?? error.message;
   return AiApiCallError.fromResponse(

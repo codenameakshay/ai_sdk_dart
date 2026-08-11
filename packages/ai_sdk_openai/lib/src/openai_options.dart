@@ -1,6 +1,6 @@
 /// Typed provider options for OpenAI language models.
 ///
-/// Pass the result of [toMap] in [LanguageModelV3CallOptions.providerOptions]
+/// Pass the result of [toMap] in [LanguageModelV4CallOptions.providerOptions]
 /// under the `'openai'` key:
 ///
 /// ```dart

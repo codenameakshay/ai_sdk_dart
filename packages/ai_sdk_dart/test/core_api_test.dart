@@ -94,7 +94,7 @@ void main() {
               jsonSchema: const {'type': 'object'},
               fromJson: (json) => json,
             ),
-            execute: (_, __) async {
+            execute: (_, _) async {
               return Stream<Object?>.fromIterable(const [
                 {'status': 'loading'},
                 {'status': 'done', 'tempC': 23},
@@ -121,6 +121,7 @@ void main() {
         StreamTextToolInputStartEvent,
         StreamTextToolInputDeltaEvent,
         StreamTextToolInputEndEvent,
+        StreamTextUsageEvent,
         StreamTextToolResultEvent,
         StreamTextToolResultEvent,
         StreamTextFinishStepEvent,
@@ -128,6 +129,7 @@ void main() {
         StreamTextTextStartEvent,
         StreamTextTextDeltaEvent,
         StreamTextTextEndEvent,
+        StreamTextUsageEvent,
         StreamTextFinishStepEvent,
         StreamTextFinishEvent<String>,
       ]);
@@ -212,7 +214,7 @@ void main() {
               jsonSchema: const {'type': 'object'},
               fromJson: (json) => json,
             ),
-            execute: (_, __) async => 'ok',
+            execute: (_, _) async => 'ok',
           ),
         },
         maxSteps: 2,
@@ -238,9 +240,26 @@ void main() {
         await result.output;
         expect(finished, isNotNull);
         expect(finished!.text, 'done');
-        expect(finished!.usage?.totalTokens, 3);
-        expect(finished!.totalUsage?.totalTokens, 3);
-        expect(finished!.warnings, contains('provider-warning'));
+        expect(
+          (finished!.usage?.inputTokens.total ?? 0) +
+              (finished!.usage?.outputTokens.total ?? 0),
+          3,
+        );
+        expect(
+          (finished!.totalUsage?.inputTokens.total ?? 0) +
+              (finished!.totalUsage?.outputTokens.total ?? 0),
+          3,
+        );
+        expect(
+          finished!.warnings,
+          contains(
+            isA<LanguageModelV4OtherWarning>().having(
+              (warning) => warning.message,
+              'message',
+              'provider-warning',
+            ),
+          ),
+        );
         expect(finished!.response.metadata?.id, 'resp_stream_1');
         expect(finished!.response.body, isA<Map<String, dynamic>>());
         expect(finished!.response.messages, isNotEmpty);
@@ -263,7 +282,7 @@ void main() {
       expect(calls.single.text, 'single step');
       expect(calls.single.toolCalls, isEmpty);
       expect(calls.single.toolResults, isEmpty);
-      expect(calls.single.finishReason, LanguageModelV3FinishReason.stop);
+      expect(calls.single.finishReason, LanguageModelV4FinishReason.stop);
     });
 
     test(
@@ -280,7 +299,7 @@ void main() {
                 jsonSchema: const {'type': 'object'},
                 fromJson: (json) => json,
               ),
-              execute: (_, __) async {
+              execute: (_, _) async {
                 executions++;
                 return 'ok';
               },
@@ -308,7 +327,7 @@ void main() {
                 jsonSchema: const {'type': 'object'},
                 fromJson: (json) => json,
               ),
-              execute: (_, __) async {
+              execute: (_, _) async {
                 executions++;
                 return 'ok';
               },
@@ -363,7 +382,7 @@ void main() {
                 jsonSchema: const {'type': 'object'},
                 fromJson: (json) => json,
               ),
-              execute: (_, __) async => const {'status': 'done'},
+              execute: (_, _) async => const {'status': 'done'},
             ),
           },
           onStepFinish: streamSteps.add,
@@ -389,14 +408,14 @@ void main() {
                 jsonSchema: const {'type': 'object'},
                 fromJson: (json) => json,
               ),
-              execute: (_, __) async => 'ok',
+              execute: (_, _) async => 'ok',
             ),
             'other': tool<Map<String, dynamic>, String>(
               inputSchema: Schema<Map<String, dynamic>>(
                 jsonSchema: const {'type': 'object'},
                 fromJson: (json) => json,
               ),
-              execute: (_, __) async => 'ignored',
+              execute: (_, _) async => 'ignored',
             ),
           },
           prepareStep: (context) {
@@ -431,7 +450,7 @@ void main() {
                 jsonSchema: const {'type': 'object'},
                 fromJson: (json) => json,
               ),
-              execute: (_, __) async => 'ok',
+              execute: (_, _) async => 'ok',
             ),
           },
         ),
@@ -448,7 +467,7 @@ void main() {
                 jsonSchema: const {'type': 'object'},
                 fromJson: (json) => json,
               ),
-              execute: (_, __) async => 'ok',
+              execute: (_, _) async => 'ok',
             ),
           },
         ),
@@ -465,7 +484,7 @@ void main() {
                 jsonSchema: const {'type': 'object'},
                 fromJson: (json) => json,
               ),
-              execute: (_, __) async => 'ok',
+              execute: (_, _) async => 'ok',
             ),
           },
         ),
@@ -482,14 +501,14 @@ void main() {
               jsonSchema: const {'type': 'object'},
               fromJson: (json) => json,
             ),
-            execute: (_, __) async => 'ok',
+            execute: (_, _) async => 'ok',
           ),
           'other': tool<Map<String, dynamic>, String>(
             inputSchema: Schema<Map<String, dynamic>>(
               jsonSchema: const {'type': 'object'},
               fromJson: (json) => json,
             ),
-            execute: (_, __) async => 'ignored',
+            execute: (_, _) async => 'ignored',
           ),
         },
         maxSteps: 3,
@@ -524,7 +543,7 @@ void main() {
                 jsonSchema: const {'type': 'object'},
                 fromJson: (json) => json,
               ),
-              execute: (_, __) async => 'ok',
+              execute: (_, _) async => 'ok',
             ),
           },
           onInputStart: starts.add,
@@ -543,6 +562,59 @@ void main() {
     );
 
     test(
+      'streamText waits for StreamPartToolCall before executing tool input',
+      () async {
+        final model = _DelayedToolCallStreamModel();
+        var executions = 0;
+        var outputCompleted = false;
+        final inputAvailable = Completer<void>();
+
+        final result = await streamText<String>(
+          model: model,
+          maxSteps: 3,
+          tools: {
+            'search': tool<Map<String, dynamic>, String>(
+              inputSchema: Schema<Map<String, dynamic>>(
+                jsonSchema: const {'type': 'object'},
+                fromJson: (json) => json,
+              ),
+              execute: (_, _) async {
+                executions++;
+                return 'ok';
+              },
+            ),
+          },
+          onInputAvailable: (_) {
+            if (!inputAvailable.isCompleted) {
+              inputAvailable.complete();
+            }
+          },
+        );
+
+        result.output.then((_) {
+          outputCompleted = true;
+        });
+
+        await inputAvailable.future;
+        await Future<void>.delayed(Duration.zero);
+
+        expect(executions, 0);
+        expect(outputCompleted, isFalse);
+        expect(model.streamCalls, 1);
+
+        model.emitCompletedToolCall();
+
+        await result.output;
+        expect(executions, 1);
+        expect(model.streamCalls, 2);
+
+        final steps = await result.steps;
+        expect(steps, hasLength(2));
+        expect(steps.first.toolResults, hasLength(1));
+      },
+    );
+
+    test(
       'streamText emits preliminary tool results from stream output',
       () async {
         final model = _StreamTaxonomyModel();
@@ -555,7 +627,7 @@ void main() {
                 jsonSchema: const {'type': 'object'},
                 fromJson: (json) => json,
               ),
-              execute: (_, __) async {
+              execute: (_, _) async {
                 return Stream<Object?>.fromIterable(const [
                   {'status': 'loading'},
                   {'status': 'done', 'tempC': 23},
@@ -593,7 +665,7 @@ void main() {
               jsonSchema: const {'type': 'object'},
               fromJson: (json) => json,
             ),
-            execute: (_, __) async => 'ok',
+            execute: (_, _) async => 'ok',
           ),
         },
         experimentalOnStart: (_) => throw StateError('onStart'),
@@ -615,7 +687,7 @@ void main() {
               jsonSchema: const {'type': 'object'},
               fromJson: (json) => json,
             ),
-            execute: (_, __) async => 'ok',
+            execute: (_, _) async => 'ok',
           ),
         },
         experimentalOnStart: (_) => throw StateError('streamOnStart'),
@@ -743,7 +815,11 @@ void main() {
         expect(generate.reasoningText, contains('I should cite sources'));
         expect(generate.sources, hasLength(1));
         expect(generate.files, hasLength(1));
-        expect(generate.totalUsage?.totalTokens, 10);
+        expect(
+          (generate.totalUsage?.inputTokens.total ?? 0) +
+              (generate.totalUsage?.outputTokens.total ?? 0),
+          10,
+        );
         expect(generate.responseMessages, isNotEmpty);
 
         final stream = await streamText<String>(model: _RichStreamModel());
@@ -753,7 +829,11 @@ void main() {
         expect(finish.reasoningText, contains('reasoning delta'));
         expect(finish.sources, hasLength(1));
         expect(finish.files, hasLength(1));
-        expect(finish.totalUsage?.totalTokens, 11);
+        expect(
+          (finish.totalUsage?.inputTokens.total ?? 0) +
+              (finish.totalUsage?.outputTokens.total ?? 0),
+          11,
+        );
         expect(finish.responseMessages, isNotEmpty);
       },
     );
@@ -768,8 +848,8 @@ void main() {
             jsonSchema: const {'type': 'object'},
             fromJson: (json) => json,
           ),
-          needsApproval: (_, __) => true,
-          execute: (_, __) async {
+          needsApproval: (_, _) => true,
+          execute: (_, _) async {
             executeCount++;
             return 'approved';
           },
@@ -786,7 +866,7 @@ void main() {
         expect(firstFinish.steps.first.toolApprovalRequests, hasLength(1));
         expect(executeCount, 0);
 
-        final approval = LanguageModelV3ToolApprovalResponse(
+        final approval = LanguageModelV4ToolApprovalResponse(
           approvalId:
               firstFinish.steps.first.toolApprovalRequests.first.approvalId,
           approved: true,
@@ -816,7 +896,7 @@ void main() {
               jsonSchema: const {'type': 'object'},
               fromJson: (json) => json,
             ),
-            execute: (_, __) async => 'ok',
+            execute: (_, _) async => 'ok',
           ),
         },
         maxSteps: 2,
@@ -831,7 +911,7 @@ void main() {
         model: throwModel,
         tools: {
           'weather': dynamicTool<Object?>(
-            execute: (_, __) async {
+            execute: (_, _) async {
               throw 'string boom';
             },
           ),
@@ -852,8 +932,8 @@ void main() {
           jsonSchema: const {'type': 'object'},
           fromJson: (json) => json,
         ),
-        needsApproval: (_, __) => true,
-        execute: (_, __) async => 'should-not-run',
+        needsApproval: (_, _) => true,
+        execute: (_, _) async => 'should-not-run',
       );
       final first = await generateText<String>(
         model: _GenerateToolLoopModel(),
@@ -865,7 +945,7 @@ void main() {
         tools: {'weather': approvalTool},
         maxSteps: 3,
         toolApprovalResponses: [
-          LanguageModelV3ToolApprovalResponse(
+          LanguageModelV4ToolApprovalResponse(
             approvalId: first.toolApprovalRequests.first.approvalId,
             approved: false,
             reason: 'denied by user',
@@ -886,7 +966,7 @@ void main() {
         tools: {
           'unsafe': dynamicTool<Object?>(
             strict: true,
-            execute: (_, __) async => 'never',
+            execute: (_, _) async => 'never',
           ),
         },
         maxSteps: 2,
@@ -914,7 +994,7 @@ void main() {
                 jsonSchema: const {'type': 'object'},
                 fromJson: (json) => json,
               ),
-              execute: (_, __) async => 'weather-ok',
+              execute: (_, _) async => 'weather-ok',
             ),
             'custom': dynamicTool<String>(
               execute: (input, _) async {
@@ -1093,7 +1173,7 @@ void main() {
   });
 }
 
-class _StaticTextGenerateModel implements LanguageModelV3 {
+class _StaticTextGenerateModel extends LanguageModelV4 {
   _StaticTextGenerateModel(this.value);
 
   final String value;
@@ -1105,27 +1185,27 @@ class _StaticTextGenerateModel implements LanguageModelV3 {
   String get provider => 'fake';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3GenerateResult(
-      content: [LanguageModelV3TextPart(text: value)],
-      finishReason: LanguageModelV3FinishReason.stop,
+    return LanguageModelV4GenerateResult(
+      content: [LanguageModelV4TextPart(text: value)],
+      finishReason: LanguageModelV4FinishReason.stop,
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 }
 
-class _JsonGenerateModel implements LanguageModelV3 {
+class _JsonGenerateModel extends LanguageModelV4 {
   @override
   String get modelId => 'fake-json';
 
@@ -1133,27 +1213,27 @@ class _JsonGenerateModel implements LanguageModelV3 {
   String get provider => 'fake';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
-    return const LanguageModelV3GenerateResult(
-      content: [LanguageModelV3TextPart(text: '{"city":"Paris","tempC":21}')],
-      finishReason: LanguageModelV3FinishReason.stop,
+    return const LanguageModelV4GenerateResult(
+      content: [LanguageModelV4TextPart(text: '{"city":"Paris","tempC":21}')],
+      finishReason: LanguageModelV4FinishReason.stop,
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 }
 
-class _JsonStreamModel implements LanguageModelV3 {
+class _JsonStreamModel extends LanguageModelV4 {
   @override
   String get modelId => 'fake-stream';
 
@@ -1161,32 +1241,32 @@ class _JsonStreamModel implements LanguageModelV3 {
   String get provider => 'fake';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable(const [
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable(const [
         StreamPartTextStart(id: 'text-0'),
         StreamPartTextDelta(id: 'text-0', delta: '{"status":"ok",'),
         StreamPartTextDelta(id: 'text-0', delta: '"count":2}'),
         StreamPartTextEnd(id: 'text-0'),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
       ]),
     );
   }
 }
 
-class _ErrorStreamModel implements LanguageModelV3 {
+class _ErrorStreamModel extends LanguageModelV4 {
   @override
   String get modelId => 'fake-error-stream';
 
@@ -1194,29 +1274,29 @@ class _ErrorStreamModel implements LanguageModelV3 {
   String get provider => 'fake';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable(const [
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable(const [
         StreamPartError(error: 'boom'),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.error),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.error),
       ]),
     );
   }
 }
 
-class _GenerateToolLoopModel implements LanguageModelV3 {
+class _GenerateToolLoopModel extends LanguageModelV4 {
   @override
   String get modelId => 'fake-generate-tool-loop';
 
@@ -1224,47 +1304,47 @@ class _GenerateToolLoopModel implements LanguageModelV3 {
   String get provider => 'fake';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     final hasToolResult = options.prompt.messages.any(
       (message) =>
-          message.role == LanguageModelV3Role.tool &&
-          message.content.whereType<LanguageModelV3ToolResultPart>().isNotEmpty,
+          message.role == LanguageModelV4Role.tool &&
+          message.content.whereType<LanguageModelV4ToolResultPart>().isNotEmpty,
     );
 
     if (!hasToolResult) {
-      return const LanguageModelV3GenerateResult(
+      return const LanguageModelV4GenerateResult(
         content: [
-          LanguageModelV3ToolCallPart(
+          LanguageModelV4ToolCallPart(
             toolCallId: 'call_weather_1',
             toolName: 'weather',
             input: {'city': 'Paris'},
           ),
         ],
-        finishReason: LanguageModelV3FinishReason.toolCalls,
+        finishReason: LanguageModelV4FinishReason.toolCalls,
       );
     }
 
-    return const LanguageModelV3GenerateResult(
-      content: [LanguageModelV3TextPart(text: 'final answer after tool: 23')],
-      finishReason: LanguageModelV3FinishReason.stop,
+    return const LanguageModelV4GenerateResult(
+      content: [LanguageModelV4TextPart(text: 'final answer after tool: 23')],
+      finishReason: LanguageModelV4FinishReason.stop,
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 }
 
-class _PrepareStepModel implements LanguageModelV3 {
-  final calls = <LanguageModelV3CallOptions>[];
+class _PrepareStepModel extends LanguageModelV4 {
+  final calls = <LanguageModelV4CallOptions>[];
 
   @override
   String get modelId => 'fake-prepare-step';
@@ -1273,45 +1353,45 @@ class _PrepareStepModel implements LanguageModelV3 {
   String get provider => 'fake';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     calls.add(options);
     final hasToolResult = options.prompt.messages.any(
       (message) =>
-          message.role == LanguageModelV3Role.tool &&
-          message.content.whereType<LanguageModelV3ToolResultPart>().isNotEmpty,
+          message.role == LanguageModelV4Role.tool &&
+          message.content.whereType<LanguageModelV4ToolResultPart>().isNotEmpty,
     );
     if (!hasToolResult) {
-      return const LanguageModelV3GenerateResult(
+      return const LanguageModelV4GenerateResult(
         content: [
-          LanguageModelV3ToolCallPart(
+          LanguageModelV4ToolCallPart(
             toolCallId: 'prepare_call_1',
             toolName: 'weather',
             input: {'city': 'Paris'},
           ),
         ],
-        finishReason: LanguageModelV3FinishReason.toolCalls,
+        finishReason: LanguageModelV4FinishReason.toolCalls,
       );
     }
-    return const LanguageModelV3GenerateResult(
-      content: [LanguageModelV3TextPart(text: 'final answer')],
-      finishReason: LanguageModelV3FinishReason.stop,
+    return const LanguageModelV4GenerateResult(
+      content: [LanguageModelV4TextPart(text: 'final answer')],
+      finishReason: LanguageModelV4FinishReason.stop,
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 }
 
-class _ToolChoiceNoneViolationModel implements LanguageModelV3 {
+class _ToolChoiceNoneViolationModel extends LanguageModelV4 {
   @override
   String get modelId => 'fake-toolchoice-none';
 
@@ -1319,33 +1399,33 @@ class _ToolChoiceNoneViolationModel implements LanguageModelV3 {
   String get provider => 'fake';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
-    return const LanguageModelV3GenerateResult(
+    return const LanguageModelV4GenerateResult(
       content: [
-        LanguageModelV3ToolCallPart(
+        LanguageModelV4ToolCallPart(
           toolCallId: 'none_violation',
           toolName: 'weather',
           input: {'city': 'Paris'},
         ),
       ],
-      finishReason: LanguageModelV3FinishReason.toolCalls,
+      finishReason: LanguageModelV4FinishReason.toolCalls,
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 }
 
-class _RequiredNoToolModel implements LanguageModelV3 {
+class _RequiredNoToolModel extends LanguageModelV4 {
   @override
   String get modelId => 'fake-toolchoice-required';
 
@@ -1353,28 +1433,28 @@ class _RequiredNoToolModel implements LanguageModelV3 {
   String get provider => 'fake';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
-    return const LanguageModelV3GenerateResult(
-      content: [LanguageModelV3TextPart(text: 'no tools called')],
-      finishReason: LanguageModelV3FinishReason.stop,
+    return const LanguageModelV4GenerateResult(
+      content: [LanguageModelV4TextPart(text: 'no tools called')],
+      finishReason: LanguageModelV4FinishReason.stop,
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 }
 
-class _SpecificToolModel implements LanguageModelV3 {
-  List<LanguageModelV3FunctionTool> firstCallTools = const [];
+class _SpecificToolModel extends LanguageModelV4 {
+  List<LanguageModelV4FunctionTool> firstCallTools = const [];
 
   @override
   String get modelId => 'fake-toolchoice-specific';
@@ -1383,47 +1463,49 @@ class _SpecificToolModel implements LanguageModelV3 {
   String get provider => 'fake';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
-    firstCallTools = firstCallTools.isEmpty ? options.tools : firstCallTools;
+    firstCallTools = firstCallTools.isEmpty
+        ? options.functionTools.toList()
+        : firstCallTools;
     final hasToolResult = options.prompt.messages.any(
       (message) =>
-          message.role == LanguageModelV3Role.tool &&
-          message.content.whereType<LanguageModelV3ToolResultPart>().isNotEmpty,
+          message.role == LanguageModelV4Role.tool &&
+          message.content.whereType<LanguageModelV4ToolResultPart>().isNotEmpty,
     );
 
     if (!hasToolResult) {
-      return const LanguageModelV3GenerateResult(
+      return const LanguageModelV4GenerateResult(
         content: [
-          LanguageModelV3ToolCallPart(
+          LanguageModelV4ToolCallPart(
             toolCallId: 'specific_call_1',
             toolName: 'weather',
             input: {'city': 'Paris'},
           ),
         ],
-        finishReason: LanguageModelV3FinishReason.toolCalls,
+        finishReason: LanguageModelV4FinishReason.toolCalls,
       );
     }
 
-    return const LanguageModelV3GenerateResult(
-      content: [LanguageModelV3TextPart(text: 'specific done')],
-      finishReason: LanguageModelV3FinishReason.stop,
+    return const LanguageModelV4GenerateResult(
+      content: [LanguageModelV4TextPart(text: 'specific done')],
+      finishReason: LanguageModelV4FinishReason.stop,
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 }
 
-class _StreamTaxonomyModel implements LanguageModelV3 {
+class _StreamTaxonomyModel extends LanguageModelV4 {
   int streamCalls = 0;
 
   @override
@@ -1433,81 +1515,85 @@ class _StreamTaxonomyModel implements LanguageModelV3 {
   String get provider => 'fake';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     streamCalls++;
     final hasToolResult = options.prompt.messages.any(
       (message) =>
-          message.role == LanguageModelV3Role.tool &&
-          message.content.whereType<LanguageModelV3ToolResultPart>().isNotEmpty,
+          message.role == LanguageModelV4Role.tool &&
+          message.content.whereType<LanguageModelV4ToolResultPart>().isNotEmpty,
     );
 
     if (!hasToolResult) {
-      return LanguageModelV3StreamResult(
-        stream: Stream<LanguageModelV3StreamPart>.fromIterable([
+      return LanguageModelV4StreamResult(
+        stream: Stream<LanguageModelV4StreamPart>.fromIterable([
           StreamPartTextStart(id: 'text-0'),
           StreamPartTextDelta(id: 'text-0', delta: 'Checking weather...'),
           StreamPartTextEnd(id: 'text-0'),
-          StreamPartReasoningDelta(delta: 'Need to call tool'),
+          StreamPartReasoningStart(id: 'reasoning-0'),
+          StreamPartReasoningDelta(
+            id: 'reasoning-0',
+            delta: 'Need to call tool',
+          ),
+          StreamPartReasoningEnd(id: 'reasoning-0'),
           StreamPartSource(
-            source: LanguageModelV3SourcePart(
+            source: LanguageModelV4SourcePart(
               id: 'src-1',
               url: 'https://example.com/weather',
               title: 'Weather Source',
             ),
           ),
           StreamPartFile(
-            file: LanguageModelV3FilePart(
+            file: LanguageModelV4FilePart(
               data: DataContentUrl(Uri.parse('https://example.com/report.pdf')),
               mediaType: 'application/pdf',
               filename: 'report.pdf',
             ),
           ),
-          StreamPartToolCallStart(
-            toolCallId: 'call_weather_1',
-            toolName: 'weather',
+          StreamPartToolInputStart(id: 'call_weather_1', toolName: 'weather'),
+          StreamPartToolInputDelta(
+            id: 'call_weather_1',
+            delta: '{"city":"Paris"}',
           ),
-          StreamPartToolCallDelta(
-            toolCallId: 'call_weather_1',
-            toolName: 'weather',
-            argsTextDelta: '{"city":"Paris"}',
+          StreamPartToolInputEnd(id: 'call_weather_1'),
+          StreamPartToolCall(
+            toolCall: LanguageModelV4ToolCallPart(
+              toolCallId: 'call_weather_1',
+              toolName: 'weather',
+              input: {'city': 'Paris'},
+            ),
           ),
-          StreamPartToolCallEnd(
-            toolCallId: 'call_weather_1',
-            toolName: 'weather',
-            input: {'city': 'Paris'},
-          ),
-          StreamPartFinish(finishReason: LanguageModelV3FinishReason.toolCalls),
+          StreamPartFinish(finishReason: LanguageModelV4FinishReason.toolCalls),
         ]),
       );
     }
 
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable(const [
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable(const [
         StreamPartTextStart(id: 'text-1'),
         StreamPartTextDelta(
           id: 'text-1',
           delta: 'Final answer with tool result.',
         ),
         StreamPartTextEnd(id: 'text-1'),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
       ]),
     );
   }
 }
 
-class _StreamInputLifecycleModel implements LanguageModelV3 {
+class _StreamInputLifecycleModel extends LanguageModelV4 {
   int streamCalls = 0;
 
   @override
@@ -1517,65 +1603,136 @@ class _StreamInputLifecycleModel implements LanguageModelV3 {
   String get provider => 'fake';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     streamCalls++;
     final hasToolResult = options.prompt.messages.any(
       (message) =>
-          message.role == LanguageModelV3Role.tool &&
-          message.content.whereType<LanguageModelV3ToolResultPart>().isNotEmpty,
+          message.role == LanguageModelV4Role.tool &&
+          message.content.whereType<LanguageModelV4ToolResultPart>().isNotEmpty,
     );
 
     if (!hasToolResult) {
-      return LanguageModelV3StreamResult(
-        stream: Stream<LanguageModelV3StreamPart>.fromIterable(const [
-          StreamPartToolCallStart(
-            toolCallId: 'call_search_1',
-            toolName: 'search',
+      return LanguageModelV4StreamResult(
+        stream: Stream<LanguageModelV4StreamPart>.fromIterable(const [
+          StreamPartToolInputStart(id: 'call_search_1', toolName: 'search'),
+          StreamPartToolInputDelta(id: 'call_search_1', delta: '{"q":"par'),
+          StreamPartToolInputDelta(id: 'call_search_1', delta: 'is"}'),
+          StreamPartToolInputEnd(id: 'call_search_1'),
+          StreamPartToolCall(
+            toolCall: LanguageModelV4ToolCallPart(
+              toolCallId: 'call_search_1',
+              toolName: 'search',
+              input: {'q': 'paris'},
+            ),
           ),
-          StreamPartToolCallDelta(
-            toolCallId: 'call_search_1',
-            toolName: 'search',
-            argsTextDelta: '{"q":"par',
-          ),
-          StreamPartToolCallDelta(
-            toolCallId: 'call_search_1',
-            toolName: 'search',
-            argsTextDelta: 'is"}',
-          ),
-          StreamPartToolCallEnd(
-            toolCallId: 'call_search_1',
-            toolName: 'search',
-            input: {'q': 'paris'},
-          ),
-          StreamPartFinish(finishReason: LanguageModelV3FinishReason.toolCalls),
+          StreamPartFinish(finishReason: LanguageModelV4FinishReason.toolCalls),
         ]),
       );
     }
 
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable(const [
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable(const [
         StreamPartTextStart(id: 'text-1'),
         StreamPartTextDelta(id: 'text-1', delta: 'done'),
         StreamPartTextEnd(id: 'text-1'),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
       ]),
     );
   }
 }
 
-class _FencedJsonStreamModel implements LanguageModelV3 {
+class _DelayedToolCallStreamModel extends LanguageModelV4 {
+  final _toolCallController = StreamController<LanguageModelV4StreamPart>();
+  var streamCalls = 0;
+
+  @override
+  String get modelId => 'fake-delayed-tool-call-stream';
+
+  @override
+  String get provider => 'fake';
+
+  @override
+  String get specificationVersion => 'v4';
+
+  @override
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
+  ) async {
+    throw UnimplementedError();
+  }
+
+  void emitCompletedToolCall() {
+    _toolCallController
+      ..add(
+        const StreamPartToolCall(
+          toolCall: LanguageModelV4ToolCallPart(
+            toolCallId: 'call_search_delayed',
+            toolName: 'search',
+            input: {'q': 'paris'},
+          ),
+        ),
+      )
+      ..add(
+        const StreamPartFinish(
+          finishReason: LanguageModelV4FinishReason.toolCalls,
+        ),
+      );
+    unawaited(_toolCallController.close());
+  }
+
+  @override
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
+  ) async {
+    streamCalls++;
+    final hasToolResult = options.prompt.messages.any(
+      (message) =>
+          message.role == LanguageModelV4Role.tool &&
+          message.content.whereType<LanguageModelV4ToolResultPart>().isNotEmpty,
+    );
+
+    if (!hasToolResult) {
+      _toolCallController
+        ..add(
+          const StreamPartToolInputStart(
+            id: 'call_search_delayed',
+            toolName: 'search',
+          ),
+        )
+        ..add(
+          const StreamPartToolInputDelta(
+            id: 'call_search_delayed',
+            delta: '{"q":"paris"}',
+          ),
+        )
+        ..add(const StreamPartToolInputEnd(id: 'call_search_delayed'));
+      return LanguageModelV4StreamResult(stream: _toolCallController.stream);
+    }
+
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable(const [
+        StreamPartTextStart(id: 'text-1'),
+        StreamPartTextDelta(id: 'text-1', delta: 'done'),
+        StreamPartTextEnd(id: 'text-1'),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
+      ]),
+    );
+  }
+}
+
+class _FencedJsonStreamModel extends LanguageModelV4 {
   @override
   String get modelId => 'fake-fenced-json-stream';
 
@@ -1583,32 +1740,32 @@ class _FencedJsonStreamModel implements LanguageModelV3 {
   String get provider => 'fake';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable(const [
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable(const [
         StreamPartTextStart(id: 'text-0'),
         StreamPartTextDelta(id: 'text-0', delta: '```json\n{"status":'),
         StreamPartTextDelta(id: 'text-0', delta: '"ok"}\n```'),
         StreamPartTextEnd(id: 'text-0'),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
       ]),
     );
   }
 }
 
-class _PartialArrayStreamModel implements LanguageModelV3 {
+class _PartialArrayStreamModel extends LanguageModelV4 {
   @override
   String get modelId => 'fake-partial-array-stream';
 
@@ -1616,33 +1773,33 @@ class _PartialArrayStreamModel implements LanguageModelV3 {
   String get provider => 'fake';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable(const [
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable(const [
         StreamPartTextStart(id: 'text-0'),
         StreamPartTextDelta(id: 'text-0', delta: '[{"name":"A"},'),
         StreamPartTextDelta(id: 'text-0', delta: '{"na'),
         StreamPartTextDelta(id: 'text-0', delta: 'me":"B"}]'),
         StreamPartTextEnd(id: 'text-0'),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
       ]),
     );
   }
 }
 
-class _InvalidJsonStreamModel implements LanguageModelV3 {
+class _InvalidJsonStreamModel extends LanguageModelV4 {
   @override
   String get modelId => 'fake-invalid-json-stream';
 
@@ -1650,31 +1807,31 @@ class _InvalidJsonStreamModel implements LanguageModelV3 {
   String get provider => 'fake';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable(const [
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable(const [
         StreamPartTextStart(id: 'text-0'),
         StreamPartTextDelta(id: 'text-0', delta: '{"status":'),
         StreamPartTextEnd(id: 'text-0'),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
       ]),
     );
   }
 }
 
-class _TransformStreamModel implements LanguageModelV3 {
+class _TransformStreamModel extends LanguageModelV4 {
   @override
   String get modelId => 'fake-transform-stream';
 
@@ -1682,31 +1839,31 @@ class _TransformStreamModel implements LanguageModelV3 {
   String get provider => 'fake';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable(const [
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable(const [
         StreamPartTextStart(id: 'text-0'),
         StreamPartTextDelta(id: 'text-0', delta: 'Hello'),
         StreamPartTextEnd(id: 'text-0'),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
       ]),
     );
   }
 }
 
-class _RichGenerateModel implements LanguageModelV3 {
+class _RichGenerateModel extends LanguageModelV4 {
   @override
   String get modelId => 'fake-rich-generate';
 
@@ -1714,45 +1871,44 @@ class _RichGenerateModel implements LanguageModelV3 {
   String get provider => 'fake';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3GenerateResult(
+    return LanguageModelV4GenerateResult(
       content: [
-        const LanguageModelV3ReasoningPart(text: 'I should cite sources.'),
-        const LanguageModelV3SourcePart(
+        const LanguageModelV4ReasoningPart(text: 'I should cite sources.'),
+        const LanguageModelV4SourcePart(
           id: 'src-1',
           url: 'https://example.com',
           title: 'Example',
         ),
-        LanguageModelV3FilePart(
+        LanguageModelV4FilePart(
           data: DataContentUrl(Uri.parse('https://example.com/doc.pdf')),
           mediaType: 'application/pdf',
           filename: 'doc.pdf',
         ),
-        const LanguageModelV3TextPart(text: 'rich done'),
+        const LanguageModelV4TextPart(text: 'rich done'),
       ],
-      finishReason: LanguageModelV3FinishReason.stop,
-      usage: const LanguageModelV3Usage(
-        inputTokens: 4,
-        outputTokens: 6,
-        totalTokens: 10,
+      finishReason: LanguageModelV4FinishReason.stop,
+      usage: const LanguageModelV4Usage(
+        inputTokens: LanguageModelV4InputTokenUsage(total: 4),
+        outputTokens: LanguageModelV4OutputTokenUsage(total: 6),
       ),
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 }
 
-class _RichStreamModel implements LanguageModelV3 {
+class _RichStreamModel extends LanguageModelV4 {
   @override
   String get modelId => 'fake-rich-stream';
 
@@ -1760,31 +1916,34 @@ class _RichStreamModel implements LanguageModelV3 {
   String get provider => 'fake';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable([
-        const StreamPartReasoningDelta(delta: 'reasoning delta'),
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable([
+        const StreamPartReasoningDelta(
+          id: 'reasoning-stream-0',
+          delta: 'reasoning delta',
+        ),
         const StreamPartSource(
-          source: LanguageModelV3SourcePart(
+          source: LanguageModelV4SourcePart(
             id: 'src-stream',
             url: 'https://example.com/stream',
             title: 'Stream Source',
           ),
         ),
         StreamPartFile(
-          file: LanguageModelV3FilePart(
+          file: LanguageModelV4FilePart(
             data: DataContentUrl(Uri.parse('https://example.com/stream.pdf')),
             mediaType: 'application/pdf',
             filename: 'stream.pdf',
@@ -1794,11 +1953,10 @@ class _RichStreamModel implements LanguageModelV3 {
         const StreamPartTextDelta(id: 'text-0', delta: 'stream-rich'),
         const StreamPartTextEnd(id: 'text-0'),
         const StreamPartFinish(
-          finishReason: LanguageModelV3FinishReason.stop,
-          usage: LanguageModelV3Usage(
-            inputTokens: 5,
-            outputTokens: 6,
-            totalTokens: 11,
+          finishReason: LanguageModelV4FinishReason.stop,
+          usage: LanguageModelV4Usage(
+            inputTokens: LanguageModelV4InputTokenUsage(total: 5),
+            outputTokens: LanguageModelV4OutputTokenUsage(total: 6),
           ),
         ),
       ]),
@@ -1806,7 +1964,7 @@ class _RichStreamModel implements LanguageModelV3 {
   }
 }
 
-class _ApprovalStreamModel implements LanguageModelV3 {
+class _ApprovalStreamModel extends LanguageModelV4 {
   @override
   String get modelId => 'fake-approval-stream';
 
@@ -1814,58 +1972,60 @@ class _ApprovalStreamModel implements LanguageModelV3 {
   String get provider => 'fake';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     final hasToolResult = options.prompt.messages.any(
       (message) =>
-          message.role == LanguageModelV3Role.tool &&
-          message.content.whereType<LanguageModelV3ToolResultPart>().isNotEmpty,
+          message.role == LanguageModelV4Role.tool &&
+          message.content.whereType<LanguageModelV4ToolResultPart>().isNotEmpty,
     );
     if (!hasToolResult) {
-      return LanguageModelV3StreamResult(
-        stream: Stream<LanguageModelV3StreamPart>.fromIterable(const [
-          StreamPartToolCallStart(
-            toolCallId: 'approval_stream_1',
+      return LanguageModelV4StreamResult(
+        stream: Stream<LanguageModelV4StreamPart>.fromIterable(const [
+          StreamPartToolInputStart(
+            id: 'approval_stream_1',
             toolName: 'secureTool',
           ),
-          StreamPartToolCallDelta(
-            toolCallId: 'approval_stream_1',
-            toolName: 'secureTool',
-            argsTextDelta: '{"action":"run"}',
+          StreamPartToolInputDelta(
+            id: 'approval_stream_1',
+            delta: '{"action":"run"}',
           ),
-          StreamPartToolCallEnd(
-            toolCallId: 'approval_stream_1',
-            toolName: 'secureTool',
-            input: {'action': 'run'},
+          StreamPartToolInputEnd(id: 'approval_stream_1'),
+          StreamPartToolCall(
+            toolCall: LanguageModelV4ToolCallPart(
+              toolCallId: 'approval_stream_1',
+              toolName: 'secureTool',
+              input: {'action': 'run'},
+            ),
           ),
-          StreamPartFinish(finishReason: LanguageModelV3FinishReason.toolCalls),
+          StreamPartFinish(finishReason: LanguageModelV4FinishReason.toolCalls),
         ]),
       );
     }
 
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable(const [
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable(const [
         StreamPartTextStart(id: 'text-1'),
         StreamPartTextDelta(id: 'text-1', delta: 'approval complete'),
         StreamPartTextEnd(id: 'text-1'),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
       ]),
     );
   }
 }
 
-class _BadToolInputModel implements LanguageModelV3 {
+class _BadToolInputModel extends LanguageModelV4 {
   @override
   String get modelId => 'fake-bad-tool-input';
 
@@ -1873,44 +2033,44 @@ class _BadToolInputModel implements LanguageModelV3 {
   String get provider => 'fake';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     final hasToolResult = options.prompt.messages.any(
       (message) =>
-          message.role == LanguageModelV3Role.tool &&
-          message.content.whereType<LanguageModelV3ToolResultPart>().isNotEmpty,
+          message.role == LanguageModelV4Role.tool &&
+          message.content.whereType<LanguageModelV4ToolResultPart>().isNotEmpty,
     );
     if (!hasToolResult) {
-      return const LanguageModelV3GenerateResult(
+      return const LanguageModelV4GenerateResult(
         content: [
-          LanguageModelV3ToolCallPart(
+          LanguageModelV4ToolCallPart(
             toolCallId: 'bad_input_1',
             toolName: 'unsafe',
             input: 'not-an-object',
           ),
         ],
-        finishReason: LanguageModelV3FinishReason.toolCalls,
+        finishReason: LanguageModelV4FinishReason.toolCalls,
       );
     }
-    return const LanguageModelV3GenerateResult(
-      content: [LanguageModelV3TextPart(text: 'done')],
-      finishReason: LanguageModelV3FinishReason.stop,
+    return const LanguageModelV4GenerateResult(
+      content: [LanguageModelV4TextPart(text: 'done')],
+      finishReason: LanguageModelV4FinishReason.stop,
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 }
 
-class _ResponseEnvelopeGenerateModel implements LanguageModelV3 {
+class _ResponseEnvelopeGenerateModel extends LanguageModelV4 {
   @override
   String get modelId => 'response-envelope-generate';
 
@@ -1918,33 +2078,35 @@ class _ResponseEnvelopeGenerateModel implements LanguageModelV3 {
   String get provider => 'fake';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3GenerateResult(
-      content: const [LanguageModelV3TextPart(text: 'hello')],
-      finishReason: LanguageModelV3FinishReason.stop,
-      response: const LanguageModelV3ResponseMetadata(
+    return LanguageModelV4GenerateResult(
+      content: const [LanguageModelV4TextPart(text: 'hello')],
+      finishReason: LanguageModelV4FinishReason.stop,
+      request: const LanguageModelV4RequestMetadata(
+        body: {'raw': 'request-body'},
+      ),
+      response: const LanguageModelV4ResponseMetadata(
         id: 'resp-1',
         modelId: 'response-envelope-generate',
         body: {'raw': 'response-body'},
-        requestBody: {'raw': 'request-body'},
       ),
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 }
 
-class _ResponseEnvelopeStreamModel implements LanguageModelV3 {
+class _ResponseEnvelopeStreamModel extends LanguageModelV4 {
   @override
   String get modelId => 'response-envelope-stream';
 
@@ -1952,35 +2114,37 @@ class _ResponseEnvelopeStreamModel implements LanguageModelV3 {
   String get provider => 'fake';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable(const [
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable(const [
         StreamPartTextStart(id: 'text-0'),
         StreamPartTextDelta(id: 'text-0', delta: 'ok'),
         StreamPartTextEnd(id: 'text-0'),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
       ]),
-      rawResponse: const {
-        'requestBody': {'raw': 'request-body'},
-        'body': {'raw': 'response-body'},
-      },
+      request: const LanguageModelV4RequestMetadata(
+        body: {'raw': 'request-body'},
+      ),
+      response: const LanguageModelV4ResponseMetadata(
+        body: {'raw': 'response-body'},
+      ),
     );
   }
 }
 
-class _OnFinishRichStreamModel implements LanguageModelV3 {
+class _OnFinishRichStreamModel extends LanguageModelV4 {
   @override
   String get modelId => 'finish-rich-stream';
 
@@ -1988,47 +2152,50 @@ class _OnFinishRichStreamModel implements LanguageModelV3 {
   String get provider => 'fake';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable(const [
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable(const [
         StreamPartTextStart(id: 'text-0'),
         StreamPartTextDelta(id: 'text-0', delta: 'done'),
         StreamPartTextEnd(id: 'text-0'),
         StreamPartFinish(
-          finishReason: LanguageModelV3FinishReason.stop,
-          usage: LanguageModelV3Usage(totalTokens: 3),
+          finishReason: LanguageModelV4FinishReason.stop,
+          usage: LanguageModelV4Usage(
+            inputTokens: LanguageModelV4InputTokenUsage(total: 1),
+            outputTokens: LanguageModelV4OutputTokenUsage(total: 2),
+          ),
           providerMetadata: {
             'fake': {'finish': 'metadata'},
           },
         ),
       ]),
-      rawResponse: const {
-        'requestBody': {'foo': 'bar'},
-        'body': {'raw': 'stream-body'},
-        'warnings': ['provider-warning'],
-        'responseMetadata': {
-          'id': 'resp_stream_1',
-          'modelId': 'finish-rich-stream',
-          'timestamp': '2026-01-01T00:00:00.000Z',
-        },
-      },
+      warnings: const [
+        LanguageModelV4OtherWarning(message: 'provider-warning'),
+      ],
+      request: const LanguageModelV4RequestMetadata(body: {'foo': 'bar'}),
+      response: LanguageModelV4ResponseMetadata(
+        id: 'resp_stream_1',
+        modelId: 'finish-rich-stream',
+        timestamp: DateTime.parse('2026-01-01T00:00:00.000Z'),
+        body: const {'raw': 'stream-body'},
+      ),
     );
   }
 }
 
-class _NestedJsonStreamModel implements LanguageModelV3 {
+class _NestedJsonStreamModel extends LanguageModelV4 {
   @override
   String get modelId => 'nested-json-stream';
 
@@ -2036,21 +2203,21 @@ class _NestedJsonStreamModel implements LanguageModelV3 {
   String get provider => 'fake';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable(const [
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable(const [
         StreamPartTextStart(id: 'text-0'),
         StreamPartTextDelta(id: 'text-0', delta: '{"recipe":{}}\n'),
         StreamPartTextDelta(
@@ -2062,20 +2229,18 @@ class _NestedJsonStreamModel implements LanguageModelV3 {
           delta: '{"recipe":{"name":"Lasagna","steps":["Boil"]}}',
         ),
         StreamPartTextEnd(id: 'text-0'),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
       ]),
-      rawResponse: const {
-        'responseMetadata': {
-          'id': 'nested_1',
-          'modelId': 'nested-json-stream',
-          'timestamp': '2026-01-01T00:00:00.000Z',
-        },
-      },
+      response: LanguageModelV4ResponseMetadata(
+        id: 'nested_1',
+        modelId: 'nested-json-stream',
+        timestamp: DateTime.parse('2026-01-01T00:00:00.000Z'),
+      ),
     );
   }
 }
 
-class _EscapedKeyJsonStreamModel implements LanguageModelV3 {
+class _EscapedKeyJsonStreamModel extends LanguageModelV4 {
   @override
   String get modelId => 'escaped-key-json-stream';
 
@@ -2083,27 +2248,27 @@ class _EscapedKeyJsonStreamModel implements LanguageModelV3 {
   String get provider => 'fake';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable(const [
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable(const [
         StreamPartTextStart(id: 'text-0'),
         StreamPartTextDelta(id: 'text-0', delta: '{}\n'),
         StreamPartTextDelta(id: 'text-0', delta: '{"a/b":1}\n'),
         StreamPartTextDelta(id: 'text-0', delta: '{"a/b":1,"c~d":2}'),
         StreamPartTextEnd(id: 'text-0'),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
       ]),
     );
   }

@@ -14,37 +14,37 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 ///
 /// Mirrors the JS AI SDK v6 middleware interface.
 abstract interface class LanguageModelMiddleware {
-  /// Transform [LanguageModelV3CallOptions] before the call reaches the model.
+  /// Transform [LanguageModelV4CallOptions] before the call reaches the model.
   ///
   /// Return modified options (or the same instance if no change is needed).
   /// Runs before both [wrapGenerate] and [wrapStream].
-  FutureOr<LanguageModelV3CallOptions> transformParams({
-    required LanguageModelV3CallOptions options,
-    required LanguageModelV3 model,
+  FutureOr<LanguageModelV4CallOptions> transformParams({
+    required LanguageModelV4CallOptions options,
+    required LanguageModelV4 model,
   });
 
   /// Optionally wrap the doGenerate call.
-  Future<LanguageModelV3GenerateResult> wrapGenerate({
-    required Future<LanguageModelV3GenerateResult> Function(
-      LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> wrapGenerate({
+    required Future<LanguageModelV4GenerateResult> Function(
+      LanguageModelV4CallOptions options,
     )
     doGenerate,
-    required LanguageModelV3CallOptions options,
-    required LanguageModelV3 model,
+    required LanguageModelV4CallOptions options,
+    required LanguageModelV4 model,
   });
 
   /// Optionally wrap the doStream call.
-  Future<LanguageModelV3StreamResult> wrapStream({
-    required Future<LanguageModelV3StreamResult> Function(
-      LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> wrapStream({
+    required Future<LanguageModelV4StreamResult> Function(
+      LanguageModelV4CallOptions options,
     )
     doStream,
-    required LanguageModelV3CallOptions options,
-    required LanguageModelV3 model,
+    required LanguageModelV4CallOptions options,
+    required LanguageModelV4 model,
   });
 }
 
-/// Wraps a [LanguageModelV3] with one or more [LanguageModelMiddleware] layers.
+/// Wraps a [LanguageModelV4] with one or more [LanguageModelMiddleware] layers.
 ///
 /// Mirrors the JS AI SDK v6 signature:
 /// ```dart
@@ -62,8 +62,8 @@ abstract interface class LanguageModelMiddleware {
 /// When [middleware] is a single [LanguageModelMiddleware] it is treated as a
 /// one-element list. When it is a `List<LanguageModelMiddleware>` middleware is
 /// applied left-to-right (first entry is the outermost layer).
-LanguageModelV3 wrapLanguageModel({
-  required LanguageModelV3 model,
+LanguageModelV4 wrapLanguageModel({
+  required LanguageModelV4 model,
   required Object middleware,
 }) {
   final List<LanguageModelMiddleware> mwList;
@@ -84,10 +84,10 @@ LanguageModelV3 wrapLanguageModel({
   return wrapped;
 }
 
-class _WrappedLanguageModel implements LanguageModelV3 {
+class _WrappedLanguageModel extends LanguageModelV4 {
   const _WrappedLanguageModel({required this.inner, required this.middleware});
 
-  final LanguageModelV3 inner;
+  final LanguageModelV4 inner;
   final LanguageModelMiddleware middleware;
 
   @override
@@ -100,8 +100,11 @@ class _WrappedLanguageModel implements LanguageModelV3 {
   String get specificationVersion => inner.specificationVersion;
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  FutureOr<Map<String, List<RegExp>>> get supportedUrls => inner.supportedUrls;
+
+  @override
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     final transformed = await middleware.transformParams(
       options: options,
@@ -115,8 +118,8 @@ class _WrappedLanguageModel implements LanguageModelV3 {
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     final transformed = await middleware.transformParams(
       options: options,
@@ -138,29 +141,29 @@ abstract class LanguageModelMiddlewareBase implements LanguageModelMiddleware {
 
   /// Default implementation: returns [options] unchanged.
   @override
-  FutureOr<LanguageModelV3CallOptions> transformParams({
-    required LanguageModelV3CallOptions options,
-    required LanguageModelV3 model,
+  FutureOr<LanguageModelV4CallOptions> transformParams({
+    required LanguageModelV4CallOptions options,
+    required LanguageModelV4 model,
   }) => options;
 
   @override
-  Future<LanguageModelV3GenerateResult> wrapGenerate({
-    required Future<LanguageModelV3GenerateResult> Function(
-      LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> wrapGenerate({
+    required Future<LanguageModelV4GenerateResult> Function(
+      LanguageModelV4CallOptions options,
     )
     doGenerate,
-    required LanguageModelV3CallOptions options,
-    required LanguageModelV3 model,
+    required LanguageModelV4CallOptions options,
+    required LanguageModelV4 model,
   }) => doGenerate(options);
 
   @override
-  Future<LanguageModelV3StreamResult> wrapStream({
-    required Future<LanguageModelV3StreamResult> Function(
-      LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> wrapStream({
+    required Future<LanguageModelV4StreamResult> Function(
+      LanguageModelV4CallOptions options,
     )
     doStream,
-    required LanguageModelV3CallOptions options,
-    required LanguageModelV3 model,
+    required LanguageModelV4CallOptions options,
+    required LanguageModelV4 model,
   }) => doStream(options);
 }
 
@@ -180,32 +183,32 @@ class _ExtractReasoningMiddleware extends LanguageModelMiddlewareBase {
   final String tagName;
 
   @override
-  Future<LanguageModelV3GenerateResult> wrapGenerate({
-    required Future<LanguageModelV3GenerateResult> Function(
-      LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> wrapGenerate({
+    required Future<LanguageModelV4GenerateResult> Function(
+      LanguageModelV4CallOptions options,
     )
     doGenerate,
-    required LanguageModelV3CallOptions options,
-    required LanguageModelV3 model,
+    required LanguageModelV4CallOptions options,
+    required LanguageModelV4 model,
   }) async {
     final result = await doGenerate(options);
-    final newContent = <LanguageModelV3ContentPart>[];
+    final newContent = <LanguageModelV4ContentPart>[];
     for (final part in result.content) {
-      if (part is LanguageModelV3TextPart) {
+      if (part is LanguageModelV4TextPart) {
         final extracted = _extractReasoning(part.text, tagName);
         if (extracted.reasoning != null) {
           newContent.add(
-            LanguageModelV3ReasoningPart(text: extracted.reasoning!),
+            LanguageModelV4ReasoningPart(text: extracted.reasoning!),
           );
         }
         if (extracted.text.isNotEmpty) {
-          newContent.add(LanguageModelV3TextPart(text: extracted.text));
+          newContent.add(LanguageModelV4TextPart(text: extracted.text));
         }
       } else {
         newContent.add(part);
       }
     }
-    return LanguageModelV3GenerateResult(
+    return LanguageModelV4GenerateResult(
       content: newContent,
       finishReason: result.finishReason,
       rawFinishReason: result.rawFinishReason,
@@ -217,24 +220,25 @@ class _ExtractReasoningMiddleware extends LanguageModelMiddlewareBase {
   }
 
   @override
-  Future<LanguageModelV3StreamResult> wrapStream({
-    required Future<LanguageModelV3StreamResult> Function(
-      LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> wrapStream({
+    required Future<LanguageModelV4StreamResult> Function(
+      LanguageModelV4CallOptions options,
     )
     doStream,
-    required LanguageModelV3CallOptions options,
-    required LanguageModelV3 model,
+    required LanguageModelV4CallOptions options,
+    required LanguageModelV4 model,
   }) async {
     final result = await doStream(options);
     final transformedStream = _transformStream(result.stream);
-    return LanguageModelV3StreamResult(stream: transformedStream);
+    return LanguageModelV4StreamResult(stream: transformedStream);
   }
 
-  Stream<LanguageModelV3StreamPart> _transformStream(
-    Stream<LanguageModelV3StreamPart> source,
+  Stream<LanguageModelV4StreamPart> _transformStream(
+    Stream<LanguageModelV4StreamPart> source,
   ) async* {
     final openTag = '<$tagName>';
     final closeTag = '</$tagName>';
+    const reasoningId = 'mw-reasoning';
     final buffer = StringBuffer();
     var inReasoning = false;
 
@@ -253,6 +257,7 @@ class _ExtractReasoningMiddleware extends LanguageModelMiddlewareBase {
             buffer.clear();
             buffer.write(accumulated.substring(start + openTag.length));
             inReasoning = true;
+            yield const StreamPartReasoningStart(id: reasoningId);
           } else {
             // No tag found yet — safe to emit everything except the last
             // openTag.length-1 chars which might be a partial tag.
@@ -269,16 +274,20 @@ class _ExtractReasoningMiddleware extends LanguageModelMiddlewareBase {
           if (end >= 0) {
             final reasoningChunk = accumulated.substring(0, end);
             if (reasoningChunk.isNotEmpty) {
-              yield StreamPartReasoningDelta(delta: reasoningChunk);
+              yield StreamPartReasoningDelta(
+                id: reasoningId,
+                delta: reasoningChunk,
+              );
             }
             buffer.clear();
             buffer.write(accumulated.substring(end + closeTag.length));
             inReasoning = false;
+            yield const StreamPartReasoningEnd(id: reasoningId);
           } else {
             final safeEnd = accumulated.length - (closeTag.length - 1);
             if (safeEnd > 0) {
               final safe = accumulated.substring(0, safeEnd);
-              yield StreamPartReasoningDelta(delta: safe);
+              yield StreamPartReasoningDelta(id: reasoningId, delta: safe);
               buffer.clear();
               buffer.write(accumulated.substring(safeEnd));
             }
@@ -290,7 +299,7 @@ class _ExtractReasoningMiddleware extends LanguageModelMiddlewareBase {
         if (remaining.isNotEmpty) {
           buffer.clear();
           if (inReasoning) {
-            yield StreamPartReasoningDelta(delta: remaining);
+            yield StreamPartReasoningDelta(id: reasoningId, delta: remaining);
           } else {
             // Use a placeholder id since we may not have one here.
             yield StreamPartTextDelta(id: 'mw-text', delta: remaining);
@@ -303,7 +312,8 @@ class _ExtractReasoningMiddleware extends LanguageModelMiddlewareBase {
     final remaining = buffer.toString();
     if (remaining.isNotEmpty) {
       if (inReasoning) {
-        yield StreamPartReasoningDelta(delta: remaining);
+        yield StreamPartReasoningDelta(id: reasoningId, delta: remaining);
+        yield const StreamPartReasoningEnd(id: reasoningId);
       } else {
         yield StreamPartTextDelta(id: 'mw-text', delta: remaining);
       }
@@ -337,19 +347,19 @@ LanguageModelMiddleware extractJsonMiddleware() => _ExtractJsonMiddleware();
 
 class _ExtractJsonMiddleware extends LanguageModelMiddlewareBase {
   @override
-  Future<LanguageModelV3GenerateResult> wrapGenerate({
-    required Future<LanguageModelV3GenerateResult> Function(
-      LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> wrapGenerate({
+    required Future<LanguageModelV4GenerateResult> Function(
+      LanguageModelV4CallOptions options,
     )
     doGenerate,
-    required LanguageModelV3CallOptions options,
-    required LanguageModelV3 model,
+    required LanguageModelV4CallOptions options,
+    required LanguageModelV4 model,
   }) async {
     final result = await doGenerate(options);
-    return LanguageModelV3GenerateResult(
+    return LanguageModelV4GenerateResult(
       content: result.content.map((part) {
-        if (part is LanguageModelV3TextPart) {
-          return LanguageModelV3TextPart(text: _stripCodeFences(part.text));
+        if (part is LanguageModelV4TextPart) {
+          return LanguageModelV4TextPart(text: _stripCodeFences(part.text));
         }
         return part;
       }).toList(),
@@ -383,56 +393,63 @@ LanguageModelMiddleware simulateStreamingMiddleware() =>
 
 class _SimulateStreamingMiddleware extends LanguageModelMiddlewareBase {
   @override
-  Future<LanguageModelV3StreamResult> wrapStream({
-    required Future<LanguageModelV3StreamResult> Function(
-      LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> wrapStream({
+    required Future<LanguageModelV4StreamResult> Function(
+      LanguageModelV4CallOptions options,
     )
     doStream,
-    required LanguageModelV3CallOptions options,
-    required LanguageModelV3 model,
+    required LanguageModelV4CallOptions options,
+    required LanguageModelV4 model,
   }) async {
     final generateResult = await model.doGenerate(options);
-    final controller = StreamController<LanguageModelV3StreamPart>();
+    final controller = StreamController<LanguageModelV4StreamPart>();
 
     controller.onListen = () {
       unawaited(() async {
         try {
+          controller.add(
+            StreamPartStreamStart(
+              warnings: List.unmodifiable(generateResult.warnings),
+            ),
+          );
           for (final part in generateResult.content) {
-            if (part is LanguageModelV3TextPart) {
+            if (part is LanguageModelV4TextPart) {
               controller.add(StreamPartTextStart(id: 'sim-text'));
               controller.add(
                 StreamPartTextDelta(id: 'sim-text', delta: part.text),
               );
               controller.add(StreamPartTextEnd(id: 'sim-text'));
-            } else if (part is LanguageModelV3ReasoningPart) {
-              controller.add(StreamPartReasoningDelta(delta: part.text));
-            } else if (part is LanguageModelV3ToolCallPart) {
+            } else if (part is LanguageModelV4ReasoningPart) {
+              controller.add(
+                const StreamPartReasoningStart(id: 'sim-reasoning'),
+              );
+              controller.add(
+                StreamPartReasoningDelta(id: 'sim-reasoning', delta: part.text),
+              );
+              controller.add(const StreamPartReasoningEnd(id: 'sim-reasoning'));
+            } else if (part is LanguageModelV4ToolCallPart) {
               final argsJson = part.input.toString();
               controller.add(
-                StreamPartToolCallStart(
-                  toolCallId: part.toolCallId,
+                StreamPartToolInputStart(
+                  id: part.toolCallId,
                   toolName: part.toolName,
                 ),
               );
               controller.add(
-                StreamPartToolCallDelta(
-                  toolCallId: part.toolCallId,
-                  toolName: part.toolName,
-                  argsTextDelta: argsJson,
-                ),
+                StreamPartToolInputDelta(id: part.toolCallId, delta: argsJson),
               );
-              controller.add(
-                StreamPartToolCallEnd(
-                  toolCallId: part.toolCallId,
-                  toolName: part.toolName,
-                  input: part.input,
-                ),
-              );
-            } else if (part is LanguageModelV3SourcePart) {
+              controller.add(StreamPartToolInputEnd(id: part.toolCallId));
+              controller.add(StreamPartToolCall(toolCall: part));
+            } else if (part is LanguageModelV4SourcePart) {
               controller.add(StreamPartSource(source: part));
-            } else if (part is LanguageModelV3FilePart) {
+            } else if (part is LanguageModelV4FilePart) {
               controller.add(StreamPartFile(file: part));
             }
+          }
+          if (generateResult.response != null) {
+            controller.add(
+              StreamPartResponseMetadata(metadata: generateResult.response!),
+            );
           }
           controller.add(
             StreamPartFinish(
@@ -454,7 +471,7 @@ class _SimulateStreamingMiddleware extends LanguageModelMiddlewareBase {
       }());
     };
 
-    return LanguageModelV3StreamResult(stream: controller.stream);
+    return LanguageModelV4StreamResult(stream: controller.stream);
   }
 }
 
@@ -493,8 +510,8 @@ class _DefaultSettingsMiddleware extends LanguageModelMiddlewareBase {
   final int? seed;
   final ProviderOptions? providerOptions;
 
-  LanguageModelV3CallOptions _applyDefaults(LanguageModelV3CallOptions opts) {
-    return LanguageModelV3CallOptions(
+  LanguageModelV4CallOptions _applyDefaults(LanguageModelV4CallOptions opts) {
+    return LanguageModelV4CallOptions(
       prompt: opts.prompt,
       tools: opts.tools,
       toolChoice: opts.toolChoice,
@@ -507,27 +524,31 @@ class _DefaultSettingsMiddleware extends LanguageModelMiddlewareBase {
       seed: opts.seed ?? seed,
       headers: opts.headers,
       providerOptions: opts.providerOptions ?? providerOptions,
+      responseFormat: opts.responseFormat,
+      includeRawChunks: opts.includeRawChunks,
+      abortSignal: opts.abortSignal,
+      reasoning: opts.reasoning,
     );
   }
 
   @override
-  Future<LanguageModelV3GenerateResult> wrapGenerate({
-    required Future<LanguageModelV3GenerateResult> Function(
-      LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> wrapGenerate({
+    required Future<LanguageModelV4GenerateResult> Function(
+      LanguageModelV4CallOptions options,
     )
     doGenerate,
-    required LanguageModelV3CallOptions options,
-    required LanguageModelV3 model,
+    required LanguageModelV4CallOptions options,
+    required LanguageModelV4 model,
   }) => doGenerate(_applyDefaults(options));
 
   @override
-  Future<LanguageModelV3StreamResult> wrapStream({
-    required Future<LanguageModelV3StreamResult> Function(
-      LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> wrapStream({
+    required Future<LanguageModelV4StreamResult> Function(
+      LanguageModelV4CallOptions options,
     )
     doStream,
-    required LanguageModelV3CallOptions options,
-    required LanguageModelV3 model,
+    required LanguageModelV4CallOptions options,
+    required LanguageModelV4 model,
   }) => doStream(_applyDefaults(options));
 }
 
@@ -539,22 +560,24 @@ LanguageModelMiddleware addToolInputExamplesMiddleware() =>
     _AddToolInputExamplesMiddleware();
 
 class _AddToolInputExamplesMiddleware extends LanguageModelMiddlewareBase {
-  LanguageModelV3CallOptions _enrich(LanguageModelV3CallOptions opts) {
+  LanguageModelV4CallOptions _enrich(LanguageModelV4CallOptions opts) {
     final enriched = opts.tools.map((tool) {
+      if (tool is! LanguageModelV4FunctionTool) return tool;
       final examples = tool.inputExamples;
       if (examples == null || examples.isEmpty) return tool;
       final examplesText = examples.map((e) => jsonEncode(e)).join('\n');
       final baseDescription = tool.description ?? tool.name;
-      return LanguageModelV3FunctionTool(
+      return LanguageModelV4FunctionTool(
         name: tool.name,
         inputSchema: tool.inputSchema,
         description: '$baseDescription\n\nExamples:\n$examplesText',
         strict: tool.strict,
         inputExamples: tool.inputExamples,
+        providerOptions: tool.providerOptions,
       );
     }).toList();
 
-    return LanguageModelV3CallOptions(
+    return LanguageModelV4CallOptions(
       prompt: opts.prompt,
       tools: enriched,
       toolChoice: opts.toolChoice,
@@ -568,26 +591,30 @@ class _AddToolInputExamplesMiddleware extends LanguageModelMiddlewareBase {
       seed: opts.seed,
       headers: opts.headers,
       providerOptions: opts.providerOptions,
+      responseFormat: opts.responseFormat,
+      includeRawChunks: opts.includeRawChunks,
+      abortSignal: opts.abortSignal,
+      reasoning: opts.reasoning,
     );
   }
 
   @override
-  Future<LanguageModelV3GenerateResult> wrapGenerate({
-    required Future<LanguageModelV3GenerateResult> Function(
-      LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> wrapGenerate({
+    required Future<LanguageModelV4GenerateResult> Function(
+      LanguageModelV4CallOptions options,
     )
     doGenerate,
-    required LanguageModelV3CallOptions options,
-    required LanguageModelV3 model,
+    required LanguageModelV4CallOptions options,
+    required LanguageModelV4 model,
   }) => doGenerate(_enrich(options));
 
   @override
-  Future<LanguageModelV3StreamResult> wrapStream({
-    required Future<LanguageModelV3StreamResult> Function(
-      LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> wrapStream({
+    required Future<LanguageModelV4StreamResult> Function(
+      LanguageModelV4CallOptions options,
     )
     doStream,
-    required LanguageModelV3CallOptions options,
-    required LanguageModelV3 model,
+    required LanguageModelV4CallOptions options,
+    required LanguageModelV4 model,
   }) => doStream(_enrich(options));
 }

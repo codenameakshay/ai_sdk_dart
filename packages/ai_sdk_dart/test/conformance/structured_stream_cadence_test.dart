@@ -19,7 +19,7 @@ void main() {
       for (final char in text.split(''))
         StreamPartTextDelta(id: 't1', delta: char),
       const StreamPartTextEnd(id: 't1'),
-      StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+      StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
     ]);
   }
 
@@ -28,7 +28,7 @@ void main() {
       const StreamPartTextStart(id: 't1'),
       for (final delta in deltas) StreamPartTextDelta(id: 't1', delta: delta),
       const StreamPartTextEnd(id: 't1'),
-      StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+      StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
     ]);
   }
 

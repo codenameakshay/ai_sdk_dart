@@ -9,7 +9,7 @@ format, capabilities, and auth.
 
 ## Decision
 
-`ai_sdk_provider` defines the model-interface contracts (`LanguageModelV3`, `EmbeddingModelV2`,
+`ai_sdk_provider` defines the model-interface contracts (`LanguageModelV4`, `EmbeddingModelV2`,
 `ImageModelV3`, `SpeechModelV1`, `TranscriptionModelV1`, `RerankModelV1`) plus the content/part/
 stream types. This is **the seam**. The core engine (`ai_sdk_dart`) depends only on the seam,
 never on a concrete provider. Each provider package implements the seam and depends only on it
@@ -18,6 +18,6 @@ plus an HTTP client.
 ## Consequences
 
 - Adding a provider never touches the core. Mocking the seam tests the core without HTTP.
-- The seam's interface versions (`V3`/`V2`/`V1`) are the unit of breaking change; bumping them
-  (e.g. a future v7 migration) ripples through every provider at once. Accepted cost.
+- The seam's interface versions (`V4`/`V3`/`V2`/`V1`) are the unit of breaking change; bumping
+  them ripples through every provider at once. Accepted cost.
 - Providers are independently versioned/published on pub.dev.

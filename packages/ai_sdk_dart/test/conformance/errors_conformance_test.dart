@@ -142,7 +142,7 @@ void main() {
         final err = AiNoObjectGeneratedError(
           message: 'fail',
           text: 'bad',
-          response: const LanguageModelV3ResponseMetadata(id: 'resp-123'),
+          response: const LanguageModelV4ResponseMetadata(id: 'resp-123'),
           usage: null,
         );
         expect(err.response?.id, 'resp-123');
@@ -163,9 +163,12 @@ void main() {
           message: 'fail',
           text: 'bad',
           response: null,
-          usage: const LanguageModelV3Usage(inputTokens: 5, outputTokens: 3),
+          usage: const LanguageModelV4Usage(
+            inputTokens: LanguageModelV4InputTokenUsage(total: 5),
+            outputTokens: LanguageModelV4OutputTokenUsage(total: 3),
+          ),
         );
-        expect(err.usage?.inputTokens, 5);
+        expect(err.usage?.inputTokens.total, 5);
       });
 
       test('exposes cause field (can be null)', () {
@@ -406,21 +409,14 @@ void main() {
       test('isInstance returns true', () {
         expect(
           AiRetryError.isInstance(
-            AiRetryError(
-              message: 'fail',
-              attempts: 1,
-              lastError: Exception(),
-            ),
+            AiRetryError(message: 'fail', attempts: 1, lastError: Exception()),
           ),
           isTrue,
         );
       });
 
       test('isInstance returns false for other errors', () {
-        expect(
-          AiRetryError.isInstance(const AiApiCallError('x')),
-          isFalse,
-        );
+        expect(AiRetryError.isInstance(const AiApiCallError('x')), isFalse);
       });
     });
 
@@ -428,7 +424,10 @@ void main() {
 
     group('AiDownloadError', () {
       test('is an AiSdkError', () {
-        final err = AiDownloadError(message: 'download failed', url: 'https://example.com/audio.mp3');
+        final err = AiDownloadError(
+          message: 'download failed',
+          url: 'https://example.com/audio.mp3',
+        );
         expect(err, isA<AiSdkError>());
       });
 
@@ -467,10 +466,7 @@ void main() {
       });
 
       test('isInstance returns false for other errors', () {
-        expect(
-          AiDownloadError.isInstance(const AiApiCallError('x')),
-          isFalse,
-        );
+        expect(AiDownloadError.isInstance(const AiApiCallError('x')), isFalse);
       });
     });
 
@@ -516,7 +512,7 @@ void main() {
 }
 
 /// A fake model that calls an unknown tool to trigger AiNoSuchToolError.
-class _FakeUnknownToolModel implements LanguageModelV3 {
+class _FakeUnknownToolModel extends LanguageModelV4 {
   @override
   String get provider => 'fake';
 
@@ -524,27 +520,27 @@ class _FakeUnknownToolModel implements LanguageModelV3 {
   String get modelId => 'fake-unknown-tool';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
-    return const LanguageModelV3GenerateResult(
+    return const LanguageModelV4GenerateResult(
       content: [
-        LanguageModelV3ToolCallPart(
+        LanguageModelV4ToolCallPart(
           toolCallId: 'c1',
           toolName: 'nonexistent_tool',
           input: {},
         ),
       ],
-      finishReason: LanguageModelV3FinishReason.toolCalls,
+      finishReason: LanguageModelV4FinishReason.toolCalls,
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }

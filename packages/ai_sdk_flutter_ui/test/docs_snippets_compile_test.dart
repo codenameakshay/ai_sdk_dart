@@ -169,12 +169,12 @@ class _ObjectSnippetPageState extends State<_ObjectSnippetPage> {
 void main() {
   testWidgets('flutter_ui README and example snippets build', (tester) async {
     final agent = ToolLoopAgent(
-      model: MockLanguageModelV3(response: [mockText('reply')]),
+      model: MockLanguageModelV4(response: [mockText('reply')]),
     );
     final chat = ChatController();
     final completion = CompletionController(agent: agent);
     final objectController = ObjectStreamController<Map<String, dynamic>>(
-      model: MockLanguageModelV3(response: [mockText('{"country":"Japan"}')]),
+      model: MockLanguageModelV4(response: [mockText('{"country":"Japan"}')]),
       schema: Schema<Map<String, dynamic>>(
         jsonSchema: const {
           'type': 'object',

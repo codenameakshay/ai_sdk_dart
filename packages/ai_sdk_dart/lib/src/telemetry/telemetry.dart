@@ -7,7 +7,7 @@
 /// final result = await generateText(
 ///   model: model,
 ///   prompt: 'Hello',
-///   experimentalTelemetry: TelemetrySettings(
+///   telemetry: TelemetrySettings(
 ///     isEnabled: true,
 ///     functionId: 'my-chat-function',
 ///     metadata: {'userId': 'user-123', 'sessionId': 'sess-456'},
@@ -15,6 +15,7 @@
 ///   ),
 /// );
 /// ```
+library;
 
 /// An attribute value acceptable in telemetry metadata.
 ///
@@ -53,7 +54,7 @@ abstract interface class TelemetryRecorder {
 
 /// Settings that enable telemetry recording for a generation call.
 ///
-/// Pass to `experimentalTelemetry` on [generateText] or [streamText].
+/// Pass to `telemetry` on [generateText] or [streamText].
 ///
 /// All fields are optional except [isEnabled] (defaults to `false`).
 ///
@@ -117,8 +118,7 @@ class _NoOpRecorder implements TelemetryRecorder {
   TelemetrySpan startSpan(
     String name, {
     Map<String, TelemetryAttributeValue> attributes = const {},
-  }) =>
-      const _NoOpSpan();
+  }) => const _NoOpSpan();
 }
 
 // ---------------------------------------------------------------------------

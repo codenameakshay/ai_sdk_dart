@@ -11,9 +11,9 @@ import '../helpers.dart';
 
 Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
 
-const _approvalRequest = LanguageModelV3ToolApprovalRequestPart(
+const _approvalRequest = LanguageModelV4ToolApprovalRequestPart(
   approvalId: 'approval_c1',
-  toolCall: LanguageModelV3ToolCallPart(
+  toolCall: LanguageModelV4ToolCallPart(
     toolCallId: 'c1',
     toolName: 'deleteFile',
     input: {'path': '/tmp/secret'},
@@ -111,8 +111,8 @@ class _ApprovalProbeController extends ChatController {
   final List<ModelMessage> _probeMessages;
 
   ChatStatus _probeStatus = ChatStatus.ready;
-  List<LanguageModelV3ToolApprovalRequestPart> _pendingRequests =
-      const <LanguageModelV3ToolApprovalRequestPart>[];
+  List<LanguageModelV4ToolApprovalRequestPart> _pendingRequests =
+      const <LanguageModelV4ToolApprovalRequestPart>[];
   String? lastApprovalId;
   bool? lastApproved;
   String? lastReason;
@@ -130,15 +130,15 @@ class _ApprovalProbeController extends ChatController {
   ChatStatus get status => _probeStatus;
 
   @override
-  List<LanguageModelV3ToolApprovalRequestPart> get pendingApprovalRequests =>
+  List<LanguageModelV4ToolApprovalRequestPart> get pendingApprovalRequests =>
       List.unmodifiable(_pendingRequests);
 
   void showApproval([
-    List<LanguageModelV3ToolApprovalRequestPart> requests = const [
+    List<LanguageModelV4ToolApprovalRequestPart> requests = const [
       _approvalRequest,
     ],
   ]) {
-    _pendingRequests = List<LanguageModelV3ToolApprovalRequestPart>.from(
+    _pendingRequests = List<LanguageModelV4ToolApprovalRequestPart>.from(
       requests,
     );
     _probeStatus = ChatStatus.awaitingApproval;
@@ -169,6 +169,55 @@ class _ApprovalProbeController extends ChatController {
   }
 }
 
+class _MetadataProbeController extends ChatController {
+  _MetadataProbeController({
+    required List<ModelMessage> messages,
+    required this.probeToolCalls,
+    required this.probeSources,
+    this.probeToolResults = const <LanguageModelV4ToolResultPart>[],
+  }) : _statusNotifier = ChangeNotifier(),
+       _contentNotifier = ChangeNotifier(),
+       _probeMessages = List<ModelMessage>.from(messages);
+
+  final ChangeNotifier _statusNotifier;
+  final ChangeNotifier _contentNotifier;
+  final List<ModelMessage> _probeMessages;
+  final List<LanguageModelV4ToolCallPart> probeToolCalls;
+  final List<LanguageModelV4SourcePart> probeSources;
+  final List<LanguageModelV4ToolResultPart> probeToolResults;
+
+  @override
+  Listenable get statusListenable => _statusNotifier;
+
+  @override
+  Listenable get contentListenable => _contentNotifier;
+
+  @override
+  List<ModelMessage> get messages => List.unmodifiable(_probeMessages);
+
+  @override
+  ChatStatus get status => ChatStatus.ready;
+
+  @override
+  List<LanguageModelV4ToolCallPart> get lastToolCalls =>
+      List.unmodifiable(probeToolCalls);
+
+  @override
+  List<LanguageModelV4SourcePart> get lastSources =>
+      List.unmodifiable(probeSources);
+
+  @override
+  List<LanguageModelV4ToolResultPart> get lastToolResults =>
+      List.unmodifiable(probeToolResults);
+
+  @override
+  void dispose() {
+    _statusNotifier.dispose();
+    _contentNotifier.dispose();
+    super.dispose();
+  }
+}
+
 void main() {
   group('AiChatScaffold', () {
     testWidgets('composes a message list and a composer', (tester) async {
@@ -179,7 +228,7 @@ void main() {
       );
       addTearDown(controller.dispose);
       final agent = ToolLoopAgent(
-        model: MockLanguageModelV3(response: [mockText('reply')]),
+        model: MockLanguageModelV4(response: [mockText('reply')]),
       );
 
       await tester.pumpWidget(
@@ -197,7 +246,7 @@ void main() {
       final controller = _ComposerProbeController();
       addTearDown(controller.dispose);
       final agent = ToolLoopAgent(
-        model: MockLanguageModelV3(doStreamError: StateError('ignored')),
+        model: MockLanguageModelV4(doStreamError: StateError('ignored')),
       );
 
       await tester.pumpWidget(
@@ -222,7 +271,7 @@ void main() {
     ) async {
       final controller = ChatController();
       addTearDown(controller.dispose);
-      final agent = ToolLoopAgent(model: MockLanguageModelV3());
+      final agent = ToolLoopAgent(model: MockLanguageModelV4());
 
       await tester.pumpWidget(
         _wrap(
@@ -333,27 +382,50 @@ void main() {
     );
 
     testWidgets(
+      'deny on an approval card routes through addToolApprovalResponse',
+      (tester) async {
+        final controller = _ApprovalProbeController();
+        addTearDown(controller.dispose);
+        final agent = textAgent('unused');
+
+        await tester.pumpWidget(
+          _wrap(AiChatScaffold(controller: controller, agent: agent)),
+        );
+
+        controller.showApproval();
+        await tester.pump();
+
+        await tester.tap(find.byKey(const ValueKey('tool-approval-deny')));
+        await tester.pump();
+
+        expect(controller.lastApprovalId, 'approval_c1');
+        expect(controller.lastApproved, isFalse);
+        expect(controller.status, ChatStatus.ready);
+      },
+    );
+
+    testWidgets(
       'shows tool result and source metadata after an approval-resumed turn',
       (tester) async {
         final controller = ChatController();
         addTearDown(controller.dispose);
         final agent = RecordingStreamAgent();
-        const source = LanguageModelV3SourcePart(
+        const source = LanguageModelV4SourcePart(
           id: 'source-1',
           url: 'https://example.com/weather',
           title: 'Weather source',
         );
-        const call = LanguageModelV3ToolCallPart(
+        const call = LanguageModelV4ToolCallPart(
           toolCallId: 'c1',
           toolName: 'deleteFile',
           input: {'path': '/x'},
         );
-        const result = LanguageModelV3ToolResultPart(
+        const result = LanguageModelV4ToolResultPart(
           toolCallId: 'c1',
           toolName: 'deleteFile',
           output: ToolResultOutputText('done'),
         );
-        const request = LanguageModelV3ToolApprovalRequestPart(
+        const request = LanguageModelV4ToolApprovalRequestPart(
           approvalId: 'approval_c1',
           toolCall: call,
         );
@@ -373,12 +445,12 @@ void main() {
               toolCalls: [call],
               toolResults: [result],
               toolApprovalRequests: [request],
-              response: LanguageModelV3GenerateResult(
+              response: LanguageModelV4GenerateResult(
                 content: [call, source],
-                finishReason: LanguageModelV3FinishReason.toolCalls,
+                finishReason: LanguageModelV4FinishReason.toolCalls,
               ),
               text: '',
-              finishReason: LanguageModelV3FinishReason.toolCalls,
+              finishReason: LanguageModelV4FinishReason.toolCalls,
             ),
           ],
           sources: const [source],
@@ -412,17 +484,17 @@ void main() {
         final controller = ChatController();
         addTearDown(controller.dispose);
         final agent = RecordingStreamAgent();
-        const source = LanguageModelV3SourcePart(
+        const source = LanguageModelV4SourcePart(
           id: 'source-1',
           url: 'https://example.com/weather',
           title: 'Weather source',
         );
-        const call = LanguageModelV3ToolCallPart(
+        const call = LanguageModelV4ToolCallPart(
           toolCallId: 'tool-1',
           toolName: 'lookupWeather',
           input: {'city': 'Paris'},
         );
-        const result = LanguageModelV3ToolResultPart(
+        const result = LanguageModelV4ToolResultPart(
           toolCallId: 'tool-1',
           toolName: 'lookupWeather',
           output: ToolResultOutputText('sunny'),
@@ -464,6 +536,47 @@ void main() {
         expect(find.text('lookupWeather'), findsNothing);
         expect(find.text('sunny'), findsNothing);
         expect(find.text('Weather source'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'does not duplicate metadata that is already inline on the assistant message',
+      (tester) async {
+        const inlineSource = LanguageModelV4SourcePart(
+          id: 'source-inline',
+          url: 'https://example.com/inline',
+          title: 'Inline source',
+        );
+        const inlineCall = LanguageModelV4ToolCallPart(
+          toolCallId: 'inline-call',
+          toolName: 'inlineTool',
+          input: {'ok': true},
+        );
+        const inlineResult = LanguageModelV4ToolResultPart(
+          toolCallId: 'inline-call',
+          toolName: 'inlineTool',
+          output: ToolResultOutputText('inline result'),
+        );
+        final controller = _MetadataProbeController(
+          messages: const [
+            ModelMessage.parts(
+              role: ModelMessageRole.assistant,
+              parts: [inlineCall, inlineSource],
+            ),
+          ],
+          probeToolCalls: const [inlineCall],
+          probeSources: const [inlineSource],
+          probeToolResults: const [inlineResult],
+        );
+        addTearDown(controller.dispose);
+        final agent = textAgent('unused');
+
+        await tester.pumpWidget(
+          _wrap(AiChatScaffold(controller: controller, agent: agent)),
+        );
+
+        expect(find.text('Inline source'), findsOneWidget);
+        expect(find.text('inlineTool'), findsOneWidget);
       },
     );
 
@@ -557,7 +670,7 @@ void main() {
         );
         addTearDown(firstController.dispose);
         addTearDown(secondController.dispose);
-        final agent = ToolLoopAgent(model: MockLanguageModelV3());
+        final agent = ToolLoopAgent(model: MockLanguageModelV4());
 
         await tester.pumpWidget(
           _wrap(AiChatScaffold(controller: firstController, agent: agent)),

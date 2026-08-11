@@ -157,10 +157,9 @@ void main() {
     });
 
     test('captures the last usage after completing', () async {
-      const usage = LanguageModelV3Usage(
-        inputTokens: 3,
-        outputTokens: 5,
-        totalTokens: 8,
+      const usage = LanguageModelV4Usage(
+        inputTokens: LanguageModelV4InputTokenUsage(total: 3),
+        outputTokens: LanguageModelV4OutputTokenUsage(total: 5),
       );
       final controller = CompletionController(
         agent: textAgentWithUsage('done', usage),
@@ -169,9 +168,66 @@ void main() {
       await controller.complete('go');
       await pumpUntil(() => !controller.isStreaming && !controller.isLoading);
 
-      expect(controller.lastUsage?.totalTokens, 8);
+      expect(controller.lastUsage?.inputTokens.total, 3);
+      expect(controller.lastUsage?.outputTokens.total, 5);
       controller.dispose();
     });
+
+    test('still finishes when usage futures fail', () async {
+      final agent = RecordingStreamAgent();
+      final controller = CompletionController(agent: agent);
+
+      unawaited(controller.complete('go'));
+      await pumpUntil(() => agent.invocations.length == 1);
+      await pumpUntil(() => controller.isStreaming);
+      final invocation = agent.invocations.single;
+
+      invocation.emitText('done');
+      invocation.failUsage(StateError('usage failed'));
+      await invocation.finish(finalText: 'done');
+      await pumpUntil(() => !controller.isLoading && !controller.isStreaming);
+
+      expect(controller.completion, 'done');
+      expect(controller.error, isNull);
+      expect(controller.lastUsage, isNull);
+      controller.dispose();
+    });
+
+    test(
+      'forwards full-stream subscription errors to controller error state',
+      () async {
+        final agent = RecordingStreamAgent();
+        final controller = CompletionController(agent: agent);
+
+        unawaited(controller.complete('go'));
+        await pumpUntil(() => agent.invocations.length == 1);
+        await pumpUntil(() => controller.isStreaming);
+        final invocation = agent.invocations.single;
+
+        invocation.emitFullStreamFailure(StateError('full stream failed'));
+        await pumpUntil(() => controller.error != null);
+
+        expect(controller.error, isA<StateError>());
+        expect(controller.isLoading, isFalse);
+        expect(controller.isStreaming, isFalse);
+        controller.dispose();
+      },
+    );
+
+    test(
+      'forwards addListener/removeListener/hasListeners to the root listenable',
+      () {
+        final controller = CompletionController(agent: textAgent('x'));
+        void listener() {}
+
+        expect(controller.hasListeners, isFalse);
+        controller.addListener(listener);
+        expect(controller.hasListeners, isTrue);
+        controller.removeListener(listener);
+        expect(controller.hasListeners, isFalse);
+        controller.dispose();
+      },
+    );
 
     test('a second complete supersedes the active request and ignores stale '
         'events from the first request', () async {

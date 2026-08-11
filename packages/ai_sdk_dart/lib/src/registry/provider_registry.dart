@@ -24,7 +24,7 @@ class ProviderRegistry {
   final Map<String, _ProviderLike> _providers;
 
   /// Resolve a language model by `'provider:modelId'`.
-  LanguageModelV3 languageModel(String id) {
+  LanguageModelV4 languageModel(String id) {
     final (provider, modelId) = _splitId(id);
     return _resolve(provider).languageModel(modelId);
   }
@@ -77,7 +77,7 @@ class ProviderRegistry {
 }
 
 abstract interface class _ProviderLike {
-  LanguageModelV3 languageModel(String modelId);
+  LanguageModelV4 languageModel(String modelId);
   EmbeddingModelV2<String> textEmbeddingModel(String modelId);
   ImageModelV3 imageModel(String modelId);
   SpeechModelV1 speechModel(String modelId);
@@ -93,14 +93,14 @@ class _CallableProvider implements _ProviderLike {
     this.transcriptionModelFactory,
   });
 
-  final LanguageModelV3 Function(String) languageModelFactory;
+  final LanguageModelV4 Function(String) languageModelFactory;
   final EmbeddingModelV2<String> Function(String) embeddingModelFactory;
   final ImageModelV3 Function(String)? imageModelFactory;
   final SpeechModelV1 Function(String)? speechModelFactory;
   final TranscriptionModelV1 Function(String)? transcriptionModelFactory;
 
   @override
-  LanguageModelV3 languageModel(String modelId) =>
+  LanguageModelV4 languageModel(String modelId) =>
       languageModelFactory(modelId);
 
   @override
@@ -190,9 +190,10 @@ class RegistrableProvider {
     this.transcriptionModelFactory,
   });
 
-  final LanguageModelV3 Function(String modelId) languageModelFactory;
+  final LanguageModelV4 Function(String modelId) languageModelFactory;
   final EmbeddingModelV2<String> Function(String modelId) embeddingModelFactory;
   final ImageModelV3 Function(String modelId)? imageModelFactory;
   final SpeechModelV1 Function(String modelId)? speechModelFactory;
-  final TranscriptionModelV1 Function(String modelId)? transcriptionModelFactory;
+  final TranscriptionModelV1 Function(String modelId)?
+  transcriptionModelFactory;
 }

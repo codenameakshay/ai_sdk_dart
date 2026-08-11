@@ -64,7 +64,7 @@ class _ChatPageState extends State<ChatPage> {
                 itemCount: _chat.messages.length,
                 itemBuilder: (context, i) {
                   final msg = _chat.messages[i];
-                  final isUser = msg.role == LanguageModelV3Role.user;
+                  final isUser = msg.role == ModelMessageRole.user;
                   return Align(
                     alignment: isUser
                         ? Alignment.centerRight
@@ -76,7 +76,7 @@ class _ChatPageState extends State<ChatPage> {
                         color: isUser ? Colors.blue[100] : Colors.grey[200],
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: Text(msg.content),
+                      child: Text(msg.content ?? ''),
                     ),
                   );
                 },

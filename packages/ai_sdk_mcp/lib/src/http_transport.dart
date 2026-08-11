@@ -94,17 +94,17 @@ class StreamableHttpClientTransport implements MCPTransport {
     return {
       'Accept': 'text/event-stream',
       ..._baseHeaders(),
-      if (_protocolVersion != null) 'MCP-Protocol-Version': _protocolVersion!,
-      if (_sessionId != null) 'Mcp-Session-Id': _sessionId!,
-      if (_lastEventId != null) 'Last-Event-ID': _lastEventId!,
+      'MCP-Protocol-Version': ?_protocolVersion,
+      'Mcp-Session-Id': ?_sessionId,
+      'Last-Event-ID': ?_lastEventId,
     };
   }
 
   Map<String, String> _deleteHeaders() {
     return {
       ..._baseHeaders(),
-      if (_protocolVersion != null) 'MCP-Protocol-Version': _protocolVersion!,
-      if (_sessionId != null) 'Mcp-Session-Id': _sessionId!,
+      'MCP-Protocol-Version': ?_protocolVersion,
+      'Mcp-Session-Id': ?_sessionId,
     };
   }
 
@@ -256,7 +256,7 @@ class StreamableHttpClientTransport implements MCPTransport {
     JsonRpcRequest request,
   ) async {
     final completer = Completer<JsonRpcResponse>();
-    unawaited(completer.future.then<void>((_) {}, onError: (_, __) {}));
+    unawaited(completer.future.then<void>((_) {}, onError: (_, _) {}));
 
     late final StreamSubscription<_SseEvent> subscription;
     subscription = _parseSse(response.stream).listen(
@@ -474,7 +474,7 @@ class StreamableHttpClientTransport implements MCPTransport {
 
       _listenerSubscription = _parseSse(response.stream).listen(
         _handleListenerEvent,
-        onError: (_, __) {
+        onError: (_, _) {
           _listenerSubscription = null;
           _scheduleListenerReconnect();
         },

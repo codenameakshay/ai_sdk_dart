@@ -6,7 +6,7 @@ import 'helpers/fake_models.dart';
 import 'helpers/matchers.dart';
 
 /// A language model that delays before returning text — used to test timeouts.
-class _SlowTextModel implements LanguageModelV3 {
+class _SlowTextModel extends LanguageModelV4 {
   _SlowTextModel(this.text, this.delay);
 
   final String text;
@@ -19,30 +19,30 @@ class _SlowTextModel implements LanguageModelV3 {
   String get modelId => 'slow-model';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     await Future<void>.delayed(delay);
-    return LanguageModelV3GenerateResult(
-      content: [LanguageModelV3TextPart(text: text)],
-      finishReason: LanguageModelV3FinishReason.stop,
+    return LanguageModelV4GenerateResult(
+      content: [LanguageModelV4TextPart(text: text)],
+      finishReason: LanguageModelV4FinishReason.stop,
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     await Future<void>.delayed(delay);
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable([
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable([
         StreamPartTextStart(id: 't'),
         StreamPartTextDelta(id: 't', delta: text),
         StreamPartTextEnd(id: 't'),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
       ]),
     );
   }
@@ -98,18 +98,20 @@ void main() {
       );
     });
 
-    test('throws AiNoObjectGeneratedError when JSON is an array not object',
-        () async {
-      final model = FakeTextModel('[1, 2, 3]');
-      Object? caught;
-      try {
-        await generateObject(model: model, schema: schema, prompt: 'x');
-      } catch (e) {
-        caught = e;
-      }
-      expect(caught, isA<AiNoObjectGeneratedError>());
-      expect((caught as AiNoObjectGeneratedError).text, '[1, 2, 3]');
-    });
+    test(
+      'throws AiNoObjectGeneratedError when JSON is an array not object',
+      () async {
+        final model = FakeTextModel('[1, 2, 3]');
+        Object? caught;
+        try {
+          await generateObject(model: model, schema: schema, prompt: 'x');
+        } catch (e) {
+          caught = e;
+        }
+        expect(caught, isA<AiNoObjectGeneratedError>());
+        expect((caught as AiNoObjectGeneratedError).text, '[1, 2, 3]');
+      },
+    );
 
     test('system instruction is prepended and passed to model', () async {
       final model = FakeTextModel('{"name":"x"}');
@@ -124,8 +126,7 @@ void main() {
       expect(sentSystem, contains('Return a single JSON object'));
     });
 
-    test('converts ModelMessages (all roles) into provider messages',
-        () async {
+    test('converts ModelMessages (all roles) into provider messages', () async {
       final model = FakeTextModel('{"name":"x"}');
       await generateObject(
         model: model,
@@ -146,21 +147,23 @@ void main() {
       expect(messages[3].role.name, 'tool');
     });
 
-    test('forwards generation params (maxOutputTokens/temperature/topP)',
-        () async {
-      final model = FakeTextModel('{"name":"x"}');
-      await generateObject(
-        model: model,
-        schema: schema,
-        prompt: 'x',
-        maxOutputTokens: 128,
-        temperature: 0.3,
-        topP: 0.8,
-      );
-      expect(model.lastCallOptions?.maxOutputTokens, 128);
-      expect(model.lastCallOptions?.temperature, 0.3);
-      expect(model.lastCallOptions?.topP, 0.8);
-    });
+    test(
+      'forwards generation params (maxOutputTokens/temperature/topP)',
+      () async {
+        final model = FakeTextModel('{"name":"x"}');
+        await generateObject(
+          model: model,
+          schema: schema,
+          prompt: 'x',
+          maxOutputTokens: 128,
+          temperature: 0.3,
+          topP: 0.8,
+        );
+        expect(model.lastCallOptions?.maxOutputTokens, 128);
+        expect(model.lastCallOptions?.temperature, 0.3);
+        expect(model.lastCallOptions?.topP, 0.8);
+      },
+    );
 
     test('timeout throws when model is too slow', () async {
       final model = _SlowTextModel(

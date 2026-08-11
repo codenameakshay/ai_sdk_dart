@@ -13,31 +13,43 @@ void main() {
     group('wrapLanguageModel() identity', () {
       test('preserves provider from inner model', () {
         final inner = FakeTextModel('hi', provider: 'test-provider');
-        final wrapped = wrapLanguageModel(model: inner, middleware: <LanguageModelMiddleware>[]);
+        final wrapped = wrapLanguageModel(
+          model: inner,
+          middleware: <LanguageModelMiddleware>[],
+        );
         expect(wrapped.provider, 'test-provider');
       });
 
       test('preserves modelId from inner model', () {
         final inner = FakeTextModel('hi', modelId: 'gpt-4o');
-        final wrapped = wrapLanguageModel(model: inner, middleware: <LanguageModelMiddleware>[]);
+        final wrapped = wrapLanguageModel(
+          model: inner,
+          middleware: <LanguageModelMiddleware>[],
+        );
         expect(wrapped.modelId, 'gpt-4o');
       });
 
       test('preserves specificationVersion from inner model', () {
         final inner = FakeTextModel('hi');
-        final wrapped = wrapLanguageModel(model: inner, middleware: <LanguageModelMiddleware>[]);
-        expect(wrapped.specificationVersion, 'v3');
+        final wrapped = wrapLanguageModel(
+          model: inner,
+          middleware: <LanguageModelMiddleware>[],
+        );
+        expect(wrapped.specificationVersion, 'v4');
       });
 
       test('empty middleware list returns model with same behavior', () async {
         final inner = FakeTextModel('hello from inner');
-        final wrapped = wrapLanguageModel(model: inner, middleware: <LanguageModelMiddleware>[]);
+        final wrapped = wrapLanguageModel(
+          model: inner,
+          middleware: <LanguageModelMiddleware>[],
+        );
         final result = await wrapped.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: const LanguageModelV3Prompt(messages: []),
+          LanguageModelV4CallOptions(
+            prompt: const LanguageModelV4Prompt(messages: []),
           ),
         );
-        final text = result.content.whereType<LanguageModelV3TextPart>().first;
+        final text = result.content.whereType<LanguageModelV4TextPart>().first;
         expect(text.text, 'hello from inner');
       });
     });
@@ -45,26 +57,35 @@ void main() {
     // ── transformParams hook ──────────────────────────────────────────────
 
     group('transformParams', () {
-      test('transformParams can modify temperature before doGenerate', () async {
-        final capturingModel = FakeCapturingModel();
-        final mw = _TransformParamsMiddleware(temperature: 0.42);
-        final wrapped = wrapLanguageModel(model: capturingModel, middleware: mw);
-        await wrapped.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: const LanguageModelV3Prompt(messages: []),
-            temperature: 0.9,
-          ),
-        );
-        expect(capturingModel.capturedOptions.first.temperature, 0.42);
-      });
+      test(
+        'transformParams can modify temperature before doGenerate',
+        () async {
+          final capturingModel = FakeCapturingModel();
+          final mw = _TransformParamsMiddleware(temperature: 0.42);
+          final wrapped = wrapLanguageModel(
+            model: capturingModel,
+            middleware: mw,
+          );
+          await wrapped.doGenerate(
+            LanguageModelV4CallOptions(
+              prompt: const LanguageModelV4Prompt(messages: []),
+              temperature: 0.9,
+            ),
+          );
+          expect(capturingModel.capturedOptions.first.temperature, 0.42);
+        },
+      );
 
       test('transformParams can modify temperature before doStream', () async {
         final capturingModel = FakeCapturingModel();
         final mw = _TransformParamsMiddleware(temperature: 0.1);
-        final wrapped = wrapLanguageModel(model: capturingModel, middleware: mw);
+        final wrapped = wrapLanguageModel(
+          model: capturingModel,
+          middleware: mw,
+        );
         await wrapped.doStream(
-          LanguageModelV3CallOptions(
-            prompt: const LanguageModelV3Prompt(messages: []),
+          LanguageModelV4CallOptions(
+            prompt: const LanguageModelV4Prompt(messages: []),
             temperature: 0.9,
           ),
         );
@@ -77,8 +98,8 @@ void main() {
         final model = FakeTextModel('hi');
         final wrapped = wrapLanguageModel(model: model, middleware: mw);
         await wrapped.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: const LanguageModelV3Prompt(messages: []),
+          LanguageModelV4CallOptions(
+            prompt: const LanguageModelV4Prompt(messages: []),
           ),
         );
         expect(log, ['transformParams', 'wrapGenerate']);
@@ -87,10 +108,13 @@ void main() {
       test('default transformParams is a no-op', () async {
         final capturingModel = FakeCapturingModel();
         final mw = _NoOpMiddleware();
-        final wrapped = wrapLanguageModel(model: capturingModel, middleware: mw);
+        final wrapped = wrapLanguageModel(
+          model: capturingModel,
+          middleware: mw,
+        );
         await wrapped.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: const LanguageModelV3Prompt(messages: []),
+          LanguageModelV4CallOptions(
+            prompt: const LanguageModelV4Prompt(messages: []),
             temperature: 0.7,
           ),
         );
@@ -108,11 +132,14 @@ void main() {
         final innerMw = _TrackingMiddleware('inner', callOrder);
 
         final model = FakeTextModel('result');
-        final wrapped = wrapLanguageModel(model: model, middleware: [outerMw, innerMw]);
+        final wrapped = wrapLanguageModel(
+          model: model,
+          middleware: [outerMw, innerMw],
+        );
 
         await wrapped.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: const LanguageModelV3Prompt(messages: []),
+          LanguageModelV4CallOptions(
+            prompt: const LanguageModelV4Prompt(messages: []),
           ),
         );
 
@@ -134,16 +161,16 @@ void main() {
           );
 
           final result = await wrapped.doGenerate(
-            LanguageModelV3CallOptions(
-              prompt: const LanguageModelV3Prompt(messages: []),
+            LanguageModelV4CallOptions(
+              prompt: const LanguageModelV4Prompt(messages: []),
             ),
           );
 
           final reasoningParts = result.content
-              .whereType<LanguageModelV3ReasoningPart>()
+              .whereType<LanguageModelV4ReasoningPart>()
               .toList();
           final textParts = result.content
-              .whereType<LanguageModelV3TextPart>()
+              .whereType<LanguageModelV4TextPart>()
               .toList();
 
           expect(reasoningParts.length, 1);
@@ -161,13 +188,13 @@ void main() {
         );
 
         final result = await wrapped.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: const LanguageModelV3Prompt(messages: []),
+          LanguageModelV4CallOptions(
+            prompt: const LanguageModelV4Prompt(messages: []),
           ),
         );
 
         final reasoningParts = result.content
-            .whereType<LanguageModelV3ReasoningPart>()
+            .whereType<LanguageModelV4ReasoningPart>()
             .toList();
         expect(reasoningParts.length, 1);
         expect(reasoningParts[0].text, 'think here');
@@ -184,7 +211,7 @@ void main() {
             const StreamPartTextDelta(id: 't1', delta: '</think>'),
             const StreamPartTextDelta(id: 't1', delta: 'answer'),
             const StreamPartTextEnd(id: 't1'),
-            StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+            StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
           ]);
 
           final wrapped = wrapLanguageModel(
@@ -193,8 +220,8 @@ void main() {
           );
 
           final streamResult = await wrapped.doStream(
-            LanguageModelV3CallOptions(
-              prompt: const LanguageModelV3Prompt(messages: []),
+            LanguageModelV4CallOptions(
+              prompt: const LanguageModelV4Prompt(messages: []),
             ),
           );
 
@@ -215,16 +242,16 @@ void main() {
         );
 
         final result = await wrapped.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: const LanguageModelV3Prompt(messages: []),
+          LanguageModelV4CallOptions(
+            prompt: const LanguageModelV4Prompt(messages: []),
           ),
         );
 
         final reasoningParts = result.content
-            .whereType<LanguageModelV3ReasoningPart>()
+            .whereType<LanguageModelV4ReasoningPart>()
             .toList();
         final textParts = result.content
-            .whereType<LanguageModelV3TextPart>()
+            .whereType<LanguageModelV4TextPart>()
             .toList();
 
         expect(reasoningParts, isEmpty);
@@ -237,16 +264,19 @@ void main() {
     group('extractJsonMiddleware', () {
       test('strips ```json ... ``` code fences from generate output', () async {
         final inner = FakeTextModel('```json\n{"ok":true}\n```');
-        final wrapped = wrapLanguageModel(model: inner, middleware: extractJsonMiddleware());
+        final wrapped = wrapLanguageModel(
+          model: inner,
+          middleware: extractJsonMiddleware(),
+        );
 
         final result = await wrapped.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: const LanguageModelV3Prompt(messages: []),
+          LanguageModelV4CallOptions(
+            prompt: const LanguageModelV4Prompt(messages: []),
           ),
         );
 
         final textPart = result.content
-            .whereType<LanguageModelV3TextPart>()
+            .whereType<LanguageModelV4TextPart>()
             .first;
         expect(textPart.text.contains('```'), isFalse);
         expect(textPart.text.trim(), '{"ok":true}');
@@ -254,16 +284,19 @@ void main() {
 
       test('passes through text without code fences unchanged', () async {
         final inner = FakeTextModel('{"already":"clean"}');
-        final wrapped = wrapLanguageModel(model: inner, middleware: extractJsonMiddleware());
+        final wrapped = wrapLanguageModel(
+          model: inner,
+          middleware: extractJsonMiddleware(),
+        );
 
         final result = await wrapped.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: const LanguageModelV3Prompt(messages: []),
+          LanguageModelV4CallOptions(
+            prompt: const LanguageModelV4Prompt(messages: []),
           ),
         );
 
         final textPart = result.content
-            .whereType<LanguageModelV3TextPart>()
+            .whereType<LanguageModelV4TextPart>()
             .first;
         expect(textPart.text.trim(), '{"already":"clean"}');
       });
@@ -275,7 +308,7 @@ void main() {
       test('calls doGenerate and fans out result as stream parts', () async {
         final inner = FakeTextModel(
           'streamed text',
-          finishReason: LanguageModelV3FinishReason.stop,
+          finishReason: LanguageModelV4FinishReason.stop,
         );
         final wrapped = wrapLanguageModel(
           model: inner,
@@ -283,8 +316,8 @@ void main() {
         );
 
         final streamResult = await wrapped.doStream(
-          LanguageModelV3CallOptions(
-            prompt: const LanguageModelV3Prompt(messages: []),
+          LanguageModelV4CallOptions(
+            prompt: const LanguageModelV4Prompt(messages: []),
           ),
         );
 
@@ -302,7 +335,7 @@ void main() {
       test('finish part has correct finishReason', () async {
         final inner = FakeTextModel(
           'done',
-          finishReason: LanguageModelV3FinishReason.stop,
+          finishReason: LanguageModelV4FinishReason.stop,
         );
         final wrapped = wrapLanguageModel(
           model: inner,
@@ -310,14 +343,14 @@ void main() {
         );
 
         final streamResult = await wrapped.doStream(
-          LanguageModelV3CallOptions(
-            prompt: const LanguageModelV3Prompt(messages: []),
+          LanguageModelV4CallOptions(
+            prompt: const LanguageModelV4Prompt(messages: []),
           ),
         );
 
         final parts = await streamResult.stream.toList();
         final finish = parts.whereType<StreamPartFinish>().first;
-        expect(finish.finishReason, LanguageModelV3FinishReason.stop);
+        expect(finish.finishReason, LanguageModelV4FinishReason.stop);
       });
     });
 
@@ -332,8 +365,8 @@ void main() {
         );
 
         await wrapped.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: const LanguageModelV3Prompt(messages: []),
+          LanguageModelV4CallOptions(
+            prompt: const LanguageModelV4Prompt(messages: []),
           ),
         );
 
@@ -348,8 +381,8 @@ void main() {
         );
 
         await wrapped.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: const LanguageModelV3Prompt(messages: []),
+          LanguageModelV4CallOptions(
+            prompt: const LanguageModelV4Prompt(messages: []),
             temperature: 0.9,
           ),
         );
@@ -365,8 +398,8 @@ void main() {
         );
 
         await wrapped.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: const LanguageModelV3Prompt(messages: []),
+          LanguageModelV4CallOptions(
+            prompt: const LanguageModelV4Prompt(messages: []),
           ),
         );
 
@@ -381,8 +414,8 @@ void main() {
         );
 
         await wrapped.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: const LanguageModelV3Prompt(messages: []),
+          LanguageModelV4CallOptions(
+            prompt: const LanguageModelV4Prompt(messages: []),
           ),
         );
 
@@ -401,10 +434,10 @@ void main() {
         );
 
         await wrapped.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: const LanguageModelV3Prompt(messages: []),
+          LanguageModelV4CallOptions(
+            prompt: const LanguageModelV4Prompt(messages: []),
             tools: [
-              const LanguageModelV3FunctionTool(
+              const LanguageModelV4FunctionTool(
                 name: 'search',
                 inputSchema: {'type': 'object'},
                 description: 'Search the web',
@@ -429,10 +462,10 @@ void main() {
         );
 
         await wrapped.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: const LanguageModelV3Prompt(messages: []),
+          LanguageModelV4CallOptions(
+            prompt: const LanguageModelV4Prompt(messages: []),
             tools: [
-              const LanguageModelV3FunctionTool(
+              const LanguageModelV4FunctionTool(
                 name: 'simple',
                 inputSchema: {'type': 'object'},
                 description: 'A simple tool',
@@ -454,11 +487,11 @@ class _TransformParamsMiddleware extends LanguageModelMiddlewareBase {
   final double temperature;
 
   @override
-  FutureOr<LanguageModelV3CallOptions> transformParams({
-    required LanguageModelV3CallOptions options,
-    required LanguageModelV3 model,
+  FutureOr<LanguageModelV4CallOptions> transformParams({
+    required LanguageModelV4CallOptions options,
+    required LanguageModelV4 model,
   }) {
-    return LanguageModelV3CallOptions(
+    return LanguageModelV4CallOptions(
       prompt: options.prompt,
       tools: options.tools,
       toolChoice: options.toolChoice,
@@ -482,22 +515,22 @@ class _LoggingTransformMiddleware extends LanguageModelMiddlewareBase {
   final List<String> log;
 
   @override
-  FutureOr<LanguageModelV3CallOptions> transformParams({
-    required LanguageModelV3CallOptions options,
-    required LanguageModelV3 model,
+  FutureOr<LanguageModelV4CallOptions> transformParams({
+    required LanguageModelV4CallOptions options,
+    required LanguageModelV4 model,
   }) {
     log.add('transformParams');
     return options;
   }
 
   @override
-  Future<LanguageModelV3GenerateResult> wrapGenerate({
-    required Future<LanguageModelV3GenerateResult> Function(
-      LanguageModelV3CallOptions,
+  Future<LanguageModelV4GenerateResult> wrapGenerate({
+    required Future<LanguageModelV4GenerateResult> Function(
+      LanguageModelV4CallOptions,
     )
     doGenerate,
-    required LanguageModelV3CallOptions options,
-    required LanguageModelV3 model,
+    required LanguageModelV4CallOptions options,
+    required LanguageModelV4 model,
   }) async {
     log.add('wrapGenerate');
     return doGenerate(options);
@@ -515,13 +548,13 @@ class _TrackingMiddleware extends LanguageModelMiddlewareBase {
   final List<String> callOrder;
 
   @override
-  Future<LanguageModelV3GenerateResult> wrapGenerate({
-    required Future<LanguageModelV3GenerateResult> Function(
-      LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> wrapGenerate({
+    required Future<LanguageModelV4GenerateResult> Function(
+      LanguageModelV4CallOptions options,
     )
     doGenerate,
-    required LanguageModelV3CallOptions options,
-    required LanguageModelV3 model,
+    required LanguageModelV4CallOptions options,
+    required LanguageModelV4 model,
   }) async {
     callOrder.add(name);
     return doGenerate(options);

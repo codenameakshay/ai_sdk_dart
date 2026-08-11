@@ -827,11 +827,11 @@ void main() {
       });
 
       test('MCPClient accepts reconnectPolicy constructor param', () {
-        final mock_transport = StreamableHttpClientTransport(
+        final mockTransport = StreamableHttpClientTransport(
           url: Uri.parse('http://localhost:9999/mcp'),
         );
         final client = MCPClient(
-          transport: mock_transport,
+          transport: mockTransport,
           reconnectPolicy: const MCPReconnectPolicy(maxAttempts: 3),
         );
         expect(client.reconnectPolicy?.maxAttempts, 3);

@@ -42,12 +42,12 @@ void main() {
       return 'http://${s.address.host}:${s.port}';
     }
 
-    LanguageModelV3CallOptions opts() => LanguageModelV3CallOptions(
-      prompt: LanguageModelV3Prompt(
+    LanguageModelV4CallOptions opts() => LanguageModelV4CallOptions(
+      prompt: LanguageModelV4Prompt(
         messages: [
-          LanguageModelV3Message(
-            role: LanguageModelV3Role.user,
-            content: [LanguageModelV3TextPart(text: 'hi')],
+          LanguageModelV4Message(
+            role: LanguageModelV4Role.user,
+            content: [LanguageModelV4TextPart(text: 'hi')],
           ),
         ],
       ),

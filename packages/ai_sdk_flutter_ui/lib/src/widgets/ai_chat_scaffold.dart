@@ -25,7 +25,7 @@ typedef ChatScaffoldApprovalBuilder =
     Widget Function(
       BuildContext context,
       ChatController controller,
-      LanguageModelV3ToolApprovalRequestPart request,
+      LanguageModelV4ToolApprovalRequestPart request,
     );
 
 /// Builds the scaffold's status view for non-terminal controller states.
@@ -236,7 +236,7 @@ class _AiChatScaffoldState extends State<AiChatScaffold> {
 
   Widget _buildApprovalView(
     BuildContext context,
-    LanguageModelV3ToolApprovalRequestPart request,
+    LanguageModelV4ToolApprovalRequestPart request,
   ) {
     final builder = widget.approvalBuilder;
     if (builder != null) {
@@ -307,15 +307,15 @@ class _AiChatScaffoldState extends State<AiChatScaffold> {
     if (assistantMessage == null) return null;
 
     final parts =
-        assistantMessage.parts ?? const <LanguageModelV3ContentPart>[];
+        assistantMessage.parts ?? const <LanguageModelV4ContentPart>[];
     final hasInlineSources = parts.any(
-      (part) => part is LanguageModelV3SourcePart,
+      (part) => part is LanguageModelV4SourcePart,
     );
     final hasInlineToolCalls = parts.any(
-      (part) => part is LanguageModelV3ToolCallPart,
+      (part) => part is LanguageModelV4ToolCallPart,
     );
 
-    final metadataParts = <LanguageModelV3ContentPart>[
+    final metadataParts = <LanguageModelV4ContentPart>[
       if (!hasInlineToolCalls) ...widget.controller.lastToolCalls,
       if (!hasInlineSources) ...widget.controller.lastSources,
     ];
@@ -338,7 +338,7 @@ class _AiChatScaffoldState extends State<AiChatScaffold> {
   }
 
   void _submitApproval({
-    required LanguageModelV3ToolApprovalRequestPart request,
+    required LanguageModelV4ToolApprovalRequestPart request,
     required bool approved,
     String? reason,
   }) {

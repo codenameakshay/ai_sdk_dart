@@ -102,8 +102,8 @@ void main() {
           expect(capturedBody!['model'], 'gpt-4.1-mini');
           expect((capturedBody!['messages'] as List).first['role'], 'user');
           expect(result.text, 'hello');
-          expect(result.usage?.inputTokens, 5);
-          expect(result.usage?.outputTokens, 3);
+          expect(result.usage?.inputTokens.total, 5);
+          expect(result.usage?.outputTokens.total, 3);
         },
       );
 
@@ -200,8 +200,8 @@ void main() {
         ).call('gpt-4.1-mini');
         final result = await generateText<String>(model: model, prompt: 'hi');
 
-        expect(result.usage?.inputTokens, 10);
-        expect(result.usage?.outputTokens, 5);
+        expect(result.usage?.inputTokens.total, 10);
+        expect(result.usage?.outputTokens.total, 5);
       });
 
       test('tools are sent as tools array with type:function', () async {
@@ -304,8 +304,8 @@ void main() {
         expect(capturedBody!['model'], 'claude-sonnet-4-5');
         expect((capturedBody!['messages'] as List).first['role'], 'user');
         expect(result.text, 'hello');
-        expect(result.usage?.inputTokens, 5);
-        expect(result.usage?.outputTokens, 3);
+        expect(result.usage?.inputTokens.total, 5);
+        expect(result.usage?.outputTokens.total, 3);
       });
 
       test('thinking content block maps to ReasoningPart', () async {
@@ -396,7 +396,7 @@ void main() {
 
         expect(result.toolCalls.length, 1);
         expect(result.toolCalls[0].toolName, 'getWeather');
-        expect(result.finishReason, LanguageModelV3FinishReason.toolCalls);
+        expect(result.finishReason, LanguageModelV4FinishReason.toolCalls);
       });
 
       test('streamText sends stream:true and emits text', () async {
@@ -508,8 +508,8 @@ void main() {
           expect(contents, isNotEmpty);
           expect(contents.first['role'], 'user');
           expect(result.text, 'hello');
-          expect(result.usage?.inputTokens, 5);
-          expect(result.usage?.outputTokens, 3);
+          expect(result.usage?.inputTokens.total, 5);
+          expect(result.usage?.outputTokens.total, 3);
         },
       );
 
@@ -629,7 +629,7 @@ void main() {
       });
 
       test(
-        'STOP finish reason maps to LanguageModelV3FinishReason.stop',
+        'STOP finish reason maps to LanguageModelV4FinishReason.stop',
         () async {
           final server = await _TestServer.start((req) async {
             req.response.statusCode = 200;
@@ -658,7 +658,7 @@ void main() {
           ).call('gemini-2.0-flash');
           final result = await generateText<String>(model: model, prompt: 'hi');
 
-          expect(result.finishReason, LanguageModelV3FinishReason.stop);
+          expect(result.finishReason, LanguageModelV4FinishReason.stop);
         },
       );
     });

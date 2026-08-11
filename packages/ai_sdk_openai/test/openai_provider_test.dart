@@ -13,6 +13,10 @@ import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
   group('OpenAIProvider', () {
+    test('exposes the default provider singleton', () {
+      expect(openai, isA<OpenAIProvider>());
+    });
+
     test('doGenerate maps text, tools, finish reason, usage', () async {
       final server = await _TestServer.start((request) async {
         expect(request.uri.path, '/v1/chat/completions');
@@ -62,17 +66,17 @@ void main() {
       final model = provider.call('gpt-4.1-mini');
 
       final result = await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'weather in paris')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'weather in paris')],
               ),
             ],
           ),
           tools: [
-            const LanguageModelV3FunctionTool(
+            const LanguageModelV4FunctionTool(
               name: 'weather',
               inputSchema: {'type': 'object'},
             ),
@@ -81,14 +85,15 @@ void main() {
         ),
       );
 
-      expect(result.finishReason, LanguageModelV3FinishReason.toolCalls);
-      expect(result.usage?.totalTokens, 15);
+      expect(result.finishReason, LanguageModelV4FinishReason.toolCalls);
+      expect(result.usage.inputTokens.total, 10);
+      expect(result.usage.outputTokens.total, 5);
       expect(
-        result.content.whereType<LanguageModelV3TextPart>().first.text,
+        result.content.whereType<LanguageModelV4TextPart>().first.text,
         'I need to check weather.',
       );
       final toolCall = result.content
-          .whereType<LanguageModelV3ToolCallPart>()
+          .whereType<LanguageModelV4ToolCallPart>()
           .first;
       expect(toolCall.toolName, 'weather');
       expect(toolCall.input, isA<Map>());
@@ -124,12 +129,12 @@ void main() {
       final model = provider.call('gpt-4.1-mini');
 
       final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'Hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'Hi')],
               ),
             ],
           ),
@@ -142,15 +147,16 @@ void main() {
         parts.whereType<StreamPartTextDelta>().map((p) => p.delta).join(),
         'Hello',
       );
-      expect(parts.whereType<StreamPartToolCallStart>().length, 1);
+      expect(parts.whereType<StreamPartToolInputStart>().length, 1);
       expect(
-        parts.whereType<StreamPartToolCallDelta>().length,
+        parts.whereType<StreamPartToolInputDelta>().length,
         greaterThanOrEqualTo(1),
       );
-      expect(parts.whereType<StreamPartToolCallEnd>().length, 1);
+      expect(parts.whereType<StreamPartToolInputEnd>().length, 1);
+      expect(parts.whereType<StreamPartToolCall>().length, 1);
       expect(
         parts.whereType<StreamPartFinish>().single.finishReason,
-        LanguageModelV3FinishReason.toolCalls,
+        LanguageModelV4FinishReason.toolCalls,
       );
     });
 
@@ -183,12 +189,12 @@ void main() {
 
       await provider
           .call('gpt-4.1-mini')
-          .doGenerate(LanguageModelV3CallOptions(prompt: _userPrompt('first')));
+          .doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('first')));
       token = 'second-token';
       await provider
           .call('gpt-4.1-mini')
           .doGenerate(
-            LanguageModelV3CallOptions(prompt: _userPrompt('second')),
+            LanguageModelV4CallOptions(prompt: _userPrompt('second')),
           );
 
       expect(authorizations, ['Bearer first-token', 'Bearer second-token']);
@@ -233,11 +239,11 @@ void main() {
 
       await provider
           .call('gpt-4.1-mini')
-          .doGenerate(LanguageModelV3CallOptions(prompt: _userPrompt('first')));
+          .doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('first')));
       await provider
           .call('gpt-4.1-mini')
           .doGenerate(
-            LanguageModelV3CallOptions(prompt: _userPrompt('second')),
+            LanguageModelV4CallOptions(prompt: _userPrompt('second')),
           );
 
       expect(interceptedRequests, 2);
@@ -311,7 +317,7 @@ void main() {
         final streamResult = await provider
             .call('gpt-4.1-mini')
             .doStream(
-              LanguageModelV3CallOptions(prompt: _userPrompt('stream')),
+              LanguageModelV4CallOptions(prompt: _userPrompt('stream')),
             );
         await streamResult.stream.drain<void>();
 
@@ -349,7 +355,7 @@ void main() {
       },
     );
 
-    test('embedding request headers override provider auth header', () async {
+    test('embedding provider auth wins over request headers', () async {
       String? authorization;
       final server = await _TestServer.start((request) async {
         authorization = request.headers.value('authorization');
@@ -382,7 +388,7 @@ void main() {
             ),
           );
 
-      expect(authorization, 'Bearer request-token');
+      expect(authorization, 'Bearer provider-token');
     });
 
     test(
@@ -414,7 +420,7 @@ void main() {
           ownedProvider
               .call('gpt-4.1-mini')
               .doGenerate(
-                LanguageModelV3CallOptions(
+                LanguageModelV4CallOptions(
                   prompt: _userPrompt('after-dispose'),
                 ),
               ),
@@ -433,7 +439,7 @@ void main() {
         await injectedProvider
             .call('gpt-4.1-mini')
             .doGenerate(
-              LanguageModelV3CallOptions(prompt: _userPrompt('still-open')),
+              LanguageModelV4CallOptions(prompt: _userPrompt('still-open')),
             );
 
         expect(adapter.closeCount, 0);
@@ -474,12 +480,12 @@ void main() {
         final model = provider.call('gpt-4.1-mini');
 
         final streamResult = await model.doStream(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
               messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
-                  content: [LanguageModelV3TextPart(text: 'Hi')],
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'Hi')],
                 ),
               ],
             ),
@@ -531,19 +537,19 @@ void main() {
         baseUrl: server.baseUrl,
       ).call('gpt-4.1-mini');
 
-      Future<void> call(LanguageModelV3ToolChoice toolChoice) async {
+      Future<void> call(LanguageModelV4ToolChoice toolChoice) async {
         await model.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
               messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
-                  content: [LanguageModelV3TextPart(text: 'hi')],
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'hi')],
                 ),
               ],
             ),
             tools: const [
-              LanguageModelV3FunctionTool(
+              LanguageModelV4FunctionTool(
                 name: 'weather',
                 inputSchema: {'type': 'object'},
                 strict: true,
@@ -611,17 +617,17 @@ void main() {
           baseUrl: server.baseUrl,
         ).call('gpt-4.1-mini');
         final result = await model.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
               messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
-                  content: [LanguageModelV3TextPart(text: 'hi')],
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'hi')],
                 ),
               ],
             ),
             tools: const [
-              LanguageModelV3FunctionTool(
+              LanguageModelV4FunctionTool(
                 name: 'weather',
                 inputSchema: {'type': 'object'},
                 strict: true,
@@ -631,7 +637,7 @@ void main() {
         );
 
         final call = result.content
-            .whereType<LanguageModelV3ToolCallPart>()
+            .whereType<LanguageModelV4ToolCallPart>()
             .single;
         expect(call.input, 'not-json');
       },
@@ -674,12 +680,12 @@ void main() {
           baseUrl: server.baseUrl,
         ).call('gpt-4.1-mini');
         final result = await model.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
               messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
-                  content: [LanguageModelV3TextPart(text: 'hi')],
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'hi')],
                 ),
               ],
             ),
@@ -687,11 +693,11 @@ void main() {
         );
 
         expect(
-          result.content.whereType<LanguageModelV3SourcePart>(),
+          result.content.whereType<LanguageModelV4SourcePart>(),
           hasLength(1),
         );
         expect(
-          result.content.whereType<LanguageModelV3FilePart>(),
+          result.content.whereType<LanguageModelV4FilePart>(),
           hasLength(1),
         );
       },
@@ -789,12 +795,12 @@ void main() {
       ).call('gpt-4.1-mini');
 
       final result = await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
@@ -808,7 +814,7 @@ void main() {
       );
 
       expect(
-        result.content.whereType<LanguageModelV3TextPart>().single.text,
+        result.content.whereType<LanguageModelV4TextPart>().single.text,
         'ok',
       );
     });
@@ -860,12 +866,12 @@ void main() {
             baseUrl: server.baseUrl,
           ).call('o3-mini');
           await model.doGenerate(
-            LanguageModelV3CallOptions(
-              prompt: LanguageModelV3Prompt(
+            LanguageModelV4CallOptions(
+              prompt: LanguageModelV4Prompt(
                 messages: [
-                  LanguageModelV3Message(
-                    role: LanguageModelV3Role.user,
-                    content: [LanguageModelV3TextPart(text: 'hi')],
+                  LanguageModelV4Message(
+                    role: LanguageModelV4Role.user,
+                    content: [LanguageModelV4TextPart(text: 'hi')],
                   ),
                 ],
               ),
@@ -907,12 +913,12 @@ void main() {
             baseUrl: server.baseUrl,
           ).call('o3-mini');
           await model.doGenerate(
-            LanguageModelV3CallOptions(
-              prompt: LanguageModelV3Prompt(
+            LanguageModelV4CallOptions(
+              prompt: LanguageModelV4Prompt(
                 messages: [
-                  LanguageModelV3Message(
-                    role: LanguageModelV3Role.user,
-                    content: [LanguageModelV3TextPart(text: 'hi')],
+                  LanguageModelV4Message(
+                    role: LanguageModelV4Role.user,
+                    content: [LanguageModelV4TextPart(text: 'hi')],
                   ),
                 ],
               ),
@@ -960,12 +966,12 @@ void main() {
             baseUrl: server.baseUrl,
           ).call('o3-mini');
           await model.doGenerate(
-            LanguageModelV3CallOptions(
-              prompt: LanguageModelV3Prompt(
+            LanguageModelV4CallOptions(
+              prompt: LanguageModelV4Prompt(
                 messages: [
-                  LanguageModelV3Message(
-                    role: LanguageModelV3Role.user,
-                    content: [LanguageModelV3TextPart(text: 'hi')],
+                  LanguageModelV4Message(
+                    role: LanguageModelV4Role.user,
+                    content: [LanguageModelV4TextPart(text: 'hi')],
                   ),
                 ],
               ),
@@ -979,13 +985,81 @@ void main() {
           expect(captured.containsKey('reasoningEffort'), isFalse);
         },
       );
+
+      test('serializes the provider-neutral reasoning control', () async {
+        late Map<String, dynamic> captured;
+        final server = await _TestServer.start((request) async {
+          final body = await utf8.decoder.bind(request).join();
+          captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'choices': [
+                {
+                  'finish_reason': 'stop',
+                  'message': {'content': 'ok'},
+                },
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = OpenAIProvider(apiKey: 'test', baseUrl: server.baseUrl)(
+          'o3-mini',
+        );
+        await model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: _userPrompt('reason'),
+            reasoning: LanguageModelV4Reasoning.high,
+          ),
+        );
+
+        expect(captured['reasoning_effort'], 'high');
+      });
+
+      test('serializes the xhigh provider-neutral reasoning control', () async {
+        late Map<String, dynamic> captured;
+        final server = await _TestServer.start((request) async {
+          final body = await utf8.decoder.bind(request).join();
+          captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'choices': [
+                {
+                  'finish_reason': 'stop',
+                  'message': {'content': 'ok'},
+                },
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = OpenAIProvider(apiKey: 'test', baseUrl: server.baseUrl)(
+          'o3-mini',
+        );
+        await model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: _userPrompt('reason'),
+            reasoning: LanguageModelV4Reasoning.xhigh,
+          ),
+        );
+
+        expect(captured['reasoning_effort'], 'xhigh');
+      });
     });
 
-    // ── outputSchema / response_format: json_schema ──────────────────────
+    // ── responseFormat / response_format: json_schema ───────────────────
 
-    group('outputSchema (native structured output)', () {
+    group('responseFormat (native structured output)', () {
       test(
-        'doGenerate sends response_format json_schema when outputSchema set',
+        'doGenerate sends response_format json_schema for JSON output',
         () async {
           late Map<String, dynamic> captured;
           final server = await _TestServer.start((request) async {
@@ -1012,25 +1086,27 @@ void main() {
             baseUrl: server.baseUrl,
           ).call('gpt-4o-mini');
           await model.doGenerate(
-            LanguageModelV3CallOptions(
-              prompt: LanguageModelV3Prompt(
+            LanguageModelV4CallOptions(
+              prompt: LanguageModelV4Prompt(
                 messages: [
-                  LanguageModelV3Message(
-                    role: LanguageModelV3Role.user,
+                  LanguageModelV4Message(
+                    role: LanguageModelV4Role.user,
                     content: [
-                      LanguageModelV3TextPart(text: 'weather in Paris'),
+                      LanguageModelV4TextPart(text: 'weather in Paris'),
                     ],
                   ),
                 ],
               ),
-              outputSchema: const {
-                'type': 'object',
-                'properties': {
-                  'city': {'type': 'string'},
-                  'tempC': {'type': 'number'},
+              responseFormat: const LanguageModelV4JsonResponseFormat(
+                schema: {
+                  'type': 'object',
+                  'properties': {
+                    'city': {'type': 'string'},
+                    'tempC': {'type': 'number'},
+                  },
+                  'required': ['city', 'tempC'],
                 },
-                'required': ['city', 'tempC'],
-              },
+              ),
             ),
           );
 
@@ -1048,7 +1124,7 @@ void main() {
       );
 
       test(
-        'doGenerate does NOT send response_format when outputSchema is null',
+        'doGenerate omits response_format when no format is requested',
         () async {
           late Map<String, dynamic> captured;
           final server = await _TestServer.start((request) async {
@@ -1075,12 +1151,12 @@ void main() {
             baseUrl: server.baseUrl,
           ).call('gpt-4o-mini');
           await model.doGenerate(
-            LanguageModelV3CallOptions(
-              prompt: LanguageModelV3Prompt(
+            LanguageModelV4CallOptions(
+              prompt: LanguageModelV4Prompt(
                 messages: [
-                  LanguageModelV3Message(
-                    role: LanguageModelV3Role.user,
-                    content: [LanguageModelV3TextPart(text: 'hi')],
+                  LanguageModelV4Message(
+                    role: LanguageModelV4Role.user,
+                    content: [LanguageModelV4TextPart(text: 'hi')],
                   ),
                 ],
               ),
@@ -1142,20 +1218,20 @@ void main() {
       ).call('gpt-4.1-mini');
 
       final result = await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
                 content: [
-                  LanguageModelV3TextPart(text: 'describe this'),
-                  LanguageModelV3ImagePart(
+                  LanguageModelV4TextPart(text: 'describe this'),
+                  LanguageModelV4ImagePart(
                     image: DataContentBytes(
                       Uint8List.fromList(utf8.encode('img')),
                     ),
                     mediaType: 'image/png',
                   ),
-                  LanguageModelV3FilePart(
+                  LanguageModelV4FilePart(
                     data: DataContentBytes(
                       Uint8List.fromList(utf8.encode('audio')),
                     ),
@@ -1163,15 +1239,15 @@ void main() {
                   ),
                 ],
               ),
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.tool,
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.tool,
                 content: [
-                  LanguageModelV3ToolResultPart(
+                  LanguageModelV4ToolResultPart(
                     toolCallId: 'call_1',
                     toolName: 'weather',
                     isError: true,
                     output: ToolResultOutputContent([
-                      LanguageModelV3TextPart(text: 'failed to fetch'),
+                      LanguageModelV4TextPart(text: 'failed to fetch'),
                     ]),
                   ),
                 ],
@@ -1182,7 +1258,7 @@ void main() {
       );
 
       expect(
-        result.content.whereType<LanguageModelV3TextPart>().single.text,
+        result.content.whereType<LanguageModelV4TextPart>().single.text,
         'ok',
       );
     });
@@ -1208,12 +1284,12 @@ void main() {
       ).call('gpt-4.1-mini');
 
       final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
@@ -1223,11 +1299,12 @@ void main() {
       final finish = (await streamResult.stream.toList())
           .whereType<StreamPartFinish>()
           .single;
-      expect(finish.usage?.totalTokens, 12);
+      expect(finish.usage.inputTokens.total, 9);
+      expect(finish.usage.outputTokens.total, 3);
       expect(finish.providerMetadata?['openai']?['id'], 'chatcmpl_123');
       expect(
         finish.providerMetadata?['openai']?['warnings'],
-        contains('careful'),
+        contains('other'),
       );
     });
 
@@ -1252,12 +1329,12 @@ void main() {
       ).call('gpt-4.1-mini');
 
       final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
@@ -1612,7 +1689,7 @@ void main() {
 }
 
 Future<Map<String, dynamic>> _captureOpenAiRequestBody(
-  LanguageModelV3Prompt prompt,
+  LanguageModelV4Prompt prompt,
 ) async {
   late Map<String, dynamic> captured;
   final server = await _TestServer.start((request) async {
@@ -1638,17 +1715,17 @@ Future<Map<String, dynamic>> _captureOpenAiRequestBody(
     apiKey: 'test',
     baseUrl: server.baseUrl,
   ).call('gpt-4.1-mini');
-  await model.doGenerate(LanguageModelV3CallOptions(prompt: prompt));
+  await model.doGenerate(LanguageModelV4CallOptions(prompt: prompt));
   await server.close();
   return captured;
 }
 
-LanguageModelV3Prompt _userPrompt(String text) {
-  return LanguageModelV3Prompt(
+LanguageModelV4Prompt _userPrompt(String text) {
+  return LanguageModelV4Prompt(
     messages: [
-      LanguageModelV3Message(
-        role: LanguageModelV3Role.user,
-        content: [LanguageModelV3TextPart(text: text)],
+      LanguageModelV4Message(
+        role: LanguageModelV4Role.user,
+        content: [LanguageModelV4TextPart(text: text)],
       ),
     ],
   );

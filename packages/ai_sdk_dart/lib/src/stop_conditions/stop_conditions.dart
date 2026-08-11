@@ -17,7 +17,7 @@ class StepSnapshot {
   final List<String> toolCallNames;
 
   /// The finish reason from the most recent model response.
-  final LanguageModelV3FinishReason? finishReason;
+  final LanguageModelV4FinishReason? finishReason;
 }
 
 /// Function that returns true when multi-step generation should stop.
@@ -72,9 +72,9 @@ StopCondition hasToolCall(String toolName) {
 /// Mirrors `hasFinishReason` from the JS AI SDK v6.
 ///
 /// ```dart
-/// stopWhen: hasFinishReason(LanguageModelV3FinishReason.stop)
+/// stopWhen: hasFinishReason(LanguageModelV4FinishReason.stop)
 /// ```
-StopCondition hasFinishReason(LanguageModelV3FinishReason reason) {
+StopCondition hasFinishReason(LanguageModelV4FinishReason reason) {
   return (snapshot) => snapshot.finishReason == reason;
 }
 
@@ -92,7 +92,7 @@ StopCondition stopWhenAny(List<StopCondition> conditions) {
 /// Stop when all of the supplied conditions are satisfied.
 ///
 /// ```dart
-/// stopWhen: stopWhenAll([hasFinishReason(LanguageModelV3FinishReason.stop), stepCountIs(3)])
+/// stopWhen: stopWhenAll([hasFinishReason(LanguageModelV4FinishReason.stop), stepCountIs(3)])
 /// ```
 StopCondition stopWhenAll(List<StopCondition> conditions) {
   return (snapshot) => conditions.every((c) => c(snapshot));

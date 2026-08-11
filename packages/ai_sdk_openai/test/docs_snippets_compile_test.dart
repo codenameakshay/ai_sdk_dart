@@ -52,9 +52,11 @@ void main() {
       print(result.text);
     }
 
-    expect(
-      [streaming, imageGeneration, reasoningOptions, providerRegistrySnippet],
-      hasLength(4),
-    );
+    expect([
+      streaming,
+      imageGeneration,
+      reasoningOptions,
+      providerRegistrySnippet,
+    ], hasLength(4));
   });
 }

@@ -17,7 +17,7 @@ void main() {
           const StreamPartTextDelta(id: 't1', delta: 'Hello'),
           const StreamPartTextDelta(id: 't1', delta: ' world'),
           const StreamPartTextEnd(id: 't1'),
-          StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+          StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
         ]);
 
         final result = await streamText(model: model, prompt: 'hi');
@@ -31,7 +31,7 @@ void main() {
           const StreamPartTextDelta(id: 't1', delta: 'Hello'),
           const StreamPartTextDelta(id: 't1', delta: ', world'),
           const StreamPartTextEnd(id: 't1'),
-          StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+          StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
         ]);
 
         final result = await streamText(model: model, prompt: 'hi');
@@ -43,13 +43,13 @@ void main() {
           const StreamPartTextStart(id: 't1'),
           const StreamPartTextDelta(id: 't1', delta: 'done'),
           const StreamPartTextEnd(id: 't1'),
-          StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+          StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
         ]);
 
         final result = await streamText(model: model, prompt: 'hi');
         // Drain the stream so futures complete
         await result.text;
-        expect(await result.finishReason, LanguageModelV3FinishReason.stop);
+        expect(await result.finishReason, LanguageModelV4FinishReason.stop);
       });
 
       test('usage future resolves to usage from finish part', () async {
@@ -58,11 +58,10 @@ void main() {
           const StreamPartTextDelta(id: 't1', delta: 'done'),
           const StreamPartTextEnd(id: 't1'),
           StreamPartFinish(
-            finishReason: LanguageModelV3FinishReason.stop,
-            usage: const LanguageModelV3Usage(
-              inputTokens: 10,
-              outputTokens: 5,
-              totalTokens: 15,
+            finishReason: LanguageModelV4FinishReason.stop,
+            usage: const LanguageModelV4Usage(
+              inputTokens: LanguageModelV4InputTokenUsage(total: 10),
+              outputTokens: LanguageModelV4OutputTokenUsage(total: 5),
             ),
           ),
         ]);
@@ -70,8 +69,8 @@ void main() {
         final result = await streamText(model: model, prompt: 'hi');
         await result.text;
         final usage = await result.usage;
-        expect(usage?.inputTokens, 10);
-        expect(usage?.outputTokens, 5);
+        expect(usage?.inputTokens.total, 10);
+        expect(usage?.outputTokens.total, 5);
       });
     });
 
@@ -113,7 +112,7 @@ void main() {
           const StreamPartTextStart(id: 't1'),
           const StreamPartTextDelta(id: 't1', delta: 'hi'),
           const StreamPartTextEnd(id: 't1'),
-          StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+          StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
         ]);
 
         final result = await streamText(model: model, prompt: 'hi');
@@ -125,11 +124,14 @@ void main() {
 
       test('fullStream includes reasoning delta events', () async {
         final model = FakeStreamModel([
-          const StreamPartReasoningDelta(delta: 'thinking...'),
+          const StreamPartReasoningDelta(
+            id: 'reasoning-0',
+            delta: 'thinking...',
+          ),
           const StreamPartTextStart(id: 't1'),
           const StreamPartTextDelta(id: 't1', delta: 'answer'),
           const StreamPartTextEnd(id: 't1'),
-          StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+          StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
         ]);
 
         final result = await streamText(model: model, prompt: 'hi');
@@ -159,7 +161,7 @@ void main() {
           const StreamPartTextStart(id: 't1'),
           const StreamPartTextDelta(id: 't1', delta: 'Hello'),
           const StreamPartTextEnd(id: 't1'),
-          StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+          StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
         ]);
 
         final result = await streamText(
@@ -186,7 +188,7 @@ void main() {
             const StreamPartTextStart(id: 't1'),
             const StreamPartTextDelta(id: 't1', delta: 'Hi'),
             const StreamPartTextEnd(id: 't1'),
-            StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+            StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
           ]);
 
           final onChunkTexts = <String>[];
@@ -217,7 +219,7 @@ void main() {
           const StreamPartTextStart(id: 't1'),
           const StreamPartTextDelta(id: 't1', delta: 'Hello'),
           const StreamPartTextEnd(id: 't1'),
-          StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+          StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
         ]);
 
         final chunkTypes = <Type>[];
@@ -233,10 +235,11 @@ void main() {
 
       test('onChunk receives StreamTextRawChunk for every raw part', () async {
         final model = FakeStreamModel([
+          const StreamPartRaw(rawValue: {'type': 'provider-chunk'}),
           const StreamPartTextStart(id: 't1'),
           const StreamPartTextDelta(id: 't1', delta: 'hi'),
           const StreamPartTextEnd(id: 't1'),
-          StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+          StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
         ]);
 
         final chunkTypes = <Type>[];
@@ -275,20 +278,17 @@ void main() {
         () async {
           final zoneErrors = <Object>[];
 
-          await runZonedGuarded(
-            () async {
-              final result = await streamText(
-                model: _ErrorAfterTextModel(StateError('boom')),
-                prompt: 'hi',
-              );
-              await expectLater(
-                result.textStream.toList(),
-                throwsA(isA<StateError>()),
-              );
-              await Future<void>.delayed(Duration.zero);
-            },
-            (error, stackTrace) => zoneErrors.add(error),
-          );
+          await runZonedGuarded(() async {
+            final result = await streamText(
+              model: _ErrorAfterTextModel(StateError('boom')),
+              prompt: 'hi',
+            );
+            await expectLater(
+              result.textStream.toList(),
+              throwsA(isA<StateError>()),
+            );
+            await Future<void>.delayed(Duration.zero);
+          }, (error, stackTrace) => zoneErrors.add(error));
 
           expect(zoneErrors, isEmpty);
         },
@@ -299,17 +299,14 @@ void main() {
         () async {
           final zoneErrors = <Object>[];
 
-          await runZonedGuarded(
-            () async {
-              final result = await streamText(
-                model: _ErrorAfterTextModel(StateError('boom')),
-                prompt: 'hi',
-              );
-              await expectLater(result.text, throwsA(isA<StateError>()));
-              await Future<void>.delayed(Duration.zero);
-            },
-            (error, stackTrace) => zoneErrors.add(error),
-          );
+          await runZonedGuarded(() async {
+            final result = await streamText(
+              model: _ErrorAfterTextModel(StateError('boom')),
+              prompt: 'hi',
+            );
+            await expectLater(result.text, throwsA(isA<StateError>()));
+            await Future<void>.delayed(Duration.zero);
+          }, (error, stackTrace) => zoneErrors.add(error));
 
           expect(zoneErrors, isEmpty);
         },
@@ -342,23 +339,25 @@ void main() {
         expect(events.last, isA<StreamTextErrorEvent>());
       });
 
-      test('late fullStream subscriber sees pre-cancelled terminal error',
-          () async {
-        final token = CancellationToken()..cancel();
-        final result = await streamText(
-          model: FakeTextModel('unused'),
-          prompt: 'hi',
-          abortSignal: token,
-        );
+      test(
+        'late fullStream subscriber sees pre-cancelled terminal error',
+        () async {
+          final token = CancellationToken()..cancel();
+          final result = await streamText(
+            model: FakeTextModel('unused'),
+            prompt: 'hi',
+            abortSignal: token,
+          );
 
-        await Future<void>.delayed(Duration.zero);
-        final events = await _collectFailingFullStream(
-          result,
-          isA<AiOperationCancelledError>(),
-        );
+          await Future<void>.delayed(Duration.zero);
+          final events = await _collectFailingFullStream(
+            result,
+            isA<AiOperationCancelledError>(),
+          );
 
-        expect(events.single, isA<StreamTextErrorEvent>());
-      });
+          expect(events.single, isA<StreamTextErrorEvent>());
+        },
+      );
 
       test(
         'late fullStream subscriber sees startup-timeout terminal error',
@@ -366,7 +365,9 @@ void main() {
           final result = await streamText(
             model: _SlowStartEmptyStreamModel(const Duration(milliseconds: 50)),
             prompt: 'hi',
-            timeout: const Duration(milliseconds: 10),
+            timeout: const TimeoutConfiguration(
+              step: Duration(milliseconds: 10),
+            ),
             maxRetries: 0,
           );
 
@@ -380,21 +381,23 @@ void main() {
         },
       );
 
-      test('late subscriber sees provider failure on raw and text streams',
-          () async {
-        final result = await streamText(
-          model: FakeErrorModel(StateError('boom')),
-          prompt: 'hi',
-          maxRetries: 0,
-        );
+      test(
+        'late subscriber sees provider failure on raw and text streams',
+        () async {
+          final result = await streamText(
+            model: FakeErrorModel(StateError('boom')),
+            prompt: 'hi',
+            maxRetries: 0,
+          );
 
-        await Future<void>.delayed(Duration.zero);
-        await expectLater(result.stream.toList(), throwsA(isA<StateError>()));
-        await expectLater(
-          result.textStream.toList(),
-          throwsA(isA<StateError>()),
-        );
-      });
+          await Future<void>.delayed(Duration.zero);
+          await expectLater(result.stream.toList(), throwsA(isA<StateError>()));
+          await expectLater(
+            result.textStream.toList(),
+            throwsA(isA<StateError>()),
+          );
+        },
+      );
     });
 
     // ── Multi-step streaming ───────────────────────────────────────────────
@@ -402,19 +405,19 @@ void main() {
     group('multi-step streaming', () {
       test('multi-step emits step start/finish events for each step', () async {
         final model = FakeMultiStepModel([
-          LanguageModelV3GenerateResult(
+          LanguageModelV4GenerateResult(
             content: [
-              const LanguageModelV3ToolCallPart(
+              const LanguageModelV4ToolCallPart(
                 toolCallId: 'c1',
                 toolName: 'noop',
                 input: {},
               ),
             ],
-            finishReason: LanguageModelV3FinishReason.toolCalls,
+            finishReason: LanguageModelV4FinishReason.toolCalls,
           ),
-          const LanguageModelV3GenerateResult(
-            content: [LanguageModelV3TextPart(text: 'Final answer')],
-            finishReason: LanguageModelV3FinishReason.stop,
+          const LanguageModelV4GenerateResult(
+            content: [LanguageModelV4TextPart(text: 'Final answer')],
+            finishReason: LanguageModelV4FinishReason.stop,
           ),
         ]);
 
@@ -428,7 +431,7 @@ void main() {
                 jsonSchema: const {'type': 'object'},
                 fromJson: (json) => json,
               ),
-              execute: (_, __) async => 'ok',
+              execute: (_, _) async => 'ok',
             ),
           },
         );
@@ -449,19 +452,19 @@ void main() {
 
       test('steps future resolves with all steps after completion', () async {
         final model = FakeMultiStepModel([
-          LanguageModelV3GenerateResult(
+          LanguageModelV4GenerateResult(
             content: [
-              const LanguageModelV3ToolCallPart(
+              const LanguageModelV4ToolCallPart(
                 toolCallId: 'c1',
                 toolName: 'noop',
                 input: {},
               ),
             ],
-            finishReason: LanguageModelV3FinishReason.toolCalls,
+            finishReason: LanguageModelV4FinishReason.toolCalls,
           ),
-          const LanguageModelV3GenerateResult(
-            content: [LanguageModelV3TextPart(text: 'done')],
-            finishReason: LanguageModelV3FinishReason.stop,
+          const LanguageModelV4GenerateResult(
+            content: [LanguageModelV4TextPart(text: 'done')],
+            finishReason: LanguageModelV4FinishReason.stop,
           ),
         ]);
 
@@ -475,7 +478,7 @@ void main() {
                 jsonSchema: const {'type': 'object'},
                 fromJson: (json) => json,
               ),
-              execute: (_, __) async => 'ok',
+              execute: (_, _) async => 'ok',
             ),
           },
         );
@@ -492,10 +495,9 @@ void main() {
         StreamTextFinishEvent<dynamic>? finishEvent;
         final model = FakeTextModel(
           'done',
-          usage: const LanguageModelV3Usage(
-            inputTokens: 5,
-            outputTokens: 3,
-            totalTokens: 8,
+          usage: const LanguageModelV4Usage(
+            inputTokens: LanguageModelV4InputTokenUsage(total: 5),
+            outputTokens: LanguageModelV4OutputTokenUsage(total: 3),
           ),
         );
 
@@ -508,26 +510,38 @@ void main() {
         await result.output;
         expect(finishEvent, isNotNull);
         expect(finishEvent!.text, 'done');
-        expect(finishEvent!.usage?.inputTokens, 5);
+        expect(finishEvent!.usage?.inputTokens.total, 5);
         expect(finishEvent!.steps, isNotEmpty);
       });
 
-      test('onFinish receives warnings from rawResponse', () async {
-        StreamTextFinishEvent<dynamic>? finishEvent;
-        final model = _FakeStreamModelWithWarnings('done', [
-          'provider-warning',
-        ]);
+      test(
+        'onFinish receives structured warnings from stream result',
+        () async {
+          StreamTextFinishEvent<dynamic>? finishEvent;
+          final model = _FakeStreamModelWithWarnings('done', [
+            'provider-warning',
+          ]);
 
-        final result = await streamText(
-          model: model,
-          prompt: 'hi',
-          onFinish: (event) => finishEvent = event,
-        );
+          final result = await streamText(
+            model: model,
+            prompt: 'hi',
+            onFinish: (event) => finishEvent = event,
+          );
 
-        await result.output;
-        expect(finishEvent, isNotNull);
-        expect(finishEvent!.warnings, contains('provider-warning'));
-      });
+          await result.output;
+          expect(finishEvent, isNotNull);
+          expect(
+            finishEvent!.warnings,
+            contains(
+              isA<LanguageModelV4OtherWarning>().having(
+                (warning) => warning.message,
+                'message',
+                'provider-warning',
+              ),
+            ),
+          );
+        },
+      );
     });
 
     // ── content and reasoning futures ─────────────────────────────────────
@@ -539,16 +553,16 @@ void main() {
         await result.text;
         final content = await result.content;
         expect(content, isNotEmpty);
-        expect(content.whereType<LanguageModelV3TextPart>().isNotEmpty, isTrue);
+        expect(content.whereType<LanguageModelV4TextPart>().isNotEmpty, isTrue);
       });
 
       test('reasoning future resolves with reasoning parts', () async {
         final model = FakeStreamModel([
-          const StreamPartReasoningDelta(delta: 'thinking'),
+          const StreamPartReasoningDelta(id: 'reasoning-0', delta: 'thinking'),
           const StreamPartTextStart(id: 't1'),
           const StreamPartTextDelta(id: 't1', delta: 'answer'),
           const StreamPartTextEnd(id: 't1'),
-          StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+          StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
         ]);
 
         final result = await streamText(model: model, prompt: 'hi');
@@ -561,7 +575,7 @@ void main() {
   });
 }
 
-class _ErrorAfterTextModel implements LanguageModelV3 {
+class _ErrorAfterTextModel extends LanguageModelV4 {
   const _ErrorAfterTextModel(this.error);
 
   final Object error;
@@ -573,19 +587,19 @@ class _ErrorAfterTextModel implements LanguageModelV3 {
   String get modelId => 'error-after-text-model';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async => throw UnimplementedError();
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable([
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable([
         const StreamPartTextStart(id: 'text-1'),
         const StreamPartTextDelta(id: 'text-1', delta: 'Hi'),
         const StreamPartTextEnd(id: 'text-1'),
@@ -595,7 +609,7 @@ class _ErrorAfterTextModel implements LanguageModelV3 {
   }
 }
 
-class _SlowStartEmptyStreamModel implements LanguageModelV3 {
+class _SlowStartEmptyStreamModel extends LanguageModelV4 {
   const _SlowStartEmptyStreamModel(this.delay);
 
   final Duration delay;
@@ -607,20 +621,20 @@ class _SlowStartEmptyStreamModel implements LanguageModelV3 {
   String get modelId => 'slow-start-empty-stream';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async => throw UnimplementedError();
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     await Future<void>.delayed(delay);
-    return const LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.empty(),
+    return const LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.empty(),
     );
   }
 }
@@ -647,8 +661,8 @@ Future<List<StreamTextEvent>> _collectFailingFullStream(
   return events;
 }
 
-/// A fake model that includes warnings in rawResponse so streamText can read them.
-class _FakeStreamModelWithWarnings implements LanguageModelV3 {
+/// A fake model that includes structured warnings on the stream result.
+class _FakeStreamModelWithWarnings extends LanguageModelV4 {
   _FakeStreamModelWithWarnings(this.text, this.warnings);
 
   final String text;
@@ -661,33 +675,37 @@ class _FakeStreamModelWithWarnings implements LanguageModelV3 {
   String get modelId => 'fake-warnings-model';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3GenerateResult(
-      content: [LanguageModelV3TextPart(text: text)],
-      finishReason: LanguageModelV3FinishReason.stop,
-      warnings: warnings,
+    return LanguageModelV4GenerateResult(
+      content: [LanguageModelV4TextPart(text: text)],
+      finishReason: LanguageModelV4FinishReason.stop,
+      warnings: structuredWarnings,
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3StreamResult(
+    return LanguageModelV4StreamResult(
       stream: simulateReadableStream(
         parts: [
           StreamPartTextStart(id: 'text-1'),
           StreamPartTextDelta(id: 'text-1', delta: text),
           StreamPartTextEnd(id: 'text-1'),
-          StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+          StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
         ],
       ),
-      rawResponse: <Object?, Object?>{'warnings': warnings},
+      warnings: structuredWarnings,
     );
   }
+
+  List<LanguageModelV4Warning> get structuredWarnings => warnings
+      .map((warning) => LanguageModelV4OtherWarning(message: warning))
+      .toList(growable: false);
 }

@@ -7,6 +7,6 @@
 ///
 /// final model = groq('llama3-8b-8192');
 /// ```
-library ai_sdk_groq;
+library;
 
 export 'src/groq_provider.dart';

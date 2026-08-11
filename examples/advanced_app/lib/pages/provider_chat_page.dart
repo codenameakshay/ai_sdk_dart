@@ -63,7 +63,7 @@ class _ProviderChatPageState extends State<ProviderChatPage> {
         widget.controller ??
         (_ownedChatController = ChatController(
           onError: (err) => _showSnackBar('Error: $err'),
-        ))!;
+        ));
   }
 
   ToolLoopAgent _buildAgent(String modelId) => ToolLoopAgent(

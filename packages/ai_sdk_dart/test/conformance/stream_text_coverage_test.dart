@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
@@ -23,7 +24,7 @@ void main() {
       const StreamPartTextStart(id: 't1'),
       for (final ch in text.split('')) StreamPartTextDelta(id: 't1', delta: ch),
       const StreamPartTextEnd(id: 't1'),
-      StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+      StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
     ]);
   }
 
@@ -112,6 +113,31 @@ void main() {
       await expectation;
     });
 
+    test(
+      'partialOutputStream and elementStream replay terminal parse errors',
+      () async {
+        final objectResult = await streamText<Map<String, dynamic>>(
+          model: chunkedText('not json at all'),
+          prompt: 'json',
+          output: Output.object(schema: objectSchema()),
+        );
+        await expectLater(
+          objectResult.partialOutputStream.toList(),
+          throwsA(isA<AiNoObjectGeneratedError>()),
+        );
+
+        final arrayResult = await streamText<List<dynamic>>(
+          model: chunkedText('[{"ok":1}, undefined]'),
+          prompt: 'json',
+          output: Output.array(element: objectSchema()),
+        );
+        await expectLater(
+          arrayResult.elementStream.toList(),
+          throwsA(isA<AiNoObjectGeneratedError>()),
+        );
+      },
+    );
+
     test('system instruction is combined with object output schema', () async {
       final model = _CapturingStreamModel('{"a":1}');
       final result = await streamText<Map<String, dynamic>>(
@@ -152,6 +178,53 @@ void main() {
   });
 
   group('streamText tool execution', () {
+    test(
+      'model-emitted tool results and approval requests are preserved',
+      () async {
+        final toolCall = LanguageModelV4ToolCallPart(
+          toolCallId: 'tc-1',
+          toolName: 'echo',
+          input: const {'msg': 'hi'},
+        );
+        final toolResult = LanguageModelV4ToolResultPart(
+          toolCallId: 'tc-1',
+          toolName: 'echo',
+          output: const ToolResultOutputText('echoed:hi'),
+        );
+        final approvalRequest = LanguageModelV4ToolApprovalRequestPart(
+          approvalId: 'approval-1',
+          toolCall: toolCall,
+        );
+        final chunks = <StreamTextChunk>[];
+        final finishes = <StreamTextFinishEvent<String>>[];
+        final result = await streamText<String>(
+          model: FakeStreamModel([
+            StreamPartToolCall(toolCall: toolCall),
+            StreamPartToolResult(toolResult: toolResult),
+            StreamPartToolApprovalRequest(approvalRequest: approvalRequest),
+            StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
+          ]),
+          prompt: 'go',
+          tools: {'echo': echoTool((_) => 'ok')},
+          onChunk: chunks.add,
+          onFinish: finishes.add,
+        );
+
+        await result.fullStream.toList();
+        expect(await result.toolResults, [toolResult]);
+        expect(await result.content, containsAll([toolCall, toolResult]));
+        expect(finishes.single.steps.single.toolApprovalRequests, [
+          approvalRequest,
+        ]);
+        expect(
+          chunks.whereType<StreamTextToolResultChunk>().map(
+            (chunk) => chunk.toolResult,
+          ),
+          contains(toolResult),
+        );
+      },
+    );
+
     test('executes a tool call and emits a tool-result event', () async {
       final model = _StreamToolThenText(
         toolName: 'echo',
@@ -189,7 +262,7 @@ void main() {
         tools: {
           'stream': tool<Map<String, dynamic>, Object?>(
             inputSchema: objectSchema(),
-            execute: (_, __) async => Stream.fromIterable(['a', 'b', 'c']),
+            execute: (_, _) async => Stream.fromIterable(['a', 'b', 'c']),
           ),
         },
       );
@@ -297,7 +370,7 @@ void main() {
           'danger': echoTool((_) => 'executed', needsApproval: (_) => true),
         },
         toolApprovalResponses: const [
-          LanguageModelV3ToolApprovalResponse(
+          LanguageModelV4ToolApprovalResponse(
             approvalId: 'approval_call-x',
             approved: true,
           ),
@@ -326,7 +399,7 @@ void main() {
           'danger': echoTool((_) => 'executed', needsApproval: (_) => true),
         },
         toolApprovalResponses: const [
-          LanguageModelV3ToolApprovalResponse(
+          LanguageModelV4ToolApprovalResponse(
             approvalId: 'approval_call-y',
             approved: false,
             reason: 'nope',
@@ -500,9 +573,9 @@ void main() {
         prompt: 'orig',
         prepareStep: (ctx) async => GenerateTextPrepareStepResult(
           messages: [
-            LanguageModelV3Message(
-              role: LanguageModelV3Role.user,
-              content: [const LanguageModelV3TextPart(text: 'overridden')],
+            LanguageModelV4Message(
+              role: LanguageModelV4Role.user,
+              content: [const LanguageModelV4TextPart(text: 'overridden')],
             ),
           ],
         ),
@@ -510,18 +583,18 @@ void main() {
       await result.fullStream.toList();
       final firstMsgPart =
           model.lastOptions!.prompt.messages.first.content.first;
-      expect((firstMsgPart as LanguageModelV3TextPart).text, 'overridden');
+      expect((firstMsgPart as LanguageModelV4TextPart).text, 'overridden');
     });
   });
 
   group('streamText source and file parts', () {
     test('emits source and file events and resolves futures', () async {
-      const source = LanguageModelV3SourcePart(
+      const source = LanguageModelV4SourcePart(
         id: 's1',
         url: 'https://example.com',
         title: 'Example',
       );
-      const file = LanguageModelV3FilePart(
+      const file = LanguageModelV4FilePart(
         mediaType: 'text/plain',
         data: DataContentBase64('aGk='),
       );
@@ -531,7 +604,7 @@ void main() {
         const StreamPartTextEnd(id: 't1'),
         const StreamPartSource(source: source),
         StreamPartFile(file: file),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
       ]);
       final result = await streamText(model: model, prompt: 'go');
       final events = await result.fullStream.toList();
@@ -545,12 +618,12 @@ void main() {
   group('streamText reasoning close mid-stream', () {
     test('reasoning followed by text closes the reasoning part', () async {
       final model = FakeStreamModel([
-        const StreamPartReasoningDelta(delta: 'first '),
-        const StreamPartReasoningDelta(delta: 'thought'),
+        const StreamPartReasoningDelta(id: 'reasoning-0', delta: 'first '),
+        const StreamPartReasoningDelta(id: 'reasoning-0', delta: 'thought'),
         const StreamPartTextStart(id: 't1'),
         const StreamPartTextDelta(id: 't1', delta: 'answer'),
         const StreamPartTextEnd(id: 't1'),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
       ]);
       final result = await streamText(model: model, prompt: 'go');
       final events = await result.fullStream.toList();
@@ -600,9 +673,94 @@ void main() {
       final result = await streamText(
         model: model,
         prompt: 'go',
-        timeout: const Duration(milliseconds: 10),
+        timeout: const TimeoutConfiguration(step: Duration(milliseconds: 10)),
         maxRetries: 0,
       );
+      final outputExpectation = expectLater(
+        result.output,
+        throwsA(isA<TimeoutException>()),
+      );
+      await expectLater(
+        result.fullStream.toList(),
+        throwsA(isA<TimeoutException>()),
+      );
+      await outputExpectation;
+    });
+
+    test(
+      'timeout configuration is passed into streaming tool execution',
+      () async {
+        final model = _StreamToolThenText(
+          toolName: 'echo',
+          input: const {},
+          finalText: 'done',
+        );
+        final result = await streamText(
+          model: model,
+          prompt: 'go',
+          maxSteps: 3,
+          timeout: const TimeoutConfiguration(
+            total: Duration(seconds: 1),
+            tool: Duration(milliseconds: 100),
+          ),
+          tools: {'echo': echoTool((_) => 'ok')},
+        );
+        expect(await result.text, 'done');
+      },
+    );
+
+    test('tool future timeout surfaces through streamText', () async {
+      final model = _StreamToolThenText(
+        toolName: 'slow',
+        input: const {},
+        finalText: 'never',
+      );
+      final result = await streamText(
+        model: model,
+        prompt: 'go',
+        maxSteps: 3,
+        timeout: const TimeoutConfiguration(tool: Duration(milliseconds: 10)),
+        tools: {
+          'slow': tool<Map<String, dynamic>, Object?>(
+            inputSchema: objectSchema(),
+            execute: (_, _) async {
+              await Future<void>.delayed(const Duration(milliseconds: 50));
+              return 'late';
+            },
+          ),
+        },
+      );
+
+      final outputExpectation = expectLater(
+        result.output,
+        throwsA(isA<TimeoutException>()),
+      );
+      await expectLater(
+        result.fullStream.toList(),
+        throwsA(isA<TimeoutException>()),
+      );
+      await outputExpectation;
+    });
+
+    test('tool stream timeout surfaces through streamText', () async {
+      final model = _StreamToolThenText(
+        toolName: 'slow-stream',
+        input: const {},
+        finalText: 'never',
+      );
+      final result = await streamText(
+        model: model,
+        prompt: 'go',
+        maxSteps: 3,
+        timeout: const TimeoutConfiguration(tool: Duration(milliseconds: 10)),
+        tools: {
+          'slow-stream': tool<Map<String, dynamic>, Object?>(
+            inputSchema: objectSchema(),
+            execute: (_, _) async => _DelayedToolOutputStream(),
+          ),
+        },
+      );
+
       final outputExpectation = expectLater(
         result.output,
         throwsA(isA<TimeoutException>()),
@@ -621,10 +779,9 @@ void main() {
         toolName: 'echo',
         input: const {},
         finalText: 'done',
-        stepUsage: const LanguageModelV3Usage(
-          inputTokens: 4,
-          outputTokens: 2,
-          totalTokens: 6,
+        stepUsage: const LanguageModelV4Usage(
+          inputTokens: LanguageModelV4InputTokenUsage(total: 4),
+          outputTokens: LanguageModelV4OutputTokenUsage(total: 2),
         ),
       );
       final result = await streamText(
@@ -636,9 +793,12 @@ void main() {
       await result.fullStream.toList();
       final total = await result.totalUsage;
       // Two steps each contributing 4/2/6.
-      expect(total?.inputTokens, 8);
-      expect(total?.outputTokens, 4);
-      expect(total?.totalTokens, 12);
+      expect(total?.inputTokens.total, 8);
+      expect(total?.outputTokens.total, 4);
+      expect(
+        (total?.inputTokens.total ?? 0) + (total?.outputTokens.total ?? 0),
+        12,
+      );
     });
 
     test('mid-stream usage event is emitted', () async {
@@ -647,15 +807,14 @@ void main() {
         const StreamPartTextDelta(id: 't1', delta: 'hi'),
         const StreamPartTextEnd(id: 't1'),
         StreamPartFinish(
-          finishReason: LanguageModelV3FinishReason.stop,
-          usage: const LanguageModelV3Usage(
-            inputTokens: 1,
-            outputTokens: 1,
-            totalTokens: 2,
+          finishReason: LanguageModelV4FinishReason.stop,
+          usage: const LanguageModelV4Usage(
+            inputTokens: LanguageModelV4InputTokenUsage(total: 1),
+            outputTokens: LanguageModelV4OutputTokenUsage(total: 1),
           ),
         ),
       ]);
-      final usageEvents = <LanguageModelV3Usage>[];
+      final usageEvents = <LanguageModelV4Usage>[];
       final result = await streamText(
         model: model,
         prompt: 'go',
@@ -796,47 +955,47 @@ class _Unencodable {
 // ---------------------------------------------------------------------------
 
 /// Captures the last call options and returns a fixed text stream.
-class _CapturingStreamModel implements LanguageModelV3 {
+class _CapturingStreamModel extends LanguageModelV4 {
   _CapturingStreamModel(this.text);
   final String text;
-  LanguageModelV3CallOptions? lastOptions;
+  LanguageModelV4CallOptions? lastOptions;
 
   @override
   String get provider => 'fake';
   @override
   String get modelId => 'capturing-stream';
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     lastOptions = options;
-    return LanguageModelV3GenerateResult(
-      content: [LanguageModelV3TextPart(text: text)],
-      finishReason: LanguageModelV3FinishReason.stop,
+    return LanguageModelV4GenerateResult(
+      content: [LanguageModelV4TextPart(text: text)],
+      finishReason: LanguageModelV4FinishReason.stop,
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     lastOptions = options;
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable([
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable([
         const StreamPartTextStart(id: 't1'),
         StreamPartTextDelta(id: 't1', delta: text),
         const StreamPartTextEnd(id: 't1'),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
       ]),
     );
   }
 }
 
 /// First call streams a single tool call; the second call streams [finalText].
-class _StreamToolThenText implements LanguageModelV3 {
+class _StreamToolThenText extends LanguageModelV4 {
   _StreamToolThenText({
     required this.toolName,
     required this.input,
@@ -847,7 +1006,7 @@ class _StreamToolThenText implements LanguageModelV3 {
   final String toolName;
   final Map<String, dynamic> input;
   final String finalText;
-  final LanguageModelV3Usage? stepUsage;
+  final LanguageModelV4Usage? stepUsage;
   int _calls = 0;
 
   @override
@@ -855,53 +1014,52 @@ class _StreamToolThenText implements LanguageModelV3 {
   @override
   String get modelId => 'tool-then-text';
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async => throw UnimplementedError();
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     final parts = _calls == 0
-        ? <LanguageModelV3StreamPart>[
-            StreamPartToolCallStart(toolCallId: 'tc-1', toolName: toolName),
-            StreamPartToolCallDelta(
-              toolCallId: 'tc-1',
-              toolName: toolName,
-              argsTextDelta: '{}',
-            ),
-            StreamPartToolCallEnd(
-              toolCallId: 'tc-1',
-              toolName: toolName,
-              input: input,
+        ? <LanguageModelV4StreamPart>[
+            StreamPartToolInputStart(id: 'tc-1', toolName: toolName),
+            StreamPartToolInputDelta(id: 'tc-1', delta: jsonEncode(input)),
+            const StreamPartToolInputEnd(id: 'tc-1'),
+            StreamPartToolCall(
+              toolCall: LanguageModelV4ToolCallPart(
+                toolCallId: 'tc-1',
+                toolName: toolName,
+                input: input,
+              ),
             ),
             StreamPartFinish(
-              finishReason: LanguageModelV3FinishReason.toolCalls,
-              usage: stepUsage,
+              finishReason: LanguageModelV4FinishReason.toolCalls,
+              usage: stepUsage ?? const LanguageModelV4Usage(),
             ),
           ]
-        : <LanguageModelV3StreamPart>[
+        : <LanguageModelV4StreamPart>[
             const StreamPartTextStart(id: 't1'),
             StreamPartTextDelta(id: 't1', delta: finalText),
             const StreamPartTextEnd(id: 't1'),
             StreamPartFinish(
-              finishReason: LanguageModelV3FinishReason.stop,
-              usage: stepUsage,
+              finishReason: LanguageModelV4FinishReason.stop,
+              usage: stepUsage ?? const LanguageModelV4Usage(),
             ),
           ];
     _calls++;
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable(parts),
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable(parts),
     );
   }
 }
 
 /// Streams exactly one tool call (no follow-up text step).
-class _StreamSingleToolModel implements LanguageModelV3 {
+class _StreamSingleToolModel extends LanguageModelV4 {
   _StreamSingleToolModel({
     required this.toolName,
     required this.input,
@@ -917,38 +1075,37 @@ class _StreamSingleToolModel implements LanguageModelV3 {
   @override
   String get modelId => 'single-tool';
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async => throw UnimplementedError();
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable([
-        StreamPartToolCallStart(toolCallId: toolCallId, toolName: toolName),
-        StreamPartToolCallDelta(
-          toolCallId: toolCallId,
-          toolName: toolName,
-          argsTextDelta: '{}',
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable([
+        StreamPartToolInputStart(id: toolCallId, toolName: toolName),
+        StreamPartToolInputDelta(id: toolCallId, delta: '{}'),
+        StreamPartToolInputEnd(id: toolCallId),
+        StreamPartToolCall(
+          toolCall: LanguageModelV4ToolCallPart(
+            toolCallId: toolCallId,
+            toolName: toolName,
+            input: input,
+          ),
         ),
-        StreamPartToolCallEnd(
-          toolCallId: toolCallId,
-          toolName: toolName,
-          input: input,
-        ),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.toolCalls),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.toolCalls),
       ]),
     );
   }
 }
 
 /// Fails [failuresBeforeSuccess] times before streaming "recovered".
-class _FlakyStreamModel implements LanguageModelV3 {
+class _FlakyStreamModel extends LanguageModelV4 {
   _FlakyStreamModel({required this.failuresBeforeSuccess});
   final int failuresBeforeSuccess;
   int attempts = 0;
@@ -958,16 +1115,16 @@ class _FlakyStreamModel implements LanguageModelV3 {
   @override
   String get modelId => 'flaky-stream';
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async => throw UnimplementedError();
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     attempts++;
     if (attempts <= failuresBeforeSuccess) {
@@ -977,19 +1134,19 @@ class _FlakyStreamModel implements LanguageModelV3 {
         isRetryable: true,
       );
     }
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable([
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable([
         const StreamPartTextStart(id: 't1'),
         const StreamPartTextDelta(id: 't1', delta: 'recovered'),
         const StreamPartTextEnd(id: 't1'),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
       ]),
     );
   }
 }
 
 /// Delays before returning the stream so a timeout can trigger.
-class _SlowStartStreamModel implements LanguageModelV3 {
+class _SlowStartStreamModel extends LanguageModelV4 {
   _SlowStartStreamModel(this.delay);
   final Duration delay;
 
@@ -998,20 +1155,44 @@ class _SlowStartStreamModel implements LanguageModelV3 {
   @override
   String get modelId => 'slow-start';
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async => throw UnimplementedError();
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     await Future<void>.delayed(delay);
-    return const LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.empty(),
+    return const LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.empty(),
+    );
+  }
+}
+
+class _DelayedToolOutputStream extends Stream<Object?> {
+  @override
+  StreamSubscription<Object?> listen(
+    void Function(Object? event)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) {
+    final controller = StreamController<Object?>();
+    unawaited(() async {
+      controller.add('first');
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      controller.add('second');
+      await controller.close();
+    }());
+    return controller.stream.listen(
+      onData,
+      onError: onError,
+      onDone: onDone,
+      cancelOnError: cancelOnError,
     );
   }
 }

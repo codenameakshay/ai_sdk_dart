@@ -15,7 +15,7 @@ void main() {
       );
 
       expect(result.text, fixture['expected']['text']);
-      expect(result.finishReason, LanguageModelV3FinishReason.stop);
+      expect(result.finishReason, LanguageModelV4FinishReason.stop);
     });
 
     test('structured-output fixture', () async {
@@ -114,7 +114,7 @@ String _eventName(StreamTextEvent event) {
   };
 }
 
-class _FixtureTextModel implements LanguageModelV3 {
+class _FixtureTextModel extends LanguageModelV4 {
   @override
   String get modelId => 'fixture-text';
 
@@ -122,31 +122,31 @@ class _FixtureTextModel implements LanguageModelV3 {
   String get provider => 'fixture';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
-    return const LanguageModelV3GenerateResult(
+    return const LanguageModelV4GenerateResult(
       content: [
-        LanguageModelV3TextPart(
+        LanguageModelV4TextPart(
           text: 'The weather in Paris is mild and cloudy.',
         ),
       ],
-      finishReason: LanguageModelV3FinishReason.stop,
+      finishReason: LanguageModelV4FinishReason.stop,
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 }
 
-class _FixtureStructuredModel implements LanguageModelV3 {
+class _FixtureStructuredModel extends LanguageModelV4 {
   @override
   String get modelId => 'fixture-structured';
 
@@ -154,27 +154,27 @@ class _FixtureStructuredModel implements LanguageModelV3 {
   String get provider => 'fixture';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
-    return const LanguageModelV3GenerateResult(
-      content: [LanguageModelV3TextPart(text: '{"city":"Paris","tempC":21}')],
-      finishReason: LanguageModelV3FinishReason.stop,
+    return const LanguageModelV4GenerateResult(
+      content: [LanguageModelV4TextPart(text: '{"city":"Paris","tempC":21}')],
+      finishReason: LanguageModelV4FinishReason.stop,
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 }
 
-class _FixtureToolLoopModel implements LanguageModelV3 {
+class _FixtureToolLoopModel extends LanguageModelV4 {
   @override
   String get modelId => 'fixture-tool-loop';
 
@@ -182,44 +182,44 @@ class _FixtureToolLoopModel implements LanguageModelV3 {
   String get provider => 'fixture';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     final hasToolResult = options.prompt.messages.any(
       (message) =>
-          message.role == LanguageModelV3Role.tool &&
-          message.content.whereType<LanguageModelV3ToolResultPart>().isNotEmpty,
+          message.role == LanguageModelV4Role.tool &&
+          message.content.whereType<LanguageModelV4ToolResultPart>().isNotEmpty,
     );
     if (!hasToolResult) {
-      return const LanguageModelV3GenerateResult(
+      return const LanguageModelV4GenerateResult(
         content: [
-          LanguageModelV3ToolCallPart(
+          LanguageModelV4ToolCallPart(
             toolCallId: 'fixture_call_1',
             toolName: 'weather',
             input: {'city': 'San Francisco'},
           ),
         ],
-        finishReason: LanguageModelV3FinishReason.toolCalls,
+        finishReason: LanguageModelV4FinishReason.toolCalls,
       );
     }
-    return const LanguageModelV3GenerateResult(
-      content: [LanguageModelV3TextPart(text: 'tool summary response')],
-      finishReason: LanguageModelV3FinishReason.stop,
+    return const LanguageModelV4GenerateResult(
+      content: [LanguageModelV4TextPart(text: 'tool summary response')],
+      finishReason: LanguageModelV4FinishReason.stop,
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 }
 
-class _FixtureStreamModel implements LanguageModelV3 {
+class _FixtureStreamModel extends LanguageModelV4 {
   @override
   String get modelId => 'fixture-stream';
 
@@ -227,53 +227,57 @@ class _FixtureStreamModel implements LanguageModelV3 {
   String get provider => 'fixture';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     final hasToolResult = options.prompt.messages.any(
       (message) =>
-          message.role == LanguageModelV3Role.tool &&
-          message.content.whereType<LanguageModelV3ToolResultPart>().isNotEmpty,
+          message.role == LanguageModelV4Role.tool &&
+          message.content.whereType<LanguageModelV4ToolResultPart>().isNotEmpty,
     );
     if (hasToolResult) {
-      return LanguageModelV3StreamResult(
-        stream: Stream<LanguageModelV3StreamPart>.fromIterable(const [
+      return LanguageModelV4StreamResult(
+        stream: Stream<LanguageModelV4StreamPart>.fromIterable(const [
           StreamPartTextStart(id: 'text-1'),
           StreamPartTextDelta(id: 'text-1', delta: 'Done'),
           StreamPartTextEnd(id: 'text-1'),
-          StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+          StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
         ]),
       );
     }
 
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable(const [
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable(const [
         StreamPartTextStart(id: 'text-0'),
         StreamPartTextDelta(id: 'text-0', delta: 'Hello'),
         StreamPartTextEnd(id: 'text-0'),
-        StreamPartReasoningDelta(delta: 'Because stream fixture'),
-        StreamPartToolCallStart(toolCallId: 'call_1', toolName: 'weather'),
-        StreamPartToolCallDelta(
-          toolCallId: 'call_1',
-          toolName: 'weather',
-          argsTextDelta: '{"city":"Paris"}',
+        StreamPartReasoningStart(id: 'reasoning-0'),
+        StreamPartReasoningDelta(
+          id: 'reasoning-0',
+          delta: 'Because stream fixture',
         ),
-        StreamPartToolCallEnd(
-          toolCallId: 'call_1',
-          toolName: 'weather',
-          input: {'city': 'Paris'},
+        StreamPartReasoningEnd(id: 'reasoning-0'),
+        StreamPartToolInputStart(id: 'call_1', toolName: 'weather'),
+        StreamPartToolInputDelta(id: 'call_1', delta: '{"city":"Paris"}'),
+        StreamPartToolInputEnd(id: 'call_1'),
+        StreamPartToolCall(
+          toolCall: LanguageModelV4ToolCallPart(
+            toolCallId: 'call_1',
+            toolName: 'weather',
+            input: {'city': 'Paris'},
+          ),
         ),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.toolCalls),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.toolCalls),
       ]),
     );
   }

@@ -1,3 +1,11 @@
+## Unreleased
+
+- Migrated Cohere streaming to explicit V4 text and tool-input lifecycle parts
+  with one complete tool call and reliable message-end finalization.
+- Added abort-signal cancellation for in-flight requests.
+
+---
+
 ## 1.2.0
 
 - Added **tool use** and **multimodal image input** to the Cohere v2 implementation. Cohere uses a

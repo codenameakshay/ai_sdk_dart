@@ -20,7 +20,7 @@ void main() {
       final model = provider('my-gpt4-deployment');
       expect(model.provider, 'azure');
       expect(model.modelId, 'my-gpt4-deployment');
-      expect(model.specificationVersion, 'v3');
+      expect(model.specificationVersion, 'v4');
     });
 
     test('creates embedding model with correct provider/spec/modelId', () {
@@ -56,14 +56,14 @@ void main() {
     });
   });
 
-  group('LanguageModelV3 interface', () {
-    test('language model implements LanguageModelV3', () {
+  group('LanguageModelV4 interface', () {
+    test('language model extends LanguageModelV4', () {
       final provider = AzureOpenAIProvider(
         endpoint: 'https://my-resource.openai.azure.com',
         apiKey: 'key',
       );
       final model = provider('gpt-4');
-      expect(model, isA<LanguageModelV3>());
+      expect(model, isA<LanguageModelV4>());
     });
   });
 
@@ -92,10 +92,10 @@ void main() {
         apiKey: 'key',
       )('gpt-4-deployment');
       await model.doGenerate(
-        LanguageModelV3CallOptions(
+        LanguageModelV4CallOptions(
           prompt: _userPrompt('weather'),
           tools: const [
-            LanguageModelV3FunctionTool(
+            LanguageModelV4FunctionTool(
               name: 'weather',
               inputSchema: {'type': 'object'},
             ),
@@ -122,7 +122,7 @@ void main() {
         apiKey: 'key',
       )('gpt-4o-deployment');
       await model.doGenerate(
-        LanguageModelV3CallOptions(prompt: _imagePrompt()),
+        LanguageModelV4CallOptions(prompt: _imagePrompt()),
       );
 
       final messages = (captured['messages'] as List)
@@ -151,7 +151,7 @@ void main() {
         apiVersion: '2024-05-01-preview',
       )('gpt-4-deployment');
       await model.doGenerate(
-        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
       );
 
       expect(apiKeyHeader, 'secret-key');
@@ -174,7 +174,7 @@ void main() {
           apiKey: 'secret-key',
         )('gpt-4-deployment');
         await model.doGenerate(
-          LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
         );
 
         expect(path, '/openai/deployments/gpt-4-deployment/chat/completions');
@@ -199,11 +199,11 @@ void main() {
 
         await provider(
           'gpt-4-deployment',
-        ).doGenerate(LanguageModelV3CallOptions(prompt: _userPrompt('first')));
+        ).doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('first')));
         token = 'second-key';
         await provider(
           'gpt-4-deployment',
-        ).doGenerate(LanguageModelV3CallOptions(prompt: _userPrompt('second')));
+        ).doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('second')));
 
         expect(apiKeys, ['first-key', 'second-key']);
       },
@@ -224,7 +224,7 @@ void main() {
         ownedProvider.dispose();
         await expectLater(
           ownedProvider('gpt-4-deployment').doGenerate(
-            LanguageModelV3CallOptions(prompt: _userPrompt('after-dispose')),
+            LanguageModelV4CallOptions(prompt: _userPrompt('after-dispose')),
           ),
           throwsA(anything),
         );
@@ -239,7 +239,7 @@ void main() {
 
         injectedProvider.dispose(force: false);
         await injectedProvider('gpt-4-deployment').doGenerate(
-          LanguageModelV3CallOptions(prompt: _userPrompt('still-open')),
+          LanguageModelV4CallOptions(prompt: _userPrompt('still-open')),
         );
 
         expect(adapter.closeCount, 0);
@@ -250,7 +250,7 @@ void main() {
     );
 
     test(
-      'response_format json_schema is serialized from outputSchema',
+      'response_format json_schema is serialized from a JSON response format',
       () async {
         late Map<String, dynamic> captured;
         final server = await _TestServer.start((request) async {
@@ -264,9 +264,11 @@ void main() {
           apiKey: 'key',
         )('gpt-4o-deployment');
         await model.doGenerate(
-          LanguageModelV3CallOptions(
+          LanguageModelV4CallOptions(
             prompt: _userPrompt('weather'),
-            outputSchema: const {'type': 'object'},
+            responseFormat: const LanguageModelV4JsonResponseFormat(
+              schema: {'type': 'object'},
+            ),
           ),
         );
 
@@ -435,22 +437,22 @@ void main() {
   });
 }
 
-LanguageModelV3Prompt _userPrompt(String text) => LanguageModelV3Prompt(
+LanguageModelV4Prompt _userPrompt(String text) => LanguageModelV4Prompt(
   messages: [
-    LanguageModelV3Message(
-      role: LanguageModelV3Role.user,
-      content: [LanguageModelV3TextPart(text: text)],
+    LanguageModelV4Message(
+      role: LanguageModelV4Role.user,
+      content: [LanguageModelV4TextPart(text: text)],
     ),
   ],
 );
 
-LanguageModelV3Prompt _imagePrompt() => LanguageModelV3Prompt(
+LanguageModelV4Prompt _imagePrompt() => LanguageModelV4Prompt(
   messages: [
-    LanguageModelV3Message(
-      role: LanguageModelV3Role.user,
+    LanguageModelV4Message(
+      role: LanguageModelV4Role.user,
       content: [
-        LanguageModelV3TextPart(text: 'describe'),
-        LanguageModelV3ImagePart(
+        LanguageModelV4TextPart(text: 'describe'),
+        LanguageModelV4ImagePart(
           image: DataContentBytes(Uint8List.fromList(utf8.encode('img'))),
           mediaType: 'image/png',
         ),

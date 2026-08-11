@@ -1,5 +1,8 @@
 ## Unreleased
 
+- Migrated chat language models to the V4 provider contract and added
+  provider-neutral reasoning controls, structured response formats, nested
+  usage, and in-flight request cancellation through the shared base.
 - **Fixed:** streaming and non-streaming reasoning/thinking is now surfaced
   (via the shared `ai_sdk_openai_compatible` base). When an OpenAI-compatible
   endpoint returns reasoning deltas (`reasoning_content` / `reasoning` /

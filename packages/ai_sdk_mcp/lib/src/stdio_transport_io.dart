@@ -25,6 +25,7 @@ class StdioMCPTransport implements MCPTransport {
 
   static const _requestTimeout = Duration(seconds: 30);
   static const _maxStderrChars = 4096;
+  static const _maxBufferedFrameChars = 1024 * 1024;
 
   final String command;
   final List<String> args;
@@ -89,6 +90,23 @@ class StdioMCPTransport implements MCPTransport {
   void _handleLine(String line) {
     if (line.trim().isEmpty) return;
     _buffer.write(line);
+    if (_buffer.length > _maxBufferedFrameChars) {
+      _terminateImmediately(
+        MCPException(
+          'Stdio MCP stdout frame exceeded $_maxBufferedFrameChars '
+          'characters without forming valid JSON',
+        ),
+        killProcess: true,
+      );
+      unawaited(
+        _cancelSubscriptions().then((_) async {
+          if (!_notifications.isClosed) {
+            await _notifications.close();
+          }
+        }),
+      );
+      return;
+    }
     try {
       final json = jsonDecode(_buffer.toString());
       _buffer.clear();
@@ -174,6 +192,12 @@ class StdioMCPTransport implements MCPTransport {
     MCPException error, {
     bool killProcess = false,
   }) async {
+    _terminateImmediately(error, killProcess: killProcess);
+    await _cancelSubscriptions();
+    if (!_notifications.isClosed) await _notifications.close();
+  }
+
+  void _terminateImmediately(MCPException error, {bool killProcess = false}) {
     _terminalError ??= error;
     _closed = true;
     _failAllPending(_terminalError!);
@@ -184,8 +208,6 @@ class StdioMCPTransport implements MCPTransport {
       _safeCloseStdin(process);
       _safeKill(process);
     }
-    await _cancelSubscriptions();
-    if (!_notifications.isClosed) await _notifications.close();
   }
 
   void _safeCloseStdin(Process process) {

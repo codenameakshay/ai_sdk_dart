@@ -13,12 +13,14 @@
     "tool-input-start",
     "tool-input-delta",
     "tool-input-end",
+    "usage",
     "tool-result",
     "finish-step",
     "start-step",
     "text-start",
     "text-delta",
     "text-end",
+    "usage",
     "finish-step",
     "finish"
   ]

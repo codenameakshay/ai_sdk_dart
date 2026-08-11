@@ -45,7 +45,7 @@ class ObjectStreamController<T> extends ChangeNotifier {
 
   /// Model used by [submit]. Required only when calling [submit];
   /// [bind] works without it.
-  final LanguageModelV3? model;
+  final LanguageModelV4? model;
 
   /// Schema describing the structured output for [submit]. Required only when
   /// calling [submit]; [bind] works without it.

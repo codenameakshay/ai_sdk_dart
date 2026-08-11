@@ -67,5 +67,20 @@ void main() {
 
       expect(notifications, 0);
     });
+
+    test('notifyListeners delegates to the immediate path', () {
+      final scheduler = FakeFrameNotificationScheduler();
+      final notifier = FrameNotifier(scheduler: scheduler);
+      var notifications = 0;
+      notifier.addListener(() {
+        notifications++;
+      });
+
+      notifier.notifyListeners();
+
+      expect(notifications, 1);
+      expect(scheduler.pendingCallbackCount, 0);
+      notifier.dispose();
+    });
   });
 }

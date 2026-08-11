@@ -49,10 +49,10 @@ void main() {
 
     group('usage aggregation', () {
       test('returns usage from model', () async {
-        final model = FakeEmbeddingModel(
-          [0.1, 0.2],
-          usage: const EmbeddingModelV2Usage(tokens: 6),
-        );
+        final model = FakeEmbeddingModel([
+          0.1,
+          0.2,
+        ], usage: const EmbeddingModelV2Usage(tokens: 6));
         final result = await embedMany(model: model, values: ['a', 'b', 'c']);
         expect(result.usage, isNotNull);
         expect(result.usage!.tokens, 6);
@@ -96,11 +96,7 @@ void main() {
 
       test('maxParallelCalls >= values.length behaves like null', () async {
         final model = _CountingEmbeddingModel([0.1, 0.2]);
-        await embedMany(
-          model: model,
-          values: ['a', 'b'],
-          maxParallelCalls: 10,
-        );
+        await embedMany(model: model, values: ['a', 'b'], maxParallelCalls: 10);
         expect(model.callCount, 1);
       });
 

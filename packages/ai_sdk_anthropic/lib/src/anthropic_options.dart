@@ -1,6 +1,6 @@
 /// Typed provider options for Anthropic language models.
 ///
-/// Pass the result of [toMap] in [LanguageModelV3CallOptions.providerOptions]
+/// Pass the result of [toMap] in [LanguageModelV4CallOptions.providerOptions]
 /// under the `'anthropic'` key:
 ///
 /// ```dart
@@ -79,7 +79,5 @@ class AnthropicLanguageModelOptions {
   final AnthropicThinkingOptions? thinking;
 
   /// Serialises this object to a map for use in [providerOptions].
-  Map<String, dynamic> toMap() => {
-    if (thinking != null) ...thinking!.toMap(),
-  };
+  Map<String, dynamic> toMap() => {if (thinking != null) ...thinking!.toMap()};
 }

@@ -1,3 +1,11 @@
+## Unreleased
+
+- Migrated Mistral chat models to the shared V4 language-model contract,
+  including unified tools, response formats, lifecycle metadata, and nested
+  usage.
+
+---
+
 ## 1.2.0
 
 - Rebuilt on the shared **`ai_sdk_openai_compatible`** base; Mistral models now get real

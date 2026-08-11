@@ -41,7 +41,7 @@ class StreamObjectResult<T> {
   final Stream<T> stream;
   final Stream<T> partialObjectStream;
   final Stream<List<StreamObjectPatchOperation>> patchStream;
-  final Stream<LanguageModelV3StreamPart> rawStream;
+  final Stream<LanguageModelV4StreamPart> rawStream;
   final Stream<String> textStream;
   final Future<T> object;
 }
@@ -64,28 +64,28 @@ class StreamObjectResult<T> {
 /// }
 /// ```
 Future<StreamObjectResult<T>> streamObject<T>({
-  required LanguageModelV3 model,
+  required LanguageModelV4 model,
   required Schema<T> schema,
   String? system,
   String? prompt,
   List<ModelMessage>? messages,
   Duration? timeout,
 }) async {
-  final normalizedMessages = <LanguageModelV3Message>[
+  final normalizedMessages = <LanguageModelV4Message>[
     if (prompt != null)
-      LanguageModelV3Message(
-        role: LanguageModelV3Role.user,
-        content: [LanguageModelV3TextPart(text: prompt)],
+      LanguageModelV4Message(
+        role: LanguageModelV4Role.user,
+        content: [LanguageModelV4TextPart(text: prompt)],
       ),
     ...?messages?.map(
-      (m) => LanguageModelV3Message(
+      (m) => LanguageModelV4Message(
         role: switch (m.role) {
-          ModelMessageRole.system => LanguageModelV3Role.system,
-          ModelMessageRole.user => LanguageModelV3Role.user,
-          ModelMessageRole.assistant => LanguageModelV3Role.assistant,
-          ModelMessageRole.tool => LanguageModelV3Role.tool,
+          ModelMessageRole.system => LanguageModelV4Role.system,
+          ModelMessageRole.user => LanguageModelV4Role.user,
+          ModelMessageRole.assistant => LanguageModelV4Role.assistant,
+          ModelMessageRole.tool => LanguageModelV4Role.tool,
         },
-        content: m.parts ?? [LanguageModelV3TextPart(text: m.content ?? '')],
+        content: m.parts ?? [LanguageModelV4TextPart(text: m.content ?? '')],
       ),
     ),
   ];
@@ -98,34 +98,20 @@ Future<StreamObjectResult<T>> streamObject<T>({
   ].join('\n');
 
   final streamCall = model.doStream(
-    LanguageModelV3CallOptions(
-      prompt: LanguageModelV3Prompt(
+    LanguageModelV4CallOptions(
+      prompt: LanguageModelV4Prompt(
         system: instruction,
         messages: normalizedMessages,
       ),
-      outputSchema: schema.jsonSchema,
+      responseFormat: LanguageModelV4JsonResponseFormat(
+        schema: schema.jsonSchema,
+      ),
     ),
   );
   final response = await (timeout != null
       ? streamCall.timeout(timeout)
       : streamCall);
-  LanguageModelV3ResponseMetadata? responseMetadata;
-  if (response.rawResponse is Map) {
-    final raw = (response.rawResponse as Map).cast<Object?, Object?>();
-    final meta = raw['responseMetadata'];
-    if (meta is Map) {
-      final map = meta.cast<Object?, Object?>();
-      final ts = map['timestamp']?.toString();
-      responseMetadata = LanguageModelV3ResponseMetadata(
-        id: map['id']?.toString(),
-        modelId: map['modelId']?.toString(),
-        timestamp: ts == null ? null : DateTime.tryParse(ts),
-        headers: null,
-        body: raw['body'],
-        requestBody: raw['requestBody'],
-      );
-    }
-  }
+  final responseMetadata = response.response;
 
   final broadcast = response.stream.asBroadcastStream();
   final textStream = broadcast

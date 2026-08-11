@@ -308,16 +308,12 @@ class MCPClient {
         if (identical(currentState, state)) {
           _resourceRefreshStates.remove(uri);
         }
-        return;
-      }
-
-      if (state.trailingRefreshQueued) {
+      } else if (state.trailingRefreshQueued) {
         state.inFlight = true;
         unawaited(_drainResourceRefreshQueue(uri, state));
-        return;
+      } else {
+        _resourceRefreshStates.remove(uri);
       }
-
-      _resourceRefreshStates.remove(uri);
     }
   }
 

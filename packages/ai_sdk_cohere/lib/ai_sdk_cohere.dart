@@ -9,6 +9,6 @@
 /// final embedder = cohere.embedding('embed-english-v3.0');
 /// final ranker = cohere.rerank('rerank-english-v3.0');
 /// ```
-library ai_sdk_cohere;
+library;
 
 export 'src/cohere_provider.dart';

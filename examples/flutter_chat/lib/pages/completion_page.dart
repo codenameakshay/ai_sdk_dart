@@ -40,7 +40,7 @@ class _CompletionPageState extends State<CompletionPage> {
             instructions: 'You are a helpful assistant. Be concise.',
           ),
           onError: (err) => _showSnackBar('Error: $err'),
-        ))!;
+        ));
   }
 
   @override

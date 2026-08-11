@@ -1,12 +1,25 @@
-import 'language_model_v3_stream_part.dart';
+import 'language_model_v4_stream_part.dart';
+import 'language_model_v4_generate_result.dart';
+import 'language_model_v4_warning.dart';
 
 /// Streaming generation result wrapper.
-class LanguageModelV3StreamResult {
-  const LanguageModelV3StreamResult({required this.stream, this.rawResponse});
+class LanguageModelV4StreamResult {
+  const LanguageModelV4StreamResult({
+    required this.stream,
+    this.warnings = const [],
+    this.request,
+    this.response,
+  });
 
   /// The provider stream of structured parts.
-  final Stream<LanguageModelV3StreamPart> stream;
+  final Stream<LanguageModelV4StreamPart> stream;
 
-  /// Optional raw response object from the provider SDK/HTTP layer.
-  final Object? rawResponse;
+  /// Warnings surfaced while preparing or executing the stream.
+  final List<LanguageModelV4Warning> warnings;
+
+  /// Request metadata from the provider call.
+  final LanguageModelV4RequestMetadata? request;
+
+  /// Response metadata from the provider call.
+  final LanguageModelV4ResponseMetadata? response;
 }

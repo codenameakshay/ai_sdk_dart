@@ -1,3 +1,11 @@
+## Unreleased
+
+- Migrated Ollama language generation and streaming to the V4 contract,
+  including complete tool calls, metadata, raw chunks, and nested usage.
+- Added abort-signal cancellation for in-flight requests.
+
+---
+
 ## 1.2.0
 
 - Added **tool use** and **multimodal image input** to the Ollama implementation, and fixed

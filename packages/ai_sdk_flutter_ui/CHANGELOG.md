@@ -1,3 +1,14 @@
+## Unreleased
+
+- Hardened controller cancellation/disposal and coalesced streaming updates to
+  frame boundaries.
+- URL-backed model images are blocked by default to prevent untrusted automatic
+  network requests; opt in with `remoteImageProviderBuilder` after validation.
+- Improved error/retry/stop/approval states, citation semantics and keyboard
+  access, live reduced-motion behavior, and long-history scrolling.
+
+---
+
 ## 1.2.0
 
 Turns `ai_sdk_flutter_ui` into a one-stop Flutter UI hub: prebuilt widgets, hardened controllers,

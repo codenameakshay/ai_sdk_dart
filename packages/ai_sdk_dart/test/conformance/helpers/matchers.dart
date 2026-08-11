@@ -7,13 +7,13 @@ import 'package:test/test.dart';
 // ---------------------------------------------------------------------------
 
 /// Matches a [GenerateTextResult] with a specific [expected] finish reason.
-Matcher hasFinishReason(LanguageModelV3FinishReason expected) =>
+Matcher hasFinishReason(LanguageModelV4FinishReason expected) =>
     _FinishReasonMatcher(expected);
 
 class _FinishReasonMatcher extends Matcher {
   const _FinishReasonMatcher(this.expected);
 
-  final LanguageModelV3FinishReason expected;
+  final LanguageModelV4FinishReason expected;
 
   @override
   bool matches(dynamic item, Map<dynamic, dynamic> matchState) {
@@ -43,7 +43,7 @@ class _FinishReasonMatcher extends Matcher {
 // Usage matcher
 // ---------------------------------------------------------------------------
 
-/// Matches usage fields on a [GenerateTextResult] or [LanguageModelV3Usage].
+/// Matches usage fields on a [GenerateTextResult] or [LanguageModelV4Usage].
 Matcher hasUsage({int? inputTokens, int? outputTokens, int? totalTokens}) =>
     _UsageMatcher(
       inputTokens: inputTokens,
@@ -60,17 +60,22 @@ class _UsageMatcher extends Matcher {
 
   @override
   bool matches(dynamic item, Map<dynamic, dynamic> matchState) {
-    LanguageModelV3Usage? usage;
+    LanguageModelV4Usage? usage;
     if (item is GenerateTextResult) {
       usage = item.usage;
-    } else if (item is LanguageModelV3Usage) {
+    } else if (item is LanguageModelV4Usage) {
       usage = item;
     }
     if (usage == null) return false;
-    if (inputTokens != null && usage.inputTokens != inputTokens) return false;
-    if (outputTokens != null && usage.outputTokens != outputTokens)
+    if (inputTokens != null && usage.inputTokens.total != inputTokens) {
       return false;
-    if (totalTokens != null && usage.totalTokens != totalTokens) return false;
+    }
+    if (outputTokens != null && usage.outputTokens.total != outputTokens) {
+      return false;
+    }
+    final actualTotal =
+        (usage.inputTokens.total ?? 0) + (usage.outputTokens.total ?? 0);
+    if (totalTokens != null && actualTotal != totalTokens) return false;
     return true;
   }
 
@@ -86,11 +91,11 @@ class _UsageMatcher extends Matcher {
     Map<dynamic, dynamic> matchState,
     bool verbose,
   ) {
-    LanguageModelV3Usage? usage;
+    LanguageModelV4Usage? usage;
     if (item is GenerateTextResult) usage = item.usage;
-    if (item is LanguageModelV3Usage) usage = item;
+    if (item is LanguageModelV4Usage) usage = item;
     return mismatchDescription.add(
-      'had usage (inputTokens: ${usage?.inputTokens}, outputTokens: ${usage?.outputTokens})',
+      'had usage (inputTokens: ${usage?.inputTokens.total}, outputTokens: ${usage?.outputTokens.total})',
     );
   }
 }
@@ -109,10 +114,10 @@ class _ToolCallMatcher extends Matcher {
 
   @override
   bool matches(dynamic item, Map<dynamic, dynamic> matchState) {
-    List<LanguageModelV3ToolCallPart>? toolCalls;
+    List<LanguageModelV4ToolCallPart>? toolCalls;
     if (item is GenerateTextResult) {
       toolCalls = item.toolCalls;
-    } else if (item is List<LanguageModelV3ToolCallPart>) {
+    } else if (item is List<LanguageModelV4ToolCallPart>) {
       toolCalls = item;
     }
     if (toolCalls == null) return false;

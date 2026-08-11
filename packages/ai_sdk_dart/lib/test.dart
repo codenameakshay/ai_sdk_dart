@@ -6,13 +6,13 @@
 /// ```dart
 /// import 'package:ai_sdk_dart/test.dart';
 ///
-/// final model = MockLanguageModelV3(
+/// final model = MockLanguageModelV4(
 ///   response: [MockTextPart('Hello, world!')],
 /// );
 /// ```
-library ai_sdk_dart_test;
+library;
 
-export 'src/testing/mock_language_model_v3.dart';
+export 'src/testing/mock_language_model_v4.dart';
 export 'src/testing/mock_embedding_model_v2.dart';
 export 'src/testing/mock_embedding_model_v3.dart';
 export 'src/testing/mock_image_model_v3.dart';

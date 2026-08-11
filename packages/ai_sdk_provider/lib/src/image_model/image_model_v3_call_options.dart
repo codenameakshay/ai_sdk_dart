@@ -1,13 +1,13 @@
-import '../language_model/language_model_v3_data_content.dart';
+import '../language_model/language_model_v4_data_content.dart';
 import '../shared/json_value.dart';
 
 /// Prompt options for image editing/generation.
 class GenerateImagePrompt {
   const GenerateImagePrompt({this.images = const [], this.text, this.mask});
 
-  final List<LanguageModelV3DataContent> images;
+  final List<LanguageModelV4DataContent> images;
   final String? text;
-  final LanguageModelV3DataContent? mask;
+  final LanguageModelV4DataContent? mask;
 }
 
 /// Call options for image generation models.

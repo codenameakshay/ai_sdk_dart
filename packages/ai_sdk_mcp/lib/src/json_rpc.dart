@@ -147,16 +147,11 @@ class MCPTransportException extends MCPException {
 /// with a fresh initialize request.
 class MCPSessionExpiredException extends MCPTransportException {
   MCPSessionExpiredException({
-    required String method,
-    required Uri uri,
-    int? statusCode,
-    String? context,
-  }) : super(
-         method: method,
-         uri: uri,
-         statusCode: statusCode,
-         context: context,
-       );
+    required super.method,
+    required super.uri,
+    super.statusCode,
+    super.context,
+  });
 }
 
 // ---------------------------------------------------------------------------

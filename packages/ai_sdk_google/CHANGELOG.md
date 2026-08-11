@@ -1,3 +1,11 @@
+## Unreleased
+
+- Migrated Gemini generation and streaming to V4 lifecycle, response formats,
+  nested usage, and complete tool-call events.
+- Fixed streamed usage accounting and added in-flight request cancellation.
+
+---
+
 ## 1.2.0
 
 - **Errors:** non-2xx API responses now throw a typed **`AiApiCallError`** (carrying Google's error

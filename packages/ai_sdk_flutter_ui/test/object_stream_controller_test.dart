@@ -15,14 +15,14 @@ class _ControlledObjectStreamInvocation {
   bool _started = false;
   bool _ended = false;
   bool cancelled = false;
-  final StreamController<LanguageModelV3StreamPart> _controller =
-      StreamController<LanguageModelV3StreamPart>(
+  final StreamController<LanguageModelV4StreamPart> _controller =
+      StreamController<LanguageModelV4StreamPart>(
         onCancel: () {
           // Mark that streamText cancelled the upstream provider stream.
         },
       );
 
-  Stream<LanguageModelV3StreamPart> get stream {
+  Stream<LanguageModelV4StreamPart> get stream {
     _controller.onCancel = () {
       cancelled = true;
     };
@@ -48,7 +48,7 @@ class _ControlledObjectStreamInvocation {
   Future<void> finish() async {
     _controller.add(
       const StreamPartFinish(
-        finishReason: LanguageModelV3FinishReason.stop,
+        finishReason: LanguageModelV4FinishReason.stop,
         rawFinishReason: 'stop',
       ),
     );
@@ -56,7 +56,7 @@ class _ControlledObjectStreamInvocation {
   }
 }
 
-class _ControlledObjectModel implements LanguageModelV3 {
+class _ControlledObjectModel extends LanguageModelV4 {
   final List<_ControlledObjectStreamInvocation> invocations = [];
 
   @override
@@ -66,22 +66,51 @@ class _ControlledObjectModel implements LanguageModelV3 {
   String get modelId => 'controlled-object';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError('submit() only exercises doStream');
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     final invocation = _ControlledObjectStreamInvocation();
     invocations.add(invocation);
-    return LanguageModelV3StreamResult(stream: invocation.stream);
+    return LanguageModelV4StreamResult(stream: invocation.stream);
+  }
+}
+
+class _ThrowingObjectModel extends LanguageModelV4 {
+  _ThrowingObjectModel(this.error);
+
+  final Object error;
+
+  @override
+  String get provider => 'mock';
+
+  @override
+  String get modelId => 'throwing-object';
+
+  @override
+  String get specificationVersion => 'v4';
+
+  @override
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
+  ) async {
+    throw error;
+  }
+
+  @override
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
+  ) async {
+    throw error;
   }
 }
 
@@ -167,11 +196,30 @@ void main() {
       controller.dispose();
     });
 
+    test('submit surfaces provider failures via error and onError', () async {
+      Object? captured;
+      final failure = StateError('submit failed');
+      final controller = ObjectStreamController<Map<String, dynamic>>(
+        model: _ThrowingObjectModel(failure),
+        schema: mapSchema,
+        onError: (error) => captured = error,
+      );
+
+      await controller.submit('boom');
+      await pumpUntil(() => controller.error != null);
+
+      expect(controller.error, same(failure));
+      expect(captured, same(failure));
+      expect(controller.isLoading, isFalse);
+      expect(controller.isStreaming, isFalse);
+      controller.dispose();
+    });
+
     test(
       'submit runs streamText(output: object) and streams the parsed object',
       () async {
         final controller = ObjectStreamController<Map<String, dynamic>>(
-          model: MockLanguageModelV3(response: [mockText('{"title":"Hi"}')]),
+          model: MockLanguageModelV4(response: [mockText('{"title":"Hi"}')]),
           schema: mapSchema,
         );
 
@@ -213,7 +261,7 @@ void main() {
 
     test('submit binds via bind() so a later bind still works', () async {
       final controller = ObjectStreamController<Map<String, dynamic>>(
-        model: MockLanguageModelV3(response: [mockText('{"title":"A"}')]),
+        model: MockLanguageModelV4(response: [mockText('{"title":"A"}')]),
         schema: mapSchema,
       );
       await controller.submit('a');
@@ -276,6 +324,21 @@ void main() {
 
       expect(notifications, beforeDispose);
     });
+
+    test(
+      'forwards addListener/removeListener/hasListeners to the root listenable',
+      () {
+        final controller = ObjectStreamController<int>();
+        void listener() {}
+
+        expect(controller.hasListeners, isFalse);
+        controller.addListener(listener);
+        expect(controller.hasListeners, isTrue);
+        controller.removeListener(listener);
+        expect(controller.hasListeners, isFalse);
+        controller.dispose();
+      },
+    );
 
     test('second submit cancels the first upstream stream and ignores stale '
         'first partials, errors, and finish', () async {

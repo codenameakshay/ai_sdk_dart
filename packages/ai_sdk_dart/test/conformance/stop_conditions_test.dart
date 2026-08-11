@@ -11,11 +11,11 @@ void main() {
       const snapshot = StepSnapshot(
         stepCount: 3,
         toolCallNames: ['search', 'read'],
-        finishReason: LanguageModelV3FinishReason.stop,
+        finishReason: LanguageModelV4FinishReason.stop,
       );
       expect(snapshot.stepCount, 3);
       expect(snapshot.toolCallNames, ['search', 'read']);
-      expect(snapshot.finishReason, LanguageModelV3FinishReason.stop);
+      expect(snapshot.finishReason, LanguageModelV4FinishReason.stop);
     });
 
     test('defaults toolCallNames to empty list', () {
@@ -37,7 +37,7 @@ void main() {
         never(
           const StepSnapshot(
             stepCount: 1,
-            finishReason: LanguageModelV3FinishReason.stop,
+            finishReason: LanguageModelV4FinishReason.stop,
           ),
         ),
         isFalse,
@@ -67,10 +67,7 @@ void main() {
       final cond = hasToolCall('search');
       expect(
         cond(
-          const StepSnapshot(
-            stepCount: 1,
-            toolCallNames: ['search', 'read'],
-          ),
+          const StepSnapshot(stepCount: 1, toolCallNames: ['search', 'read']),
         ),
         isTrue,
       );
@@ -80,10 +77,7 @@ void main() {
       final cond = hasToolCall('write');
       expect(
         cond(
-          const StepSnapshot(
-            stepCount: 1,
-            toolCallNames: ['search', 'read'],
-          ),
+          const StepSnapshot(stepCount: 1, toolCallNames: ['search', 'read']),
         ),
         isFalse,
       );
@@ -97,12 +91,12 @@ void main() {
 
   group('hasFinishReason', () {
     test('returns true when finishReason matches', () {
-      final cond = hasFinishReason(LanguageModelV3FinishReason.stop);
+      final cond = hasFinishReason(LanguageModelV4FinishReason.stop);
       expect(
         cond(
           const StepSnapshot(
             stepCount: 1,
-            finishReason: LanguageModelV3FinishReason.stop,
+            finishReason: LanguageModelV4FinishReason.stop,
           ),
         ),
         isTrue,
@@ -110,12 +104,12 @@ void main() {
     });
 
     test('returns false when finishReason does not match', () {
-      final cond = hasFinishReason(LanguageModelV3FinishReason.stop);
+      final cond = hasFinishReason(LanguageModelV4FinishReason.stop);
       expect(
         cond(
           const StepSnapshot(
             stepCount: 1,
-            finishReason: LanguageModelV3FinishReason.length,
+            finishReason: LanguageModelV4FinishReason.length,
           ),
         ),
         isFalse,
@@ -123,7 +117,7 @@ void main() {
     });
 
     test('returns false when finishReason is null', () {
-      final cond = hasFinishReason(LanguageModelV3FinishReason.stop);
+      final cond = hasFinishReason(LanguageModelV4FinishReason.stop);
       expect(cond(const StepSnapshot(stepCount: 1)), isFalse);
     });
   });
@@ -132,12 +126,7 @@ void main() {
     test('returns true when any condition matches', () {
       final cond = stopWhenAny([stepCountIs(10), hasToolCall('done')]);
       expect(
-        cond(
-          const StepSnapshot(
-            stepCount: 3,
-            toolCallNames: ['done'],
-          ),
-        ),
+        cond(const StepSnapshot(stepCount: 3, toolCallNames: ['done'])),
         isTrue,
       );
     });
@@ -157,13 +146,13 @@ void main() {
     test('returns true when all conditions match', () {
       final cond = stopWhenAll([
         stepCountIs(3),
-        hasFinishReason(LanguageModelV3FinishReason.stop),
+        hasFinishReason(LanguageModelV4FinishReason.stop),
       ]);
       expect(
         cond(
           const StepSnapshot(
             stepCount: 3,
-            finishReason: LanguageModelV3FinishReason.stop,
+            finishReason: LanguageModelV4FinishReason.stop,
           ),
         ),
         isTrue,
@@ -173,13 +162,13 @@ void main() {
     test('returns false when only some conditions match', () {
       final cond = stopWhenAll([
         stepCountIs(3),
-        hasFinishReason(LanguageModelV3FinishReason.stop),
+        hasFinishReason(LanguageModelV4FinishReason.stop),
       ]);
       expect(
         cond(
           const StepSnapshot(
             stepCount: 3,
-            finishReason: LanguageModelV3FinishReason.length,
+            finishReason: LanguageModelV4FinishReason.length,
           ),
         ),
         isFalse,
@@ -194,9 +183,7 @@ void main() {
 
   group('generateText stopWhen parameter', () {
     test('accepts a single StopCondition', () async {
-      final model = MockLanguageModelV3(
-        response: [mockText('Hello!')],
-      );
+      final model = MockLanguageModelV4(response: [mockText('Hello!')]);
 
       final result = await generateText(
         model: model,
@@ -207,9 +194,7 @@ void main() {
     });
 
     test('accepts a list of StopConditions', () async {
-      final model = MockLanguageModelV3(
-        response: [mockText('Hello!')],
-      );
+      final model = MockLanguageModelV4(response: [mockText('Hello!')]);
 
       final result = await generateText(
         model: model,
@@ -220,9 +205,7 @@ void main() {
     });
 
     test('null stopWhen falls back to maxSteps', () async {
-      final model = MockLanguageModelV3(
-        response: [mockText('Hello!')],
-      );
+      final model = MockLanguageModelV4(response: [mockText('Hello!')]);
 
       final result = await generateText(
         model: model,
@@ -249,7 +232,7 @@ void main() {
                 jsonSchema: const {'type': 'object'},
                 fromJson: (json) => json,
               ),
-              execute: (_, __) async {
+              execute: (_, _) async {
                 executions++;
                 return 'pong';
               },
@@ -264,9 +247,7 @@ void main() {
 
   group('streamText stopWhen parameter', () {
     test('accepts a single StopCondition', () async {
-      final model = MockLanguageModelV3(
-        response: [mockText('Hello!')],
-      );
+      final model = MockLanguageModelV4(response: [mockText('Hello!')]);
 
       final result = await streamText(
         model: model,
@@ -277,9 +258,7 @@ void main() {
     });
 
     test('accepts a list of StopConditions', () async {
-      final model = MockLanguageModelV3(
-        response: [mockText('Hello!')],
-      );
+      final model = MockLanguageModelV4(response: [mockText('Hello!')]);
 
       final result = await streamText(
         model: model,
@@ -303,7 +282,7 @@ void main() {
                 jsonSchema: const {'type': 'object'},
                 fromJson: (json) => json,
               ),
-              execute: (_, __) async {
+              execute: (_, _) async {
                 executions++;
                 return 'pong';
               },
@@ -322,9 +301,12 @@ void main() {
     final condA = stepCountIs(2);
     final condB = hasToolCall('x');
 
-    test('resolveStopConditions merges single stopWhen with stopConditions', () {
-      expect(resolveStopConditions(condA, [condB]), [condA, condB]);
-    });
+    test(
+      'resolveStopConditions merges single stopWhen with stopConditions',
+      () {
+        expect(resolveStopConditions(condA, [condB]), [condA, condB]);
+      },
+    );
 
     test('resolveStopConditions accepts a list stopWhen', () {
       expect(resolveStopConditions([condA, never], const []), [condA, never]);
@@ -342,7 +324,10 @@ void main() {
     });
 
     test('resolveStepBudget returns 1 without tools', () {
-      expect(resolveStepBudget(hasTools: false, stopWhen: condA, maxSteps: 9), 1);
+      expect(
+        resolveStepBudget(hasTools: false, stopWhen: condA, maxSteps: 9),
+        1,
+      );
     });
 
     test('resolveStepBudget uses the safety cap when stopWhen is set', () {
@@ -393,16 +378,19 @@ void main() {
       );
     });
 
-    test('shouldStopAfterStep continues when tools ran and no condition trips', () {
-      expect(
-        shouldStopAfterStep(
-          toolResultsEmpty: false,
-          hasApprovalRequests: false,
-          snapshot: const StepSnapshot(stepCount: 1),
-          conditions: [stepCountIs(3)],
-        ),
-        isFalse,
-      );
-    });
+    test(
+      'shouldStopAfterStep continues when tools ran and no condition trips',
+      () {
+        expect(
+          shouldStopAfterStep(
+            toolResultsEmpty: false,
+            hasApprovalRequests: false,
+            snapshot: const StepSnapshot(stepCount: 1),
+            conditions: [stepCountIs(3)],
+          ),
+          isFalse,
+        );
+      },
+    );
   });
 }

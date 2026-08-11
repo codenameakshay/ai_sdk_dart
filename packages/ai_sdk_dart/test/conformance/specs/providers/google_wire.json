@@ -92,7 +92,7 @@
     },
     {
       "id": "finish-reason-mapping",
-      "description": "Google STOP maps to LanguageModelV3FinishReason.stop",
+      "description": "Google STOP maps to LanguageModelV4FinishReason.stop",
       "mockResponse": {
         "candidates": [
           { "finishReason": "STOP", "content": { "parts": [{ "text": "ok" }] } }

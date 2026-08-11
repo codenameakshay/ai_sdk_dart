@@ -49,7 +49,7 @@ class GroqProvider {
   }
 
   /// Returns a language model for the given [modelId].
-  LanguageModelV3 call(String modelId) => OpenAICompatibleChatLanguageModel(
+  LanguageModelV4 call(String modelId) => OpenAICompatibleChatLanguageModel(
     modelId: modelId,
     config: OpenAICompatibleConfig(
       provider: 'groq',

@@ -97,7 +97,7 @@ class OpenAICompatibleConfig {
   /// `reasoning_content`, OpenRouter emits `reasoning`, and some hosts use
   /// `thinking`. The first match on a streaming `delta` is emitted as a
   /// [StreamPartReasoningDelta]; on a non-streaming `message` it becomes a
-  /// [LanguageModelV3ReasoningPart]. Defaults to
+  /// [LanguageModelV4ReasoningPart]. Defaults to
   /// `['reasoning_content', 'reasoning', 'thinking']`; set to `const []` to
   /// disable reasoning extraction entirely.
   final List<String> reasoningKeys;
@@ -108,8 +108,8 @@ class OpenAICompatibleConfig {
   /// overlapping key here wins — prefer non-conflicting keys. Returning `null`
   /// (or an empty map) adds nothing.
   ///
-  /// The [LanguageModelV3CallOptions] are passed so the hook can read
+  /// The [LanguageModelV4CallOptions] are passed so the hook can read
   /// `providerOptions[provider]`.
-  final Map<String, dynamic>? Function(LanguageModelV3CallOptions options)?
+  final Map<String, dynamic>? Function(LanguageModelV4CallOptions options)?
   extraBody;
 }

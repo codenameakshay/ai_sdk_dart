@@ -29,14 +29,11 @@ Future<T> raceWithCancellation<T>(
     completer.completeError(error, stackTrace);
   }
 
-  operation.then(
-    (value) {
-      if (settled) return;
-      settled = true;
-      completer.complete(value);
-    },
-    onError: completeError,
-  );
+  operation.then((value) {
+    if (settled) return;
+    settled = true;
+    completer.complete(value);
+  }, onError: completeError);
 
   abortSignal.onCancelled.then((_) {
     if (settled) return;

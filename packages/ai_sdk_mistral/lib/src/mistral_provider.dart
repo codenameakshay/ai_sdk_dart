@@ -50,7 +50,7 @@ class MistralProvider {
   }
 
   /// Returns a language model for the given [modelId].
-  LanguageModelV3 call(String modelId) => OpenAICompatibleChatLanguageModel(
+  LanguageModelV4 call(String modelId) => OpenAICompatibleChatLanguageModel(
     modelId: modelId,
     config: OpenAICompatibleConfig(
       provider: 'mistral',
@@ -128,7 +128,7 @@ class _MistralEmbeddingModel implements EmbeddingModelV2<String> {
       response = await client.post<Map<String, dynamic>>(
         providerEndpoint(baseUrl ?? 'https://api.mistral.ai/v1', '/embeddings'),
         data: body,
-        options: Options(headers: {...resolvedHeaders, ...?options.headers}),
+        options: Options(headers: {...?options.headers, ...resolvedHeaders}),
       );
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);

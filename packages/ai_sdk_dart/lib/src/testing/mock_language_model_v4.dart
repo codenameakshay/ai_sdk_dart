@@ -10,16 +10,16 @@ import '../utils/utils.dart';
 /// Mirrors `MockLanguageModelV1` from the JS AI SDK v6 `ai/test` sub-path.
 ///
 /// ```dart
-/// final model = MockLanguageModelV3(
+/// final model = MockLanguageModelV4(
 ///   response: [MockTextPart('Hello!')],
 /// );
 /// final result = await generateText(model: model, prompt: 'Hi');
 /// expect(result.text, 'Hello!');
 /// ```
-class MockLanguageModelV3 implements LanguageModelV3 {
-  MockLanguageModelV3({
+class MockLanguageModelV4 extends LanguageModelV4 {
+  MockLanguageModelV4({
     this.response = const [],
-    this.finishReason = LanguageModelV3FinishReason.stop,
+    this.finishReason = LanguageModelV4FinishReason.stop,
     this.rawFinishReason = 'stop',
     this.usage,
     this.warnings = const [],
@@ -31,15 +31,15 @@ class MockLanguageModelV3 implements LanguageModelV3 {
   });
 
   /// Content parts to return from every call.
-  final List<LanguageModelV3ContentPart> response;
+  final List<LanguageModelV4ContentPart> response;
 
   /// Finish reason to report.
-  final LanguageModelV3FinishReason finishReason;
+  final LanguageModelV4FinishReason finishReason;
 
   final String? rawFinishReason;
 
   /// Token usage to report.
-  final LanguageModelV3Usage? usage;
+  final LanguageModelV4Usage? usage;
 
   /// Warnings to report.
   final List<String> warnings;
@@ -59,68 +59,73 @@ class MockLanguageModelV3 implements LanguageModelV3 {
   final String modelId;
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   /// All call options passed to [doGenerate] in the order they were called.
-  final List<LanguageModelV3CallOptions> generateCalls = [];
+  final List<LanguageModelV4CallOptions> generateCalls = [];
 
   /// All call options passed to [doStream] in the order they were called.
-  final List<LanguageModelV3CallOptions> streamCalls = [];
+  final List<LanguageModelV4CallOptions> streamCalls = [];
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     generateCalls.add(options);
     if (doGenerateError != null) throw doGenerateError!;
-    return LanguageModelV3GenerateResult(
+    return LanguageModelV4GenerateResult(
       content: response,
       finishReason: finishReason,
       rawFinishReason: rawFinishReason,
       usage: usage,
-      warnings: warnings,
+      warnings: warnings
+          .map((warning) => LanguageModelV4OtherWarning(message: warning))
+          .toList(growable: false),
       providerMetadata: providerMetadata,
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     streamCalls.add(options);
     if (doStreamError != null) throw doStreamError!;
 
     final textId = generateId();
-    final parts = <LanguageModelV3StreamPart>[];
+    final parts = <LanguageModelV4StreamPart>[];
+    final streamWarnings = warnings
+        .map((warning) => LanguageModelV4OtherWarning(message: warning))
+        .toList(growable: false);
+
+    parts.add(StreamPartStreamStart(warnings: streamWarnings));
 
     for (final part in response) {
-      if (part is LanguageModelV3TextPart) {
+      if (part is LanguageModelV4TextPart) {
         parts.add(StreamPartTextStart(id: textId));
         parts.add(StreamPartTextDelta(id: textId, delta: part.text));
         parts.add(StreamPartTextEnd(id: textId));
-      } else if (part is LanguageModelV3ReasoningPart) {
-        parts.add(StreamPartReasoningDelta(delta: part.text));
-      } else if (part is LanguageModelV3ToolCallPart) {
+      } else if (part is LanguageModelV4ReasoningPart) {
+        parts.add(const StreamPartReasoningStart(id: 'mock-reasoning'));
         parts.add(
-          StreamPartToolCallStart(
-            toolCallId: part.toolCallId,
+          StreamPartReasoningDelta(id: 'mock-reasoning', delta: part.text),
+        );
+        parts.add(const StreamPartReasoningEnd(id: 'mock-reasoning'));
+      } else if (part is LanguageModelV4ToolCallPart) {
+        parts.add(
+          StreamPartToolInputStart(
+            id: part.toolCallId,
             toolName: part.toolName,
           ),
         );
         parts.add(
-          StreamPartToolCallDelta(
-            toolCallId: part.toolCallId,
-            toolName: part.toolName,
-            argsTextDelta: jsonEncode(part.input),
+          StreamPartToolInputDelta(
+            id: part.toolCallId,
+            delta: jsonEncode(part.input),
           ),
         );
-        parts.add(
-          StreamPartToolCallEnd(
-            toolCallId: part.toolCallId,
-            toolName: part.toolName,
-            input: part.input,
-          ),
-        );
+        parts.add(StreamPartToolInputEnd(id: part.toolCallId));
+        parts.add(StreamPartToolCall(toolCall: part));
       }
     }
 
@@ -128,16 +133,14 @@ class MockLanguageModelV3 implements LanguageModelV3 {
       StreamPartFinish(
         finishReason: finishReason,
         rawFinishReason: rawFinishReason,
-        usage: usage,
+        usage: usage ?? const LanguageModelV4Usage(),
         providerMetadata: providerMetadata,
       ),
     );
 
-    return LanguageModelV3StreamResult(
+    return LanguageModelV4StreamResult(
       stream: Stream.fromIterable(parts),
-      rawResponse: warnings.isEmpty
-          ? null
-          : <Object?, Object?>{'warnings': warnings},
+      warnings: streamWarnings,
     );
   }
 }
@@ -145,25 +148,24 @@ class MockLanguageModelV3 implements LanguageModelV3 {
 /// Convenience constructor for a mock text content part.
 ///
 /// ```dart
-/// final model = MockLanguageModelV3(
+/// final model = MockLanguageModelV4(
 ///   response: [mockText('Hello!')],
 /// );
 /// ```
-LanguageModelV3TextPart mockText(String text) =>
-    LanguageModelV3TextPart(text: text);
+LanguageModelV4TextPart mockText(String text) =>
+    LanguageModelV4TextPart(text: text);
 
 /// Convenience constructor for a mock reasoning content part.
-LanguageModelV3ReasoningPart mockReasoning(String text) =>
-    LanguageModelV3ReasoningPart(text: text);
+LanguageModelV4ReasoningPart mockReasoning(String text) =>
+    LanguageModelV4ReasoningPart(text: text);
 
 /// Convenience constructor for a mock tool call content part.
-LanguageModelV3ToolCallPart mockToolCall({
+LanguageModelV4ToolCallPart mockToolCall({
   required String toolName,
   required Object input,
   String? toolCallId,
-}) =>
-    LanguageModelV3ToolCallPart(
-      toolCallId: toolCallId ?? generateId(),
-      toolName: toolName,
-      input: input,
-    );
+}) => LanguageModelV4ToolCallPart(
+  toolCallId: toolCallId ?? generateId(),
+  toolName: toolName,
+  input: input,
+);

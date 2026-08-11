@@ -1,16 +1,27 @@
+import 'dart:convert';
+
 import 'package:ai_sdk_dart/src/core/partial_json.dart';
 
-void main() {
+void main(List<String> arguments) {
   const sizes = [('1KiB', 1024), ('64KiB', 64 * 1024), ('1MiB', 1024 * 1024)];
+  final results = <Map<String, Object>>[];
 
   for (final (label, targetBytes) in sizes) {
     final objectResult = _runObjectBenchmark(_buildObjectPayload(targetBytes));
     _assertLinear(objectResult);
-    print(objectResult.describe(label));
+    results.add(objectResult.toJson(label));
 
     final arrayResult = _runArrayBenchmark(_buildArrayPayload(targetBytes));
     _assertLinear(arrayResult);
-    print(arrayResult.describe(label));
+    results.add(arrayResult.toJson(label));
+  }
+
+  if (arguments.contains('--json')) {
+    print(jsonEncode(results));
+    return;
+  }
+  for (final result in results) {
+    print(_BenchmarkResult.describeJson(result));
   }
 }
 
@@ -195,13 +206,25 @@ class _BenchmarkResult {
   final int elements;
   final int elapsedMicroseconds;
 
-  String describe(String label) {
-    return '$kind $label bytes=$bytes '
-        'parseAttempts=$parseAttempts '
-        'decodeAttempts=$decodeAttempts '
-        'snapshotCount=$snapshotCount '
-        'snapshotElementsCopied=$snapshotElementsCopied '
-        'elements=$elements '
-        'elapsedMs=${elapsedMicroseconds / 1000}';
+  Map<String, Object> toJson(String label) => {
+    'kind': kind,
+    'size': label,
+    'bytes': bytes,
+    'parseAttempts': parseAttempts,
+    'decodeAttempts': decodeAttempts,
+    'snapshotCount': snapshotCount,
+    'snapshotElementsCopied': snapshotElementsCopied,
+    'elements': elements,
+    'elapsedMicroseconds': elapsedMicroseconds,
+  };
+
+  static String describeJson(Map<String, Object> result) {
+    return '${result['kind']} ${result['size']} bytes=${result['bytes']} '
+        'parseAttempts=${result['parseAttempts']} '
+        'decodeAttempts=${result['decodeAttempts']} '
+        'snapshotCount=${result['snapshotCount']} '
+        'snapshotElementsCopied=${result['snapshotElementsCopied']} '
+        'elements=${result['elements']} '
+        'elapsedMs=${(result['elapsedMicroseconds'] as int) / 1000}';
   }
 }

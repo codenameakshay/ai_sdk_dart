@@ -58,7 +58,7 @@ class AzureOpenAIProvider {
   }
 
   /// Returns a language model for the given Azure deployment [deploymentId].
-  LanguageModelV3 call(String deploymentId) =>
+  LanguageModelV4 call(String deploymentId) =>
       OpenAICompatibleChatLanguageModel(
         modelId: deploymentId,
         config: OpenAICompatibleConfig(
@@ -153,7 +153,7 @@ class _AzureEmbeddingModel implements EmbeddingModelV2<String> {
         ),
         queryParameters: {'api-version': apiVersion},
         data: body,
-        options: Options(headers: {...resolvedHeaders, ...?options.headers}),
+        options: Options(headers: {...?options.headers, ...resolvedHeaders}),
       );
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);

@@ -180,6 +180,7 @@ void main() {
     }.entries) {
       await tester.pumpWidget(
         App(
+          key: ValueKey(fixture.key),
           initialPage: AdvancedExamplePage.toolsChat,
           initialToolsFixture: fixture.key,
         ),
@@ -368,7 +369,7 @@ StreamTextResult<Object?> _completedStreamResult({
     rawFinishReason: Future<String?>.value('stop'),
     usage: Future<LanguageModelV4Usage?>.value(null),
     totalUsage: Future<LanguageModelV4Usage?>.value(null),
-    warnings: Future<List<String>>.value(const []),
+    warnings: Future.value(const <LanguageModelV4Warning>[]),
     steps: Future<List<GenerateTextStep>>.value(const []),
     request: Future<GenerateTextRequest>.value(
       const GenerateTextRequest(system: null, messages: []),

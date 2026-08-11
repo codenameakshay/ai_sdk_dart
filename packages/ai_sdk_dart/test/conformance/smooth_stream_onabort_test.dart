@@ -157,26 +157,28 @@ void main() {
       expect(abortCalled, isFalse);
     });
 
-    test('onAbort is not called when cancelling after normal completion',
-        () async {
-      var abortCalls = 0;
-      final token = CancellationToken();
+    test(
+      'onAbort is not called when cancelling after normal completion',
+      () async {
+        var abortCalls = 0;
+        final token = CancellationToken();
 
-      final result = await streamText(
-        model: FakeTextModel('Hello'),
-        prompt: 'hi',
-        abortSignal: token,
-        onAbort: () {
-          abortCalls++;
-        },
-      );
+        final result = await streamText(
+          model: FakeTextModel('Hello'),
+          prompt: 'hi',
+          abortSignal: token,
+          onAbort: () {
+            abortCalls++;
+          },
+        );
 
-      await result.text;
-      token.cancel();
-      await Future<void>.delayed(Duration.zero);
+        await result.text;
+        token.cancel();
+        await Future<void>.delayed(Duration.zero);
 
-      expect(abortCalls, 0);
-    });
+        expect(abortCalls, 0);
+      },
+    );
 
     test('onAbort is not called when abortSignal is null', () async {
       var abortCalled = false;
@@ -219,10 +221,7 @@ void main() {
         if (received.length == 2) token.cancel();
       });
 
-      await expectLater(
-        result.text,
-        throwsA(isA<AiOperationCancelledError>()),
-      );
+      await expectLater(result.text, throwsA(isA<AiOperationCancelledError>()));
       await sub.cancel();
 
       // The loop broke after the cancel, so not all five deltas were seen.
@@ -230,54 +229,58 @@ void main() {
       expect(received.length, lessThan(5));
     });
 
-    test('cancelling during a silent stream fails text stream promptly',
-        () async {
-      final token = CancellationToken();
-      final result = await streamText(
-        model: _SilentStreamModel(),
-        prompt: 'hi',
-        abortSignal: token,
-      );
+    test(
+      'cancelling during a silent stream fails text stream promptly',
+      () async {
+        final token = CancellationToken();
+        final result = await streamText(
+          model: _SilentStreamModel(),
+          prompt: 'hi',
+          abortSignal: token,
+        );
 
-      final textStreamFuture = result.textStream.toList();
-      await Future<void>.delayed(const Duration(milliseconds: 10));
-      token.cancel();
+        final textStreamFuture = result.textStream.toList();
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        token.cancel();
 
-      await expectLater(
-        textStreamFuture,
-        throwsA(isA<AiOperationCancelledError>()),
-      );
-      await expectLater(
-        result.text,
-        throwsA(isA<AiOperationCancelledError>()),
-      );
-    });
+        await expectLater(
+          textStreamFuture,
+          throwsA(isA<AiOperationCancelledError>()),
+        );
+        await expectLater(
+          result.text,
+          throwsA(isA<AiOperationCancelledError>()),
+        );
+      },
+    );
 
-    test('onAbort is not called when cancelling after terminal error',
-        () async {
-      var abortCalls = 0;
-      final token = CancellationToken();
-      final result = await streamText(
-        model: _ImmediateErrorStreamModel(),
-        prompt: 'hi',
-        abortSignal: token,
-        onAbort: () {
-          abortCalls++;
-        },
-      );
+    test(
+      'onAbort is not called when cancelling after terminal error',
+      () async {
+        var abortCalls = 0;
+        final token = CancellationToken();
+        final result = await streamText(
+          model: _ImmediateErrorStreamModel(),
+          prompt: 'hi',
+          abortSignal: token,
+          onAbort: () {
+            abortCalls++;
+          },
+        );
 
-      await expectLater(result.text, throwsA(isA<StateError>()));
-      token.cancel();
-      await Future<void>.delayed(Duration.zero);
+        await expectLater(result.text, throwsA(isA<StateError>()));
+        token.cancel();
+        await Future<void>.delayed(Duration.zero);
 
-      expect(abortCalls, 0);
-    });
+        expect(abortCalls, 0);
+      },
+    );
   });
 }
 
 /// A streaming model that emits text deltas spaced by [chunkDelayInMs], so a
 /// mid-stream cancellation can land between chunks.
-class _SlowStreamModel implements LanguageModelV3 {
+class _SlowStreamModel extends LanguageModelV4 {
   _SlowStreamModel(this.deltas, {this.chunkDelayInMs = 25});
 
   final List<String> deltas;
@@ -290,27 +293,27 @@ class _SlowStreamModel implements LanguageModelV3 {
   String get modelId => 'slow-stream';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
-  ) async => LanguageModelV3GenerateResult(
-    content: [LanguageModelV3TextPart(text: deltas.join())],
-    finishReason: LanguageModelV3FinishReason.stop,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
+  ) async => LanguageModelV4GenerateResult(
+    content: [LanguageModelV4TextPart(text: deltas.join())],
+    finishReason: LanguageModelV4FinishReason.stop,
   );
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    final parts = <LanguageModelV3StreamPart>[
+    final parts = <LanguageModelV4StreamPart>[
       StreamPartTextStart(id: 't'),
       for (final d in deltas) StreamPartTextDelta(id: 't', delta: d),
       StreamPartTextEnd(id: 't'),
-      StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+      StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
     ];
-    return LanguageModelV3StreamResult(
+    return LanguageModelV4StreamResult(
       stream: simulateReadableStream(
         parts: parts,
         chunkDelayInMs: chunkDelayInMs,
@@ -319,7 +322,7 @@ class _SlowStreamModel implements LanguageModelV3 {
   }
 }
 
-class _SilentStreamModel implements LanguageModelV3 {
+class _SilentStreamModel extends LanguageModelV4 {
   @override
   String get provider => 'fake';
 
@@ -327,23 +330,23 @@ class _SilentStreamModel implements LanguageModelV3 {
   String get modelId => 'silent-stream';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async => throw UnimplementedError();
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    final controller = StreamController<LanguageModelV3StreamPart>();
-    return LanguageModelV3StreamResult(stream: controller.stream);
+    final controller = StreamController<LanguageModelV4StreamPart>();
+    return LanguageModelV4StreamResult(stream: controller.stream);
   }
 }
 
-class _ImmediateErrorStreamModel implements LanguageModelV3 {
+class _ImmediateErrorStreamModel extends LanguageModelV4 {
   @override
   String get provider => 'fake';
 
@@ -351,19 +354,19 @@ class _ImmediateErrorStreamModel implements LanguageModelV3 {
   String get modelId => 'immediate-error-stream';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async => throw UnimplementedError();
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable([
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable([
         StreamPartError(error: StateError('boom')),
       ]),
     );

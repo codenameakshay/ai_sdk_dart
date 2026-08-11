@@ -55,7 +55,7 @@ class StreamTextReasoningChunk extends StreamTextChunk {
 class StreamTextToolCallChunk extends StreamTextChunk {
   const StreamTextToolCallChunk({required this.toolCall});
 
-  final LanguageModelV3ToolCallPart toolCall;
+  final LanguageModelV4ToolCallPart toolCall;
 }
 
 class StreamTextToolResultChunk extends StreamTextChunk {
@@ -64,26 +64,26 @@ class StreamTextToolResultChunk extends StreamTextChunk {
     required this.preliminary,
   });
 
-  final LanguageModelV3ToolResultPart toolResult;
+  final LanguageModelV4ToolResultPart toolResult;
   final bool preliminary;
 }
 
 class StreamTextRawChunk extends StreamTextChunk {
-  const StreamTextRawChunk({required this.part});
+  const StreamTextRawChunk({required this.rawValue});
 
-  final LanguageModelV3StreamPart part;
+  final Object? rawValue;
 }
 
 class StreamTextSourceChunk extends StreamTextChunk {
   const StreamTextSourceChunk({required this.source});
 
-  final LanguageModelV3SourcePart source;
+  final LanguageModelV4SourcePart source;
 }
 
 class StreamTextFileChunk extends StreamTextChunk {
   const StreamTextFileChunk({required this.file});
 
-  final LanguageModelV3FilePart file;
+  final LanguageModelV4FilePart file;
 }
 
 class StreamTextToolInputStartChunk extends StreamTextChunk {
@@ -113,7 +113,7 @@ class StreamTextToolInputDeltaChunk extends StreamTextChunk {
 class StreamTextUsageChunk extends StreamTextChunk {
   const StreamTextUsageChunk({required this.usage});
 
-  final LanguageModelV3Usage usage;
+  final LanguageModelV4Usage usage;
 }
 
 sealed class StreamTextEvent {
@@ -171,13 +171,13 @@ class StreamTextReasoningEndEvent extends StreamTextEvent {
 class StreamTextSourceEvent extends StreamTextEvent {
   const StreamTextSourceEvent({required this.source});
 
-  final LanguageModelV3SourcePart source;
+  final LanguageModelV4SourcePart source;
 }
 
 class StreamTextFileEvent extends StreamTextEvent {
   const StreamTextFileEvent({required this.file});
 
-  final LanguageModelV3FilePart file;
+  final LanguageModelV4FilePart file;
 }
 
 class StreamTextToolInputStartEvent extends StreamTextEvent {
@@ -224,7 +224,7 @@ class StreamTextToolResultEvent extends StreamTextEvent {
     required this.preliminary,
   });
 
-  final LanguageModelV3ToolResultPart toolResult;
+  final LanguageModelV4ToolResultPart toolResult;
   final bool preliminary;
 }
 
@@ -241,9 +241,9 @@ class StreamTextToolErrorEvent extends StreamTextEvent {
 }
 
 class StreamTextRawEvent extends StreamTextEvent {
-  const StreamTextRawEvent({required this.part});
+  const StreamTextRawEvent({required this.rawValue});
 
-  final LanguageModelV3StreamPart part;
+  final Object? rawValue;
 }
 
 class StreamTextErrorEvent extends StreamTextEvent {
@@ -261,7 +261,7 @@ class StreamTextFinishStepEvent extends StreamTextEvent {
 class StreamTextUsageEvent extends StreamTextEvent {
   const StreamTextUsageEvent({required this.usage});
 
-  final LanguageModelV3Usage usage;
+  final LanguageModelV4Usage usage;
 }
 
 class StreamTextFinishEvent<TOutput> extends StreamTextEvent {
@@ -286,20 +286,20 @@ class StreamTextFinishEvent<TOutput> extends StreamTextEvent {
 
   final String text;
   final TOutput output;
-  final LanguageModelV3FinishReason finishReason;
+  final LanguageModelV4FinishReason finishReason;
   final String? rawFinishReason;
-  final LanguageModelV3Usage? usage;
-  final LanguageModelV3Usage? totalUsage;
+  final LanguageModelV4Usage? usage;
+  final LanguageModelV4Usage? totalUsage;
   final ProviderMetadata? providerMetadata;
   final List<GenerateTextStep> steps;
-  final List<LanguageModelV3ReasoningPart> reasoning;
+  final List<LanguageModelV4ReasoningPart> reasoning;
   final String reasoningText;
-  final List<LanguageModelV3SourcePart> sources;
-  final List<LanguageModelV3FilePart> files;
-  final List<LanguageModelV3Message> responseMessages;
+  final List<LanguageModelV4SourcePart> sources;
+  final List<LanguageModelV4FilePart> files;
+  final List<LanguageModelV4Message> responseMessages;
   final GenerateTextRequest request;
   final GenerateTextResponse response;
-  final List<String> warnings;
+  final List<LanguageModelV4Warning> warnings;
 }
 
 class StreamTextResult<TOutput> {
@@ -330,25 +330,25 @@ class StreamTextResult<TOutput> {
     required this.finish,
   });
 
-  final Stream<LanguageModelV3StreamPart> stream;
+  final Stream<LanguageModelV4StreamPart> stream;
   final Stream<StreamTextEvent> fullStream;
   final Stream<String> textStream;
   final Stream<Object?> partialOutputStream;
   final Stream<Object?> elementStream;
   final Future<String> text;
   final Future<TOutput> output;
-  final Future<List<LanguageModelV3ContentPart>> content;
-  final Future<List<LanguageModelV3ReasoningPart>> reasoning;
+  final Future<List<LanguageModelV4ContentPart>> content;
+  final Future<List<LanguageModelV4ReasoningPart>> reasoning;
   final Future<String> reasoningText;
-  final Future<List<LanguageModelV3FilePart>> files;
-  final Future<List<LanguageModelV3SourcePart>> sources;
-  final Future<List<LanguageModelV3ToolCallPart>> toolCalls;
-  final Future<List<LanguageModelV3ToolResultPart>> toolResults;
-  final Future<LanguageModelV3FinishReason?> finishReason;
+  final Future<List<LanguageModelV4FilePart>> files;
+  final Future<List<LanguageModelV4SourcePart>> sources;
+  final Future<List<LanguageModelV4ToolCallPart>> toolCalls;
+  final Future<List<LanguageModelV4ToolResultPart>> toolResults;
+  final Future<LanguageModelV4FinishReason?> finishReason;
   final Future<String?> rawFinishReason;
-  final Future<LanguageModelV3Usage?> usage;
-  final Future<LanguageModelV3Usage?> totalUsage;
-  final Future<List<String>> warnings;
+  final Future<LanguageModelV4Usage?> usage;
+  final Future<LanguageModelV4Usage?> totalUsage;
+  final Future<List<LanguageModelV4Warning>> warnings;
   final Future<List<GenerateTextStep>> steps;
   final Future<GenerateTextRequest> request;
   final Future<GenerateTextResponse> response;

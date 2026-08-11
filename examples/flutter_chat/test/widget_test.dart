@@ -105,12 +105,12 @@ void main() {
   });
 }
 
-class _HoldingTextModel implements LanguageModelV3 {
+class _HoldingTextModel extends LanguageModelV4 {
   _HoldingTextModel(this.text);
 
   final String text;
-  final StreamController<LanguageModelV3StreamPart> _controller =
-      StreamController<LanguageModelV3StreamPart>();
+  final StreamController<LanguageModelV4StreamPart> _controller =
+      StreamController<LanguageModelV4StreamPart>();
 
   @override
   String get provider => 'mock';
@@ -119,28 +119,28 @@ class _HoldingTextModel implements LanguageModelV3 {
   String get modelId => 'holding-text';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3GenerateResult(
-      content: [LanguageModelV3TextPart(text: text)],
-      finishReason: LanguageModelV3FinishReason.stop,
+    return LanguageModelV4GenerateResult(
+      content: [LanguageModelV4TextPart(text: text)],
+      finishReason: LanguageModelV4FinishReason.stop,
       rawFinishReason: 'stop',
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     const id = 'text-1';
     _controller
       ..add(const StreamPartTextStart(id: id))
       ..add(StreamPartTextDelta(id: id, delta: text))
       ..add(const StreamPartTextEnd(id: id));
-    return LanguageModelV3StreamResult(stream: _controller.stream);
+    return LanguageModelV4StreamResult(stream: _controller.stream);
   }
 }

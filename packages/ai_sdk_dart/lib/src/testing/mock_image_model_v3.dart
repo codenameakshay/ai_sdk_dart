@@ -50,4 +50,3 @@ class MockImageModelV3 implements ImageModelV3 {
     );
   }
 }
-

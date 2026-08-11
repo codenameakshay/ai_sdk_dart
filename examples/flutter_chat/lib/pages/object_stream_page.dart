@@ -59,7 +59,7 @@ class _ObjectStreamPageState extends State<ObjectStreamPage> {
           model: OpenAIProvider(apiKey: openAiApiKey)('gpt-4.1-mini'),
           schema: _schema,
           onError: (err) => _showSnackBar('Error: $err'),
-        ))!;
+        ));
   }
 
   @override

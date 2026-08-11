@@ -2,6 +2,7 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
 import '../core/generate_text.dart';
 import '../core/stream_text.dart';
+import '../core/timeout_configuration.dart';
 import '../messages/model_message.dart';
 import '../stop_conditions/stop_conditions.dart';
 import '../tools/tool.dart';
@@ -29,7 +30,7 @@ class ToolLoopAgent {
     this.stopConditions = const [],
   });
 
-  final LanguageModelV3 model;
+  final LanguageModelV4 model;
   final String? instructions;
   final ToolSet tools;
   final int maxSteps;
@@ -40,7 +41,7 @@ class ToolLoopAgent {
     String? prompt,
     List<ModelMessage>? messages,
     CancellationToken? abortSignal,
-    Duration? timeout,
+    TimeoutConfiguration? timeout,
   }) {
     return generateText(
       model: model,
@@ -62,9 +63,9 @@ class ToolLoopAgent {
   Future<StreamTextResult> stream({
     String? prompt,
     List<ModelMessage>? messages,
-    List<LanguageModelV3ToolApprovalResponse> toolApprovalResponses = const [],
+    List<LanguageModelV4ToolApprovalResponse> toolApprovalResponses = const [],
     CancellationToken? abortSignal,
-    Duration? timeout,
+    TimeoutConfiguration? timeout,
   }) {
     return streamText(
       model: model,

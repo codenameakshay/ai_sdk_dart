@@ -97,23 +97,22 @@ void main() {
   });
 
   group('dynamicTool input parsing', () {
-    test('non-strict dynamicTool forwards raw input to the executor',
-        () async {
+    test('non-strict dynamicTool forwards raw input to the executor', () async {
       Object? received;
       final model = FakeMultiStepModel([
-        const LanguageModelV3GenerateResult(
+        const LanguageModelV4GenerateResult(
           content: [
-            LanguageModelV3ToolCallPart(
+            LanguageModelV4ToolCallPart(
               toolCallId: 'c1',
               toolName: 'dyn',
               input: {'any': 'thing'},
             ),
           ],
-          finishReason: LanguageModelV3FinishReason.toolCalls,
+          finishReason: LanguageModelV4FinishReason.toolCalls,
         ),
-        const LanguageModelV3GenerateResult(
-          content: [LanguageModelV3TextPart(text: 'done')],
-          finishReason: LanguageModelV3FinishReason.stop,
+        const LanguageModelV4GenerateResult(
+          content: [LanguageModelV4TextPart(text: 'done')],
+          finishReason: LanguageModelV4FinishReason.stop,
         ),
       ]);
       await generateText(
@@ -133,7 +132,7 @@ void main() {
     });
 
     test('dynamicTool schema fromJson returns the raw JSON unchanged', () {
-      final t = dynamicTool<String>(execute: (_, __) async => 'x');
+      final t = dynamicTool<String>(execute: (_, _) async => 'x');
       final parsed = t.inputSchema.fromJson({'k': 'v'});
       expect(parsed, {'k': 'v'});
     });
@@ -142,19 +141,19 @@ void main() {
   group('non-JSON-encodable tool output falls back to toString', () {
     test('generateText stringifies an unencodable tool output', () async {
       final model = FakeMultiStepModel([
-        const LanguageModelV3GenerateResult(
+        const LanguageModelV4GenerateResult(
           content: [
-            LanguageModelV3ToolCallPart(
+            LanguageModelV4ToolCallPart(
               toolCallId: 'c1',
               toolName: 'obj',
               input: {},
             ),
           ],
-          finishReason: LanguageModelV3FinishReason.toolCalls,
+          finishReason: LanguageModelV4FinishReason.toolCalls,
         ),
-        const LanguageModelV3GenerateResult(
-          content: [LanguageModelV3TextPart(text: 'done')],
-          finishReason: LanguageModelV3FinishReason.stop,
+        const LanguageModelV4GenerateResult(
+          content: [LanguageModelV4TextPart(text: 'done')],
+          finishReason: LanguageModelV4FinishReason.stop,
         ),
       ]);
       final result = await generateText(
@@ -168,7 +167,7 @@ void main() {
               fromJson: (json) => json,
             ),
             // A bare Object() is not JSON-encodable → toString() fallback.
-            execute: (_, __) async => _Unencodable(),
+            execute: (_, _) async => _Unencodable(),
           ),
         },
       );
@@ -181,10 +180,10 @@ void main() {
   group('convertToModelMessages', () {
     test('converts a tool-role message', () {
       final messages = convertToModelMessages([
-        const LanguageModelV3Message(
-          role: LanguageModelV3Role.tool,
+        const LanguageModelV4Message(
+          role: LanguageModelV4Role.tool,
           content: [
-            LanguageModelV3ToolResultPart(
+            LanguageModelV4ToolResultPart(
               toolCallId: 'c1',
               toolName: 'echo',
               output: ToolResultOutputText('result'),
@@ -198,17 +197,17 @@ void main() {
 
     test('converts every role including a single-text shortcut', () {
       final messages = convertToModelMessages(const [
-        LanguageModelV3Message(
-          role: LanguageModelV3Role.system,
-          content: [LanguageModelV3TextPart(text: 'sys')],
+        LanguageModelV4Message(
+          role: LanguageModelV4Role.system,
+          content: [LanguageModelV4TextPart(text: 'sys')],
         ),
-        LanguageModelV3Message(
-          role: LanguageModelV3Role.user,
-          content: [LanguageModelV3TextPart(text: 'hi')],
+        LanguageModelV4Message(
+          role: LanguageModelV4Role.user,
+          content: [LanguageModelV4TextPart(text: 'hi')],
         ),
-        LanguageModelV3Message(
-          role: LanguageModelV3Role.assistant,
-          content: [LanguageModelV3TextPart(text: 'yo')],
+        LanguageModelV4Message(
+          role: LanguageModelV4Role.assistant,
+          content: [LanguageModelV4TextPart(text: 'yo')],
         ),
       ]);
       expect(messages.map((m) => m.role.name), ['system', 'user', 'assistant']);

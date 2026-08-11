@@ -8,11 +8,11 @@ import 'package:test/test.dart';
 
 void main() {
   group('testing utilities', () {
-    // ── MockLanguageModelV3 ───────────────────────────────────────────────
+    // ── MockLanguageModelV4 ───────────────────────────────────────────────
 
-    group('MockLanguageModelV3', () {
+    group('MockLanguageModelV4', () {
       test('returns configured text response from generateText', () async {
-        final model = MockLanguageModelV3(
+        final model = MockLanguageModelV4(
           response: [mockText('Hello, world!')],
         );
         final result = await generateText(model: model, prompt: 'hi');
@@ -20,21 +20,21 @@ void main() {
       });
 
       test('records calls in generateCalls list', () async {
-        final model = MockLanguageModelV3(response: [mockText('ok')]);
+        final model = MockLanguageModelV4(response: [mockText('ok')]);
         await generateText(model: model, prompt: 'first');
         await generateText(model: model, prompt: 'second');
         expect(model.generateCalls.length, 2);
       });
 
       test('records calls in streamCalls list', () async {
-        final model = MockLanguageModelV3(response: [mockText('ok')]);
+        final model = MockLanguageModelV4(response: [mockText('ok')]);
         final result = await streamText(model: model, prompt: 'test');
         await result.text; // consume the stream
         expect(model.streamCalls.length, 1);
       });
 
       test('throws doGenerateError when configured', () async {
-        final model = MockLanguageModelV3(
+        final model = MockLanguageModelV4(
           response: [],
           doGenerateError: Exception('generate error'),
         );
@@ -45,7 +45,7 @@ void main() {
       });
 
       test('returns reasoning from streamText', () async {
-        final model = MockLanguageModelV3(
+        final model = MockLanguageModelV4(
           response: [mockReasoning('thinking...'), mockText('done')],
         );
         final result = await streamText(model: model, prompt: 'hi');
@@ -54,39 +54,42 @@ void main() {
       });
 
       test('returns correct finishReason', () async {
-        final model = MockLanguageModelV3(
+        final model = MockLanguageModelV4(
           response: [mockText('hi')],
-          finishReason: LanguageModelV3FinishReason.stop,
+          finishReason: LanguageModelV4FinishReason.stop,
         );
         final result = await generateText(model: model, prompt: 'test');
-        expect(result.finishReason, LanguageModelV3FinishReason.stop);
+        expect(result.finishReason, LanguageModelV4FinishReason.stop);
       });
 
       test('reports usage when configured', () async {
-        final model = MockLanguageModelV3(
+        final model = MockLanguageModelV4(
           response: [mockText('hi')],
-          usage: const LanguageModelV3Usage(inputTokens: 10, outputTokens: 5),
+          usage: const LanguageModelV4Usage(
+            inputTokens: LanguageModelV4InputTokenUsage(total: 10),
+            outputTokens: LanguageModelV4OutputTokenUsage(total: 5),
+          ),
         );
         final result = await generateText(model: model, prompt: 'test');
-        expect(result.usage?.inputTokens, 10);
-        expect(result.usage?.outputTokens, 5);
+        expect(result.usage?.inputTokens.total, 10);
+        expect(result.usage?.outputTokens.total, 5);
       });
 
-      test('mockText helper creates LanguageModelV3TextPart', () {
+      test('mockText helper creates LanguageModelV4TextPart', () {
         final part = mockText('hello');
-        expect(part, isA<LanguageModelV3TextPart>());
+        expect(part, isA<LanguageModelV4TextPart>());
         expect(part.text, 'hello');
       });
 
-      test('mockReasoning helper creates LanguageModelV3ReasoningPart', () {
+      test('mockReasoning helper creates LanguageModelV4ReasoningPart', () {
         final part = mockReasoning('think');
-        expect(part, isA<LanguageModelV3ReasoningPart>());
+        expect(part, isA<LanguageModelV4ReasoningPart>());
         expect(part.text, 'think');
       });
 
-      test('mockToolCall helper creates LanguageModelV3ToolCallPart', () {
+      test('mockToolCall helper creates LanguageModelV4ToolCallPart', () {
         final part = mockToolCall(toolName: 'search', input: {'q': 'test'});
-        expect(part, isA<LanguageModelV3ToolCallPart>());
+        expect(part, isA<LanguageModelV4ToolCallPart>());
         expect(part.toolName, 'search');
         expect(part.input, {'q': 'test'});
       });
@@ -96,9 +99,7 @@ void main() {
 
     group('MockEmbeddingModelV2', () {
       test('returns configured embedding vector', () async {
-        final model = MockEmbeddingModelV2<String>(
-          embedding: [0.1, 0.2, 0.3],
-        );
+        final model = MockEmbeddingModelV2<String>(embedding: [0.1, 0.2, 0.3]);
         final result = await embed(model: model, value: 'hello');
         expect(result.embedding, [0.1, 0.2, 0.3]);
       });
@@ -137,9 +138,7 @@ void main() {
 
     group('MockEmbeddingModelV3', () {
       test('returns configured embedding vector via embed()', () async {
-        final model = MockEmbeddingModelV3<String>(
-          embedding: [0.4, 0.5, 0.6],
-        );
+        final model = MockEmbeddingModelV3<String>(embedding: [0.4, 0.5, 0.6]);
         final result = await embed(model: model, value: 'hello');
         expect(result.embedding, [0.4, 0.5, 0.6]);
       });
@@ -159,7 +158,7 @@ void main() {
       test('throws doEmbedError when configured', () {
         final model = MockEmbeddingModelV3<String>(
           embedding: [],
-          doEmbedError: Exception('v3 embed error'),
+          doEmbedError: Exception('v4 embed error'),
         );
         expect(
           () => embed(model: model, value: 'hi'),
@@ -180,10 +179,7 @@ void main() {
 
       test('works with embedMany()', () async {
         final model = MockEmbeddingModelV3<String>(embedding: [0.7, 0.8]);
-        final result = await embedMany(
-          model: model,
-          values: ['a', 'b', 'c'],
-        );
+        final result = await embedMany(model: model, values: ['a', 'b', 'c']);
         expect(result.embeddings, hasLength(3));
         for (final e in result.embeddings) {
           expect(e.embedding, [0.7, 0.8]);
@@ -203,7 +199,9 @@ void main() {
 
       test('records calls in generateCalls list', () async {
         final model = MockImageModelV3(
-          images: [Uint8List.fromList([0])],
+          images: [
+            Uint8List.fromList([0]),
+          ],
         );
         await generateImage(model: model, prompt: 'test 1');
         await generateImage(model: model, prompt: 'test 2');
@@ -293,30 +291,29 @@ void main() {
           model: inner,
           middleware: <ImageModelMiddleware>[],
         );
-        final result = await generateImage(
-          model: wrapped,
-          prompt: 'sunset',
-        );
+        final result = await generateImage(model: wrapped, prompt: 'sunset');
         expect(result.image.bytes, bytes);
       });
 
       test('transformParams can modify prompt', () async {
         final inner = MockImageModelV3(
-          images: [Uint8List.fromList([1])],
+          images: [
+            Uint8List.fromList([1]),
+          ],
         );
         final mw = _PrefixPromptMiddleware('detailed: ');
         final wrapped = wrapImageModel(model: inner, middleware: mw);
 
-        await wrapped.doGenerate(
-          const ImageModelV3CallOptions(prompt: 'cat'),
-        );
+        await wrapped.doGenerate(const ImageModelV3CallOptions(prompt: 'cat'));
 
         expect(inner.generateCalls.first.prompt, 'detailed: cat');
       });
 
       test('single middleware can be passed without a list', () async {
         final inner = MockImageModelV3(
-          images: [Uint8List.fromList([1])],
+          images: [
+            Uint8List.fromList([1]),
+          ],
         );
         // _ConcreteImageMiddleware is a no-op concrete subclass
         final mw = _ConcreteImageMiddleware();

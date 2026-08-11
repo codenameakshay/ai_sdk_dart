@@ -16,6 +16,8 @@
 /// Run:
 ///   dart run lib/main.dart
 ///
+library;
+
 import 'dart:io';
 
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';

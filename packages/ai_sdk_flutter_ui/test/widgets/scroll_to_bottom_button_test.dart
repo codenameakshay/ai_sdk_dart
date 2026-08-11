@@ -2,7 +2,24 @@ import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_dart/test.dart';
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+Future<void> _tabUntilActivated(
+  WidgetTester tester,
+  bool Function() activated, {
+  int maxTabs = 10,
+}) async {
+  for (var i = 0; i < maxTabs; i++) {
+    if (activated()) return;
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    if (activated()) return;
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+  }
+  fail('Unable to activate target after $maxTabs tabs');
+}
 
 void main() {
   group('ScrollToBottomButton', () {
@@ -136,6 +153,21 @@ void main() {
       expect(controller.position.pixels, controller.position.maxScrollExtent);
     });
 
+    testWidgets('is reachable and activatable by keyboard', (tester) async {
+      final semantics = tester.ensureSemantics();
+
+      await tester.pumpWidget(harness());
+      await tester.pumpAndSettle();
+
+      await _tabUntilActivated(
+        tester,
+        () => controller.position.pixels == controller.position.maxScrollExtent,
+      );
+      await tester.pumpAndSettle();
+      expect(controller.position.pixels, controller.position.maxScrollExtent);
+      semantics.dispose();
+    });
+
     testWidgets('re-wires its listener when the controller changes', (
       tester,
     ) async {
@@ -179,7 +211,7 @@ void main() {
       (tester) async {
         final chatController = ChatController();
         addTearDown(chatController.dispose);
-        final agent = ToolLoopAgent(model: MockLanguageModelV3());
+        final agent = ToolLoopAgent(model: MockLanguageModelV4());
 
         await tester.pumpWidget(
           MaterialApp(

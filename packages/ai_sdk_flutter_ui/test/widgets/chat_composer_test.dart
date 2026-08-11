@@ -1,10 +1,27 @@
 import 'dart:ui' as ui;
 
-import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
+import 'package:ai_sdk_flutter_ui/src/widgets/chat_composer.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
+
+Future<void> _tabUntilActivated(
+  WidgetTester tester,
+  bool Function() activated, {
+  int maxTabs = 10,
+}) async {
+  for (var i = 0; i < maxTabs; i++) {
+    if (activated()) return;
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    if (activated()) return;
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+  }
+  fail('Unable to activate target after $maxTabs tabs');
+}
 
 void main() {
   group('ChatComposer', () {
@@ -150,6 +167,54 @@ void main() {
           .getSemanticsData();
       expect(stopNode.label, 'Stop response');
       expect(stopNode.hasAction(ui.SemanticsAction.tap), isTrue);
+      semantics.dispose();
+    });
+
+    testWidgets('attach and send are reachable and activatable by keyboard', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      final controller = TextEditingController(text: 'keyboard send');
+      addTearDown(controller.dispose);
+      var attachCalls = 0;
+      String? sent;
+
+      await tester.pumpWidget(
+        _wrap(
+          ChatComposer(
+            controller: controller,
+            onSend: (text) => sent = text,
+            onAttach: () => attachCalls++,
+          ),
+        ),
+      );
+
+      await _tabUntilActivated(tester, () => attachCalls == 1);
+      expect(attachCalls, 1);
+
+      await _tabUntilActivated(tester, () => sent != null);
+      expect(sent, 'keyboard send');
+      semantics.dispose();
+    });
+
+    testWidgets('stop is reachable and activatable by keyboard', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      var stopped = false;
+
+      await tester.pumpWidget(
+        _wrap(
+          ChatComposer(
+            onSend: (_) {},
+            isLoading: true,
+            onStop: () => stopped = true,
+          ),
+        ),
+      );
+
+      await _tabUntilActivated(tester, () => stopped);
+      expect(stopped, isTrue);
       semantics.dispose();
     });
   });

@@ -64,6 +64,10 @@ void main() {
 
       expect(result.finishReason, LanguageModelV4FinishReason.toolCalls);
       expect(result.usage.inputTokens.total, 12);
+      // No cache fields in the response -> no input token breakdown.
+      expect(result.usage.inputTokens.noCache, isNull);
+      expect(result.usage.inputTokens.cacheRead, isNull);
+      expect(result.usage.inputTokens.cacheWrite, isNull);
       expect(
         result.content.whereType<LanguageModelV4ReasoningPart>().length,
         1,
@@ -766,7 +770,6 @@ void main() {
         contains('other'),
       );
     });
-
     test(
       'stream emits raw chunks and closes explicit thinking and tool blocks',
       () async {
@@ -823,6 +826,111 @@ void main() {
         });
       },
     );
+    test(
+      'doGenerate maps cache_read/creation into V4 input token fields',
+      () async {
+        final server = await _TestServer.start((request) async {
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'id': 'msg_c',
+              'model': 'claude-sonnet-4-5',
+              'stop_reason': 'end_turn',
+              'content': [
+                {'type': 'text', 'text': 'hi'},
+              ],
+              'usage': {
+                'input_tokens': 10,
+                'output_tokens': 5,
+                'cache_read_input_tokens': 100,
+                'cache_creation_input_tokens': 20,
+              },
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = AnthropicProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('claude-sonnet-4-5');
+
+        final result = await model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'hi')],
+                ),
+              ],
+            ),
+          ),
+        );
+
+        // Anthropic reports cache tokens separately, so inputTokens is the sum:
+        // input_tokens (10) + cache_read (100) + cache_creation (20) = 130.
+        expect(result.usage.inputTokens.total, 130);
+        expect(result.usage.outputTokens.total, 5);
+        expect(result.usage.inputTokens.noCache, 10);
+        expect(result.usage.inputTokens.cacheRead, 100);
+        expect(result.usage.inputTokens.cacheWrite, 20);
+      },
+    );
+
+    test('stream carries cache token fields from message_start to finish', () async {
+      final server = await _TestServer.start((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.set('content-type', 'text/event-stream');
+        // message_start carries the input/cache breakdown; the trailing
+        // message_delta reports only output_tokens.
+        request.response.write(
+          'data: {"type":"message_start","message":{"id":"msg_c","model":"claude-sonnet-4-5","usage":{"input_tokens":8,"output_tokens":1,"cache_read_input_tokens":40,"cache_creation_input_tokens":0}}}\n\n',
+        );
+        request.response.write(
+          'data: {"type":"content_block_start","index":0,"content_block":{"type":"text"}}\n\n',
+        );
+        request.response.write(
+          'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}\n\n',
+        );
+        request.response.write(
+          'data: {"type":"message_delta","usage":{"output_tokens":3},"delta":{"stop_reason":"end_turn"}}\n\n',
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = AnthropicProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).call('claude-sonnet-4-5');
+
+      final streamResult = await model.doStream(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
+            messages: [
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
+              ),
+            ],
+          ),
+        ),
+      );
+
+      final finish = (await streamResult.stream.toList())
+          .whereType<StreamPartFinish>()
+          .single;
+      // input_tokens (8) + cache_read (40) = 48; output from message_delta.
+      expect(finish.usage.inputTokens.total, 48);
+      expect(finish.usage.outputTokens.total, 3);
+      // Cache breakdown captured at message_start survives the output-only delta.
+      expect(finish.usage.inputTokens.noCache, 8);
+      expect(finish.usage.inputTokens.cacheRead, 40);
+      expect(finish.usage.inputTokens.cacheWrite, 0);
+    });
 
     // ── AnthropicThinkingOptions / speed ─────────────────────────────────
 

@@ -184,16 +184,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
       content: content,
       finishReason: _mapAnthropicFinishReason(data['stop_reason']?.toString()),
       rawFinishReason: data['stop_reason']?.toString(),
-      usage: usage == null
-          ? null
-          : LanguageModelV4Usage(
-              inputTokens: LanguageModelV4InputTokenUsage(
-                total: _intOrNull(usage['input_tokens']),
-              ),
-              outputTokens: LanguageModelV4OutputTokenUsage(
-                total: _intOrNull(usage['output_tokens']),
-              ),
-            ),
+      usage: usage == null ? null : _anthropicUsageFrom(usage),
       warnings: warnings,
       request: LanguageModelV4RequestMetadata(body: requestBody),
       response: LanguageModelV4ResponseMetadata(
@@ -302,14 +293,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
               final usage =
                   (message['usage'] as Map?)?.cast<String, dynamic>() ??
                   <String, dynamic>{};
-              streamUsage = LanguageModelV4Usage(
-                inputTokens: LanguageModelV4InputTokenUsage(
-                  total: _intOrNull(usage['input_tokens']),
-                ),
-                outputTokens: LanguageModelV4OutputTokenUsage(
-                  total: _intOrNull(usage['output_tokens']),
-                ),
-              );
+              streamUsage = _anthropicUsageFrom(usage, previous: streamUsage);
               break;
             case 'content_block_start':
               final index = _intOrNull(json['index']) ?? 0;
@@ -403,18 +387,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
                   (json['usage'] as Map?)?.cast<String, dynamic>() ??
                   <String, dynamic>{};
               if (usage.isNotEmpty) {
-                streamUsage = LanguageModelV4Usage(
-                  inputTokens: LanguageModelV4InputTokenUsage(
-                    total:
-                        _intOrNull(usage['input_tokens']) ??
-                        streamUsage?.inputTokens.total,
-                  ),
-                  outputTokens: LanguageModelV4OutputTokenUsage(
-                    total:
-                        _intOrNull(usage['output_tokens']) ??
-                        streamUsage?.outputTokens.total,
-                  ),
-                );
+                streamUsage = _anthropicUsageFrom(usage, previous: streamUsage);
               }
               final stopReason = delta['stop_reason']?.toString();
               if (stopReason != null) {
@@ -624,6 +597,50 @@ int? _intOrNull(Object? value) => switch (value) {
   String v => int.tryParse(v),
   _ => null,
 };
+
+/// Builds a [LanguageModelV4Usage] from an Anthropic `usage` object, mapping
+/// the prompt-cache token fields into nested V4 input token usage fields.
+///
+/// Anthropic reports cache tokens *separately* from `input_tokens` (unlike
+/// OpenAI/Google, where cached tokens are a subset of the prompt count), so
+/// the reported [LanguageModelV4InputTokenUsage.total] is the sum of the fresh
+/// input, cache-read, and cache-creation tokens. When the response carries no
+/// cache fields the total collapses back to `input_tokens`, preserving prior
+/// behaviour while leaving the cache breakdown unset.
+///
+/// [previous] carries usage forward across streaming events: `message_start`
+/// reports the input/cache breakdown while later `message_delta` events report
+/// only `output_tokens`.
+LanguageModelV4Usage _anthropicUsageFrom(
+  Map<String, dynamic> usage, {
+  LanguageModelV4Usage? previous,
+}) {
+  final inputTokens = _intOrNull(usage['input_tokens']);
+  final outputTokens = _intOrNull(usage['output_tokens']);
+  final cacheRead = _intOrNull(usage['cache_read_input_tokens']);
+  final cacheWrite = _intOrNull(usage['cache_creation_input_tokens']);
+  final hasCache = cacheRead != null || cacheWrite != null;
+
+  final int? totalInput;
+  if (inputTokens != null || hasCache) {
+    totalInput = (inputTokens ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0);
+  } else {
+    totalInput = previous?.inputTokens.total;
+  }
+
+  return LanguageModelV4Usage(
+    inputTokens: LanguageModelV4InputTokenUsage(
+      total: totalInput,
+      noCache: hasCache ? inputTokens : previous?.inputTokens.noCache,
+      cacheRead: hasCache ? cacheRead : previous?.inputTokens.cacheRead,
+      cacheWrite: hasCache ? cacheWrite : previous?.inputTokens.cacheWrite,
+    ),
+    outputTokens: LanguageModelV4OutputTokenUsage(
+      total: outputTokens ?? previous?.outputTokens.total,
+    ),
+    raw: usage,
+  );
+}
 
 String _generateId(String prefix) {
   final micros = DateTime.now().microsecondsSinceEpoch;

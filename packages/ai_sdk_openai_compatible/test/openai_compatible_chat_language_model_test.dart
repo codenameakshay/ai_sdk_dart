@@ -374,6 +374,40 @@ void main() {
       expect(toolCall.input, {'city': 'Paris'});
     });
 
+    test('doGenerate maps prompt_tokens_details.cached_tokens', () async {
+      final server = await _TestServer.start((request) async {
+        _writeJson(request, {
+          'id': 'chatcmpl_c',
+          'model': 'm',
+          'choices': [
+            {
+              'finish_reason': 'stop',
+              'message': {'content': 'hi'},
+            },
+          ],
+          'usage': {
+            'prompt_tokens': 100,
+            'completion_tokens': 5,
+            'total_tokens': 105,
+            'prompt_tokens_details': {'cached_tokens': 80},
+          },
+        });
+      });
+      addTearDown(server.close);
+
+      final model = _bearerModel(server.baseUrl);
+      final result = await model.doGenerate(
+        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+      );
+
+      // prompt_tokens already includes cache hits, so total stays at 100 and
+      // the uncached remainder is surfaced separately.
+      expect(result.usage.inputTokens.total, 100);
+      expect(result.usage.inputTokens.noCache, 20);
+      expect(result.usage.inputTokens.cacheRead, 80);
+      expect(result.usage.inputTokens.cacheWrite, isNull);
+    });
+
     // ── SSE text + tool-call streaming ───────────────────────────────────
     test('doStream parses text deltas and tool-call deltas', () async {
       final server = await _TestServer.start((request) async {

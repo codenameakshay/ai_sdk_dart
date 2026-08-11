@@ -71,6 +71,7 @@ void main() {
 
       expect(result.finishReason, LanguageModelV4FinishReason.stop);
       expect(result.usage.inputTokens.total, 10);
+      expect(result.usage.inputTokens.cacheRead, isNull);
       expect(result.usage.outputTokens.total, 6);
       expect(
         result.content.whereType<LanguageModelV4TextPart>().single.text,
@@ -81,6 +82,53 @@ void main() {
         'weather',
       );
     });
+
+    test(
+      'doGenerate maps cachedContentTokenCount into nested inputTokens',
+      () async {
+        final server = await _TestServer.start((request) async {
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'candidates': [
+                {
+                  'finishReason': 'STOP',
+                  'content': {
+                    'parts': [
+                      {'text': 'hi'},
+                    ],
+                  },
+                },
+              ],
+              'usageMetadata': {
+                'promptTokenCount': 100,
+                'candidatesTokenCount': 6,
+                'totalTokenCount': 106,
+                'cachedContentTokenCount': 80,
+              },
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = GoogleGenerativeAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('gemini-2.0-flash');
+
+        final result = await model.doGenerate(
+          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        );
+
+        expect(result.usage.inputTokens.total, 100);
+        expect(result.usage.inputTokens.cacheRead, 80);
+        expect(result.usage.inputTokens.cacheWrite, isNull);
+        expect(result.usage.inputTokens.noCache, 20);
+        expect(result.usage.outputTokens.total, 6);
+      },
+    );
 
     test('credentials are resolved immediately before each request', () async {
       final apiKeys = <String?>[];
@@ -878,7 +926,7 @@ void main() {
         request.response.statusCode = 200;
         request.response.headers.set('content-type', 'text/event-stream');
         request.response.write(
-          'data: {"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":2,"totalTokenCount":7},"candidates":[{"content":{"parts":[{"text":"Hello"}]}}]}\n\n',
+          'data: {"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":2,"totalTokenCount":7,"cachedContentTokenCount":3},"candidates":[{"content":{"parts":[{"text":"Hello"}]}}]}\n\n',
         );
         request.response.write(
           'data: {"promptFeedback":{"blockReason":"SAFETY"},"candidates":[{"content":{"parts":[]},"finishReason":"STOP"}]}\n\n',
@@ -909,6 +957,8 @@ void main() {
           .whereType<StreamPartFinish>()
           .single;
       expect(finish.usage.inputTokens.total, 5);
+      expect(finish.usage.inputTokens.cacheRead, 3);
+      expect(finish.usage.inputTokens.noCache, 2);
       expect(finish.usage.outputTokens.total, 2);
       expect(finish.providerMetadata?['google']?['model'], 'gemini-2.0-flash');
       expect(finish.providerMetadata?['google']?['warnings'], isNotEmpty);

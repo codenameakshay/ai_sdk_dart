@@ -233,16 +233,7 @@ class _GoogleLanguageModel extends LanguageModelV4 {
       content: content,
       finishReason: _mapGoogleFinishReason(first['finishReason']?.toString()),
       rawFinishReason: first['finishReason']?.toString(),
-      usage: usage == null
-          ? null
-          : LanguageModelV4Usage(
-              inputTokens: LanguageModelV4InputTokenUsage(
-                total: _intOrNull(usage['promptTokenCount']),
-              ),
-              outputTokens: LanguageModelV4OutputTokenUsage(
-                total: _intOrNull(usage['candidatesTokenCount']),
-              ),
-            ),
+      usage: usage == null ? null : _googleUsageFrom(usage),
       warnings: warnings,
       request: LanguageModelV4RequestMetadata(body: requestBody),
       response: LanguageModelV4ResponseMetadata(
@@ -357,14 +348,7 @@ class _GoogleLanguageModel extends LanguageModelV4 {
           final usage = (json['usageMetadata'] as Map?)
               ?.cast<String, dynamic>();
           if (usage != null) {
-            streamUsage = LanguageModelV4Usage(
-              inputTokens: LanguageModelV4InputTokenUsage(
-                total: _intOrNull(usage['promptTokenCount']),
-              ),
-              outputTokens: LanguageModelV4OutputTokenUsage(
-                total: _intOrNull(usage['candidatesTokenCount']),
-              ),
-            );
+            streamUsage = _googleUsageFrom(usage);
           }
           final candidates = (json['candidates'] as List?) ?? const [];
           if (candidates.isEmpty) continue;
@@ -787,6 +771,27 @@ void _emitGoogleToolCall(
         input: state.input,
       ),
     ),
+  );
+}
+
+/// Gemini's `promptTokenCount` already includes cached tokens, so `total`
+/// remains the reported prompt total and the uncached remainder is surfaced via
+/// `noCache`.
+LanguageModelV4Usage _googleUsageFrom(Map<String, dynamic> usage) {
+  final inputTokens = _intOrNull(usage['promptTokenCount']);
+  final cacheRead = _intOrNull(usage['cachedContentTokenCount']);
+  return LanguageModelV4Usage(
+    inputTokens: LanguageModelV4InputTokenUsage(
+      total: inputTokens,
+      noCache: cacheRead == null || inputTokens == null
+          ? null
+          : inputTokens - cacheRead,
+      cacheRead: cacheRead,
+    ),
+    outputTokens: LanguageModelV4OutputTokenUsage(
+      total: _intOrNull(usage['candidatesTokenCount']),
+    ),
+    raw: usage,
   );
 }
 

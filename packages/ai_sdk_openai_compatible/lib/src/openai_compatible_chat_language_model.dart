@@ -702,9 +702,20 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
 // ── shared helpers ────────────────────────────────────────────────────────
 
 LanguageModelV4Usage _usageFrom(Map<String, dynamic> usage) {
+  final inputTokens = _intOrNull(usage['prompt_tokens']);
+  // OpenAI's `prompt_tokens` already includes cache hits; `cached_tokens` is a
+  // subset of it, so `total` stays as reported and the uncached remainder is
+  // surfaced via `noCache`.
+  final promptDetails = (usage['prompt_tokens_details'] as Map?)
+      ?.cast<String, dynamic>();
+  final cacheRead = _intOrNull(promptDetails?['cached_tokens']);
   return LanguageModelV4Usage(
     inputTokens: LanguageModelV4InputTokenUsage(
-      total: _intOrNull(usage['prompt_tokens']),
+      total: inputTokens,
+      noCache: cacheRead == null || inputTokens == null
+          ? null
+          : inputTokens - cacheRead,
+      cacheRead: cacheRead,
     ),
     outputTokens: LanguageModelV4OutputTokenUsage(
       total: _intOrNull(usage['completion_tokens']),

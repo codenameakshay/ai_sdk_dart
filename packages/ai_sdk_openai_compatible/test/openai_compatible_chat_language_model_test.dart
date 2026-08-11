@@ -297,6 +297,8 @@ void main() {
 
       expect(result.finishReason, LanguageModelV3FinishReason.toolCalls);
       expect(result.usage?.totalTokens, 15);
+      // No prompt_tokens_details → no input token breakdown.
+      expect(result.usage?.inputTokenDetails, isNull);
       expect(
         result.content.whereType<LanguageModelV3TextPart>().single.text,
         'checking',
@@ -306,6 +308,40 @@ void main() {
           .single;
       expect(toolCall.toolName, 'weather');
       expect(toolCall.input, {'city': 'Paris'});
+    });
+
+    test('doGenerate maps prompt_tokens_details.cached_tokens', () async {
+      final server = await _TestServer.start((request) async {
+        _writeJson(request, {
+          'id': 'chatcmpl_c',
+          'model': 'm',
+          'choices': [
+            {
+              'finish_reason': 'stop',
+              'message': {'content': 'hi'},
+            },
+          ],
+          'usage': {
+            'prompt_tokens': 100,
+            'completion_tokens': 5,
+            'total_tokens': 105,
+            'prompt_tokens_details': {'cached_tokens': 80},
+          },
+        });
+      });
+      addTearDown(server.close);
+
+      final model = _bearerModel(server.baseUrl);
+      final result = await model.doGenerate(
+        LanguageModelV3CallOptions(prompt: _userPrompt('hi')),
+      );
+
+      // prompt_tokens already includes cache hits, so inputTokens stays the
+      // total and the uncached remainder is surfaced via noCacheTokens.
+      expect(result.usage?.inputTokens, 100);
+      expect(result.usage?.inputTokenDetails?.cacheReadTokens, 80);
+      expect(result.usage?.inputTokenDetails?.noCacheTokens, 20);
+      expect(result.usage?.inputTokenDetails?.cacheWriteTokens, isNull);
     });
 
     // ── SSE text + tool-call streaming ───────────────────────────────────

@@ -206,13 +206,7 @@ class _GoogleLanguageModel implements LanguageModelV3 {
       content: content,
       finishReason: _mapGoogleFinishReason(first['finishReason']?.toString()),
       rawFinishReason: first['finishReason']?.toString(),
-      usage: usage == null
-          ? null
-          : LanguageModelV3Usage(
-              inputTokens: _intOrNull(usage['promptTokenCount']),
-              outputTokens: _intOrNull(usage['candidatesTokenCount']),
-              totalTokens: _intOrNull(usage['totalTokenCount']),
-            ),
+      usage: usage == null ? null : _googleUsageFrom(usage),
       warnings: warnings,
       response: LanguageModelV3ResponseMetadata(
         modelId: modelId,
@@ -321,11 +315,7 @@ class _GoogleLanguageModel implements LanguageModelV3 {
           final usage = (json['usageMetadata'] as Map?)
               ?.cast<String, dynamic>();
           if (usage != null) {
-            streamUsage = LanguageModelV3Usage(
-              inputTokens: _intOrNull(usage['promptTokenCount']),
-              outputTokens: _intOrNull(usage['candidatesTokenCount']),
-              totalTokens: _intOrNull(usage['totalTokenCount']),
-            );
+            streamUsage = _googleUsageFrom(usage);
           }
           final candidates = (json['candidates'] as List?) ?? const [];
           if (candidates.isEmpty) continue;
@@ -639,6 +629,27 @@ int? _intOrNull(Object? value) => switch (value) {
   String v => int.tryParse(v),
   _ => null,
 };
+
+/// Builds a [LanguageModelV3Usage] from a Gemini `usageMetadata` object, mapping
+/// `cachedContentTokenCount` into [LanguageModelV3InputTokenDetails].
+///
+/// Gemini's `promptTokenCount` already includes cached tokens, so `inputTokens`
+/// stays the total and the uncached remainder is surfaced via `noCacheTokens`.
+LanguageModelV3Usage _googleUsageFrom(Map<String, dynamic> usage) {
+  final inputTokens = _intOrNull(usage['promptTokenCount']);
+  final cacheRead = _intOrNull(usage['cachedContentTokenCount']);
+  return LanguageModelV3Usage(
+    inputTokens: inputTokens,
+    outputTokens: _intOrNull(usage['candidatesTokenCount']),
+    totalTokens: _intOrNull(usage['totalTokenCount']),
+    inputTokenDetails: cacheRead == null
+        ? null
+        : LanguageModelV3InputTokenDetails(
+            noCacheTokens: inputTokens == null ? null : inputTokens - cacheRead,
+            cacheReadTokens: cacheRead,
+          ),
+  );
+}
 
 String _generateId(String prefix) {
   final micros = DateTime.now().microsecondsSinceEpoch;

@@ -69,6 +69,8 @@ void main() {
 
       expect(result.finishReason, LanguageModelV3FinishReason.stop);
       expect(result.usage?.totalTokens, 16);
+      // No cachedContentTokenCount → no input token breakdown.
+      expect(result.usage?.inputTokenDetails, isNull);
       expect(
         result.content.whereType<LanguageModelV3TextPart>().single.text,
         'Hello from gemini',
@@ -77,6 +79,60 @@ void main() {
         result.content.whereType<LanguageModelV3ToolCallPart>().single.toolName,
         'weather',
       );
+    });
+
+    test('doGenerate maps cachedContentTokenCount into inputTokenDetails',
+        () async {
+      final server = await _TestServer.start((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'candidates': [
+              {
+                'finishReason': 'STOP',
+                'content': {
+                  'parts': [
+                    {'text': 'hi'},
+                  ],
+                },
+              },
+            ],
+            'usageMetadata': {
+              'promptTokenCount': 100,
+              'candidatesTokenCount': 6,
+              'totalTokenCount': 106,
+              'cachedContentTokenCount': 80,
+            },
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = GoogleGenerativeAIProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).call('gemini-2.0-flash');
+
+      final result = await model.doGenerate(
+        LanguageModelV3CallOptions(
+          prompt: LanguageModelV3Prompt(
+            messages: [
+              LanguageModelV3Message(
+                role: LanguageModelV3Role.user,
+                content: [LanguageModelV3TextPart(text: 'hi')],
+              ),
+            ],
+          ),
+        ),
+      );
+
+      // promptTokenCount already includes cached tokens, so inputTokens stays
+      // the total and the uncached remainder is surfaced via noCacheTokens.
+      expect(result.usage?.inputTokens, 100);
+      expect(result.usage?.inputTokenDetails?.cacheReadTokens, 80);
+      expect(result.usage?.inputTokenDetails?.noCacheTokens, 20);
     });
 
     test('doGenerate extracts provider-native source and file parts', () async {

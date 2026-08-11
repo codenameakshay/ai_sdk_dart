@@ -1,5 +1,5 @@
 /// OpenAI provider for the AI SDK.
-library ai_sdk_openai;
+library;
 
 export 'src/openai_provider.dart';
 export 'src/openai_options.dart';

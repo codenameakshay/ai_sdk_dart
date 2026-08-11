@@ -8,7 +8,7 @@ import 'package:dio/dio.dart';
 import 'api_error.dart';
 import 'openai_compatible_config.dart';
 
-/// A [LanguageModelV3] implementing the full OpenAI Chat Completions wire
+/// A [LanguageModelV4] implementing the full OpenAI Chat Completions wire
 /// format, parameterized for per-provider quirks via [OpenAICompatibleConfig].
 ///
 /// Owns: multimodal message building (text + image + audio + file), `tools` /
@@ -18,7 +18,7 @@ import 'openai_compatible_config.dart';
 ///
 /// Providers wrap this behind their own factory; see `ai_sdk_groq`,
 /// `ai_sdk_azure`, `ai_sdk_mistral`, and `ai_sdk_openai`.
-class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
+class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
   /// Creates a model for [modelId] driven by [config].
   const OpenAICompatibleChatLanguageModel({
     required this.config,
@@ -35,20 +35,26 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
   String get provider => config.provider;
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
-  Dio _client() =>
-      config.clientFactory(baseUrl: config.baseUrl, headers: config.headers());
+  Future<Map<String, String>> _resolvedHeaders() async {
+    final headers = await Future.value(config.headers());
+    return Map<String, String>.unmodifiable(headers);
+  }
 
   Options _requestOptions(
-    LanguageModelV3CallOptions options, {
+    Map<String, String> headers,
+    LanguageModelV4CallOptions options, {
     ResponseType? responseType,
   }) {
-    return Options(responseType: responseType, headers: options.headers);
+    return Options(
+      responseType: responseType,
+      headers: {...?options.headers, ...headers},
+    );
   }
 
   Map<String, dynamic> _buildBody(
-    LanguageModelV3CallOptions options, {
+    LanguageModelV4CallOptions options, {
     required bool stream,
   }) {
     final body = <String, dynamic>{
@@ -72,12 +78,23 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
       if (options.stopSequences.isNotEmpty) 'stop': options.stopSequences,
       if (options.seed != null) config.seedKey: options.seed,
       if (config.supportsResponseFormatJsonSchema &&
-          options.outputSchema != null)
+          options.responseFormat is LanguageModelV4JsonResponseFormat)
         'response_format': {
           'type': 'json_schema',
           'json_schema': {
-            'name': 'response',
-            'schema': options.outputSchema,
+            'name':
+                (options.responseFormat as LanguageModelV4JsonResponseFormat)
+                    .name ??
+                'response',
+            'schema':
+                (options.responseFormat as LanguageModelV4JsonResponseFormat)
+                    .schema,
+            if ((options.responseFormat as LanguageModelV4JsonResponseFormat)
+                    .description !=
+                null)
+              'description':
+                  (options.responseFormat as LanguageModelV4JsonResponseFormat)
+                      .description,
             'strict': true,
           },
         },
@@ -91,18 +108,20 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
   }
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
-    final client = _client();
+    final headers = await _resolvedHeaders();
     final requestBody = _buildBody(options, stream: false);
+    final cancelToken = _cancelTokenFor(options.abortSignal);
     final Response<Map<String, dynamic>> response;
     try {
-      response = await client.post<Map<String, dynamic>>(
-        '/chat/completions',
+      response = await config.client.post<Map<String, dynamic>>(
+        providerEndpoint(config.baseUrl, '/chat/completions'),
         data: requestBody,
         queryParameters: config.queryParameters,
-        options: _requestOptions(options),
+        options: _requestOptions(headers, options),
+        cancelToken: cancelToken,
       );
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);
@@ -117,15 +136,15 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
         (firstChoice['message'] as Map?)?.cast<String, dynamic>() ??
         <String, dynamic>{};
 
-    final content = <LanguageModelV3ContentPart>[];
+    final content = <LanguageModelV4ContentPart>[];
     final reasoning = _extractReasoning(message);
     if (reasoning != null) {
-      content.add(LanguageModelV3ReasoningPart(text: reasoning));
+      content.add(LanguageModelV4ReasoningPart(text: reasoning));
     }
 
     final text = message['content'];
     if (text is String && text.isNotEmpty) {
-      content.add(LanguageModelV3TextPart(text: text));
+      content.add(LanguageModelV4TextPart(text: text));
     }
 
     final toolCalls = (message['tool_calls'] as List?) ?? const [];
@@ -136,7 +155,7 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
           <String, dynamic>{};
       final rawInput = function['arguments']?.toString() ?? '{}';
       content.add(
-        LanguageModelV3ToolCallPart(
+        LanguageModelV4ToolCallPart(
           toolCallId: callMap['id']?.toString() ?? _generateId('call'),
           toolName: function['name']?.toString() ?? 'unknown_tool',
           input: _safeParseJson(rawInput),
@@ -152,13 +171,14 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
 
     final usageMap = (data['usage'] as Map?)?.cast<String, dynamic>();
     final warnings = _readWarnings(data['warnings']);
-    return LanguageModelV3GenerateResult(
+    return LanguageModelV4GenerateResult(
       content: content,
       finishReason: _mapFinishReason(firstChoice['finish_reason']?.toString()),
       rawFinishReason: firstChoice['finish_reason']?.toString(),
       usage: usageMap == null ? null : _usageFrom(usageMap),
       warnings: warnings,
-      response: LanguageModelV3ResponseMetadata(
+      request: LanguageModelV4RequestMetadata(body: requestBody),
+      response: LanguageModelV4ResponseMetadata(
         id: data['id']?.toString(),
         modelId: data['model']?.toString() ?? modelId,
         timestamp: DateTime.now().toUtc(),
@@ -166,24 +186,29 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
           (key, value) => MapEntry(key, value.join(',')),
         ),
         body: data,
-        requestBody: requestBody,
       ),
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    final client = _client();
+    final headers = await _resolvedHeaders();
     final requestBody = _buildBody(options, stream: true);
+    final cancelToken = _cancelTokenFor(options.abortSignal);
     final Response<ResponseBody> response;
     try {
-      response = await client.post<ResponseBody>(
-        '/chat/completions',
+      response = await config.client.post<ResponseBody>(
+        providerEndpoint(config.baseUrl, '/chat/completions'),
         data: requestBody,
         queryParameters: config.queryParameters,
-        options: _requestOptions(options, responseType: ResponseType.stream),
+        options: _requestOptions(
+          headers,
+          options,
+          responseType: ResponseType.stream,
+        ),
+        cancelToken: cancelToken,
       );
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);
@@ -194,21 +219,20 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
       throw StateError('$provider stream response body is null.');
     }
 
-    final controller = StreamController<LanguageModelV3StreamPart>();
+    final controller = StreamController<LanguageModelV4StreamPart>();
     final toolState = <int, _ToolStreamState>{};
     var textStarted = false;
-    LanguageModelV3Usage? streamUsage;
-    final streamWarnings = <String>[];
+    var reasoningStarted = false;
+    var streamStarted = false;
+    LanguageModelV4Usage? streamUsage;
+    final streamWarnings = <LanguageModelV4Warning>[];
     String? responseId;
     String? responseModel;
     Map<String, dynamic>? lastChunk;
-    final rawResponse = <String, Object?>{
-      'requestBody': requestBody,
-      'statusCode': response.statusCode,
-      'headers': response.headers.map.map(
-        (key, value) => MapEntry(key, value.join(',')),
-      ),
-    };
+    final responseHeaders = response.headers.map.map(
+      (key, value) => MapEntry(key, value.join(',')),
+    );
+    final responseTimestamp = DateTime.now().toUtc();
 
     unawaited(() async {
       try {
@@ -225,6 +249,17 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
           responseId ??= json['id']?.toString();
           responseModel ??= json['model']?.toString();
           streamWarnings.addAll(_readWarnings(json['warnings']));
+          if (!streamStarted) {
+            streamStarted = true;
+            controller.add(
+              StreamPartStreamStart(
+                warnings: List.unmodifiable(streamWarnings),
+              ),
+            );
+          }
+          if (options.includeRawChunks) {
+            controller.add(StreamPartRaw(rawValue: json));
+          }
           final usageMap = (json['usage'] as Map?)?.cast<String, dynamic>();
           if (usageMap != null) {
             streamUsage = _usageFrom(usageMap);
@@ -242,7 +277,16 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
           // consumer's reasoning span opens before any text/tool deltas.
           final reasoningDelta = _extractReasoning(delta);
           if (reasoningDelta != null) {
-            controller.add(StreamPartReasoningDelta(delta: reasoningDelta));
+            if (!reasoningStarted) {
+              reasoningStarted = true;
+              controller.add(const StreamPartReasoningStart(id: 'reasoning-0'));
+            }
+            controller.add(
+              StreamPartReasoningDelta(
+                id: 'reasoning-0',
+                delta: reasoningDelta,
+              ),
+            );
           }
 
           _appendAnnotationParts(
@@ -271,9 +315,7 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
             final state = toolState.putIfAbsent(index, () {
               final id = call['id']?.toString() ?? _generateId('tool');
               final name = function['name']?.toString() ?? 'unknown_tool';
-              controller.add(
-                StreamPartToolCallStart(toolCallId: id, toolName: name),
-              );
+              controller.add(StreamPartToolInputStart(id: id, toolName: name));
               return _ToolStreamState(id: id, name: name);
             });
 
@@ -284,11 +326,7 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
             if (argDelta is String && argDelta.isNotEmpty) {
               state.argumentsBuffer.write(argDelta);
               controller.add(
-                StreamPartToolCallDelta(
-                  toolCallId: state.id,
-                  toolName: state.name,
-                  argsTextDelta: argDelta,
-                ),
+                StreamPartToolInputDelta(id: state.id, delta: argDelta),
               );
             }
           }
@@ -298,56 +336,83 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
             if (textStarted) {
               controller.add(const StreamPartTextEnd(id: 'text-0'));
             }
+            if (reasoningStarted) {
+              controller.add(const StreamPartReasoningEnd(id: 'reasoning-0'));
+            }
             for (final state in toolState.values) {
+              controller.add(StreamPartToolInputEnd(id: state.id));
               controller.add(
-                StreamPartToolCallEnd(
-                  toolCallId: state.id,
-                  toolName: state.name,
-                  input: _safeParseJson(state.argumentsBuffer.toString()),
+                StreamPartToolCall(
+                  toolCall: LanguageModelV4ToolCallPart(
+                    toolCallId: state.id,
+                    toolName: state.name,
+                    input: _safeParseJson(state.argumentsBuffer.toString()),
+                  ),
                 ),
               );
             }
             controller.add(
+              StreamPartResponseMetadata(
+                metadata: LanguageModelV4ResponseMetadata(
+                  id: responseId,
+                  modelId: responseModel,
+                  timestamp: responseTimestamp,
+                  headers: responseHeaders,
+                  body: lastChunk,
+                ),
+              ),
+            );
+            controller.add(
               StreamPartFinish(
                 finishReason: _mapFinishReason(finishReason),
                 rawFinishReason: finishReason,
-                usage: streamUsage,
+                usage: streamUsage ?? const LanguageModelV4Usage(),
                 providerMetadata: {
                   provider: {
-                    if (responseId != null) 'id': responseId,
-                    if (responseModel != null) 'model': responseModel,
+                    'id': ?responseId,
+                    'model': ?responseModel,
                     'timestamp': DateTime.now().toUtc().toIso8601String(),
-                    if (streamWarnings.isNotEmpty) 'warnings': streamWarnings,
+                    if (streamWarnings.isNotEmpty)
+                      'warnings': streamWarnings
+                          .map((warning) => warning.type)
+                          .toList(growable: false),
                   },
                 },
               ),
             );
           }
-
-          rawResponse['responseMetadata'] = {
-            if (responseId != null) 'id': responseId,
-            if (responseModel != null) 'modelId': responseModel,
-            'timestamp': DateTime.now().toUtc().toIso8601String(),
-          };
-          rawResponse['warnings'] = List<String>.from(streamWarnings);
-          rawResponse['body'] = lastChunk;
         }
       } catch (error) {
+        if (!streamStarted) {
+          streamStarted = true;
+          controller.add(const StreamPartStreamStart());
+        }
         controller.add(StreamPartError(error: error));
       } finally {
+        if (!streamStarted) {
+          controller.add(const StreamPartStreamStart());
+        }
         await controller.close();
       }
     }());
 
-    return LanguageModelV3StreamResult(
+    return LanguageModelV4StreamResult(
       stream: controller.stream,
-      rawResponse: rawResponse,
+      warnings: List.unmodifiable(streamWarnings),
+      request: LanguageModelV4RequestMetadata(body: requestBody),
+      response: LanguageModelV4ResponseMetadata(
+        id: responseId,
+        modelId: responseModel,
+        timestamp: responseTimestamp,
+        headers: responseHeaders,
+        body: lastChunk,
+      ),
     );
   }
 
   // ── message building ──────────────────────────────────────────────────
 
-  List<Map<String, dynamic>> _toMessages(LanguageModelV3Prompt prompt) {
+  List<Map<String, dynamic>> _toMessages(LanguageModelV4Prompt prompt) {
     final out = <Map<String, dynamic>>[];
     if (prompt.system != null && prompt.system!.isNotEmpty) {
       out.add({'role': 'system', 'content': prompt.system});
@@ -355,19 +420,19 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
 
     for (final message in prompt.messages) {
       final role = switch (message.role) {
-        LanguageModelV3Role.system => 'system',
-        LanguageModelV3Role.user => 'user',
-        LanguageModelV3Role.assistant => 'assistant',
-        LanguageModelV3Role.tool => 'tool',
+        LanguageModelV4Role.system => 'system',
+        LanguageModelV4Role.user => 'user',
+        LanguageModelV4Role.assistant => 'assistant',
+        LanguageModelV4Role.tool => 'tool',
       };
 
       final text = message.content
-          .whereType<LanguageModelV3TextPart>()
+          .whereType<LanguageModelV4TextPart>()
           .map((part) => part.text)
           .join('\n');
 
       final toolCalls = message.content
-          .whereType<LanguageModelV3ToolCallPart>()
+          .whereType<LanguageModelV4ToolCallPart>()
           .map(
             (tool) => {
               'id': tool.toolCallId,
@@ -382,7 +447,7 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
 
       if (role == 'tool') {
         final toolParts = message.content
-            .whereType<LanguageModelV3ToolResultPart>();
+            .whereType<LanguageModelV4ToolResultPart>();
         for (final toolPart in toolParts) {
           out.add({
             'role': 'tool',
@@ -417,15 +482,15 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
   }
 
   List<Map<String, dynamic>>? _toContentParts(
-    List<LanguageModelV3ContentPart> parts,
+    List<LanguageModelV4ContentPart> parts,
   ) {
     final out = <Map<String, dynamic>>[];
     for (final part in parts) {
-      if (part is LanguageModelV3TextPart) {
+      if (part is LanguageModelV4TextPart) {
         out.add({'type': 'text', 'text': part.text});
         continue;
       }
-      if (part is LanguageModelV3ImagePart) {
+      if (part is LanguageModelV4ImagePart) {
         final imageUrl = _toImageUrl(part.image, part.mediaType);
         if (imageUrl != null) {
           out.add({
@@ -435,7 +500,7 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
         }
         continue;
       }
-      if (part is LanguageModelV3FilePart &&
+      if (part is LanguageModelV4FilePart &&
           part.mediaType.startsWith('audio/')) {
         final audioData = _toBase64(part.data);
         if (audioData != null) {
@@ -449,7 +514,7 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
         }
         continue;
       }
-      if (part is LanguageModelV3FilePart &&
+      if (part is LanguageModelV4FilePart &&
           part.mediaType.startsWith('image/')) {
         final imageUrl = _toImageUrl(part.data, part.mediaType);
         if (imageUrl != null) {
@@ -460,7 +525,7 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
         }
         continue;
       }
-      if (part is LanguageModelV3FilePart) {
+      if (part is LanguageModelV4FilePart) {
         final fileData = _toBase64(part.data);
         if (fileData != null) {
           out.add({
@@ -478,8 +543,8 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
 
   // ── tool serialization ────────────────────────────────────────────────
 
-  Map<String, dynamic> _toToolJson(LanguageModelV3FunctionTool tool) {
-    return {
+  Map<String, dynamic> _toToolJson(LanguageModelV4Tool tool) => switch (tool) {
+    LanguageModelV4FunctionTool() => {
       'type': 'function',
       'function': {
         'name': tool.name,
@@ -487,10 +552,16 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
         'parameters': tool.inputSchema,
         if (tool.strict != null) 'strict': tool.strict,
       },
-    };
-  }
+    },
+    LanguageModelV4ProviderDefinedTool() => {
+      'type': tool.id,
+      'name': tool.name,
+      if (tool.description != null) 'description': tool.description,
+      ...tool.args,
+    },
+  };
 
-  Object _toToolChoice(LanguageModelV3ToolChoice choice) {
+  Object _toToolChoice(LanguageModelV4ToolChoice choice) {
     return switch (choice) {
       ToolChoiceAuto() => 'auto',
       ToolChoiceNone() => 'none',
@@ -506,8 +577,8 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
 
   void _appendAnnotationParts(
     List<Object?> annotations, {
-    required void Function(LanguageModelV3SourcePart) onSource,
-    required void Function(LanguageModelV3FilePart) onFile,
+    required void Function(LanguageModelV4SourcePart) onSource,
+    required void Function(LanguageModelV4FilePart) onFile,
   }) {
     for (var i = 0; i < annotations.length; i++) {
       final annotation = (annotations[i] as Map).cast<String, dynamic>();
@@ -516,7 +587,7 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
         final url = annotation['url']?.toString();
         if (url != null && url.isNotEmpty) {
           onSource(
-            LanguageModelV3SourcePart(
+            LanguageModelV4SourcePart(
               id: '${provider}_source_$i',
               url: url,
               title: annotation['title']?.toString(),
@@ -529,7 +600,7 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
         final fileId = annotation['file_id']?.toString();
         if (fileId != null && fileId.isNotEmpty) {
           onFile(
-            LanguageModelV3FilePart(
+            LanguageModelV4FilePart(
               data: DataContentUrl(Uri.parse('$provider://file/$fileId')),
               mediaType: 'application/octet-stream',
               filename: fileId,
@@ -542,7 +613,7 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
 
   // ── tool result serialization ─────────────────────────────────────────
 
-  String _toToolResultText(LanguageModelV3ToolResultPart result) {
+  String _toToolResultText(LanguageModelV4ToolResultPart result) {
     if (result.output is ToolResultOutputText && !result.isError) {
       return (result.output as ToolResultOutputText).text;
     }
@@ -554,7 +625,7 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
     });
   }
 
-  Object _toToolResultOutputJson(LanguageModelV3ToolResultOutput output) {
+  Object _toToolResultOutputJson(LanguageModelV4ToolResultOutput output) {
     if (output is ToolResultOutputText) {
       return {'type': 'text', 'text': output.text};
     }
@@ -564,35 +635,35 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
         'parts': output.parts.map(_toGenericContentPartJson).toList(),
       };
     }
-    // Unreachable: LanguageModelV3ToolResultOutput is a sealed class with only
+    // Unreachable: LanguageModelV4ToolResultOutput is a sealed class with only
     // ToolResultOutputText and ToolResultOutputContent, both handled above.
     return {'type': 'unknown'}; // coverage:ignore-line
   }
 
   Map<String, dynamic> _toGenericContentPartJson(
-    LanguageModelV3ContentPart part,
+    LanguageModelV4ContentPart part,
   ) {
-    if (part is LanguageModelV3TextPart) {
+    if (part is LanguageModelV4TextPart) {
       return {'type': 'text', 'text': part.text};
     }
-    if (part is LanguageModelV3ImagePart) {
+    if (part is LanguageModelV4ImagePart) {
       final data = _toBase64(part.image);
       return {
         'type': 'image',
-        if (part.mediaType != null) 'mediaType': part.mediaType,
+        'mediaType': ?part.mediaType,
         if (part.image is DataContentUrl)
           'url': (part.image as DataContentUrl).url.toString(),
-        if (data != null) 'base64': data,
+        'base64': ?data,
       };
     }
-    if (part is LanguageModelV3FilePart) {
+    if (part is LanguageModelV4FilePart) {
       return {
         'type': 'file',
         'mediaType': part.mediaType,
         if (part.filename != null) 'filename': part.filename,
         if (part.data is DataContentUrl)
           'url': (part.data as DataContentUrl).url.toString(),
-        if (_toBase64(part.data) case final data?) 'base64': data,
+        'base64': ?_toBase64(part.data),
       };
     }
     return {'type': 'unsupported'};
@@ -615,43 +686,44 @@ class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
 
   // ── finish reason ─────────────────────────────────────────────────────
 
-  LanguageModelV3FinishReason _mapFinishReason(String? reason) {
+  LanguageModelV4FinishReason _mapFinishReason(String? reason) {
     return switch (reason) {
-      'stop' => LanguageModelV3FinishReason.stop,
-      'length' => LanguageModelV3FinishReason.length,
-      'content_filter' => LanguageModelV3FinishReason.contentFilter,
-      'tool_calls' => LanguageModelV3FinishReason.toolCalls,
-      'error' => LanguageModelV3FinishReason.error,
-      null => LanguageModelV3FinishReason.unknown,
-      _ => LanguageModelV3FinishReason.other,
+      'stop' => LanguageModelV4FinishReason.stop,
+      'length' => LanguageModelV4FinishReason.length,
+      'content_filter' => LanguageModelV4FinishReason.contentFilter,
+      'tool_calls' => LanguageModelV4FinishReason.toolCalls,
+      'error' => LanguageModelV4FinishReason.error,
+      null => LanguageModelV4FinishReason.unknown,
+      _ => LanguageModelV4FinishReason.other,
     };
   }
 }
 
 // ── shared helpers ────────────────────────────────────────────────────────
 
-LanguageModelV3Usage _usageFrom(Map<String, dynamic> usage) {
+LanguageModelV4Usage _usageFrom(Map<String, dynamic> usage) {
   final inputTokens = _intOrNull(usage['prompt_tokens']);
   // OpenAI's `prompt_tokens` already includes cache hits; `cached_tokens` is a
-  // subset of it, so `inputTokens` is left as the total and the uncached
-  // remainder is surfaced via `noCacheTokens`.
+  // subset of it, so `total` stays as reported and the uncached remainder is
+  // surfaced via `noCache`.
   final promptDetails = (usage['prompt_tokens_details'] as Map?)
       ?.cast<String, dynamic>();
   final cacheRead = _intOrNull(promptDetails?['cached_tokens']);
-  return LanguageModelV3Usage(
-    inputTokens: inputTokens,
-    outputTokens: _intOrNull(usage['completion_tokens']),
-    totalTokens: _intOrNull(usage['total_tokens']),
-    inputTokenDetails: cacheRead == null
-        ? null
-        : LanguageModelV3InputTokenDetails(
-            noCacheTokens: inputTokens == null ? null : inputTokens - cacheRead,
-            cacheReadTokens: cacheRead,
-          ),
+  return LanguageModelV4Usage(
+    inputTokens: LanguageModelV4InputTokenUsage(
+      total: inputTokens,
+      noCache: cacheRead == null || inputTokens == null
+          ? null
+          : inputTokens - cacheRead,
+      cacheRead: cacheRead,
+    ),
+    outputTokens: LanguageModelV4OutputTokenUsage(
+      total: _intOrNull(usage['completion_tokens']),
+    ),
   );
 }
 
-String? _toImageUrl(LanguageModelV3DataContent data, String? mediaType) {
+String? _toImageUrl(LanguageModelV4DataContent data, String? mediaType) {
   if (data is DataContentUrl) return data.url.toString();
   final b64 = _toBase64(data);
   if (b64 == null) return null;
@@ -659,7 +731,7 @@ String? _toImageUrl(LanguageModelV3DataContent data, String? mediaType) {
   return 'data:$resolvedMediaType;base64,$b64';
 }
 
-String? _toBase64(LanguageModelV3DataContent data) {
+String? _toBase64(LanguageModelV4DataContent data) {
   return switch (data) {
     DataContentBytes(:final bytes) => base64Encode(bytes),
     DataContentBase64(:final base64) => base64,
@@ -686,7 +758,9 @@ Map<String, dynamic>? _safeParseJsonMap(String input) {
   // Unreachable: jsonDecode always produces a Map<String, dynamic> for JSON
   // objects, so the typed check above always matches first; this guards a
   // hypothetical differently-typed Map without crashing.
-  if (parsed is Map) return parsed.cast<String, dynamic>(); // coverage:ignore-line
+  if (parsed is Map) {
+    return parsed.cast<String, dynamic>(); // coverage:ignore-line
+  }
   return null;
 }
 
@@ -710,13 +784,69 @@ String _generateId(String prefix) {
   return '$prefix-$micros';
 }
 
-List<String> _readWarnings(Object? warningsRaw) {
-  if (warningsRaw is! List) return const [];
+List<LanguageModelV4Warning> _readWarnings(Object? warningsRaw) {
+  if (warningsRaw is! List) {
+    return const [];
+  }
+
   return warningsRaw
-      .map((item) => item?.toString())
-      .whereType<String>()
-      .where((item) => item.isNotEmpty)
-      .toList();
+      .map(_parseWarning)
+      .whereType<LanguageModelV4Warning>()
+      .toList(growable: false);
+}
+
+CancelToken? _cancelTokenFor(LanguageModelV4AbortSignal? abortSignal) {
+  if (abortSignal == null) {
+    return null;
+  }
+
+  final cancelToken = CancelToken();
+  if (abortSignal.isCancelled) {
+    cancelToken.cancel('abortSignal');
+    return cancelToken;
+  }
+
+  unawaited(
+    abortSignal.onCancelled.then((_) {
+      if (!cancelToken.isCancelled) {
+        cancelToken.cancel('abortSignal');
+      }
+    }),
+  );
+  return cancelToken;
+}
+
+LanguageModelV4Warning? _parseWarning(Object? item) {
+  if (item == null) {
+    return null;
+  }
+  if (item is String) {
+    return item.isEmpty ? null : LanguageModelV4OtherWarning(message: item);
+  }
+  if (item is Map) {
+    final map = item.cast<Object?, Object?>();
+    final type = map['type']?.toString();
+    final feature = map['feature']?.toString();
+    final details = map['details']?.toString();
+    return switch (type) {
+      'unsupported' when feature != null => LanguageModelV4UnsupportedWarning(
+        feature: feature,
+        details: details,
+      ),
+      'compatibility' when feature != null =>
+        LanguageModelV4CompatibilityWarning(feature: feature, details: details),
+      'deprecated' when feature != null => LanguageModelV4DeprecatedWarning(
+        setting: feature,
+        message: details ?? 'This setting is deprecated.',
+      ),
+      'other' => LanguageModelV4OtherWarning(
+        message: map['message']?.toString() ?? jsonEncode(item),
+      ),
+      _ => LanguageModelV4OtherWarning(message: jsonEncode(item)),
+    };
+  }
+  final text = item.toString();
+  return text.isEmpty ? null : LanguageModelV4OtherWarning(message: text);
 }
 
 class _ToolStreamState {

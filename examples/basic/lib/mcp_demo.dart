@@ -2,7 +2,7 @@
 ///
 /// Demonstrates using `ai_sdk_mcp` to:
 ///
-///   1. Connect to an MCP server over HTTP (`HttpClientTransport`)
+///   1. Connect to an MCP server over HTTP (`StreamableHttpClientTransport`)
 ///   2. Run the `initialize` handshake and discover the server's tools
 ///   3. Call a discovered tool directly
 ///   4. Hand the discovered `ToolSet` to `generateText` so the model can call
@@ -11,11 +11,12 @@
 /// To keep the example self-contained and runnable with zero external setup, it
 /// spins up a tiny in-process MCP server (a `dart:io` `HttpServer` speaking
 /// MCP's JSON-RPC) and connects to it over loopback. In a real app you would
-/// point the transport at a remote server URL instead — see [connectViaSse]
-/// below for the `SseClientTransport` variant.
+/// point the transport at a remote server URL instead — see [connectViaHttp]
+/// below for the remote transport variant.
 ///
 /// Note: stdio-based MCP servers (`StdioMCPTransport`) are desktop/native only;
-/// this HTTP/SSE flow works everywhere `package:http` does, including web.
+/// this Streamable HTTP flow works everywhere `package:http` does, including
+/// web.
 ///
 /// Run:
 ///   dart run lib/mcp_demo.dart                          # discovery + tool call
@@ -49,7 +50,7 @@ Future<void> main() async {
 
   // 2. Connect over HTTP and run the MCP initialize handshake.
   final client = MCPClient(
-    transport: HttpClientTransport(url: Uri.parse(baseUrl)),
+    transport: StreamableHttpClientTransport(url: Uri.parse(baseUrl)),
   );
 
   try {
@@ -104,23 +105,18 @@ Future<void> main() async {
   }
 }
 
-/// Connect to a *remote* MCP server over HTTP+SSE (protocol 2024-11-05).
+/// Connect to a *remote* MCP server over Streamable HTTP (protocol 2025-06-18).
 ///
-/// Shown for reference — `main` uses the simpler [HttpClientTransport] against
-/// the in-process server. Use SSE when the server pushes notifications (e.g.
-/// `notifications/resources/updated`) over a long-lived connection.
+/// Shown for reference — `main` uses the same transport against the in-process
+/// server.
 ///
 /// ```dart
-/// final client = await connectViaSse(Uri.parse('https://example.com/sse'));
+/// final client = await connectViaHttp(Uri.parse('https://example.com/mcp'));
 /// final tools = await client.tools();
 /// ```
-Future<MCPClient> connectViaSse(Uri sseUrl) async {
+Future<MCPClient> connectViaHttp(Uri endpoint) async {
   final client = MCPClient(
-    transport: SseClientTransport(
-      url: sseUrl,
-      connectTimeout: const Duration(seconds: 30),
-      requestTimeout: const Duration(seconds: 30),
-    ),
+    transport: StreamableHttpClientTransport(url: endpoint),
   );
   await client.initialize();
   return client;
@@ -163,6 +159,11 @@ Future<HttpServer> _startMockMcpServer() async {
 }
 
 Future<void> _handleRequest(HttpRequest request) async {
+  if (request.method == 'GET' || request.method == 'DELETE') {
+    request.response.statusCode = HttpStatus.methodNotAllowed;
+    await request.response.close();
+    return;
+  }
   if (request.method != 'POST') {
     request.response.statusCode = HttpStatus.methodNotAllowed;
     await request.response.close();
@@ -179,7 +180,14 @@ Future<void> _handleRequest(HttpRequest request) async {
     return;
   }
 
-  final result = _dispatch(rpc['method'] as String?, rpc['params']);
+  final method = rpc['method'] as String?;
+  if (method == 'notifications/initialized') {
+    request.response.statusCode = HttpStatus.accepted;
+    await request.response.close();
+    return;
+  }
+
+  final result = _dispatch(method, rpc['params']);
   final payload = jsonEncode({
     'jsonrpc': '2.0',
     'id': rpc['id'],
@@ -197,12 +205,10 @@ Object? _dispatch(String? method, Object? params) {
   switch (method) {
     case 'initialize':
       return {
-        'protocolVersion': '2024-11-05',
+        'protocolVersion': '2025-06-18',
         'capabilities': {'tools': <String, dynamic>{}},
         'serverInfo': {'name': 'mock-mcp-server', 'version': '1.0.0'},
       };
-    case 'notifications/initialized':
-      return <String, dynamic>{};
     case 'tools/list':
       return {'tools': _toolDescriptors};
     case 'tools/call':

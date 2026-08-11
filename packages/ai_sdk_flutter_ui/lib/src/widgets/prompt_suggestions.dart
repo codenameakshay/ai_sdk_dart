@@ -119,7 +119,11 @@ class _PromptSuggestionsState extends State<PromptSuggestions>
     final start = (index.clamp(0, 5)) * 0.08;
     final animation = CurvedAnimation(
       parent: _controller,
-      curve: Interval(start, (start + 0.5).clamp(0.0, 1.0), curve: AiMotion.standard),
+      curve: Interval(
+        start,
+        (start + 0.5).clamp(0.0, 1.0),
+        curve: AiMotion.standard,
+      ),
     );
     return AnimatedBuilder(
       animation: animation,
@@ -127,7 +131,10 @@ class _PromptSuggestionsState extends State<PromptSuggestions>
         final t = animation.value;
         return Opacity(
           opacity: t,
-          child: Transform.translate(offset: Offset(0, 6 * (1 - t)), child: child),
+          child: Transform.translate(
+            offset: Offset(0, 6 * (1 - t)),
+            child: child,
+          ),
         );
       },
       child: child,

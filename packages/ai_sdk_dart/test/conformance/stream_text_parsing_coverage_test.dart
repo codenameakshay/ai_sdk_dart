@@ -19,7 +19,7 @@ void main() {
       const StreamPartTextStart(id: 't1'),
       for (final ch in text.split('')) StreamPartTextDelta(id: 't1', delta: ch),
       const StreamPartTextEnd(id: 't1'),
-      StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+      StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
     ]);
   }
 
@@ -49,22 +49,22 @@ void main() {
         messages: const [
           ModelMessage.parts(
             role: ModelMessageRole.user,
-            parts: [LanguageModelV3TextPart(text: 'partbody')],
+            parts: [LanguageModelV4TextPart(text: 'partbody')],
           ),
         ],
       );
       await result.fullStream.toList();
       final firstPart = model.lastOptions!.prompt.messages.first.content.first;
-      expect((firstPart as LanguageModelV3TextPart).text, 'partbody');
+      expect((firstPart as LanguageModelV4TextPart).text, 'partbody');
     });
   });
 
   group('streamText reasoning finalization', () {
     test('reasoning-only stream closes reasoning at end of loop', () async {
       final model = FakeStreamModel([
-        const StreamPartReasoningDelta(delta: 'just '),
-        const StreamPartReasoningDelta(delta: 'thinking'),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+        const StreamPartReasoningDelta(id: 'reasoning-0', delta: 'just '),
+        const StreamPartReasoningDelta(id: 'reasoning-0', delta: 'thinking'),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
       ]);
       final result = await streamText(model: model, prompt: 'go');
       final events = await result.fullStream.toList();
@@ -73,18 +73,20 @@ void main() {
       expect(await result.reasoningText, 'just thinking');
     });
 
-    test('reasoning still open at stream end is closed in the finalizer',
-        () async {
-      // No finish part: the in-loop close (triggered by non-reasoning parts)
-      // never fires, so the post-loop finalizer closes the reasoning block.
-      final model = FakeStreamModel([
-        const StreamPartReasoningDelta(delta: 'dangling'),
-      ]);
-      final result = await streamText(model: model, prompt: 'go');
-      final events = await result.fullStream.toList();
-      expect(events.whereType<StreamTextReasoningEndEvent>(), hasLength(1));
-      expect(await result.reasoningText, 'dangling');
-    });
+    test(
+      'reasoning still open at stream end is closed in the finalizer',
+      () async {
+        // No finish part: the in-loop close (triggered by non-reasoning parts)
+        // never fires, so the post-loop finalizer closes the reasoning block.
+        final model = FakeStreamModel([
+          const StreamPartReasoningDelta(id: 'reasoning-0', delta: 'dangling'),
+        ]);
+        final result = await streamText(model: model, prompt: 'go');
+        final events = await result.fullStream.toList();
+        expect(events.whereType<StreamTextReasoningEndEvent>(), hasLength(1));
+        expect(await result.reasoningText, 'dangling');
+      },
+    );
   });
 
   group('streamText output JSON extraction', () {
@@ -119,7 +121,10 @@ void main() {
         result.output,
         throwsA(isA<AiNoObjectGeneratedError>()),
       );
-      await result.fullStream.toList();
+      await expectLater(
+        result.fullStream.toList(),
+        throwsA(isA<AiNoObjectGeneratedError>()),
+      );
       await expectation;
     });
 
@@ -131,50 +136,61 @@ void main() {
         prompt: 'json',
         output: Output.array(element: objectSchema()),
       );
-      final elements = await result.elementStream.toList();
+      final elements = await result.elementStream.handleError((_) {}).toList();
       expect(elements.length, 3);
       expect((elements.last as Map)['i'], 3);
     });
 
-    test('array embedded in prose is extracted via the manual tokenizer',
-        () async {
-      // jsonDecode of the whole text fails, but _extractJsonCandidate finds
-      // the balanced [...] and the manual element tokenizer parses it.
-      final model = chunkedText('Here you go: [{"i":1}, {"i":2}] done.');
-      final result = await streamText<List<dynamic>>(
-        model: model,
-        prompt: 'json',
-        output: Output.array(element: objectSchema()),
-      );
-      final output = await result.output;
-      expect(output.length, 2);
-      expect((output.last as Map)['i'], 2);
-    });
+    test(
+      'array embedded in prose is extracted via the manual tokenizer',
+      () async {
+        // jsonDecode of the whole text fails, but _extractJsonCandidate finds
+        // the balanced [...] and the manual element tokenizer parses it.
+        final model = chunkedText('Here you go: [{"i":1}, {"i":2}] done.');
+        final result = await streamText<List<dynamic>>(
+          model: model,
+          prompt: 'json',
+          output: Output.array(element: objectSchema()),
+        );
+        final output = await result.output;
+        expect(output.length, 2);
+        expect((output.last as Map)['i'], 2);
+      },
+    );
 
-    test('malformed array element is skipped by the manual tokenizer',
-        () async {
-      // The balanced [...] candidate fails a full jsonDecode (the bare token
-      // "undefined" is not JSON), forcing element-by-element tokenization,
-      // which decodes the valid objects and skips the bad token.
-      final model = chunkedText('[{"i":1}, undefined, {"i":2}]');
-      final result = await streamText<List<dynamic>>(
-        model: model,
-        prompt: 'json',
-        output: Output.array(element: objectSchema()),
-      );
-      // The final full-array parse rejects the malformed token; observe it.
-      final outputExpectation = expectLater(
-        result.output,
-        throwsA(isA<AiNoObjectGeneratedError>()),
-      );
-      final elements = await result.elementStream.toList();
-      // Two valid elements survive the per-element tokenizer; the bad one is
-      // dropped.
-      expect(elements.length, 2);
-      expect((elements.first as Map)['i'], 1);
-      expect((elements.last as Map)['i'], 2);
-      await outputExpectation;
-    });
+    test(
+      'malformed array element is skipped by the manual tokenizer',
+      () async {
+        // The balanced [...] candidate fails a full jsonDecode (the bare token
+        // "undefined" is not JSON), forcing element-by-element tokenization,
+        // which decodes the valid objects and skips the bad token.
+        final model = chunkedText('[{"i":1}, undefined, {"i":2}]');
+        final result = await streamText<List<dynamic>>(
+          model: model,
+          prompt: 'json',
+          output: Output.array(element: objectSchema()),
+        );
+        // The final full-array parse rejects the malformed token; observe it.
+        final outputExpectation = expectLater(
+          result.output,
+          throwsA(isA<AiNoObjectGeneratedError>()),
+        );
+        final fullStreamExpectation = expectLater(
+          result.fullStream.toList(),
+          throwsA(isA<AiNoObjectGeneratedError>()),
+        );
+        final elements = await result.elementStream
+            .handleError((_) {})
+            .toList();
+        // Two valid elements survive the per-element tokenizer; the bad one is
+        // dropped.
+        expect(elements.length, 2);
+        expect((elements.first as Map)['i'], 1);
+        expect((elements.last as Map)['i'], 2);
+        await outputExpectation;
+        await fullStreamExpectation;
+      },
+    );
 
     test('tokenizer skips empty tokens from stray commas', () async {
       // The doubled comma yields an empty token that the tokenizer skips,
@@ -189,9 +205,14 @@ void main() {
         result.output,
         throwsA(isA<AiNoObjectGeneratedError>()),
       );
-      final elements = await result.elementStream.toList();
+      final fullStreamExpectation = expectLater(
+        result.fullStream.toList(),
+        throwsA(isA<AiNoObjectGeneratedError>()),
+      );
+      final elements = await result.elementStream.handleError((_) {}).toList();
       expect(elements.length, 2);
       await outputExpectation;
+      await fullStreamExpectation;
     });
 
     test('json output parses fenced JSON', () async {
@@ -205,22 +226,27 @@ void main() {
       expect(out['ok'], isTrue);
     });
 
-    test('array of scalars rejected when object elements are required',
-        () async {
-      // The final parse encounters scalar array elements and rejects them.
-      final model = chunkedText('[1, 2, 3]');
-      final result = await streamText<List<dynamic>>(
-        model: model,
-        prompt: 'json',
-        output: Output.array(element: objectSchema()),
-      );
-      final outputExpectation = expectLater(
-        result.output,
-        throwsA(isA<AiNoObjectGeneratedError>()),
-      );
-      await result.fullStream.toList();
-      await outputExpectation;
-    });
+    test(
+      'array of scalars rejected when object elements are required',
+      () async {
+        // The final parse encounters scalar array elements and rejects them.
+        final model = chunkedText('[1, 2, 3]');
+        final result = await streamText<List<dynamic>>(
+          model: model,
+          prompt: 'json',
+          output: Output.array(element: objectSchema()),
+        );
+        final outputExpectation = expectLater(
+          result.output,
+          throwsA(isA<AiNoObjectGeneratedError>()),
+        );
+        await expectLater(
+          result.fullStream.toList(),
+          throwsA(isA<AiNoObjectGeneratedError>()),
+        );
+        await outputExpectation;
+      },
+    );
 
     test('object output rejects a non-object JSON value', () async {
       // A bare JSON array is valid JSON but not an object → rejected.
@@ -234,7 +260,10 @@ void main() {
         result.output,
         throwsA(isA<AiNoObjectGeneratedError>()),
       );
-      await result.fullStream.toList();
+      await expectLater(
+        result.fullStream.toList(),
+        throwsA(isA<AiNoObjectGeneratedError>()),
+      );
       await outputExpectation;
     });
   });
@@ -253,7 +282,7 @@ void main() {
         tools: {
           'dyn': dynamicTool<String>(
             strict: true,
-            execute: (_, __) async => 'ran',
+            execute: (_, _) async => 'ran',
           ),
         },
       );
@@ -277,7 +306,7 @@ void main() {
         tools: {
           'echo': tool<Map<String, dynamic>, String>(
             inputSchema: objectSchema(),
-            execute: (_, __) async => 'ran',
+            execute: (_, _) async => 'ran',
           ),
         },
       );
@@ -326,7 +355,7 @@ void main() {
         tools: {
           'stream': tool<Map<String, dynamic>, Object?>(
             inputSchema: objectSchema(),
-            execute: (_, __) async => Stream.fromIterable(['x', 'y']),
+            execute: (_, _) async => Stream.fromIterable(['x', 'y']),
           ),
         },
         onChunk: (chunk) {
@@ -341,54 +370,53 @@ void main() {
       expect(prelimChunks.where((p) => !p).length, 1);
     });
   });
-
 }
 
 // ---------------------------------------------------------------------------
 // Helper models
 // ---------------------------------------------------------------------------
 
-class _CapturingStreamModel implements LanguageModelV3 {
+class _CapturingStreamModel extends LanguageModelV4 {
   _CapturingStreamModel(this.text);
   final String text;
-  LanguageModelV3CallOptions? lastOptions;
+  LanguageModelV4CallOptions? lastOptions;
 
   @override
   String get provider => 'fake';
   @override
   String get modelId => 'capturing-stream';
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     lastOptions = options;
-    return LanguageModelV3GenerateResult(
-      content: [LanguageModelV3TextPart(text: text)],
-      finishReason: LanguageModelV3FinishReason.stop,
+    return LanguageModelV4GenerateResult(
+      content: [LanguageModelV4TextPart(text: text)],
+      finishReason: LanguageModelV4FinishReason.stop,
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     lastOptions = options;
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable([
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable([
         const StreamPartTextStart(id: 't1'),
         StreamPartTextDelta(id: 't1', delta: text),
         const StreamPartTextEnd(id: 't1'),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
       ]),
     );
   }
 }
 
 /// Streams one tool call with an arbitrary [input] (may be non-object).
-class _StreamSingleToolModel implements LanguageModelV3 {
+class _StreamSingleToolModel extends LanguageModelV4 {
   _StreamSingleToolModel({required this.toolName, required this.input});
   final String toolName;
   final Object input;
@@ -398,36 +426,36 @@ class _StreamSingleToolModel implements LanguageModelV3 {
   @override
   String get modelId => 'single-tool';
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
-  ) async =>
-      throw UnimplementedError();
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
+  ) async => throw UnimplementedError();
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable([
-        StreamPartToolCallStart(toolCallId: 'tc-1', toolName: toolName),
-        StreamPartToolCallEnd(
-          toolCallId: 'tc-1',
-          toolName: toolName,
-          input: input,
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable([
+        StreamPartToolInputStart(id: 'tc-1', toolName: toolName),
+        const StreamPartToolInputEnd(id: 'tc-1'),
+        StreamPartToolCall(
+          toolCall: LanguageModelV4ToolCallPart(
+            toolCallId: 'tc-1',
+            toolName: toolName,
+            input: input,
+          ),
         ),
-        StreamPartFinish(
-          finishReason: LanguageModelV3FinishReason.toolCalls,
-        ),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.toolCalls),
       ]),
     );
   }
 }
 
 /// First call emits a tool call, second emits text.
-class _ToolThenText implements LanguageModelV3 {
+class _ToolThenText extends LanguageModelV4 {
   _ToolThenText({required this.toolName, required this.finalText});
   final String toolName;
   final String finalText;
@@ -438,39 +466,41 @@ class _ToolThenText implements LanguageModelV3 {
   @override
   String get modelId => 'tool-then-text';
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
-  ) async =>
-      throw UnimplementedError();
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
+  ) async => throw UnimplementedError();
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     final parts = _calls == 0
-        ? <LanguageModelV3StreamPart>[
-            StreamPartToolCallStart(toolCallId: 'tc-1', toolName: toolName),
-            StreamPartToolCallEnd(
-              toolCallId: 'tc-1',
-              toolName: toolName,
-              input: const {},
+        ? <LanguageModelV4StreamPart>[
+            StreamPartToolInputStart(id: 'tc-1', toolName: toolName),
+            const StreamPartToolInputEnd(id: 'tc-1'),
+            StreamPartToolCall(
+              toolCall: LanguageModelV4ToolCallPart(
+                toolCallId: 'tc-1',
+                toolName: toolName,
+                input: const {},
+              ),
             ),
             StreamPartFinish(
-              finishReason: LanguageModelV3FinishReason.toolCalls,
+              finishReason: LanguageModelV4FinishReason.toolCalls,
             ),
           ]
-        : <LanguageModelV3StreamPart>[
+        : <LanguageModelV4StreamPart>[
             const StreamPartTextStart(id: 't1'),
             StreamPartTextDelta(id: 't1', delta: finalText),
             const StreamPartTextEnd(id: 't1'),
-            StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+            StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
           ];
     _calls++;
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable(parts),
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable(parts),
     );
   }
 }

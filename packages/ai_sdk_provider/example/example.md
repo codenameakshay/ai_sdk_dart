@@ -8,13 +8,13 @@ You do not normally import it directly — it is a transitive dependency of
 
 ## Building a custom provider
 
-Implement `LanguageModelV3` to wire any HTTP API into the AI SDK:
+Implement `LanguageModelV4` to wire any HTTP API into the AI SDK:
 
 ```dart
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
-class MyCustomModel implements LanguageModelV3 {
+class MyCustomModel extends LanguageModelV4 {
   const MyCustomModel({required this.modelId});
 
   @override
@@ -24,28 +24,28 @@ class MyCustomModel implements LanguageModelV3 {
   String get provider => 'my-provider';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     // Extract the user prompt from the last message.
     final prompt = options.prompt
-        .whereType<LanguageModelV3UserMessage>()
+        .whereType<LanguageModelV4UserMessage>()
         .lastOrNull
         ?.content
-        .whereType<LanguageModelV3TextPart>()
+        .whereType<LanguageModelV4TextPart>()
         .map((p) => p.text)
         .join() ?? '';
 
     // Call your API here and return the result.
     final text = await _callMyApi(prompt);
 
-    return LanguageModelV3GenerateResult(
-      content: [LanguageModelV3TextPart(text: text)],
-      finishReason: LanguageModelV3FinishReason.stop,
-      usage: const LanguageModelV3Usage(
+    return LanguageModelV4GenerateResult(
+      content: [LanguageModelV4TextPart(text: text)],
+      finishReason: LanguageModelV4FinishReason.stop,
+      usage: const LanguageModelV4Usage(
         inputTokens: 10,
         outputTokens: 5,
         totalTokens: 15,
@@ -54,21 +54,21 @@ class MyCustomModel implements LanguageModelV3 {
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    // For streaming, return a stream of LanguageModelV3StreamPart events.
+    // For streaming, return a stream of LanguageModelV4StreamPart events.
     final result = await doGenerate(options);
-    final text = result.content.whereType<LanguageModelV3TextPart>().first.text;
+    final text = result.content.whereType<LanguageModelV4TextPart>().first.text;
 
-    return LanguageModelV3StreamResult(
+    return LanguageModelV4StreamResult(
       stream: simulateReadableStream(
         parts: [
           StreamPartTextStart(id: 'text-1'),
           StreamPartTextDelta(id: 'text-1', delta: text),
           StreamPartTextEnd(id: 'text-1'),
           StreamPartFinish(
-            finishReason: LanguageModelV3FinishReason.stop,
+            finishReason: LanguageModelV4FinishReason.stop,
             usage: result.usage,
           ),
         ],
@@ -101,7 +101,7 @@ print(result.text);
 
 | Interface | Use case |
 |-----------|----------|
-| `LanguageModelV3` | Text generation and streaming |
+| `LanguageModelV4` | Text generation and streaming |
 | `EmbeddingModelV2<VALUE>` | Text / multimodal embeddings |
 | `ImageModelV3` | Image generation |
 | `SpeechModelV1` | Text-to-speech synthesis |

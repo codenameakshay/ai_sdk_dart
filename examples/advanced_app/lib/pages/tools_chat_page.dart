@@ -16,8 +16,25 @@ import '../config.dart';
 /// Unlike [ChatController] (which surfaces only the assistant's text), this
 /// page drives `streamText` directly so it can read tool-call / tool-result /
 /// reasoning / source events off `fullStream` and show them as they arrive.
+enum ToolsChatFixture { normal, approval, error, sourcesTool, longHistory }
+
+typedef ToolsChatStreamRunner =
+    Future<StreamTextResult> Function(
+      List<ModelMessage> messages,
+      ToolSet tools,
+    );
+
 class ToolsChatPage extends StatefulWidget {
-  const ToolsChatPage({super.key});
+  const ToolsChatPage({
+    super.key,
+    this.fixture,
+    this.streamRunner,
+    this.scrollController,
+  });
+
+  final ToolsChatFixture? fixture;
+  final ToolsChatStreamRunner? streamRunner;
+  final ScrollController? scrollController;
 
   @override
   State<ToolsChatPage> createState() => _ToolsChatPageState();
@@ -26,7 +43,7 @@ class ToolsChatPage extends StatefulWidget {
 class _ToolsChatPageState extends State<ToolsChatPage> {
   // extractReasoningMiddleware turns `<think>…</think>` spans into reasoning
   // parts, so the model's chain-of-thought shows up in the ReasoningView.
-  late final LanguageModelV3 _model = wrapLanguageModel(
+  late final LanguageModelV4 _model = wrapLanguageModel(
     model: OpenAIProvider(apiKey: openAiApiKey)('gpt-4.1-mini'),
     middleware: [extractReasoningMiddleware(tagName: 'think')],
   );
@@ -36,16 +53,19 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
       '<think></think> tags, then answer. Use the getWeather tool for weather '
       'questions and the calculate tool for arithmetic.';
 
-  final _scrollController = ScrollController();
+  late ScrollController _scrollController;
+  late bool _ownsScrollController;
   final List<ModelMessage> _history = [];
   final List<_Item> _items = [];
-  final List<LanguageModelV3SourcePart> _sources = [];
+  final List<LanguageModelV4SourcePart> _pendingSources = [];
   final StringBuffer _turnText = StringBuffer();
 
   _TextItem? _currentAssistant;
   _ReasoningItem? _currentReasoning;
   StreamSubscription<StreamTextEvent>? _sub;
   bool _streaming = false;
+  bool _pinnedToBottom = true;
+  bool _scrollScheduled = false;
 
   static final _weatherSchema = Schema<Map<String, dynamic>>(
     jsonSchema: const {
@@ -93,9 +113,22 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
   };
 
   @override
+  void initState() {
+    super.initState();
+    _ownsScrollController = widget.scrollController == null;
+    _scrollController = widget.scrollController ?? ScrollController();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _pinnedToBottom = ScrollBottomPolicy.isNearBottomController(
+        _scrollController,
+      );
+    });
+  }
+
+  @override
   void dispose() {
     _sub?.cancel();
-    _scrollController.dispose();
+    if (_ownsScrollController) _scrollController.dispose();
     super.dispose();
   }
 
@@ -104,21 +137,24 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
     setState(() {
       _history.add(ModelMessage(role: ModelMessageRole.user, content: text));
       _items.add(_TextItem(ModelMessageRole.user, text));
+      _pendingSources.clear();
       _streaming = true;
       _currentAssistant = null;
       _currentReasoning = null;
       _turnText.clear();
     });
-    _scrollToBottom();
+    _scheduleScrollToBottom();
 
     try {
-      final result = await streamText(
-        model: _model,
-        system: _system,
-        messages: _history,
-        tools: _tools,
-        maxSteps: 5,
-      );
+      final result = widget.streamRunner != null
+          ? await widget.streamRunner!(_history, _tools)
+          : await streamText(
+              model: _model,
+              system: _system,
+              messages: _history,
+              tools: _tools,
+              maxSteps: 5,
+            );
       // The `text` future rejects on a streaming error; we surface errors via
       // fullStream below, so swallow it to avoid an unhandled async error.
       result.text.then((_) {}, onError: (_) {});
@@ -144,6 +180,10 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
         final item = _currentAssistant ??= _push(
           _TextItem(ModelMessageRole.assistant, ''),
         );
+        if (_pendingSources.isNotEmpty) {
+          item.sources.addAll(_pendingSources);
+          _pendingSources.clear();
+        }
         item.text += delta;
         _bump();
       case StreamTextReasoningDeltaEvent(:final delta):
@@ -158,7 +198,7 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
         _currentAssistant = null;
         _push(
           _ToolItem(
-            LanguageModelV3ToolCallPart(
+            LanguageModelV4ToolCallPart(
               toolCallId: toolCallId,
               toolName: toolName,
               input: input,
@@ -175,7 +215,12 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
         }
         _bump();
       case StreamTextSourceEvent(:final source):
-        _sources.add(source);
+        final item = _currentAssistant;
+        if (item == null) {
+          _pendingSources.add(source);
+        } else {
+          item.sources.add(source);
+        }
         _bump();
       case StreamTextErrorEvent(:final error):
         _onError(error);
@@ -202,6 +247,14 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
     }
     if (!mounted) return;
     setState(() {
+      if (_currentAssistant != null && _pendingSources.isNotEmpty) {
+        _currentAssistant!.sources.addAll(_pendingSources);
+      } else if (_pendingSources.isNotEmpty) {
+        _items.add(
+          _SourcesItem(List<LanguageModelV4SourcePart>.from(_pendingSources)),
+        );
+      }
+      _pendingSources.clear();
       _streaming = false;
       _currentAssistant = null;
       _currentReasoning = null;
@@ -221,7 +274,7 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
     setState(() {
       _history.clear();
       _items.clear();
-      _sources.clear();
+      _pendingSources.clear();
       _turnText.clear();
       _currentAssistant = null;
       _currentReasoning = null;
@@ -237,18 +290,158 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
 
   void _bump() {
     if (mounted) setState(() {});
-    _scrollToBottom();
+    _scheduleScrollToBottom();
   }
 
-  void _scrollToBottom() {
+  void _scheduleScrollToBottom() {
+    if (_scrollScheduled) return;
+    _scrollScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients) return;
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOut,
-      );
+      _scrollScheduled = false;
+      if (!mounted || !_pinnedToBottom || !_scrollController.hasClients) {
+        return;
+      }
+      if (!_scrollController.position.hasContentDimensions) return;
+      final target = _scrollController.position.maxScrollExtent;
+      if ((target - _scrollController.position.pixels).abs() <= 0.5) return;
+      if (MediaQuery.maybeOf(context)?.disableAnimations ?? false) {
+        _scrollController.jumpTo(target);
+      } else {
+        _scrollController.animateTo(
+          target,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      }
     });
+  }
+
+  bool _handleScrollNotification(ScrollNotification notification) {
+    if (notification.depth != 0) return false;
+    _pinnedToBottom = ScrollBottomPolicy.isNearBottom(notification.metrics);
+    return false;
+  }
+
+  void _onFixtureAction(String label) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(label), duration: const Duration(seconds: 1)),
+    );
+  }
+
+  Widget _buildFixture(ToolsChatFixture fixture) {
+    return switch (fixture) {
+      ToolsChatFixture.normal => _FixtureScaffold(
+        items: const [
+          _FixtureBubble(
+            role: ModelMessageRole.user,
+            text: 'What can this page do?',
+          ),
+          _FixtureBubble(
+            role: ModelMessageRole.assistant,
+            text: 'Offline fixture reply',
+          ),
+        ],
+        composer: ChatComposer(
+          onSend: (_) {},
+          hintText: 'Ask about weather or math…',
+        ),
+      ),
+      ToolsChatFixture.approval => _FixtureScaffold(
+        items: const [
+          _FixtureBubble(
+            role: ModelMessageRole.user,
+            text: 'Delete q3.pdf from reports.',
+          ),
+        ],
+        panels: [
+          ToolApprovalCard(
+            request: const LanguageModelV4ToolApprovalRequestPart(
+              approvalId: 'approval-delete',
+              toolCall: LanguageModelV4ToolCallPart(
+                toolCallId: 'call-delete',
+                toolName: 'deleteFile',
+                input: {'path': '/Users/me/reports/q3.pdf'},
+              ),
+            ),
+            onApprove: (_) => _onFixtureAction('Approved fixture action'),
+            onDeny: (_) => _onFixtureAction('Denied fixture action'),
+          ),
+        ],
+        composer: const ChatComposer(
+          onSend: _noopSend,
+          enabled: false,
+          hintText: 'Approval pending…',
+        ),
+      ),
+      ToolsChatFixture.error => _FixtureScaffold(
+        items: const [
+          _FixtureBubble(
+            role: ModelMessageRole.user,
+            text: 'Summarise my deploy notes.',
+          ),
+        ],
+        panels: [
+          ChatErrorView(
+            error: StateError('Fixture request failed'),
+            onRetry: () => _onFixtureAction('Retry'),
+            onDismiss: () => _onFixtureAction('Dismissed fixture error'),
+          ),
+        ],
+        composer: ChatComposer(
+          onSend: (_) {},
+          hintText: 'Ask about weather or math…',
+        ),
+      ),
+      ToolsChatFixture.sourcesTool => _FixtureScaffold(
+        items: const [
+          _FixtureBubble(
+            role: ModelMessageRole.user,
+            text: 'What is the weather in Tokyo?',
+          ),
+          _FixtureReasoning(text: 'Use the weather tool and cite the source.'),
+          _FixtureTool(
+            call: LanguageModelV4ToolCallPart(
+              toolCallId: 'call-weather',
+              toolName: 'getWeather',
+              input: {'city': 'Tokyo'},
+            ),
+            result: LanguageModelV4ToolResultPart(
+              toolCallId: 'call-weather',
+              toolName: 'getWeather',
+              output: ToolResultOutputText('Sunny, 22°C in Tokyo.'),
+            ),
+          ),
+          _FixtureBubble(
+            role: ModelMessageRole.assistant,
+            text: 'It is currently 22°C and sunny in Tokyo.',
+          ),
+        ],
+        sources: const [
+          LanguageModelV4SourcePart(
+            id: 'source-weather',
+            url: 'https://weather.example.com/tokyo',
+            title: 'Example Weather Feed',
+          ),
+        ],
+        composer: ChatComposer(
+          onSend: (_) {},
+          hintText: 'Ask about weather or math…',
+        ),
+      ),
+      ToolsChatFixture.longHistory => _FixtureScaffold(
+        items: List<_FixtureItem>.generate(
+          12,
+          (i) => _FixtureBubble(
+            role: i.isEven ? ModelMessageRole.user : ModelMessageRole.assistant,
+            text: 'Conversation history ${i + 1}',
+          ),
+        ),
+        composer: ChatComposer(
+          onSend: (_) {},
+          hintText: 'Ask about weather or math…',
+        ),
+      ),
+    };
   }
 
   void _showSnackBar(String msg) {
@@ -258,6 +451,14 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
 
   @override
   Widget build(BuildContext context) {
+    final fixture = widget.fixture;
+    if (fixture != null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Tools Chat')),
+        body: _buildFixture(fixture),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Tools Chat'),
@@ -274,20 +475,16 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
           Expanded(
             child: _items.isEmpty
                 ? const _EmptyState()
-                : ListView(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
+                : NotificationListener<ScrollNotification>(
+                    onNotification: _handleScrollNotification,
+                    child: ListView(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      children: [for (final item in _items) _buildItem(item)],
                     ),
-                    children: [
-                      for (final item in _items) _buildItem(item),
-                      if (_sources.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 12),
-                          child: SourceCitations(sources: _sources),
-                        ),
-                    ],
                   ),
           ),
           ChatComposer(
@@ -303,9 +500,20 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
 
   Widget _buildItem(_Item item) {
     return switch (item) {
-      _TextItem() => ChatMessageBubble(
-        message: ModelMessage(role: item.role, content: item.text),
-        isStreaming: _streaming && identical(item, _currentAssistant),
+      _TextItem() => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ChatMessageBubble(
+            message: ModelMessage(role: item.role, content: item.text),
+            isStreaming: _streaming && identical(item, _currentAssistant),
+          ),
+          if (item.role == ModelMessageRole.assistant &&
+              item.sources.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6, bottom: 6),
+              child: SourceCitations(sources: item.sources),
+            ),
+        ],
       ),
       _ReasoningItem() => Align(
         alignment: Alignment.centerLeft,
@@ -317,6 +525,10 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
         ),
       ),
       _ToolItem() => ToolCallCard(call: item.call, result: item.result),
+      _SourcesItem() => Padding(
+        padding: const EdgeInsets.only(top: 6, bottom: 6),
+        child: SourceCitations(sources: item.sources),
+      ),
     };
   }
 
@@ -393,6 +605,7 @@ class _TextItem extends _Item {
   _TextItem(this.role, this.text);
   final ModelMessageRole role;
   String text;
+  final List<LanguageModelV4SourcePart> sources = [];
 }
 
 class _ReasoningItem extends _Item {
@@ -402,8 +615,13 @@ class _ReasoningItem extends _Item {
 
 class _ToolItem extends _Item {
   _ToolItem(this.call);
-  final LanguageModelV3ToolCallPart call;
-  LanguageModelV3ToolResultPart? result;
+  final LanguageModelV4ToolCallPart call;
+  LanguageModelV4ToolResultPart? result;
+}
+
+class _SourcesItem extends _Item {
+  _SourcesItem(this.sources);
+  final List<LanguageModelV4SourcePart> sources;
 }
 
 class _EmptyState extends StatelessWidget {
@@ -426,5 +644,89 @@ class _EmptyState extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+void _noopSend(String _) {}
+
+sealed class _FixtureItem {
+  const _FixtureItem();
+}
+
+class _FixtureBubble extends _FixtureItem {
+  const _FixtureBubble({required this.role, required this.text});
+
+  final ModelMessageRole role;
+  final String text;
+}
+
+class _FixtureReasoning extends _FixtureItem {
+  const _FixtureReasoning({required this.text});
+
+  final String text;
+}
+
+class _FixtureTool extends _FixtureItem {
+  const _FixtureTool({required this.call, this.result});
+
+  final LanguageModelV4ToolCallPart call;
+  final LanguageModelV4ToolResultPart? result;
+}
+
+class _FixtureScaffold extends StatelessWidget {
+  const _FixtureScaffold({
+    required this.items,
+    required this.composer,
+    this.panels = const [],
+    this.sources = const [],
+  });
+
+  final List<_FixtureItem> items;
+  final Widget composer;
+  final List<Widget> panels;
+  final List<LanguageModelV4SourcePart> sources;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            children: [
+              for (final panel in panels) ...[
+                panel,
+                const SizedBox(height: 12),
+              ],
+              for (final item in items) _buildFixtureItem(context, item),
+              if (sources.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: SourceCitations(sources: sources),
+                ),
+            ],
+          ),
+        ),
+        composer,
+      ],
+    );
+  }
+
+  Widget _buildFixtureItem(BuildContext context, _FixtureItem item) {
+    return switch (item) {
+      _FixtureBubble() => ChatMessageBubble(
+        message: ModelMessage(role: item.role, content: item.text),
+      ),
+      _FixtureReasoning() => Align(
+        alignment: Alignment.centerLeft,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.sizeOf(context).width * 0.85,
+          ),
+          child: ReasoningView(text: item.text, initiallyExpanded: true),
+        ),
+      ),
+      _FixtureTool() => ToolCallCard(call: item.call, result: item.result),
+    };
   }
 }

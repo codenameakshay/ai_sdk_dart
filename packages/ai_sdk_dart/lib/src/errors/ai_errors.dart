@@ -1,3 +1,5 @@
+import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+
 /// The AI SDK error hierarchy lives in `ai_sdk_provider` so that provider
 /// packages (which depend on `ai_sdk_provider`, not on `ai_sdk_dart`) can throw
 /// the same typed errors — in particular [AiApiCallError] for non-2xx provider
@@ -10,6 +12,7 @@ export 'package:ai_sdk_provider/ai_sdk_provider.dart'
         AiNoSuchToolError,
         AiInvalidToolInputError,
         AiNoContentGeneratedError,
+        AiOperationCancelledError,
         AiNoObjectGeneratedError,
         AiToolCallRepairError,
         AiNoImageGeneratedError,

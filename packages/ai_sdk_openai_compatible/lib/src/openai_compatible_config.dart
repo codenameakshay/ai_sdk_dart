@@ -1,17 +1,6 @@
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
 
-/// Builds a [Dio] client for a given base URL and headers.
-///
-/// Providers may override this to inject interceptors or reuse a client; the
-/// default ([OpenAICompatibleConfig.defaultClientFactory]) creates a fresh
-/// [Dio] with the base URL and JSON content type configured.
-typedef DioFactory =
-    Dio Function({
-      required String baseUrl,
-      required Map<String, String> headers,
-    });
-
 /// Per-provider configuration for [OpenAICompatibleChatLanguageModel].
 ///
 /// This is the small interface in front of a deep module: everything that
@@ -24,6 +13,7 @@ typedef DioFactory =
 /// OpenAICompatibleConfig(
 ///   provider: 'groq',
 ///   baseUrl: 'https://api.groq.com/openai/v1',
+///   client: Dio(BaseOptions(baseUrl: 'https://api.groq.com/openai/v1')),
 ///   headers: () => {'Authorization': 'Bearer $apiKey'},
 /// );
 /// ```
@@ -34,6 +24,7 @@ class OpenAICompatibleConfig {
     required this.provider,
     required this.baseUrl,
     required this.headers,
+    required this.client,
     this.queryParameters,
     this.seedKey = 'seed',
     this.maxTokensKey = 'max_completion_tokens',
@@ -43,7 +34,6 @@ class OpenAICompatibleConfig {
     this.includeStreamUsageOption = true,
     this.reasoningKeys = const ['reasoning_content', 'reasoning', 'thinking'],
     this.extraBody,
-    this.clientFactory = defaultClientFactory,
   });
 
   /// Short provider name, e.g. `'openai'`, `'azure'`, `'groq'`, `'mistral'`.
@@ -62,7 +52,13 @@ class OpenAICompatibleConfig {
   /// OpenAI/Groq/Mistral use `{'Authorization': 'Bearer <key>'}`; Azure uses
   /// `{'api-key': <key>}`. `Content-Type: application/json` is added by the
   /// default client factory, so it need not be returned here.
-  final Map<String, String> Function() headers;
+  final RequestHeadersProvider headers;
+
+  /// Reusable client owned by the provider instance or injected by the caller.
+  ///
+  /// Request-time auth stays out of this client's base options; [headers] are
+  /// resolved immediately before dispatch and merged into each request instead.
+  final Dio client;
 
   /// Static query parameters added to every request, e.g. Azure's
   /// `{'api-version': '2024-02-15-preview'}`. `null` when none are needed.
@@ -101,7 +97,7 @@ class OpenAICompatibleConfig {
   /// `reasoning_content`, OpenRouter emits `reasoning`, and some hosts use
   /// `thinking`. The first match on a streaming `delta` is emitted as a
   /// [StreamPartReasoningDelta]; on a non-streaming `message` it becomes a
-  /// [LanguageModelV3ReasoningPart]. Defaults to
+  /// [LanguageModelV4ReasoningPart]. Defaults to
   /// `['reasoning_content', 'reasoning', 'thinking']`; set to `const []` to
   /// disable reasoning extraction entirely.
   final List<String> reasoningKeys;
@@ -112,27 +108,8 @@ class OpenAICompatibleConfig {
   /// overlapping key here wins — prefer non-conflicting keys. Returning `null`
   /// (or an empty map) adds nothing.
   ///
-  /// The [LanguageModelV3CallOptions] are passed so the hook can read
+  /// The [LanguageModelV4CallOptions] are passed so the hook can read
   /// `providerOptions[provider]`.
-  final Map<String, dynamic>? Function(LanguageModelV3CallOptions options)?
+  final Map<String, dynamic>? Function(LanguageModelV4CallOptions options)?
   extraBody;
-
-  /// Factory for the underlying HTTP client. Defaults to
-  /// [defaultClientFactory].
-  final DioFactory clientFactory;
-
-  /// Default [Dio] factory: a fresh client with the base URL and a JSON
-  /// content type, plus the provider headers.
-  static Dio defaultClientFactory({
-    required String baseUrl,
-    required Map<String, String> headers,
-  }) {
-    return Dio(
-      BaseOptions(
-        baseUrl: baseUrl,
-        headers: {'Content-Type': 'application/json', ...headers},
-        responseType: ResponseType.json,
-      ),
-    );
-  }
 }

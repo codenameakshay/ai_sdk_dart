@@ -51,9 +51,7 @@ class MockEmbeddingModelV3<VALUE> implements EmbeddingModelV2<VALUE> {
     if (doEmbedError != null) throw doEmbedError!;
     return EmbeddingModelV2GenerateResult(
       embeddings: options.values
-          .map(
-            (v) => EmbeddingModelV2Embedding(value: v, embedding: embedding),
-          )
+          .map((v) => EmbeddingModelV2Embedding(value: v, embedding: embedding))
           .toList(),
       usage: usage,
     );

@@ -9,6 +9,6 @@
 /// final model = ollama('llama3');
 /// final embedder = ollama.embedding('nomic-embed-text');
 /// ```
-library ai_sdk_ollama;
+library;
 
 export 'src/ollama_provider.dart';

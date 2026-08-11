@@ -60,7 +60,10 @@ void main() {
       );
 
       expect(result.documents, hasLength(2));
-      expect(result.documents.first.document, 'Paris is the capital of France.');
+      expect(
+        result.documents.first.document,
+        'Paris is the capital of France.',
+      );
       expect(result.documents.first.index, 0);
       expect(result.documents.first.relevanceScore, 0.95);
       expect(result.documents.last.relevanceScore, 0.10);
@@ -82,28 +85,30 @@ void main() {
       expect(result.document.index, 2);
     });
 
-    test('forwards query, documents, topN and providerOptions to model',
-        () async {
-      final model = FakeRerankModel([doc(0, 'a', 0.5)]);
-      const providerOptions = <String, Map<String, dynamic>>{
-        'cohere': {'model': 'rerank-english-v3.0'},
-      };
+    test(
+      'forwards query, documents, topN and providerOptions to model',
+      () async {
+        final model = FakeRerankModel([doc(0, 'a', 0.5)]);
+        const providerOptions = <String, Map<String, dynamic>>{
+          'cohere': {'model': 'rerank-english-v3.0'},
+        };
 
-      await rerank(
-        model: model,
-        query: 'my query',
-        documents: const ['a', 'b'],
-        topN: 1,
-        headers: const {'x-test': '1'},
-        providerOptions: providerOptions,
-      );
+        await rerank(
+          model: model,
+          query: 'my query',
+          documents: const ['a', 'b'],
+          topN: 1,
+          headers: const {'x-test': '1'},
+          providerOptions: providerOptions,
+        );
 
-      expect(model.lastOptions?.query, 'my query');
-      expect(model.lastOptions?.documents, ['a', 'b']);
-      expect(model.lastOptions?.topN, 1);
-      expect(model.lastOptions?.headers, {'x-test': '1'});
-      expect(model.lastOptions?.providerOptions, providerOptions);
-    });
+        expect(model.lastOptions?.query, 'my query');
+        expect(model.lastOptions?.documents, ['a', 'b']);
+        expect(model.lastOptions?.topN, 1);
+        expect(model.lastOptions?.headers, {'x-test': '1'});
+        expect(model.lastOptions?.providerOptions, providerOptions);
+      },
+    );
 
     test('topN limits the number of returned documents', () async {
       final model = FakeRerankModel([
@@ -123,10 +128,9 @@ void main() {
     });
 
     test('timeout throws when the model is too slow', () async {
-      final model = FakeRerankModel(
-        [doc(0, 'a', 0.5)],
-        delay: const Duration(milliseconds: 200),
-      );
+      final model = FakeRerankModel([
+        doc(0, 'a', 0.5),
+      ], delay: const Duration(milliseconds: 200));
 
       expect(
         () => rerank(

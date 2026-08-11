@@ -26,20 +26,14 @@ Demonstrates:
 
 ## Runnable example apps
 
-The repository contains three full example apps. Set your API keys, then run:
-
-```sh
-export OPENAI_API_KEY=sk-...
-export ANTHROPIC_API_KEY=sk-ant-...   # advanced app only
-export GOOGLE_API_KEY=AIza...         # advanced app only
-```
+The repository contains three full example apps.
 
 ### 1. Dart CLI — [`examples/basic`](https://github.com/codenameakshay/ai_sdk_dart/tree/main/examples/basic)
 
 A pure-Dart command-line program that exercises the full SDK against real providers.
 
 ```sh
-cd examples/basic && dart run lib/main.dart
+OPENAI_API_KEY=sk-... make run-basic
 ```
 
 Covers: `generateText`, `streamText`, structured output (`Output.object` / `array` /
@@ -70,7 +64,10 @@ cd examples/flutter_chat && fvm flutter run --dart-define=OPENAI_API_KEY=sk-...
 A comprehensive Flutter demo of every SDK feature across all three providers.
 
 ```sh
-cd examples/advanced_app && fvm flutter run --dart-define=OPENAI_API_KEY=sk-...
+cd examples/advanced_app && fvm flutter run \
+  --dart-define=OPENAI_API_KEY=sk-... \
+  --dart-define=ANTHROPIC_API_KEY=sk-ant-... \
+  --dart-define=GOOGLE_API_KEY=AIza...
 # or: make run-advanced / make run-advanced-web
 ```
 
@@ -79,9 +76,9 @@ cd examples/advanced_app && fvm flutter run --dart-define=OPENAI_API_KEY=sk-...
 | Provider switcher (OpenAI / Anthropic / Google) | All |
 | Tools chat (weather + calculator) | OpenAI |
 | Image generation (DALL-E 3) | OpenAI |
-| Multimodal (image + text input) | OpenAI / Google |
+| Multimodal (image + text input) | OpenAI |
 | Embeddings + cosine similarity | OpenAI / Google |
 | Text-to-speech | OpenAI |
 | Speech-to-text | OpenAI |
-| Completion | All |
-| Object stream | All |
+| Completion | OpenAI |
+| Object stream | OpenAI |

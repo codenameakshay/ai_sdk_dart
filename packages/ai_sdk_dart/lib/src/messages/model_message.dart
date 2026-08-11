@@ -13,12 +13,12 @@ class ModelMessage {
 
   const ModelMessage.parts({
     required this.role,
-    required List<LanguageModelV3ContentPart> this.parts,
+    required List<LanguageModelV4ContentPart> this.parts,
   }) : content = null;
 
   final ModelMessageRole role;
   final String? content;
-  final List<LanguageModelV3ContentPart>? parts;
+  final List<LanguageModelV4ContentPart>? parts;
 }
 
 /// Tool approval request emitted when a tool requires user approval.

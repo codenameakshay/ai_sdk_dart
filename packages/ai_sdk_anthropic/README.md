@@ -6,17 +6,17 @@ Anthropic provider for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart). Supp
 
 ```yaml
 dependencies:
-  ai_sdk_dart: ^1.1.0
-  ai_sdk_anthropic: ^1.1.0
+  ai_sdk_dart: ^1.2.0
+  ai_sdk_anthropic: ^1.2.0
 ```
 
 ## Usage
 
-Set your API key via environment variable:
-
-```sh
-export ANTHROPIC_API_KEY=sk-ant-...
-```
+The top-level `anthropic` factory reads
+`const String.fromEnvironment('ANTHROPIC_API_KEY')`. Use it with
+`fvm dart run --define=ANTHROPIC_API_KEY=sk-ant-... bin/app.dart`, or read
+`Platform.environment['ANTHROPIC_API_KEY']` yourself and pass `apiKey:` to
+`AnthropicProvider` in server and CLI apps.
 
 ### Language model
 
@@ -34,6 +34,8 @@ print(result.text);
 ### Streaming
 
 ```dart
+import 'dart:io';
+
 final result = await streamText(
   model: anthropic('claude-sonnet-4-5'),
   prompt: 'Write a haiku about Dart.',
@@ -52,8 +54,8 @@ import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_anthropic/ai_sdk_anthropic.dart';
 
 final model = wrapLanguageModel(
-  anthropic('claude-sonnet-4-5'),
-  [extractReasoningMiddleware(tagName: 'think')],
+  model: anthropic('claude-sonnet-4-5'),
+  middleware: extractReasoningMiddleware(tagName: 'think'),
 );
 
 final result = await generateText(

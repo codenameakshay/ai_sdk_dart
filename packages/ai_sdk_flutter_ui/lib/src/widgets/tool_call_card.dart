@@ -24,11 +24,11 @@ class ToolCallCard extends StatelessWidget {
   const ToolCallCard({super.key, required this.call, this.result});
 
   /// The tool call to render.
-  final LanguageModelV3ToolCallPart call;
+  final LanguageModelV4ToolCallPart call;
 
-  /// Optional result for [call]. When [LanguageModelV3ToolResultPart.isError]
+  /// Optional result for [call]. When [LanguageModelV4ToolResultPart.isError]
   /// is true, it is rendered in the error color.
-  final LanguageModelV3ToolResultPart? result;
+  final LanguageModelV4ToolResultPart? result;
 
   @override
   Widget build(BuildContext context) {
@@ -37,75 +37,84 @@ class ToolCallCard extends StatelessWidget {
     final result = this.result;
     final isError = result?.isError ?? false;
 
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      elevation: 0,
-      color: scheme.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: scheme.outlineVariant),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  Icons.build_circle_outlined,
-                  size: 18,
-                  color: scheme.primary,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    call.toolName,
-                    style: textTheme.titleSmall?.copyWith(
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            _CodeBlock(text: _prettyJson(call.input)),
-            if (result != null) ...[
-              const SizedBox(height: 12),
+    return Semantics(
+      container: true,
+      label: 'Tool call: ${call.toolName}',
+      child: Card(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        elevation: 0,
+        color: scheme.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: scheme.outlineVariant),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
               Row(
                 children: [
-                  TweenAnimationBuilder<double>(
-                    key: ValueKey(isError),
-                    tween: Tween(begin: 0.6, end: 1),
-                    duration: AiMotion.duration(context, AiMotion.quick),
-                    curve: AiMotion.gentle,
-                    builder: (context, scale, child) =>
-                        Transform.scale(scale: scale, child: child),
-                    child: Icon(
-                      isError
-                          ? Icons.error_outline_rounded
-                          : Icons.check_circle_outline_rounded,
-                      size: 16,
-                      color: isError ? scheme.error : scheme.primary,
-                    ),
+                  Icon(
+                    Icons.build_circle_outlined,
+                    size: 18,
+                    color: scheme.primary,
                   ),
-                  const SizedBox(width: 6),
-                  Text(
-                    isError ? 'Error' : 'Result',
-                    style: textTheme.labelMedium?.copyWith(
-                      color: isError ? scheme.error : scheme.onSurfaceVariant,
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      call.toolName,
+                      style: textTheme.titleSmall?.copyWith(
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 6),
-              _CodeBlock(
-                text: _stringifyOutput(result.output),
-                background: isError ? scheme.errorContainer : null,
-                foreground: isError ? scheme.onErrorContainer : null,
-              ),
+              const SizedBox(height: 8),
+              _CodeBlock(text: _prettyJson(call.input)),
+              if (result != null) ...[
+                const SizedBox(height: 12),
+                Semantics(
+                  label: isError ? 'Tool error' : 'Tool result',
+                  child: Row(
+                    children: [
+                      TweenAnimationBuilder<double>(
+                        key: ValueKey(isError),
+                        tween: Tween(begin: 0.6, end: 1),
+                        duration: AiMotion.duration(context, AiMotion.quick),
+                        curve: AiMotion.gentle,
+                        builder: (context, scale, child) =>
+                            Transform.scale(scale: scale, child: child),
+                        child: Icon(
+                          isError
+                              ? Icons.error_outline_rounded
+                              : Icons.check_circle_outline_rounded,
+                          size: 16,
+                          color: isError ? scheme.error : scheme.primary,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        isError ? 'Error' : 'Result',
+                        style: textTheme.labelMedium?.copyWith(
+                          color: isError
+                              ? scheme.error
+                              : scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 6),
+                _CodeBlock(
+                  text: _stringifyOutput(result.output),
+                  background: isError ? scheme.errorContainer : null,
+                  foreground: isError ? scheme.onErrorContainer : null,
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -119,7 +128,7 @@ class ToolCallCard extends StatelessWidget {
     }
   }
 
-  static String _stringifyOutput(LanguageModelV3ToolResultOutput output) {
+  static String _stringifyOutput(LanguageModelV4ToolResultOutput output) {
     if (output is ToolResultOutputText) return output.text;
     if (output is ToolResultOutputContent) {
       return output.parts.map((p) => p.runtimeType).join(', ');

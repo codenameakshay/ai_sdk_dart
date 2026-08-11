@@ -22,7 +22,7 @@ void main() {
       for (final snap in jsonSnapshots)
         StreamPartTextDelta(id: 't1', delta: snap),
       const StreamPartTextEnd(id: 't1'),
-      StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+      StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
     ]);
   }
 
@@ -68,11 +68,7 @@ void main() {
 
     test('diffs nested lists: element replace, add, and remove', () async {
       // List grows (add), an element changes (replace), then shrinks (remove).
-      final model = snapshots([
-        '{"xs":[1,2]}',
-        '{"xs":[1,9,3]}',
-        '{"xs":[1]}',
-      ]);
+      final model = snapshots(['{"xs":[1,2]}', '{"xs":[1,9,3]}', '{"xs":[1]}']);
       final result = await streamObject(
         model: model,
         schema: schema,
@@ -86,18 +82,17 @@ void main() {
       );
       expect(ops.any((o) => o.op == 'add' && o.path == '/xs/2'), isTrue);
       // Snapshot 3 vs 2: indices 1 and 2 removed.
-      expect(ops.any((o) => o.op == 'remove' && o.path.startsWith('/xs/')),
-          isTrue);
+      expect(
+        ops.any((o) => o.op == 'remove' && o.path.startsWith('/xs/')),
+        isTrue,
+      );
       expect(await result.object, {
         'xs': [1],
       });
     });
 
     test('diffs nested maps recursively', () async {
-      final model = snapshots([
-        '{"o":{"a":1}}',
-        '{"o":{"a":1,"b":2}}',
-      ]);
+      final model = snapshots(['{"o":{"a":1}}', '{"o":{"a":1,"b":2}}']);
       final result = await streamObject(
         model: model,
         schema: schema,

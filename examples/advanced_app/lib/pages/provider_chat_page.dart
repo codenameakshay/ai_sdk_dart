@@ -13,7 +13,10 @@ import '../config.dart';
 /// Switch between OpenAI, Anthropic, and Google models from the app bar; each
 /// switch rebuilds the [ToolLoopAgent] against the newly selected model.
 class ProviderChatPage extends StatefulWidget {
-  const ProviderChatPage({super.key});
+  const ProviderChatPage({super.key, this.agent, this.controller});
+
+  final ToolLoopAgent? agent;
+  final ChatController? controller;
 
   @override
   State<ProviderChatPage> createState() => _ProviderChatPageState();
@@ -21,6 +24,7 @@ class ProviderChatPage extends StatefulWidget {
 
 class _ProviderChatPageState extends State<ProviderChatPage> {
   late final ProviderRegistry _registry;
+  ChatController? _ownedChatController;
   late final ChatController _chat;
   late ToolLoopAgent _agent;
 
@@ -54,8 +58,12 @@ class _ProviderChatPageState extends State<ProviderChatPage> {
             GoogleGenerativeAIProvider(apiKey: googleApiKey).embedding(id),
       ),
     });
-    _agent = _buildAgent(_selectedModelId);
-    _chat = ChatController(onError: (err) => _showSnackBar('Error: $err'));
+    _agent = widget.agent ?? _buildAgent(_selectedModelId);
+    _chat =
+        widget.controller ??
+        (_ownedChatController = ChatController(
+          onError: (err) => _showSnackBar('Error: $err'),
+        ));
   }
 
   ToolLoopAgent _buildAgent(String modelId) => ToolLoopAgent(
@@ -66,7 +74,7 @@ class _ProviderChatPageState extends State<ProviderChatPage> {
 
   @override
   void dispose() {
-    _chat.dispose();
+    _ownedChatController?.dispose();
     super.dispose();
   }
 
@@ -97,6 +105,7 @@ class _ProviderChatPageState extends State<ProviderChatPage> {
               onChanged: _chat.isLoading
                   ? null
                   : (v) {
+                      if (widget.agent != null) return;
                       if (v == null) return;
                       setState(() {
                         _selectedModelId = v;
@@ -118,8 +127,7 @@ class _ProviderChatPageState extends State<ProviderChatPage> {
         // A prebuilt PromptSuggestions empty state — tapping a chip sends it
         // as the first message.
         emptyState: _EmptyState(
-          onSelected: (text) =>
-              _chat.sendMessage(agent: _agent, text: text),
+          onSelected: (text) => _chat.sendMessage(agent: _agent, text: text),
         ),
       ),
     );

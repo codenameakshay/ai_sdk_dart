@@ -5,6 +5,7 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
 import '../messages/model_message.dart';
 import '../tools/tool.dart';
+import 'partial_json.dart';
 
 /// A JSON Patch-style operation for incremental object updates.
 ///
@@ -40,7 +41,7 @@ class StreamObjectResult<T> {
   final Stream<T> stream;
   final Stream<T> partialObjectStream;
   final Stream<List<StreamObjectPatchOperation>> patchStream;
-  final Stream<LanguageModelV3StreamPart> rawStream;
+  final Stream<LanguageModelV4StreamPart> rawStream;
   final Stream<String> textStream;
   final Future<T> object;
 }
@@ -63,28 +64,28 @@ class StreamObjectResult<T> {
 /// }
 /// ```
 Future<StreamObjectResult<T>> streamObject<T>({
-  required LanguageModelV3 model,
+  required LanguageModelV4 model,
   required Schema<T> schema,
   String? system,
   String? prompt,
   List<ModelMessage>? messages,
   Duration? timeout,
 }) async {
-  final normalizedMessages = <LanguageModelV3Message>[
+  final normalizedMessages = <LanguageModelV4Message>[
     if (prompt != null)
-      LanguageModelV3Message(
-        role: LanguageModelV3Role.user,
-        content: [LanguageModelV3TextPart(text: prompt)],
+      LanguageModelV4Message(
+        role: LanguageModelV4Role.user,
+        content: [LanguageModelV4TextPart(text: prompt)],
       ),
     ...?messages?.map(
-      (m) => LanguageModelV3Message(
+      (m) => LanguageModelV4Message(
         role: switch (m.role) {
-          ModelMessageRole.system => LanguageModelV3Role.system,
-          ModelMessageRole.user => LanguageModelV3Role.user,
-          ModelMessageRole.assistant => LanguageModelV3Role.assistant,
-          ModelMessageRole.tool => LanguageModelV3Role.tool,
+          ModelMessageRole.system => LanguageModelV4Role.system,
+          ModelMessageRole.user => LanguageModelV4Role.user,
+          ModelMessageRole.assistant => LanguageModelV4Role.assistant,
+          ModelMessageRole.tool => LanguageModelV4Role.tool,
         },
-        content: m.parts ?? [LanguageModelV3TextPart(text: m.content ?? '')],
+        content: m.parts ?? [LanguageModelV4TextPart(text: m.content ?? '')],
       ),
     ),
   ];
@@ -97,34 +98,20 @@ Future<StreamObjectResult<T>> streamObject<T>({
   ].join('\n');
 
   final streamCall = model.doStream(
-    LanguageModelV3CallOptions(
-      prompt: LanguageModelV3Prompt(
+    LanguageModelV4CallOptions(
+      prompt: LanguageModelV4Prompt(
         system: instruction,
         messages: normalizedMessages,
       ),
-      outputSchema: schema.jsonSchema,
+      responseFormat: LanguageModelV4JsonResponseFormat(
+        schema: schema.jsonSchema,
+      ),
     ),
   );
   final response = await (timeout != null
       ? streamCall.timeout(timeout)
       : streamCall);
-  LanguageModelV3ResponseMetadata? responseMetadata;
-  if (response.rawResponse is Map) {
-    final raw = (response.rawResponse as Map).cast<Object?, Object?>();
-    final meta = raw['responseMetadata'];
-    if (meta is Map) {
-      final map = meta.cast<Object?, Object?>();
-      final ts = map['timestamp']?.toString();
-      responseMetadata = LanguageModelV3ResponseMetadata(
-        id: map['id']?.toString(),
-        modelId: map['modelId']?.toString(),
-        timestamp: ts == null ? null : DateTime.tryParse(ts),
-        headers: null,
-        body: raw['body'],
-        requestBody: raw['requestBody'],
-      );
-    }
-  }
+  final responseMetadata = response.response;
 
   final broadcast = response.stream.asBroadcastStream();
   final textStream = broadcast
@@ -137,15 +124,28 @@ Future<StreamObjectResult<T>> streamObject<T>({
   final objectCompleter = Completer<T>();
   unawaited(() async {
     final buffer = StringBuffer();
+    final partialJsonTracker = PartialJsonTracker();
     Map<String, dynamic>? previousJson;
+    String? lastPartialFingerprint;
     T? lastObject;
     try {
       await for (final part in broadcast) {
         if (part is StreamPartTextDelta) {
           buffer.write(part.delta);
+          final cadence = partialJsonTracker.append(part.delta);
+          if (!cadence.shouldAttemptValue) {
+            continue;
+          }
+
           final parsedJson = _tryParseObjectJson(buffer.toString());
           if (parsedJson != null) {
             final parsed = schema.fromJson(parsedJson);
+            final fingerprint = partialJsonFingerprint(parsedJson);
+            if (fingerprint == lastPartialFingerprint) {
+              continue;
+            }
+
+            lastPartialFingerprint = fingerprint;
             lastObject = parsed;
             objectController.add(parsed);
 
@@ -191,9 +191,12 @@ Future<StreamObjectResult<T>> streamObject<T>({
 }
 
 Map<String, dynamic>? _tryParseObjectJson(String text) {
-  final parsed =
-      _safeParseJson(text.trim()) ??
-      _safeParseJson(_extractLastJsonObject(text) ?? '');
+  final parsed = tryParsePartialJsonValue(
+    text,
+    phase: PartialJsonParsePhase.streamObjectSnapshot,
+    trigger: PartialJsonParseTrigger.candidateClosed,
+    fallbackCandidate: extractLastJsonObject(text),
+  );
   if (parsed is Map<String, dynamic>) {
     return parsed;
   }
@@ -204,51 +207,6 @@ Map<String, dynamic>? _tryParseObjectJson(String text) {
   }
   // coverage:ignore-end
   return null;
-}
-
-String? _extractLastJsonObject(String text) {
-  var depth = 0;
-  var inString = false;
-  var escaped = false;
-  int? topLevelStart;
-  String? lastComplete;
-
-  for (var i = 0; i < text.length; i++) {
-    final char = text[i];
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (char == r'\') {
-      escaped = true;
-      continue;
-    }
-    if (char == '"') {
-      inString = !inString;
-      continue;
-    }
-    if (inString) {
-      continue;
-    }
-
-    if (char == '{') {
-      if (depth == 0) {
-        topLevelStart = i;
-      }
-      depth++;
-      continue;
-    }
-
-    if (char == '}') {
-      depth--;
-      if (depth == 0 && topLevelStart != null) {
-        lastComplete = text.substring(topLevelStart, i + 1);
-        topLevelStart = null;
-      }
-    }
-  }
-
-  return lastComplete;
 }
 
 List<StreamObjectPatchOperation> _diffObjectPatch(
@@ -360,25 +318,4 @@ bool _jsonValueEquals(Object? left, Object? right) {
   }
   // coverage:ignore-end
   return left == right;
-}
-
-Object? _safeParseJson(String text) {
-  try {
-    return jsonDecode(text);
-  } catch (_) {
-    final fenceMatch = RegExp(
-      r'```(?:json)?\s*([\s\S]+?)\s*```',
-    ).firstMatch(text);
-    if (fenceMatch != null) {
-      final fenced = fenceMatch.group(1);
-      if (fenced != null) {
-        try {
-          return jsonDecode(fenced);
-        } catch (_) {
-          return null;
-        }
-      }
-    }
-    return null;
-  }
 }

@@ -17,7 +17,7 @@ typedef AssistantTextBuilder =
 /// Signature for the approve/deny callbacks of an inline tool-approval request.
 typedef ToolApprovalCallback =
     void Function(
-      LanguageModelV3ToolApprovalRequestPart request,
+      LanguageModelV4ToolApprovalRequestPart request,
       String? reason,
     );
 
@@ -45,6 +45,7 @@ class AssistantMessageView extends StatelessWidget {
     this.onFileTap,
     this.onToolApprove,
     this.onToolDeny,
+    this.remoteImageProviderBuilder,
     this.spacing = 8,
   });
 
@@ -56,13 +57,13 @@ class AssistantMessageView extends StatelessWidget {
   final AssistantTextBuilder? textBuilder;
 
   /// Tool results to pair with tool-call parts by `toolCallId`.
-  final List<LanguageModelV3ToolResultPart> toolResults;
+  final List<LanguageModelV4ToolResultPart> toolResults;
 
   /// Called when a source citation chip is tapped.
-  final void Function(LanguageModelV3SourcePart source)? onSourceTap;
+  final void Function(LanguageModelV4SourcePart source)? onSourceTap;
 
   /// Called when a file attachment is tapped.
-  final void Function(LanguageModelV3FilePart file)? onFileTap;
+  final void Function(LanguageModelV4FilePart file)? onFileTap;
 
   /// Called when an inline tool-approval request is approved. When both this
   /// and [onToolDeny] are null, approval requests render as plain tool cards.
@@ -70,6 +71,10 @@ class AssistantMessageView extends StatelessWidget {
 
   /// Called when an inline tool-approval request is denied.
   final ToolApprovalCallback? onToolDeny;
+
+  /// Opts in to loading URL-backed images after host-side validation.
+  /// Remote images are blocked by default.
+  final RemoteImageProviderBuilder? remoteImageProviderBuilder;
 
   /// Vertical gap between rendered segments.
   final double spacing;
@@ -83,31 +88,36 @@ class AssistantMessageView extends StatelessWidget {
       final text = message.content ?? '';
       if (text.isNotEmpty) children.add(_text(context, text));
     } else {
-      final sources = <LanguageModelV3SourcePart>[];
+      final sources = <LanguageModelV4SourcePart>[];
       for (final part in parts) {
         switch (part) {
-          case LanguageModelV3TextPart(:final text):
+          case LanguageModelV4TextPart(:final text):
             if (text.isNotEmpty) children.add(_text(context, text));
-          case LanguageModelV3ReasoningPart(:final text):
+          case LanguageModelV4ReasoningPart(:final text):
             children.add(ReasoningView(text: text));
-          case LanguageModelV3ToolCallPart():
+          case LanguageModelV4ToolCallPart():
             children.add(ToolCallCard(call: part, result: _resultFor(part)));
-          case LanguageModelV3ToolApprovalRequestPart():
+          case LanguageModelV4ToolApprovalRequestPart():
             children.add(_approval(part));
-          case LanguageModelV3ImagePart():
-            children.add(MessageImage(image: part));
-          case LanguageModelV3FilePart():
+          case LanguageModelV4ImagePart():
+            children.add(
+              MessageImage(
+                image: part,
+                remoteImageProviderBuilder: remoteImageProviderBuilder,
+              ),
+            );
+          case LanguageModelV4FilePart():
             children.add(
               MessageAttachment(
                 file: part,
                 onTap: onFileTap == null ? null : () => onFileTap!(part),
               ),
             );
-          case LanguageModelV3SourcePart():
+          case LanguageModelV4SourcePart():
             sources.add(part);
-          case LanguageModelV3RedactedReasoningPart():
-          case LanguageModelV3ToolResultPart():
-          case LanguageModelV3ToolApprovalResponse():
+          case LanguageModelV4RedactedReasoningPart():
+          case LanguageModelV4ToolResultPart():
+          case LanguageModelV4ToolApprovalResponse():
             break; // not rendered inline
         }
       }
@@ -135,13 +145,11 @@ class AssistantMessageView extends StatelessWidget {
     if (builder != null) return builder(context, text);
     // Bubbleless assistant prose reads as the body of the turn; give it a
     // comfortable reading line-height.
-    final style = Theme.of(
-      context,
-    ).textTheme.bodyMedium?.copyWith(height: 1.5);
+    final style = Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.5);
     return SelectableText(text, style: style);
   }
 
-  Widget _approval(LanguageModelV3ToolApprovalRequestPart part) {
+  Widget _approval(LanguageModelV4ToolApprovalRequestPart part) {
     if (onToolApprove == null && onToolDeny == null) {
       return ToolCallCard(call: part.toolCall);
     }
@@ -152,7 +160,7 @@ class AssistantMessageView extends StatelessWidget {
     );
   }
 
-  LanguageModelV3ToolResultPart? _resultFor(LanguageModelV3ToolCallPart call) {
+  LanguageModelV4ToolResultPart? _resultFor(LanguageModelV4ToolCallPart call) {
     for (final result in toolResults) {
       if (result.toolCallId == call.toolCallId) return result;
     }

@@ -32,17 +32,18 @@ class _WidgetGalleryPageState extends State<WidgetGalleryPage> {
   static final _assistantTurn = ModelMessage.parts(
     role: ModelMessageRole.assistant,
     parts: const [
-      LanguageModelV3ReasoningPart(
-        text: 'The user asked about the weather in Tokyo, so I should call the '
+      LanguageModelV4ReasoningPart(
+        text:
+            'The user asked about the weather in Tokyo, so I should call the '
             'getWeather tool and summarise the result.',
       ),
-      LanguageModelV3TextPart(text: 'It is currently 22°C and sunny in Tokyo.'),
-      LanguageModelV3ToolCallPart(
+      LanguageModelV4TextPart(text: 'It is currently 22°C and sunny in Tokyo.'),
+      LanguageModelV4ToolCallPart(
         toolCallId: 'call_1',
         toolName: 'getWeather',
         input: {'city': 'Tokyo'},
       ),
-      LanguageModelV3SourcePart(
+      LanguageModelV4SourcePart(
         id: 's1',
         url: 'https://weather.example.com/tokyo',
         title: 'Tokyo Weather — example.com',
@@ -51,26 +52,25 @@ class _WidgetGalleryPageState extends State<WidgetGalleryPage> {
   );
 
   static const _toolResults = [
-    LanguageModelV3ToolResultPart(
+    LanguageModelV4ToolResultPart(
       toolCallId: 'call_1',
       toolName: 'getWeather',
       output: ToolResultOutputText('{"tempC": 22, "condition": "sunny"}'),
     ),
   ];
 
-  static const _approvalRequest = LanguageModelV3ToolApprovalRequestPart(
+  static const _approvalRequest = LanguageModelV4ToolApprovalRequestPart(
     approvalId: 'approval_call_2',
-    toolCall: LanguageModelV3ToolCallPart(
+    toolCall: LanguageModelV4ToolCallPart(
       toolCallId: 'call_2',
       toolName: 'deleteFile',
       input: {'path': '/Users/me/reports/q3.pdf'},
     ),
   );
 
-  static const _usage = LanguageModelV3Usage(
-    inputTokens: 1240,
-    outputTokens: 318,
-    totalTokens: 1558,
+  static const _usage = LanguageModelV4Usage(
+    inputTokens: LanguageModelV4InputTokenUsage(total: 1240),
+    outputTokens: LanguageModelV4OutputTokenUsage(total: 318),
   );
 
   @override
@@ -177,29 +177,31 @@ class _WidgetGalleryPageState extends State<WidgetGalleryPage> {
           child: Column(
             children: const [
               ToolCallCard(
-                call: LanguageModelV3ToolCallPart(
+                call: LanguageModelV4ToolCallPart(
                   toolCallId: 'call_3',
                   toolName: 'calculate',
                   input: {'expression': '42 * 1.5'},
                 ),
-                result: LanguageModelV3ToolResultPart(
+                result: LanguageModelV4ToolResultPart(
                   toolCallId: 'call_3',
                   toolName: 'calculate',
                   output: ToolResultOutputText('63'),
                 ),
               ),
               ToolCallCard(
-                call: LanguageModelV3ToolCallPart(
+                call: LanguageModelV4ToolCallPart(
                   toolCallId: 'call_4',
                   toolName: 'fetchUrl',
                   input: {'url': 'https://nope.invalid'},
                 ),
-                result: LanguageModelV3ToolResultPart(
+                result: LanguageModelV4ToolResultPart(
                   toolCallId: 'call_4',
                   toolName: 'fetchUrl',
                   isError: true,
-                  output: ToolResultOutputText('SocketException: failed host '
-                      'lookup'),
+                  output: ToolResultOutputText(
+                    'SocketException: failed host '
+                    'lookup',
+                  ),
                 ),
               ),
             ],
@@ -233,7 +235,7 @@ class _WidgetGalleryPageState extends State<WidgetGalleryPage> {
                 width: 280,
                 height: 150,
                 child: MessageImage(
-                  image: LanguageModelV3ImagePart(
+                  image: LanguageModelV4ImagePart(
                     image: DataContentUrl(
                       Uri.parse('https://picsum.photos/seed/aisdk/280/150'),
                     ),
@@ -242,7 +244,7 @@ class _WidgetGalleryPageState extends State<WidgetGalleryPage> {
               ),
               const SizedBox(height: 12),
               MessageAttachment(
-                file: LanguageModelV3FilePart(
+                file: LanguageModelV4FilePart(
                   data: DataContentUrl(
                     Uri.parse('https://example.com/design-spec.pdf'),
                   ),

@@ -6,7 +6,7 @@
 ///
 /// This is infrastructure, not a vendor provider — it has no callable factory of
 /// its own. See `docs/adr/0004-openai-compatible-base.md`.
-library ai_sdk_openai_compatible;
+library;
 
 export 'src/api_error.dart';
 export 'src/openai_compatible_chat_language_model.dart';

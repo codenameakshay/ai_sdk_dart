@@ -14,25 +14,18 @@ void main() {
       test('empty provider with no models throws on resolution', () {
         final provider = customProvider();
         expect(() => provider.languageModel('gpt-4o'), throwsArgumentError);
-        expect(
-          () => provider.textEmbeddingModel('embed'),
-          throwsArgumentError,
-        );
+        expect(() => provider.textEmbeddingModel('embed'), throwsArgumentError);
       });
 
       test('resolves registered language model by id', () {
         final model = FakeTextModel('hello');
-        final provider = customProvider(
-          languageModels: {'my-model': model},
-        );
+        final provider = customProvider(languageModels: {'my-model': model});
         expect(provider.languageModel('my-model'), same(model));
       });
 
       test('resolves registered embedding model by id', () {
         final model = FakeEmbeddingModel([0.1, 0.2]);
-        final provider = customProvider(
-          embeddingModels: {'embed': model},
-        );
+        final provider = customProvider(embeddingModels: {'embed': model});
         expect(provider.textEmbeddingModel('embed'), same(model));
       });
 
@@ -40,15 +33,14 @@ void main() {
         final provider = customProvider(
           languageModels: {'model-a': FakeTextModel('a')},
         );
-        expect(
-          () => provider.languageModel('model-b'),
-          throwsArgumentError,
-        );
+        expect(() => provider.languageModel('model-b'), throwsArgumentError);
       });
 
       test('throws ArgumentError for unregistered embedding model', () {
         final provider = customProvider(
-          embeddingModels: {'embed-a': FakeEmbeddingModel([0.1])},
+          embeddingModels: {
+            'embed-a': FakeEmbeddingModel([0.1]),
+          },
         );
         expect(
           () => provider.textEmbeddingModel('embed-b'),
@@ -80,7 +72,10 @@ void main() {
         final provider = customProvider(
           transcriptionModels: {'whisper': transcriptionModel},
         );
-        expect(provider.transcriptionModel('whisper'), same(transcriptionModel));
+        expect(
+          provider.transcriptionModel('whisper'),
+          same(transcriptionModel),
+        );
       });
 
       test('throws for unregistered image model', () {
@@ -145,17 +140,18 @@ void main() {
     // ── integration with generateText ─────────────────────────────────────
 
     group('integration with generateText()', () {
-      test('model resolved from customProvider works with generateText', () async {
-        final model = FakeTextModel('Hello from custom provider!');
-        final provider = customProvider(
-          languageModels: {'chat': model},
-        );
-        final result = await generateText(
-          model: provider.languageModel('chat'),
-          prompt: 'hi',
-        );
-        expect(result.text, 'Hello from custom provider!');
-      });
+      test(
+        'model resolved from customProvider works with generateText',
+        () async {
+          final model = FakeTextModel('Hello from custom provider!');
+          final provider = customProvider(languageModels: {'chat': model});
+          final result = await generateText(
+            model: provider.languageModel('chat'),
+            prompt: 'hi',
+          );
+          expect(result.text, 'Hello from custom provider!');
+        },
+      );
     });
   });
 }

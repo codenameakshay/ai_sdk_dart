@@ -1,10 +1,40 @@
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
+import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:flutter/material.dart';
 
 import '../chat_controller.dart';
+import 'assistant_message_view.dart';
 import 'chat_composer.dart';
+import 'chat_error_view.dart';
 import 'chat_message_list.dart';
 import 'scroll_to_bottom_button.dart';
+import 'tool_approval_card.dart';
+
+/// Builds the scaffold's inline error state.
+typedef ChatScaffoldErrorBuilder =
+    Widget Function(
+      BuildContext context,
+      ChatController controller,
+      Object error,
+      VoidCallback onRetry,
+      VoidCallback onDismiss,
+    );
+
+/// Builds one pending tool-approval card for the scaffold.
+typedef ChatScaffoldApprovalBuilder =
+    Widget Function(
+      BuildContext context,
+      ChatController controller,
+      LanguageModelV4ToolApprovalRequestPart request,
+    );
+
+/// Builds the scaffold's status view for non-terminal controller states.
+typedef ChatScaffoldStatusBuilder =
+    Widget Function(
+      BuildContext context,
+      ChatController controller,
+      ChatStatus status,
+    );
 
 /// A drop-in chat screen body: composes [ChatMessageList], a
 /// [ScrollToBottomButton], and [ChatComposer] wired to a [ChatController] and a
@@ -35,6 +65,9 @@ class AiChatScaffold extends StatefulWidget {
     required this.controller,
     required this.agent,
     this.messageBuilder,
+    this.errorBuilder,
+    this.approvalBuilder,
+    this.statusBuilder,
     this.onAttach,
     this.hintText = 'Message…',
     this.emptyState,
@@ -49,6 +82,15 @@ class AiChatScaffold extends StatefulWidget {
 
   /// Optional custom row builder forwarded to [ChatMessageList].
   final ChatMessageBuilder? messageBuilder;
+
+  /// Optional override for the inline error state.
+  final ChatScaffoldErrorBuilder? errorBuilder;
+
+  /// Optional override for each inline tool-approval card.
+  final ChatScaffoldApprovalBuilder? approvalBuilder;
+
+  /// Optional override for the scaffold's compact status view.
+  final ChatScaffoldStatusBuilder? statusBuilder;
 
   /// Optional attachment callback forwarded to [ChatComposer].
   final VoidCallback? onAttach;
@@ -98,10 +140,44 @@ class _AiChatScaffoldState extends State<AiChatScaffold> {
           ),
         ),
         ListenableBuilder(
-          listenable: widget.controller,
+          listenable: widget.controller.contentListenable,
           builder: (context, _) {
+            final metadata = _buildMetadataFallback(context);
+            if (metadata == null) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: metadata,
+            );
+          },
+        ),
+        ListenableBuilder(
+          listenable: widget.controller.statusListenable,
+          builder: (context, _) {
+            final panels = _buildStatePanels(context);
+            if (panels.isEmpty) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var i = 0; i < panels.length; i++) ...[
+                    if (i > 0) const SizedBox(height: 8),
+                    panels[i],
+                  ],
+                ],
+              ),
+            );
+          },
+        ),
+        ListenableBuilder(
+          listenable: widget.controller.statusListenable,
+          builder: (context, _) {
+            final awaitingApproval =
+                widget.controller.status == ChatStatus.awaitingApproval;
             return ChatComposer(
               isLoading: widget.controller.isLoading,
+              enabled: !awaitingApproval,
               hintText: widget.hintText,
               onAttach: widget.onAttach,
               onStop: widget.controller.stop,
@@ -114,5 +190,166 @@ class _AiChatScaffoldState extends State<AiChatScaffold> {
         ),
       ],
     );
+  }
+
+  List<Widget> _buildStatePanels(BuildContext context) {
+    final controller = widget.controller;
+    final panels = <Widget>[];
+
+    final error = controller.error;
+    if (error != null) {
+      panels.add(_buildErrorView(context, error));
+    }
+
+    if (controller.status == ChatStatus.awaitingApproval) {
+      for (final request in controller.pendingApprovalRequests) {
+        panels.add(_buildApprovalView(context, request));
+      }
+    }
+
+    final statusView = _buildStatusView(context, controller.status);
+    if (statusView != null) {
+      panels.add(statusView);
+    }
+
+    return panels;
+  }
+
+  Widget _buildErrorView(BuildContext context, Object error) {
+    final builder = widget.errorBuilder;
+    if (builder != null) {
+      return builder(
+        context,
+        widget.controller,
+        error,
+        _retryLastRequest,
+        widget.controller.clearError,
+      );
+    }
+
+    return ChatErrorView(
+      error: error,
+      onRetry: _retryLastRequest,
+      onDismiss: widget.controller.clearError,
+    );
+  }
+
+  Widget _buildApprovalView(
+    BuildContext context,
+    LanguageModelV4ToolApprovalRequestPart request,
+  ) {
+    final builder = widget.approvalBuilder;
+    if (builder != null) {
+      return builder(context, widget.controller, request);
+    }
+
+    return ToolApprovalCard(
+      request: request,
+      onApprove: (reason) =>
+          _submitApproval(request: request, approved: true, reason: reason),
+      onDeny: (reason) =>
+          _submitApproval(request: request, approved: false, reason: reason),
+    );
+  }
+
+  Widget? _buildStatusView(BuildContext context, ChatStatus status) {
+    if (status == ChatStatus.ready || status == ChatStatus.error) {
+      return null;
+    }
+
+    final builder = widget.statusBuilder;
+    if (builder != null) {
+      return builder(context, widget.controller, status);
+    }
+
+    final label = switch (status) {
+      ChatStatus.submitted ||
+      ChatStatus.streaming => 'Assistant is responding…',
+      ChatStatus.awaitingApproval => 'Approve the tool call to continue.',
+      ChatStatus.ready || ChatStatus.error => null,
+    };
+    if (label == null) return null;
+
+    final scheme = Theme.of(context).colorScheme;
+    final style = Theme.of(
+      context,
+    ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant);
+
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      label: label,
+      child: ExcludeSemantics(
+        child: Row(
+          children: [
+            Icon(
+              status == ChatStatus.awaitingApproval
+                  ? Icons.shield_outlined
+                  : Icons.auto_awesome,
+              size: 16,
+              color: scheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 8),
+            Expanded(child: Text(label, style: style)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget? _buildMetadataFallback(BuildContext context) {
+    if (widget.messageBuilder != null ||
+        widget.controller.status != ChatStatus.ready) {
+      return null;
+    }
+
+    final assistantMessage = _lastAssistantMessage(widget.controller.messages);
+    if (assistantMessage == null) return null;
+
+    final parts =
+        assistantMessage.parts ?? const <LanguageModelV4ContentPart>[];
+    final hasInlineSources = parts.any(
+      (part) => part is LanguageModelV4SourcePart,
+    );
+    final hasInlineToolCalls = parts.any(
+      (part) => part is LanguageModelV4ToolCallPart,
+    );
+
+    final metadataParts = <LanguageModelV4ContentPart>[
+      if (!hasInlineToolCalls) ...widget.controller.lastToolCalls,
+      if (!hasInlineSources) ...widget.controller.lastSources,
+    ];
+    if (metadataParts.isEmpty) return null;
+
+    return AssistantMessageView(
+      message: ModelMessage.parts(
+        role: ModelMessageRole.assistant,
+        parts: metadataParts,
+      ),
+      toolResults: widget.controller.lastToolResults,
+    );
+  }
+
+  ModelMessage? _lastAssistantMessage(List<ModelMessage> messages) {
+    for (final message in messages.reversed) {
+      if (message.role == ModelMessageRole.assistant) return message;
+    }
+    return null;
+  }
+
+  void _submitApproval({
+    required LanguageModelV4ToolApprovalRequestPart request,
+    required bool approved,
+    String? reason,
+  }) {
+    widget.controller.addToolApprovalResponse(
+      approvalId: request.approvalId,
+      approved: approved,
+      reason: reason,
+    );
+  }
+
+  void _retryLastRequest() {
+    widget.controller.reload();
   }
 }

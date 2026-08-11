@@ -5,6 +5,7 @@ import '../chat_controller.dart';
 import '../theme/ai_motion.dart';
 import 'assistant_message_view.dart';
 import 'chat_message_bubble.dart';
+import 'scroll_bottom_policy.dart';
 import 'streaming_text_view.dart';
 import 'typing_indicator.dart';
 
@@ -69,9 +70,10 @@ class ChatMessageList extends StatefulWidget {
 }
 
 class _ChatMessageListState extends State<ChatMessageList> {
-  late final ScrollController _scrollController =
-      widget.scrollController ?? ScrollController();
-  bool _ownsScrollController = false;
+  late ScrollController _scrollController;
+  late bool _ownsScrollController;
+  bool _pinnedToBottom = true;
+  bool _scrollScheduled = false;
 
   /// Message instances already shown, tracked by identity so a row eases in
   /// exactly once (on arrival) and never again when scrolled back into view.
@@ -80,7 +82,7 @@ class _ChatMessageListState extends State<ChatMessageList> {
   @override
   void initState() {
     super.initState();
-    _ownsScrollController = widget.scrollController == null;
+    _attachScrollController(widget.scrollController);
     widget.controller.addListener(_onChange);
   }
 
@@ -92,6 +94,9 @@ class _ChatMessageListState extends State<ChatMessageList> {
       widget.controller.addListener(_onChange);
       _seen.clear();
     }
+    if (oldWidget.scrollController != widget.scrollController) {
+      _replaceScrollController(widget.scrollController);
+    }
   }
 
   @override
@@ -101,12 +106,49 @@ class _ChatMessageListState extends State<ChatMessageList> {
     super.dispose();
   }
 
-  void _onChange() => _scrollToBottom();
-
-  void _scrollToBottom() {
+  void _attachScrollController(ScrollController? externalController) {
+    _ownsScrollController = externalController == null;
+    _scrollController = externalController ?? ScrollController();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients) return;
+      if (!mounted) return;
+      _syncPinnedToBottomFromController();
+    });
+  }
+
+  void _replaceScrollController(ScrollController? externalController) {
+    final previousController = _scrollController;
+    final previouslyOwned = _ownsScrollController;
+    _attachScrollController(externalController);
+    if (previouslyOwned) previousController.dispose();
+  }
+
+  void _onChange() {
+    if (_pinnedToBottom) _scheduleScrollToBottom();
+  }
+
+  void _syncPinnedToBottomFromController() {
+    _pinnedToBottom = ScrollBottomPolicy.isNearBottomController(
+      _scrollController,
+    );
+  }
+
+  bool _handleScrollNotification(ScrollNotification notification) {
+    if (notification.depth != 0) return false;
+    _pinnedToBottom = ScrollBottomPolicy.isNearBottom(notification.metrics);
+    return false;
+  }
+
+  void _scheduleScrollToBottom() {
+    if (_scrollScheduled) return;
+    _scrollScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollScheduled = false;
+      if (!mounted || !_pinnedToBottom || !_scrollController.hasClients) {
+        return;
+      }
+      if (!_scrollController.position.hasContentDimensions) return;
       final target = _scrollController.position.maxScrollExtent;
+      if ((target - _scrollController.position.pixels).abs() <= 0.5) return;
       if (AiMotion.reduced(context)) {
         _scrollController.jumpTo(target);
       } else {
@@ -153,19 +195,22 @@ class _ChatMessageListState extends State<ChatMessageList> {
             ..addAll(messages);
         });
 
-        return ListView.builder(
-          controller: _scrollController,
-          padding: widget.padding,
-          itemCount: itemCount,
-          itemBuilder: (context, index) {
-            if (pendingActive && index == messages.length) {
-              return _buildPendingRow(context, streaming);
-            }
-            final message = messages[index];
-            final isNew = !_seen.contains(message);
-            final row = _buildRow(context, message);
-            return isNew ? AiEntrance(child: row) : row;
-          },
+        return NotificationListener<ScrollNotification>(
+          onNotification: _handleScrollNotification,
+          child: ListView.builder(
+            controller: _scrollController,
+            padding: widget.padding,
+            itemCount: itemCount,
+            itemBuilder: (context, index) {
+              if (pendingActive && index == messages.length) {
+                return _buildPendingRow(context, streaming);
+              }
+              final message = messages[index];
+              final isNew = !_seen.contains(message);
+              final row = _buildRow(context, message);
+              return isNew ? AiEntrance(child: row) : row;
+            },
+          ),
         );
       },
     );
@@ -181,9 +226,7 @@ class _ChatMessageListState extends State<ChatMessageList> {
       return builder(context, streamingMessage, true);
     }
 
-    final style = Theme.of(
-      context,
-    ).textTheme.bodyMedium?.copyWith(height: 1.5);
+    final style = Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.5);
     final Widget content = streaming.isEmpty
         ? const TypingIndicator(key: ValueKey('pending-typing'))
         : StreamingTextView(
@@ -212,20 +255,40 @@ class _ChatMessageListState extends State<ChatMessageList> {
     if (message.role == ModelMessageRole.user) {
       return ChatMessageBubble(message: message);
     }
-    return _assistantTurn(context, AssistantMessageView(message: message));
+    final plainText = message.parts == null ? message.content?.trim() : null;
+    final assistantTurn = _assistantTurn(
+      context,
+      AssistantMessageView(message: message),
+    );
+    if (plainText != null && plainText.isNotEmpty) {
+      return Semantics(
+        key: const ValueKey('assistant-message-semantics'),
+        container: true,
+        label: 'Assistant message',
+        value: plainText,
+        readOnly: true,
+        child: ExcludeSemantics(child: assistantTurn),
+      );
+    }
+    return assistantTurn;
   }
 
   /// Flush assistant layout: a small leading marker + the content column.
   Widget _assistantTurn(BuildContext context, Widget child) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const _AssistantMarker(),
-          const SizedBox(width: 10),
-          Expanded(child: child),
-        ],
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      label: 'Assistant message',
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const _AssistantMarker(),
+            const SizedBox(width: 10),
+            Expanded(child: child),
+          ],
+        ),
       ),
     );
   }

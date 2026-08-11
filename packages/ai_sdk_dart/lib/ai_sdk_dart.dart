@@ -1,4 +1,4 @@
-library ai_sdk_dart;
+library;
 
 export 'src/agent/tool_loop_agent.dart';
 export 'src/core/embed.dart';
@@ -9,6 +9,7 @@ export 'src/core/generate_speech.dart';
 export 'src/core/generate_text.dart';
 export 'src/core/stream_text.dart';
 export 'src/core/stream_object.dart';
+export 'src/core/timeout_configuration.dart';
 export 'src/core/rerank.dart';
 export 'src/core/transcribe.dart';
 export 'src/errors/ai_errors.dart';

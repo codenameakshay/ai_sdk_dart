@@ -96,6 +96,5 @@ class _FakeImageModel implements ImageModelV3 {
   @override
   Future<ImageModelV3GenerateResult> doGenerate(
     ImageModelV3CallOptions options,
-  ) async =>
-      const ImageModelV3GenerateResult(images: []);
+  ) async => const ImageModelV3GenerateResult(images: []);
 }

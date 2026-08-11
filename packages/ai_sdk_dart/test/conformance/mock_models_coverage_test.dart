@@ -6,22 +6,22 @@ import 'package:test/test.dart';
 
 /// Exercises the streaming code paths of the public mock models that the
 /// existing tests only drive via doGenerate: reasoning + tool-call fan-out in
-/// `MockLanguageModelV3.doStream`, the warnings rawResponse envelope, and the
+/// `MockLanguageModelV4.doStream`, the structured warnings surface, and the
 /// `specificationVersion` getters.
 void main() {
-  group('MockLanguageModelV3 streaming fan-out', () {
-    test('specificationVersion is v3', () {
-      final model = MockLanguageModelV3(response: [mockText('hi')]);
-      expect(model.specificationVersion, 'v3');
+  group('MockLanguageModelV4 streaming fan-out', () {
+    test('specificationVersion is v4', () {
+      final model = MockLanguageModelV4(response: [mockText('hi')]);
+      expect(model.specificationVersion, 'v4');
     });
 
     test('doStream emits reasoning deltas for reasoning parts', () async {
-      final model = MockLanguageModelV3(
+      final model = MockLanguageModelV4(
         response: [mockReasoning('thinking'), mockText('answer')],
       );
       final result = await model.doStream(
-        const LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(messages: []),
+        const LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(messages: []),
         ),
       );
       final parts = await result.stream.toList();
@@ -34,7 +34,7 @@ void main() {
     });
 
     test('doStream fans out tool-call start/delta/end parts', () async {
-      final model = MockLanguageModelV3(
+      final model = MockLanguageModelV4(
         response: [
           mockToolCall(
             toolName: 'search',
@@ -42,52 +42,58 @@ void main() {
             toolCallId: 'tc-1',
           ),
         ],
-        finishReason: LanguageModelV3FinishReason.toolCalls,
+        finishReason: LanguageModelV4FinishReason.toolCalls,
         rawFinishReason: 'tool_calls',
       );
       final result = await model.doStream(
-        const LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(messages: []),
+        const LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(messages: []),
         ),
       );
       final parts = await result.stream.toList();
-      expect(parts.whereType<StreamPartToolCallStart>(), hasLength(1));
-      final delta = parts.whereType<StreamPartToolCallDelta>().single;
-      expect(jsonDecode(delta.argsTextDelta), {'q': 'x'});
-      final end = parts.whereType<StreamPartToolCallEnd>().single;
-      expect(end.input, {'q': 'x'});
+      expect(parts.whereType<StreamPartToolInputStart>(), hasLength(1));
+      final delta = parts.whereType<StreamPartToolInputDelta>().single;
+      expect(jsonDecode(delta.delta), {'q': 'x'});
+      expect(parts.whereType<StreamPartToolInputEnd>(), hasLength(1));
+      final call = parts.whereType<StreamPartToolCall>().single.toolCall;
+      expect(call.input, {'q': 'x'});
       final finish = parts.whereType<StreamPartFinish>().single;
-      expect(finish.finishReason, LanguageModelV3FinishReason.toolCalls);
+      expect(finish.finishReason, LanguageModelV4FinishReason.toolCalls);
     });
 
-    test('doStream exposes warnings via the rawResponse envelope', () async {
-      final model = MockLanguageModelV3(
+    test('doStream exposes structured warnings on the stream result', () async {
+      final model = MockLanguageModelV4(
         response: [mockText('hi')],
         warnings: const ['deprecated-param'],
       );
       final result = await model.doStream(
-        const LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(messages: []),
+        const LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(messages: []),
         ),
       );
-      expect(result.rawResponse, isA<Map>());
       expect(
-        (result.rawResponse! as Map)['warnings'],
-        contains('deprecated-param'),
+        result.warnings,
+        contains(
+          isA<LanguageModelV4OtherWarning>().having(
+            (warning) => warning.message,
+            'message',
+            'deprecated-param',
+          ),
+        ),
       );
       await result.stream.toList();
     });
 
     test('records both generate and stream call options', () async {
-      final model = MockLanguageModelV3(response: [mockText('hi')]);
+      final model = MockLanguageModelV4(response: [mockText('hi')]);
       await model.doGenerate(
-        const LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(messages: []),
+        const LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(messages: []),
         ),
       );
       final stream = await model.doStream(
-        const LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(messages: []),
+        const LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(messages: []),
         ),
       );
       await stream.stream.toList();

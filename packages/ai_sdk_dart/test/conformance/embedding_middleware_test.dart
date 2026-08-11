@@ -12,8 +12,11 @@ void main() {
 
     group('wrapEmbeddingModel()', () {
       test('wrapped model exposes inner provider and modelId', () {
-        final inner = FakeEmbeddingModel([0.1, 0.2],
-            provider: 'my-provider', modelId: 'my-model');
+        final inner = FakeEmbeddingModel(
+          [0.1, 0.2],
+          provider: 'my-provider',
+          modelId: 'my-model',
+        );
         final wrapped = wrapEmbeddingModel(
           model: inner,
           middleware: _PassthroughMiddleware<String>(),
@@ -66,9 +69,7 @@ void main() {
           model: inner,
           middleware: [mw1, mw2],
         );
-        await wrapped.doEmbed(
-          const EmbeddingModelV2CallOptions(values: ['x']),
-        );
+        await wrapped.doEmbed(const EmbeddingModelV2CallOptions(values: ['x']));
         // mw1 is outermost: transformParams(mw1) → transformParams(mw2) → inner
         expect(order, ['mw1-transform', 'mw2-transform']);
       });
@@ -128,10 +129,7 @@ void main() {
           model: inner,
           middleware: _PassthroughMiddleware<String>(),
         );
-        final result = await embedMany(
-          model: wrapped,
-          values: ['a', 'b', 'c'],
-        );
+        final result = await embedMany(model: wrapped, values: ['a', 'b', 'c']);
         expect(result.embeddings, hasLength(3));
       });
     });
@@ -145,8 +143,7 @@ class _PassthroughMiddleware<VALUE>
   const _PassthroughMiddleware();
 }
 
-class _CapturingMiddleware<VALUE>
-    extends EmbeddingModelMiddlewareBase<VALUE> {
+class _CapturingMiddleware<VALUE> extends EmbeddingModelMiddlewareBase<VALUE> {
   _CapturingMiddleware(this._captured);
   final List<EmbeddingModelV2CallOptions<VALUE>> _captured;
 
@@ -175,9 +172,7 @@ class _CachingMiddleware<VALUE> extends EmbeddingModelMiddlewareBase<VALUE> {
   }) async {
     return EmbeddingModelV2GenerateResult(
       embeddings: options.values
-          .map(
-            (v) => EmbeddingModelV2Embedding(value: v, embedding: _cached),
-          )
+          .map((v) => EmbeddingModelV2Embedding(value: v, embedding: _cached))
           .toList(),
     );
   }
@@ -199,7 +194,6 @@ class _OrderTrackingMiddleware<VALUE>
   }
 }
 
-class _BaseOnlyMiddleware<VALUE>
-    extends EmbeddingModelMiddlewareBase<VALUE> {
+class _BaseOnlyMiddleware<VALUE> extends EmbeddingModelMiddlewareBase<VALUE> {
   const _BaseOnlyMiddleware();
 }

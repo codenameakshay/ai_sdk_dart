@@ -1,34 +1,40 @@
+import 'dart:async';
+
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
+import 'package:ai_sdk_dart/src/core/retry_helper.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
 
 import 'helpers/fake_models.dart';
 
 void main() {
+  setUp(debugResetRetryHooksForTests);
+  tearDown(debugResetRetryHooksForTests);
+
   // ---------------------------------------------------------------------------
   // generateText – new generation parameters
   // ---------------------------------------------------------------------------
 
   group('generateText generation parameters', () {
-    test('passes topK to LanguageModelV3CallOptions', () async {
+    test('passes topK to LanguageModelV4CallOptions', () async {
       final model = FakeCapturingModel(responseText: 'ok');
       await generateText(model: model, prompt: 'hi', topK: 40);
       expect(model.capturedOptions.last.topK, 40);
     });
 
-    test('passes presencePenalty to LanguageModelV3CallOptions', () async {
+    test('passes presencePenalty to LanguageModelV4CallOptions', () async {
       final model = FakeCapturingModel(responseText: 'ok');
       await generateText(model: model, prompt: 'hi', presencePenalty: 0.5);
       expect(model.capturedOptions.last.presencePenalty, 0.5);
     });
 
-    test('passes frequencyPenalty to LanguageModelV3CallOptions', () async {
+    test('passes frequencyPenalty to LanguageModelV4CallOptions', () async {
       final model = FakeCapturingModel(responseText: 'ok');
       await generateText(model: model, prompt: 'hi', frequencyPenalty: 0.3);
       expect(model.capturedOptions.last.frequencyPenalty, 0.3);
     });
 
-    test('passes stopSequences to LanguageModelV3CallOptions', () async {
+    test('passes stopSequences to LanguageModelV4CallOptions', () async {
       final model = FakeCapturingModel(responseText: 'ok');
       await generateText(
         model: model,
@@ -38,13 +44,13 @@ void main() {
       expect(model.capturedOptions.last.stopSequences, ['STOP', 'END']);
     });
 
-    test('passes seed to LanguageModelV3CallOptions', () async {
+    test('passes seed to LanguageModelV4CallOptions', () async {
       final model = FakeCapturingModel(responseText: 'ok');
       await generateText(model: model, prompt: 'hi', seed: 42);
       expect(model.capturedOptions.last.seed, 42);
     });
 
-    test('passes headers to LanguageModelV3CallOptions', () async {
+    test('passes headers to LanguageModelV4CallOptions', () async {
       final model = FakeCapturingModel(responseText: 'ok');
       await generateText(
         model: model,
@@ -59,10 +65,16 @@ void main() {
       final model = _CountingFakeModel(
         onCall: () {
           callCount++;
-          if (callCount < 3) throw Exception('transient error');
-          return LanguageModelV3GenerateResult(
-            content: [LanguageModelV3TextPart(text: 'success')],
-            finishReason: LanguageModelV3FinishReason.stop,
+          if (callCount < 3) {
+            throw const AiApiCallError(
+              'Transient upstream failure',
+              statusCode: 503,
+              isRetryable: true,
+            );
+          }
+          return LanguageModelV4GenerateResult(
+            content: [LanguageModelV4TextPart(text: 'success')],
+            finishReason: LanguageModelV4FinishReason.stop,
           );
         },
       );
@@ -76,12 +88,193 @@ void main() {
       expect(callCount, 3);
     });
 
+    test(
+      'does not retry generic exceptions even when maxRetries is set',
+      () async {
+        var callCount = 0;
+        final model = _CountingFakeModel(
+          onCall: () {
+            callCount++;
+            throw Exception('non-provider failure');
+          },
+        );
+
+        await expectLater(
+          () => generateText(model: model, prompt: 'hi', maxRetries: 3),
+          throwsA(isA<Exception>()),
+        );
+        expect(callCount, 1);
+      },
+    );
+
     test('maxRetries rethrows after exhausting retries', () async {
       final model = FakeErrorModel(Exception('permanent error'));
       expect(
         () => generateText(model: model, prompt: 'hi', maxRetries: 2),
         throwsA(isA<Exception>()),
       );
+    });
+
+    test(
+      'does not retry non-retryable API errors such as auth failures',
+      () async {
+        var callCount = 0;
+        final model = _CountingFakeModel(
+          onCall: () {
+            callCount++;
+            throw const AiApiCallError(
+              'Unauthorized',
+              statusCode: 401,
+              type: 'authentication_error',
+              isRetryable: false,
+            );
+          },
+        );
+
+        await expectLater(
+          () => generateText(model: model, prompt: 'hi', maxRetries: 3),
+          throwsA(isA<AiApiCallError>()),
+        );
+        expect(callCount, 1);
+      },
+    );
+
+    test(
+      'pre-cancelled generateText short-circuits before any provider call',
+      () async {
+        final token = CancellationToken()..cancel();
+        var callCount = 0;
+        final model = _CountingFakeModel(
+          onCall: () {
+            callCount++;
+            return LanguageModelV4GenerateResult(
+              content: [LanguageModelV4TextPart(text: 'unexpected')],
+              finishReason: LanguageModelV4FinishReason.stop,
+            );
+          },
+        );
+
+        await expectLater(
+          () => generateText(
+            model: model,
+            prompt: 'hi',
+            maxRetries: 3,
+            abortSignal: token,
+          ),
+          throwsA(isA<AiOperationCancelledError>()),
+        );
+        expect(callCount, 0);
+      },
+    );
+
+    test(
+      'cancelling generateText while awaiting provider startup throws typed cancellation',
+      () async {
+        final token = CancellationToken();
+        var callCount = 0;
+        final gate = Completer<void>();
+        final model = _CountingFakeModel(
+          onCall: () async {
+            callCount++;
+            await gate.future;
+            return LanguageModelV4GenerateResult(
+              content: [LanguageModelV4TextPart(text: 'late')],
+              finishReason: LanguageModelV4FinishReason.stop,
+            );
+          },
+        );
+
+        final future = generateText(
+          model: model,
+          prompt: 'hi',
+          abortSignal: token,
+          maxRetries: 0,
+        );
+        await Future<void>.delayed(Duration.zero);
+        token.cancel();
+
+        await expectLater(future, throwsA(isA<AiOperationCancelledError>()));
+        expect(callCount, 1);
+        gate.complete();
+      },
+    );
+
+    test(
+      'cancelling during retry backoff rethrows the triggering provider error',
+      () async {
+        final token = CancellationToken();
+        final sleepEntered = Completer<void>();
+        final sleepCompleter = Completer<void>();
+        debugConfigureRetryHooksForTests(
+          sleep: (duration) async {
+            if (!sleepEntered.isCompleted) sleepEntered.complete();
+            await sleepCompleter.future;
+          },
+          randomDouble: () => 1.0,
+        );
+
+        var callCount = 0;
+        final model = _CountingFakeModel(
+          onCall: () {
+            callCount++;
+            throw const AiApiCallError(
+              'Transient upstream failure',
+              statusCode: 503,
+              isRetryable: true,
+            );
+          },
+        );
+
+        final future = generateText(
+          model: model,
+          prompt: 'hi',
+          maxRetries: 3,
+          abortSignal: token,
+        );
+
+        await sleepEntered.future;
+        token.cancel();
+
+        await expectLater(future, throwsA(isA<AiApiCallError>()));
+        expect(callCount, 1);
+      },
+    );
+
+    test('honors Retry-After headers before retrying', () async {
+      final slept = <Duration>[];
+      debugConfigureRetryHooksForTests(
+        sleep: (duration) async => slept.add(duration),
+        randomDouble: () => throw StateError('backoff jitter should not run'),
+      );
+
+      var callCount = 0;
+      final model = _CountingFakeModel(
+        onCall: () {
+          callCount++;
+          if (callCount == 1) {
+            throw const AiApiCallError(
+              'Rate limited',
+              statusCode: 429,
+              isRetryable: true,
+              responseHeaders: {'Retry-After': '3'},
+            );
+          }
+          return LanguageModelV4GenerateResult(
+            content: [LanguageModelV4TextPart(text: 'success')],
+            finishReason: LanguageModelV4FinishReason.stop,
+          );
+        },
+      );
+
+      final result = await generateText(
+        model: model,
+        prompt: 'hi',
+        maxRetries: 2,
+      );
+
+      expect(result.text, 'success');
+      expect(callCount, 2);
+      expect(slept, [const Duration(seconds: 3)]);
     });
 
     test('activeToolNames filters tools passed to provider', () async {
@@ -104,11 +297,71 @@ void main() {
         activeToolNames: ['tool_a'],
       );
 
-      final passedToolNames =
-          model.capturedOptions.last.tools.map((t) => t.name).toList();
+      final passedToolNames = model.capturedOptions.last.tools
+          .map((t) => t.name)
+          .toList();
       expect(passedToolNames, contains('tool_a'));
       expect(passedToolNames, isNot(contains('tool_b')));
     });
+
+    test(
+      'tool cancellation in a terminal maxSteps generateText step throws cancellation',
+      () async {
+        final token = CancellationToken();
+        final gate = Completer<void>();
+        final future = generateText(
+          model: FakeToolModel(toolName: 'wait', toolInput: const {}),
+          prompt: 'hi',
+          maxSteps: 1,
+          abortSignal: token,
+          tools: {
+            'wait': tool<Map<String, dynamic>, String>(
+              inputSchema: jsonSchema({'type': 'object'}),
+              execute: (_, _) async {
+                await gate.future;
+                return 'late';
+              },
+            ),
+          },
+        );
+
+        await Future<void>.delayed(Duration.zero);
+        token.cancel();
+
+        await expectLater(future, throwsA(isA<AiOperationCancelledError>()));
+        gate.complete();
+      },
+    );
+
+    test(
+      'tool cancellation beats same-step stop conditions in generateText',
+      () async {
+        final token = CancellationToken();
+        final gate = Completer<void>();
+        final future = generateText(
+          model: FakeToolModel(toolName: 'wait', toolInput: const {}),
+          prompt: 'hi',
+          maxSteps: 2,
+          stopConditions: [(_) => true],
+          abortSignal: token,
+          tools: {
+            'wait': tool<Map<String, dynamic>, String>(
+              inputSchema: jsonSchema({'type': 'object'}),
+              execute: (_, _) async {
+                await gate.future;
+                return 'late';
+              },
+            ),
+          },
+        );
+
+        await Future<void>.delayed(Duration.zero);
+        token.cancel();
+
+        await expectLater(future, throwsA(isA<AiOperationCancelledError>()));
+        gate.complete();
+      },
+    );
   });
 
   // ---------------------------------------------------------------------------
@@ -116,14 +369,14 @@ void main() {
   // ---------------------------------------------------------------------------
 
   group('streamText generation parameters', () {
-    test('passes topK to LanguageModelV3CallOptions', () async {
+    test('passes topK to LanguageModelV4CallOptions', () async {
       final model = FakeCapturingModel(responseText: 'ok');
       final result = await streamText(model: model, prompt: 'hi', topK: 40);
       await result.text; // drain the stream
       expect(model.capturedOptions.last.topK, 40);
     });
 
-    test('passes presencePenalty to LanguageModelV3CallOptions', () async {
+    test('passes presencePenalty to LanguageModelV4CallOptions', () async {
       final model = FakeCapturingModel(responseText: 'ok');
       final result = await streamText(
         model: model,
@@ -134,7 +387,7 @@ void main() {
       expect(model.capturedOptions.last.presencePenalty, 0.5);
     });
 
-    test('passes frequencyPenalty to LanguageModelV3CallOptions', () async {
+    test('passes frequencyPenalty to LanguageModelV4CallOptions', () async {
       final model = FakeCapturingModel(responseText: 'ok');
       final result = await streamText(
         model: model,
@@ -145,7 +398,7 @@ void main() {
       expect(model.capturedOptions.last.frequencyPenalty, 0.3);
     });
 
-    test('passes stopSequences to LanguageModelV3CallOptions', () async {
+    test('passes stopSequences to LanguageModelV4CallOptions', () async {
       final model = FakeCapturingModel(responseText: 'ok');
       final result = await streamText(
         model: model,
@@ -156,14 +409,14 @@ void main() {
       expect(model.capturedOptions.last.stopSequences, ['STOP']);
     });
 
-    test('passes seed to LanguageModelV3CallOptions', () async {
+    test('passes seed to LanguageModelV4CallOptions', () async {
       final model = FakeCapturingModel(responseText: 'ok');
       final result = await streamText(model: model, prompt: 'hi', seed: 99);
       await result.text;
       expect(model.capturedOptions.last.seed, 99);
     });
 
-    test('passes headers to LanguageModelV3CallOptions', () async {
+    test('passes headers to LanguageModelV4CallOptions', () async {
       final model = FakeCapturingModel(responseText: 'ok');
       final result = await streamText(
         model: model,
@@ -179,20 +432,176 @@ void main() {
       final model = _CountingFakeModel(
         onCall: () {
           callCount++;
-          if (callCount < 2) throw Exception('transient');
-          return LanguageModelV3GenerateResult(
-            content: [LanguageModelV3TextPart(text: 'streamed')],
-            finishReason: LanguageModelV3FinishReason.stop,
+          if (callCount < 2) {
+            throw const AiApiCallError(
+              'Transient upstream failure',
+              statusCode: 503,
+              isRetryable: true,
+            );
+          }
+          return LanguageModelV4GenerateResult(
+            content: [LanguageModelV4TextPart(text: 'streamed')],
+            finishReason: LanguageModelV4FinishReason.stop,
           );
         },
         isStream: true,
       );
 
-      final result = await streamText(model: model, prompt: 'hi', maxRetries: 2);
+      final result = await streamText(
+        model: model,
+        prompt: 'hi',
+        maxRetries: 2,
+      );
       final text = await result.text;
       expect(text, 'streamed');
       expect(callCount, 2);
     });
+
+    test(
+      'does not retry generic stream exceptions even when maxRetries is set',
+      () async {
+        var callCount = 0;
+        final model = _CountingFakeModel(
+          onCall: () {
+            callCount++;
+            throw Exception('non-provider stream failure');
+          },
+          isStream: true,
+        );
+
+        final result = await streamText(
+          model: model,
+          prompt: 'hi',
+          maxRetries: 3,
+        );
+
+        await expectLater(result.text, throwsA(isA<Exception>()));
+        expect(callCount, 1);
+      },
+    );
+
+    test(
+      'pre-cancelled streamText short-circuits before any provider call',
+      () async {
+        final token = CancellationToken()..cancel();
+        var callCount = 0;
+        final model = _CountingFakeModel(
+          onCall: () {
+            callCount++;
+            return LanguageModelV4GenerateResult(
+              content: [LanguageModelV4TextPart(text: 'unexpected')],
+              finishReason: LanguageModelV4FinishReason.stop,
+            );
+          },
+          isStream: true,
+        );
+
+        final result = await streamText(
+          model: model,
+          prompt: 'hi',
+          maxRetries: 3,
+          abortSignal: token,
+        );
+
+        await expectLater(
+          result.output,
+          throwsA(isA<AiOperationCancelledError>()),
+        );
+        expect(callCount, 0);
+      },
+    );
+
+    test(
+      'cancelling streamText while awaiting provider startup throws typed cancellation',
+      () async {
+        final token = CancellationToken();
+        var callCount = 0;
+        final gate = Completer<void>();
+        final model = _CountingFakeModel(
+          onCall: () async {
+            callCount++;
+            await gate.future;
+            return LanguageModelV4GenerateResult(
+              content: [LanguageModelV4TextPart(text: 'late')],
+              finishReason: LanguageModelV4FinishReason.stop,
+            );
+          },
+          isStream: true,
+        );
+
+        final result = await streamText(
+          model: model,
+          prompt: 'hi',
+          abortSignal: token,
+          maxRetries: 0,
+        );
+        await Future<void>.delayed(Duration.zero);
+        token.cancel();
+
+        await expectLater(
+          result.text,
+          throwsA(isA<AiOperationCancelledError>()),
+        );
+        expect(callCount, 1);
+        gate.complete();
+      },
+    );
+
+    test(
+      'retries retryable API errors with capped exponential jitter',
+      () async {
+        final slept = <Duration>[];
+        final attempts = <RetryAttemptObservation>[];
+        final jitterValues = <double>[0.25, 1.0, 1.0, 1.0];
+        debugConfigureRetryHooksForTests(
+          sleep: (duration) async => slept.add(duration),
+          randomDouble: () => jitterValues.removeAt(0),
+          onAttempt: attempts.add,
+        );
+
+        var callCount = 0;
+        final model = _CountingFakeModel(
+          onCall: () {
+            callCount++;
+            if (callCount < 5) {
+              throw const AiApiCallError(
+                'Transient upstream failure',
+                statusCode: 503,
+                isRetryable: true,
+              );
+            }
+            return LanguageModelV4GenerateResult(
+              content: [LanguageModelV4TextPart(text: 'streamed')],
+              finishReason: LanguageModelV4FinishReason.stop,
+            );
+          },
+          isStream: true,
+        );
+
+        final result = await streamText(
+          model: model,
+          prompt: 'hi',
+          maxRetries: 4,
+        );
+        final text = await result.text;
+
+        expect(text, 'streamed');
+        expect(callCount, 5);
+        expect(slept, [
+          const Duration(milliseconds: 25),
+          const Duration(milliseconds: 200),
+          const Duration(milliseconds: 400),
+          const Duration(milliseconds: 500),
+        ]);
+        expect(attempts.map((attempt) => attempt.attemptNumber), [
+          1,
+          2,
+          3,
+          4,
+          5,
+        ]);
+      },
+    );
 
     test('activeToolNames filters tools passed to provider', () async {
       final model = FakeCapturingModel(responseText: 'ok');
@@ -215,11 +624,77 @@ void main() {
       );
       await result.text;
 
-      final passedToolNames =
-          model.capturedOptions.last.tools.map((t) => t.name).toList();
+      final passedToolNames = model.capturedOptions.last.tools
+          .map((t) => t.name)
+          .toList();
       expect(passedToolNames, contains('tool_a'));
       expect(passedToolNames, isNot(contains('tool_b')));
     });
+
+    test(
+      'tool cancellation in a terminal maxSteps streamText step throws cancellation',
+      () async {
+        final token = CancellationToken();
+        final gate = Completer<void>();
+        final result = await streamText(
+          model: FakeToolModel(toolName: 'wait', toolInput: const {}),
+          prompt: 'hi',
+          maxSteps: 1,
+          abortSignal: token,
+          tools: {
+            'wait': tool<Map<String, dynamic>, String>(
+              inputSchema: jsonSchema({'type': 'object'}),
+              execute: (_, _) async {
+                await gate.future;
+                return 'late';
+              },
+            ),
+          },
+        );
+
+        await Future<void>.delayed(Duration.zero);
+        token.cancel();
+
+        await expectLater(
+          result.text,
+          throwsA(isA<AiOperationCancelledError>()),
+        );
+        gate.complete();
+      },
+    );
+
+    test(
+      'tool cancellation beats same-step stop conditions in streamText',
+      () async {
+        final token = CancellationToken();
+        final gate = Completer<void>();
+        final result = await streamText(
+          model: FakeToolModel(toolName: 'wait', toolInput: const {}),
+          prompt: 'hi',
+          maxSteps: 2,
+          stopConditions: [(_) => true],
+          abortSignal: token,
+          tools: {
+            'wait': tool<Map<String, dynamic>, String>(
+              inputSchema: jsonSchema({'type': 'object'}),
+              execute: (_, _) async {
+                await gate.future;
+                return 'late';
+              },
+            ),
+          },
+        );
+
+        await Future<void>.delayed(Duration.zero);
+        token.cancel();
+
+        await expectLater(
+          result.text,
+          throwsA(isA<AiOperationCancelledError>()),
+        );
+        gate.complete();
+      },
+    );
   });
 
   // ---------------------------------------------------------------------------
@@ -233,7 +708,10 @@ void main() {
     });
 
     test('jsonSchema field matches the provided map', () {
-      final map = {'type': 'string', 'enum': ['a', 'b']};
+      final map = {
+        'type': 'string',
+        'enum': ['a', 'b'],
+      };
       final schema = jsonSchema(map);
       expect(schema.jsonSchema, map);
     });
@@ -259,10 +737,10 @@ void main() {
 // Helper fake models
 // ---------------------------------------------------------------------------
 
-typedef _GenerateCallback = LanguageModelV3GenerateResult Function();
+typedef _GenerateCallback = FutureOr<LanguageModelV4GenerateResult> Function();
 
 /// A fake model that delegates to a callback, allowing controlled failures.
-class _CountingFakeModel implements LanguageModelV3 {
+class _CountingFakeModel extends LanguageModelV4 {
   _CountingFakeModel({required this.onCall, this.isStream = false});
 
   final _GenerateCallback onCall;
@@ -275,25 +753,25 @@ class _CountingFakeModel implements LanguageModelV3 {
   final String modelId = 'fake-counting-model';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
-    return onCall();
+    return await onCall();
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    final result = onCall();
+    final result = await onCall();
     final text = result.content
-        .whereType<LanguageModelV3TextPart>()
+        .whereType<LanguageModelV4TextPart>()
         .map((p) => p.text)
         .join();
-    return LanguageModelV3StreamResult(
+    return LanguageModelV4StreamResult(
       stream: simulateReadableStream(
         parts: [
           StreamPartTextStart(id: 'text-1'),

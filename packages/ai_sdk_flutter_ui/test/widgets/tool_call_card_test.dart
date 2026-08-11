@@ -11,7 +11,7 @@ void main() {
       await tester.pumpWidget(
         _wrap(
           const ToolCallCard(
-            call: LanguageModelV3ToolCallPart(
+            call: LanguageModelV4ToolCallPart(
               toolCallId: 'c1',
               toolName: 'getWeather',
               input: {'city': 'Tokyo'},
@@ -29,12 +29,12 @@ void main() {
       await tester.pumpWidget(
         _wrap(
           const ToolCallCard(
-            call: LanguageModelV3ToolCallPart(
+            call: LanguageModelV4ToolCallPart(
               toolCallId: 'c1',
               toolName: 'getWeather',
               input: {'city': 'Tokyo'},
             ),
-            result: LanguageModelV3ToolResultPart(
+            result: LanguageModelV4ToolResultPart(
               toolCallId: 'c1',
               toolName: 'getWeather',
               output: ToolResultOutputText('Sunny, 22C'),
@@ -52,12 +52,12 @@ void main() {
       await tester.pumpWidget(
         _wrap(
           const ToolCallCard(
-            call: LanguageModelV3ToolCallPart(
+            call: LanguageModelV4ToolCallPart(
               toolCallId: 'c1',
               toolName: 'getWeather',
               input: {'city': 'Tokyo'},
             ),
-            result: LanguageModelV3ToolResultPart(
+            result: LanguageModelV4ToolResultPart(
               toolCallId: 'c1',
               toolName: 'getWeather',
               isError: true,
@@ -81,7 +81,7 @@ void main() {
       await tester.pumpWidget(
         _wrap(
           ToolCallCard(
-            call: LanguageModelV3ToolCallPart(
+            call: LanguageModelV4ToolCallPart(
               toolCallId: 'c1',
               toolName: 'runFn',
               input: input,
@@ -101,16 +101,16 @@ void main() {
       await tester.pumpWidget(
         _wrap(
           const ToolCallCard(
-            call: LanguageModelV3ToolCallPart(
+            call: LanguageModelV4ToolCallPart(
               toolCallId: 'c1',
               toolName: 'render',
               input: {},
             ),
-            result: LanguageModelV3ToolResultPart(
+            result: LanguageModelV4ToolResultPart(
               toolCallId: 'c1',
               toolName: 'render',
               output: ToolResultOutputContent([
-                LanguageModelV3TextPart(text: 'hi'),
+                LanguageModelV4TextPart(text: 'hi'),
               ]),
             ),
           ),
@@ -119,10 +119,7 @@ void main() {
 
       expect(find.text('Result'), findsOneWidget);
       // The body lists the runtimeType of the single content part.
-      expect(
-        find.textContaining('LanguageModelV3TextPart'),
-        findsOneWidget,
-      );
+      expect(find.textContaining('LanguageModelV4TextPart'), findsOneWidget);
     });
   });
 }

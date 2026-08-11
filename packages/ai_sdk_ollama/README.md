@@ -6,8 +6,8 @@ Ollama provider for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart). Run ope
 
 ```yaml
 dependencies:
-  ai_sdk_dart: ^1.1.0
-  ai_sdk_ollama: ^1.1.0
+  ai_sdk_dart: ^1.2.0
+  ai_sdk_ollama: ^1.2.0
 ```
 
 ## Prerequisites
@@ -40,6 +40,8 @@ print(result.text);
 ### Streaming
 
 ```dart
+import 'dart:io';
+
 final result = await streamText(
   model: ollama('llama3'),
   prompt: 'Write a short poem about local AI.',

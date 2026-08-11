@@ -94,28 +94,28 @@ Future<void> _structuredOutput() async {
 Future<void> _toolUse() async {
   print('── tool use ──────────────────────────────────────────────');
 
-  int _calls = 0;
+  int calls = 0;
   final result = await generateText(
     model: _FakeStepModel(
       onStep: (_) {
-        _calls++;
-        if (_calls == 1) {
-          return const LanguageModelV3GenerateResult(
+        calls++;
+        if (calls == 1) {
+          return const LanguageModelV4GenerateResult(
             content: [
-              LanguageModelV3ToolCallPart(
+              LanguageModelV4ToolCallPart(
                 toolCallId: 'c1',
                 toolName: 'getWeather',
                 input: {'city': 'Paris'},
               ),
             ],
-            finishReason: LanguageModelV3FinishReason.toolCalls,
+            finishReason: LanguageModelV4FinishReason.toolCalls,
           );
         }
-        return const LanguageModelV3GenerateResult(
+        return const LanguageModelV4GenerateResult(
           content: [
-            LanguageModelV3TextPart(text: 'It is sunny in Paris (23°C).'),
+            LanguageModelV4TextPart(text: 'It is sunny in Paris (23°C).'),
           ],
-          finishReason: LanguageModelV3FinishReason.stop,
+          finishReason: LanguageModelV4FinishReason.stop,
         );
       },
     ),
@@ -127,7 +127,9 @@ Future<void> _toolUse() async {
         inputSchema: Schema<Map<String, dynamic>>(
           jsonSchema: const {
             'type': 'object',
-            'properties': {'city': {'type': 'string'}},
+            'properties': {
+              'city': {'type': 'string'},
+            },
             'required': ['city'],
           },
           fromJson: (json) => json,
@@ -182,7 +184,7 @@ Future<void> _middleware() async {
 // Minimal fake models (no network calls needed)
 // ---------------------------------------------------------------------------
 
-class _FakeModel implements LanguageModelV3 {
+class _FakeModel extends LanguageModelV4 {
   const _FakeModel(this._text);
   final String _text;
 
@@ -191,55 +193,52 @@ class _FakeModel implements LanguageModelV3 {
   @override
   String get modelId => 'fake-model';
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
-  ) async =>
-      LanguageModelV3GenerateResult(
-        content: [LanguageModelV3TextPart(text: _text)],
-        finishReason: LanguageModelV3FinishReason.stop,
-      );
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
+  ) async => LanguageModelV4GenerateResult(
+    content: [LanguageModelV4TextPart(text: _text)],
+    finishReason: LanguageModelV4FinishReason.stop,
+  );
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
-  ) async =>
-      LanguageModelV3StreamResult(
-        stream: simulateReadableStream(
-          parts: [
-            StreamPartTextStart(id: 'text-1'),
-            StreamPartTextDelta(id: 'text-1', delta: _text),
-            StreamPartTextEnd(id: 'text-1'),
-            StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
-          ],
-        ),
-      );
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
+  ) async => LanguageModelV4StreamResult(
+    stream: simulateReadableStream(
+      parts: [
+        StreamPartTextStart(id: 'text-1'),
+        StreamPartTextDelta(id: 'text-1', delta: _text),
+        StreamPartTextEnd(id: 'text-1'),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
+      ],
+    ),
+  );
 }
 
-class _FakeStepModel implements LanguageModelV3 {
+class _FakeStepModel extends LanguageModelV4 {
   _FakeStepModel({required this.onStep});
-  final LanguageModelV3GenerateResult Function(LanguageModelV3CallOptions) onStep;
+  final LanguageModelV4GenerateResult Function(LanguageModelV4CallOptions)
+  onStep;
 
   @override
   String get provider => 'fake';
   @override
   String get modelId => 'fake-step-model';
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
-  ) async =>
-      onStep(options);
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
+  ) async => onStep(options);
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
-  ) async =>
-      throw UnimplementedError();
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
+  ) async => throw UnimplementedError();
 }
 
 class _FakeEmbeddingModel implements EmbeddingModelV2<String> {
@@ -256,12 +255,9 @@ class _FakeEmbeddingModel implements EmbeddingModelV2<String> {
   @override
   Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
     EmbeddingModelV2CallOptions<String> options,
-  ) async =>
-      EmbeddingModelV2GenerateResult(
-        embeddings: options.values
-            .map(
-              (v) => EmbeddingModelV2Embedding(value: v, embedding: _embedding),
-            )
-            .toList(),
-      );
+  ) async => EmbeddingModelV2GenerateResult(
+    embeddings: options.values
+        .map((v) => EmbeddingModelV2Embedding(value: v, embedding: _embedding))
+        .toList(),
+  );
 }

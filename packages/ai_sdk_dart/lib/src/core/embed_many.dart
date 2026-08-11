@@ -54,15 +54,16 @@ Future<EmbedManyResult<VALUE>> embedMany<VALUE>({
     return const EmbedManyResult(embeddings: [], usage: null);
   }
 
-  Future<EmbeddingModelV2GenerateResult<VALUE>> doEmbed(
-    List<VALUE> chunk,
-  ) {
-    final call = model.doEmbed(EmbeddingModelV2CallOptions<VALUE>(values: chunk));
+  Future<EmbeddingModelV2GenerateResult<VALUE>> doEmbed(List<VALUE> chunk) {
+    final call = model.doEmbed(
+      EmbeddingModelV2CallOptions<VALUE>(values: chunk),
+    );
     return timeout != null ? call.timeout(timeout) : call;
   }
 
   // If maxParallelCalls is null or >= values.length, send all at once.
-  final parallel = (maxParallelCalls == null || maxParallelCalls >= values.length)
+  final parallel =
+      (maxParallelCalls == null || maxParallelCalls >= values.length)
       ? null
       : maxParallelCalls;
 
@@ -72,10 +73,8 @@ Future<EmbedManyResult<VALUE>> embedMany<VALUE>({
     return EmbedManyResult<VALUE>(
       embeddings: result.embeddings
           .map(
-            (e) => EmbedManyEntry<VALUE>(
-              value: e.value,
-              embedding: e.embedding,
-            ),
+            (e) =>
+                EmbedManyEntry<VALUE>(value: e.value, embedding: e.embedding),
           )
           .toList(),
       usage: result.usage,
@@ -104,7 +103,9 @@ Future<EmbedManyResult<VALUE>> embedMany<VALUE>({
 
     for (final result in results) {
       for (final e in result.embeddings) {
-        allEntries.add(EmbedManyEntry<VALUE>(value: e.value, embedding: e.embedding));
+        allEntries.add(
+          EmbedManyEntry<VALUE>(value: e.value, embedding: e.embedding),
+        );
       }
       if (result.usage != null) {
         hasUsage = true;
@@ -115,6 +116,10 @@ Future<EmbedManyResult<VALUE>> embedMany<VALUE>({
 
   return EmbedManyResult<VALUE>(
     embeddings: allEntries,
-    usage: hasUsage ? EmbeddingModelV2Usage(tokens: totalInputTokens > 0 ? totalInputTokens : null) : null,
+    usage: hasUsage
+        ? EmbeddingModelV2Usage(
+            tokens: totalInputTokens > 0 ? totalInputTokens : null,
+          )
+        : null,
   );
 }

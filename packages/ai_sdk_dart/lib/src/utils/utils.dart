@@ -82,7 +82,7 @@ String Function() createIdGenerator({int size = 7}) {
 ///     StreamPartTextStart(id: '1'),
 ///     StreamPartTextDelta(id: '1', delta: 'Hello'),
 ///     StreamPartTextEnd(id: '1'),
-///     StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+///     StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
 ///   ],
 /// );
 /// ```
@@ -100,14 +100,14 @@ String Function() createIdGenerator({int size = 7}) {
 ///     StreamPartTextStart(id: '1'),
 ///     StreamPartTextDelta(id: '1', delta: 'Hello'),
 ///     StreamPartTextEnd(id: '1'),
-///     StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+///     StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
 ///   ],
 ///   initialDelayInMs: 50,
 ///   chunkDelayInMs: 10,
 /// );
 /// ```
-Stream<LanguageModelV3StreamPart> simulateReadableStream({
-  required List<LanguageModelV3StreamPart> parts,
+Stream<LanguageModelV4StreamPart> simulateReadableStream({
+  required List<LanguageModelV4StreamPart> parts,
   int initialDelayInMs = 0,
   int chunkDelayInMs = 0,
   // Legacy alias kept for backward compatibility.
@@ -138,24 +138,24 @@ Stream<LanguageModelV3StreamPart> simulateReadableStream({
 // Message utilities
 // ---------------------------------------------------------------------------
 
-/// Converts a list of provider-level [LanguageModelV3Message] objects to
+/// Converts a list of provider-level [LanguageModelV4Message] objects to
 /// user-facing [ModelMessage] objects.
 ///
 /// Mirrors `convertToModelMessages` from the JS AI SDK v6.
 List<ModelMessage> convertToModelMessages(
-  List<LanguageModelV3Message> messages,
+  List<LanguageModelV4Message> messages,
 ) {
   return messages.map((m) {
     final role = switch (m.role) {
-      LanguageModelV3Role.system => ModelMessageRole.system,
-      LanguageModelV3Role.user => ModelMessageRole.user,
-      LanguageModelV3Role.assistant => ModelMessageRole.assistant,
-      LanguageModelV3Role.tool => ModelMessageRole.tool,
+      LanguageModelV4Role.system => ModelMessageRole.system,
+      LanguageModelV4Role.user => ModelMessageRole.user,
+      LanguageModelV4Role.assistant => ModelMessageRole.assistant,
+      LanguageModelV4Role.tool => ModelMessageRole.tool,
     };
-    if (m.content.length == 1 && m.content.first is LanguageModelV3TextPart) {
+    if (m.content.length == 1 && m.content.first is LanguageModelV4TextPart) {
       return ModelMessage(
         role: role,
-        content: (m.content.first as LanguageModelV3TextPart).text,
+        content: (m.content.first as LanguageModelV4TextPart).text,
       );
     }
     return ModelMessage.parts(role: role, parts: m.content);
@@ -188,8 +188,7 @@ List<ModelMessage> pruneMessages(
   if (maxMessages == null || messages.isEmpty) return List.of(messages);
 
   // Split off a leading system message so it's always preserved.
-  final hasLeadingSystem =
-      messages.first.role == ModelMessageRole.system;
+  final hasLeadingSystem = messages.first.role == ModelMessageRole.system;
   final systemPrefix = hasLeadingSystem ? [messages.first] : <ModelMessage>[];
   final rest = hasLeadingSystem ? messages.sublist(1) : messages;
 

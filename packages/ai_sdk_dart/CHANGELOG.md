@@ -1,3 +1,15 @@
+## Unreleased
+
+- Migrated generation, streaming, middleware, mocks, and tools to the V4
+  language-model contract.
+- Added scoped total/step/chunk/tool timeouts, provider-backed cancellation,
+  stable `runtimeContext`/`telemetry` names, explicit approval policies, and
+  machine-readable structured-stream benchmarks.
+- Tools now execute only after a complete validated stream tool call, not when
+  its input stream ends.
+
+---
+
 ## 1.2.0
 
 ### Errors

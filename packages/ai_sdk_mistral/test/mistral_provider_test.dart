@@ -5,7 +5,10 @@ import 'dart:typed_data';
 
 import 'package:ai_sdk_mistral/ai_sdk_mistral.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+import 'package:dio/dio.dart';
 import 'package:test/test.dart';
+
+import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
   group('MistralProvider', () {
@@ -14,7 +17,7 @@ void main() {
       final model = provider('mistral-large-latest');
       expect(model.provider, 'mistral');
       expect(model.modelId, 'mistral-large-latest');
-      expect(model.specificationVersion, 'v3');
+      expect(model.specificationVersion, 'v4');
     });
 
     test('creates embedding model with correct provider/spec/modelId', () {
@@ -37,13 +40,81 @@ void main() {
       final model = provider('mistral-small');
       expect(model.modelId, 'mistral-small');
     });
+
+    test(
+      'chat credentials are resolved immediately before each request',
+      () async {
+        final authorizations = <String?>[];
+        final server = await _TestServer.start((request) async {
+          authorizations.add(request.headers.value('authorization'));
+          _writeOk(request);
+        });
+        addTearDown(server.close);
+
+        var token = 'first-token';
+        final provider = MistralProvider(
+          baseUrl: server.baseUrl,
+          credentialProvider: () async => token,
+        );
+
+        await provider(
+          'mistral-small',
+        ).doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('first')));
+        token = 'second-token';
+        await provider(
+          'mistral-small',
+        ).doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('second')));
+
+        expect(authorizations, ['Bearer first-token', 'Bearer second-token']);
+      },
+    );
+
+    test(
+      'dispose closes owned clients and leaves injected clients open',
+      () async {
+        final server = await _TestServer.start((request) async {
+          _writeOk(request);
+        });
+        addTearDown(server.close);
+
+        final ownedProvider = MistralProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        );
+        ownedProvider.dispose();
+        await expectLater(
+          ownedProvider('mistral-small').doGenerate(
+            LanguageModelV4CallOptions(prompt: _userPrompt('after-dispose')),
+          ),
+          throwsA(anything),
+        );
+
+        final client = Dio(BaseOptions(baseUrl: server.baseUrl));
+        final adapter = attachTrackingAdapter(client);
+        final injectedProvider = MistralProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+          client: client,
+        );
+
+        injectedProvider.dispose(force: false);
+        await injectedProvider('mistral-small').doGenerate(
+          LanguageModelV4CallOptions(prompt: _userPrompt('still-open')),
+        );
+
+        expect(adapter.closeCount, 0);
+        client.close(force: true);
+        expect(adapter.closeCount, 1);
+        expect(adapter.lastForce, true);
+      },
+    );
   });
 
-  group('LanguageModelV3 interface', () {
-    test('language model implements LanguageModelV3', () {
+  group('LanguageModelV4 interface', () {
+    test('language model extends LanguageModelV4', () {
       final provider = MistralProvider(apiKey: 'key');
       final model = provider('mistral-medium');
-      expect(model, isA<LanguageModelV3>());
+      expect(model, isA<LanguageModelV4>());
     });
   });
 
@@ -68,10 +139,10 @@ void main() {
         'mistral-large-latest',
       );
       await model.doGenerate(
-        LanguageModelV3CallOptions(
+        LanguageModelV4CallOptions(
           prompt: _userPrompt('weather'),
           tools: const [
-            LanguageModelV3FunctionTool(
+            LanguageModelV4FunctionTool(
               name: 'weather',
               inputSchema: {'type': 'object'},
             ),
@@ -97,7 +168,7 @@ void main() {
         'pixtral-large-latest',
       );
       await model.doGenerate(
-        LanguageModelV3CallOptions(prompt: _imagePrompt()),
+        LanguageModelV4CallOptions(prompt: _imagePrompt()),
       );
 
       final messages = (captured['messages'] as List)
@@ -120,7 +191,7 @@ void main() {
         'mistral-small',
       );
       await model.doGenerate(
-        LanguageModelV3CallOptions(
+        LanguageModelV4CallOptions(
           prompt: _userPrompt('hi'),
           seed: 99,
           maxOutputTokens: 200,
@@ -130,6 +201,28 @@ void main() {
       expect(captured.containsKey('seed'), isFalse);
       expect(captured['max_tokens'], 200);
     });
+
+    test(
+      'baseUrl ending with slash still posts to chat/completions once',
+      () async {
+        late String path;
+        final server = await _TestServer.start((request) async {
+          path = request.uri.path;
+          _writeOk(request);
+        });
+        addTearDown(server.close);
+
+        final model = MistralProvider(
+          apiKey: 'key',
+          baseUrl: '${server.baseUrl}/',
+        )('mistral-small');
+        await model.doGenerate(
+          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        );
+
+        expect(path, '/v1/chat/completions');
+      },
+    );
   });
 
   group('Mistral embedding doEmbed wire format', () {
@@ -205,25 +298,99 @@ void main() {
       );
       expect(result.embeddings, isEmpty);
     });
+
+    test('baseUrl ending with slash still posts to embeddings once', () async {
+      late String path;
+      final server = await _TestServer.start((request) async {
+        path = request.uri.path;
+        await _captureBody(request);
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'data': [
+              {
+                'index': 0,
+                'embedding': [0.1, 0.2],
+              },
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = MistralProvider(
+        apiKey: 'key',
+        baseUrl: '${server.baseUrl}/',
+      ).embedding('mistral-embed');
+
+      await model.doEmbed(
+        const EmbeddingModelV2CallOptions<String>(values: ['hello']),
+      );
+
+      expect(path, '/v1/embeddings');
+    });
+
+    test(
+      'embedding credentials are resolved immediately before each request',
+      () async {
+        final authorizations = <String?>[];
+        final server = await _TestServer.start((request) async {
+          authorizations.add(request.headers.value('authorization'));
+          await _captureBody(request);
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'data': [
+                {
+                  'index': 0,
+                  'embedding': [0.1, 0.2],
+                },
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        var token = 'first-token';
+        final model = MistralProvider(
+          baseUrl: server.baseUrl,
+          credentialProvider: () async => token,
+        ).embedding('mistral-embed');
+
+        await model.doEmbed(
+          const EmbeddingModelV2CallOptions<String>(values: ['first']),
+        );
+        token = 'second-token';
+        await model.doEmbed(
+          const EmbeddingModelV2CallOptions<String>(values: ['second']),
+        );
+
+        expect(authorizations, ['Bearer first-token', 'Bearer second-token']);
+      },
+    );
   });
 }
 
-LanguageModelV3Prompt _userPrompt(String text) => LanguageModelV3Prompt(
+LanguageModelV4Prompt _userPrompt(String text) => LanguageModelV4Prompt(
   messages: [
-    LanguageModelV3Message(
-      role: LanguageModelV3Role.user,
-      content: [LanguageModelV3TextPart(text: text)],
+    LanguageModelV4Message(
+      role: LanguageModelV4Role.user,
+      content: [LanguageModelV4TextPart(text: text)],
     ),
   ],
 );
 
-LanguageModelV3Prompt _imagePrompt() => LanguageModelV3Prompt(
+LanguageModelV4Prompt _imagePrompt() => LanguageModelV4Prompt(
   messages: [
-    LanguageModelV3Message(
-      role: LanguageModelV3Role.user,
+    LanguageModelV4Message(
+      role: LanguageModelV4Role.user,
       content: [
-        LanguageModelV3TextPart(text: 'describe'),
-        LanguageModelV3ImagePart(
+        LanguageModelV4TextPart(text: 'describe'),
+        LanguageModelV4ImagePart(
           image: DataContentBytes(Uint8List.fromList(utf8.encode('img'))),
           mediaType: 'image/png',
         ),

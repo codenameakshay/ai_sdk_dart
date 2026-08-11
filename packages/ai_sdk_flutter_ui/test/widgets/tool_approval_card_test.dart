@@ -5,9 +5,9 @@ import 'package:flutter_test/flutter_test.dart';
 
 Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
 
-const _request = LanguageModelV3ToolApprovalRequestPart(
+const _request = LanguageModelV4ToolApprovalRequestPart(
   approvalId: 'approval_c1',
-  toolCall: LanguageModelV3ToolCallPart(
+  toolCall: LanguageModelV4ToolCallPart(
     toolCallId: 'c1',
     toolName: 'deleteFile',
     input: {'path': '/tmp/secret'},
@@ -19,7 +19,11 @@ void main() {
     testWidgets('shows the tool name and pretty-printed input', (tester) async {
       await tester.pumpWidget(
         _wrap(
-          ToolApprovalCard(request: _request, onApprove: (_) {}, onDeny: (_) {}),
+          ToolApprovalCard(
+            request: _request,
+            onApprove: (_) {},
+            onDeny: (_) {},
+          ),
         ),
       );
 
@@ -88,9 +92,9 @@ void main() {
     });
 
     testWidgets('falls back to toString for non-JSON input', (tester) async {
-      final request = LanguageModelV3ToolApprovalRequestPart(
+      final request = LanguageModelV4ToolApprovalRequestPart(
         approvalId: 'a1',
-        toolCall: LanguageModelV3ToolCallPart(
+        toolCall: LanguageModelV4ToolCallPart(
           toolCallId: 'c1',
           toolName: 'weird',
           input: _Unencodable(),

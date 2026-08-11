@@ -82,11 +82,7 @@ void main() {
 
   group('startTelemetrySpan', () {
     test('returns no-op span when settings is null', () {
-      final span = startTelemetrySpan(
-        null,
-        spanName: 'test',
-        attributes: {},
-      );
+      final span = startTelemetrySpan(null, spanName: 'test', attributes: {});
       // No-op span should not throw when called.
       span.setAttribute('key', 'value');
       span.recordException(Exception('test'));
@@ -151,17 +147,12 @@ void main() {
   group('generateText telemetry integration', () {
     test('records span when telemetry is enabled', () async {
       final recorder = _TestRecorder();
-      final model = MockLanguageModelV3(
-        response: [mockText('Hello!')],
-      );
+      final model = MockLanguageModelV4(response: [mockText('Hello!')]);
 
       await generateText(
         model: model,
         prompt: 'Hi',
-        experimentalTelemetry: TelemetrySettings(
-          isEnabled: true,
-          recorder: recorder,
-        ),
+        telemetry: TelemetrySettings(isEnabled: true, recorder: recorder),
       );
 
       expect(recorder.spans.length, 1);
@@ -171,17 +162,12 @@ void main() {
 
     test('records model provider and id as span attributes', () async {
       final recorder = _TestRecorder();
-      final model = MockLanguageModelV3(
-        response: [mockText('Hello!')],
-      );
+      final model = MockLanguageModelV4(response: [mockText('Hello!')]);
 
       await generateText(
         model: model,
         prompt: 'Hi',
-        experimentalTelemetry: TelemetrySettings(
-          isEnabled: true,
-          recorder: recorder,
-        ),
+        telemetry: TelemetrySettings(isEnabled: true, recorder: recorder),
       );
 
       final attrs = recorder.spans.first.startAttributes;
@@ -192,17 +178,12 @@ void main() {
 
     test('records usage on span after completion', () async {
       final recorder = _TestRecorder();
-      final model = MockLanguageModelV3(
-        response: [mockText('Done')],
-      );
+      final model = MockLanguageModelV4(response: [mockText('Done')]);
 
       await generateText(
         model: model,
         prompt: 'Hi',
-        experimentalTelemetry: TelemetrySettings(
-          isEnabled: true,
-          recorder: recorder,
-        ),
+        telemetry: TelemetrySettings(isEnabled: true, recorder: recorder),
       );
 
       final span = recorder.spans.first;
@@ -215,17 +196,12 @@ void main() {
 
     test('no span when telemetry is disabled', () async {
       final recorder = _TestRecorder();
-      final model = MockLanguageModelV3(
-        response: [mockText('Hello!')],
-      );
+      final model = MockLanguageModelV4(response: [mockText('Hello!')]);
 
       await generateText(
         model: model,
         prompt: 'Hi',
-        experimentalTelemetry: TelemetrySettings(
-          isEnabled: false,
-          recorder: recorder,
-        ),
+        telemetry: TelemetrySettings(isEnabled: false, recorder: recorder),
       );
 
       expect(recorder.spans, isEmpty);
@@ -233,7 +209,7 @@ void main() {
 
     test('records error when model throws', () async {
       final recorder = _TestRecorder();
-      final model = MockLanguageModelV3(
+      final model = MockLanguageModelV4(
         response: [],
         doGenerateError: Exception('model error'),
       );
@@ -242,10 +218,7 @@ void main() {
         generateText(
           model: model,
           prompt: 'Hi',
-          experimentalTelemetry: TelemetrySettings(
-            isEnabled: true,
-            recorder: recorder,
-          ),
+          telemetry: TelemetrySettings(isEnabled: true, recorder: recorder),
         ),
         throwsA(isA<Exception>()),
       );
@@ -257,14 +230,12 @@ void main() {
 
     test('records functionId from telemetry settings', () async {
       final recorder = _TestRecorder();
-      final model = MockLanguageModelV3(
-        response: [mockText('Hello!')],
-      );
+      final model = MockLanguageModelV4(response: [mockText('Hello!')]);
 
       await generateText(
         model: model,
         prompt: 'Hi',
-        experimentalTelemetry: TelemetrySettings(
+        telemetry: TelemetrySettings(
           isEnabled: true,
           functionId: 'chat-completion',
           recorder: recorder,
@@ -281,17 +252,12 @@ void main() {
   group('streamText telemetry integration', () {
     test('records span when telemetry is enabled', () async {
       final recorder = _TestRecorder();
-      final model = MockLanguageModelV3(
-        response: [mockText('Hello!')],
-      );
+      final model = MockLanguageModelV4(response: [mockText('Hello!')]);
 
       final result = await streamText(
         model: model,
         prompt: 'Hi',
-        experimentalTelemetry: TelemetrySettings(
-          isEnabled: true,
-          recorder: recorder,
-        ),
+        telemetry: TelemetrySettings(isEnabled: true, recorder: recorder),
       );
       await result.text; // drain the stream
 
@@ -301,17 +267,12 @@ void main() {
 
     test('span ended after stream finishes', () async {
       final recorder = _TestRecorder();
-      final model = MockLanguageModelV3(
-        response: [mockText('Hello!')],
-      );
+      final model = MockLanguageModelV4(response: [mockText('Hello!')]);
 
       final result = await streamText(
         model: model,
         prompt: 'Hi',
-        experimentalTelemetry: TelemetrySettings(
-          isEnabled: true,
-          recorder: recorder,
-        ),
+        telemetry: TelemetrySettings(isEnabled: true, recorder: recorder),
       );
       await result.text;
       // Give the async .then() chain a microtask to settle.
@@ -322,52 +283,45 @@ void main() {
 
     test('no span when telemetry is disabled', () async {
       final recorder = _TestRecorder();
-      final model = MockLanguageModelV3(
-        response: [mockText('Hello!')],
-      );
+      final model = MockLanguageModelV4(response: [mockText('Hello!')]);
 
       final result = await streamText(
         model: model,
         prompt: 'Hi',
-        experimentalTelemetry: TelemetrySettings(
-          isEnabled: false,
-          recorder: recorder,
-        ),
+        telemetry: TelemetrySettings(isEnabled: false, recorder: recorder),
       );
       await result.text;
 
       expect(recorder.spans, isEmpty);
     });
 
-    test('records usage attributes on the span after the finish chain settles',
-        () async {
-      final recorder = _TestRecorder();
-      final model = MockLanguageModelV3(
-        response: [mockText('Done')],
-        usage: const LanguageModelV3Usage(
-          inputTokens: 7,
-          outputTokens: 3,
-          totalTokens: 10,
-        ),
-      );
+    test(
+      'records usage attributes on the span after the finish chain settles',
+      () async {
+        final recorder = _TestRecorder();
+        final model = MockLanguageModelV4(
+          response: [mockText('Done')],
+          usage: const LanguageModelV4Usage(
+            inputTokens: LanguageModelV4InputTokenUsage(total: 7),
+            outputTokens: LanguageModelV4OutputTokenUsage(total: 3),
+          ),
+        );
 
-      final result = await streamText(
-        model: model,
-        prompt: 'Hi',
-        experimentalTelemetry: TelemetrySettings(
-          isEnabled: true,
-          recorder: recorder,
-        ),
-      );
-      // Drain everything and let the nested finish→usage .then() chain run.
-      await result.fullStream.toList();
-      await result.totalUsage;
-      await Future<void>.delayed(const Duration(milliseconds: 5));
+        final result = await streamText(
+          model: model,
+          prompt: 'Hi',
+          telemetry: TelemetrySettings(isEnabled: true, recorder: recorder),
+        );
+        // Drain everything and let the nested finish→usage .then() chain run.
+        await result.fullStream.toList();
+        await result.totalUsage;
+        await Future<void>.delayed(const Duration(milliseconds: 5));
 
-      final span = recorder.spans.first;
-      expect(span.setAttributes['ai.usage.promptTokens'], 7);
-      expect(span.setAttributes['ai.usage.completionTokens'], 3);
-      expect(span.ended, isTrue);
-    });
+        final span = recorder.spans.first;
+        expect(span.setAttributes['ai.usage.promptTokens'], 7);
+        expect(span.setAttributes['ai.usage.completionTokens'], 3);
+        expect(span.ended, isTrue);
+      },
+    );
   });
 }

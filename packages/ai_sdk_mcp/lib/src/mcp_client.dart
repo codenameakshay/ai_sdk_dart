@@ -2,14 +2,23 @@ import 'dart:async';
 
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 
+import 'http_transport.dart';
 import 'json_rpc.dart';
 
-// Re-export the shared JSON-RPC transport interface and exception so callers
-// importing the barrel get them.
-export 'json_rpc.dart' show MCPTransport, MCPException;
+// Re-export the stable JSON-RPC transport surface so callers implementing
+// custom MCP transports can use only the package barrel import.
+export 'json_rpc.dart'
+    show
+        JsonRpcRequest,
+        JsonRpcResponse,
+        JsonRpcNotification,
+        MCPTransport,
+        MCPException,
+        MCPTransportException,
+        MCPSessionExpiredException;
 
-// Web-safe HTTP/SSE transports (no dart:io).
-export 'http_transport.dart' show HttpClientTransport, SseClientTransport;
+// Web-safe HTTP transport (no dart:io).
+export 'http_transport.dart' show StreamableHttpClientTransport;
 
 // Stdio transport: real (dart:io) on native, throwing stub on web. The
 // top-level library never imports `dart:io` directly — it is reachable only
@@ -157,7 +166,9 @@ class MCPReconnectPolicy {
 ///
 /// ```dart
 /// final client = MCPClient(
-///   transport: SseClientTransport(url: Uri.parse('http://localhost:3000/sse')),
+///   transport: StreamableHttpClientTransport(
+///     url: Uri.parse('http://localhost:3000/mcp'),
+///   ),
 ///   reconnectPolicy: MCPReconnectPolicy(),
 /// );
 /// await client.initialize();
@@ -189,13 +200,16 @@ class MCPClient {
   int get _id => _nextId++;
 
   bool _initialized = false;
+  Future<void>? _initializeFuture;
 
   /// Resource subscription controllers keyed by resource URI.
-  final _resourceSubscriptions =
-      <String, StreamController<MCPResourceContent>>{};
+  final _resourceSubscriptions = <String, _ResourceSubscription>{};
+  final _resourceRefreshStates = <String, _ResourceRefreshState>{};
+  int _nextResourceSubscriptionGeneration = 1;
 
   /// Subscription to the active transport's server-initiated message stream.
   StreamSubscription<Map<String, dynamic>>? _notificationSub;
+  bool _closed = false;
 
   // ---------------------------------------------------------------------------
   // Transport notifications (server push)
@@ -208,8 +222,16 @@ class MCPClient {
     _notificationSub?.cancel();
     _notificationSub = transport.notifications.listen(
       _handleServerMessage,
-      onError: (_) {}, // Transport-level errors handled by _send/reconnect.
+      onError: _handleTransportError,
     );
+  }
+
+  void _handleTransportError(Object error, [StackTrace? stackTrace]) {
+    if (_closed) return;
+    if (error is! MCPSessionExpiredException) {
+      return;
+    }
+    unawaited(_recoverFromSessionExpiry().catchError((_) {}));
   }
 
   void _handleServerMessage(Map<String, dynamic> json) {
@@ -220,18 +242,79 @@ class MCPClient {
     final uri = params['uri']?.toString();
     if (uri == null) return;
 
-    final controller = _resourceSubscriptions[uri];
-    if (controller == null || controller.isClosed) return;
+    final subscription = _resourceSubscriptions[uri];
+    if (subscription == null || subscription.controller.isClosed) return;
 
-    // The notification only carries the uri; fetch the fresh content and push
-    // it to subscribers.
-    unawaited(
-      readResource(uri)
-          .then((content) {
-            if (!controller.isClosed) controller.add(content);
-          })
-          .catchError((_) {}),
-    );
+    _queueResourceRefresh(uri);
+  }
+
+  void _queueResourceRefresh(String uri) {
+    if (_closed) return;
+    final subscription = _resourceSubscriptions[uri];
+    if (subscription == null || subscription.controller.isClosed) return;
+
+    var state = _resourceRefreshStates[uri];
+    if (state == null || !identical(state.subscription, subscription)) {
+      state = _ResourceRefreshState(subscription);
+      _resourceRefreshStates[uri] = state;
+    }
+    state.trailingRefreshQueued = true;
+    if (state.inFlight) return;
+
+    state.inFlight = true;
+    unawaited(_drainResourceRefreshQueue(uri, state));
+  }
+
+  Future<void> _drainResourceRefreshQueue(
+    String uri,
+    _ResourceRefreshState state,
+  ) async {
+    try {
+      while (state.trailingRefreshQueued && !_closed) {
+        state.trailingRefreshQueued = false;
+
+        final currentSubscription = _resourceSubscriptions[uri];
+        if (currentSubscription == null ||
+            currentSubscription.controller.isClosed ||
+            !identical(currentSubscription, state.subscription)) {
+          break;
+        }
+
+        try {
+          final content = await readResource(uri);
+          if (_closed) break;
+
+          final currentSubscription = _resourceSubscriptions[uri];
+          if (currentSubscription == null ||
+              currentSubscription.controller.isClosed ||
+              !identical(currentSubscription, state.subscription)) {
+            break;
+          }
+          currentSubscription.controller.add(content);
+        } catch (_) {
+          if (_closed) break;
+        }
+      }
+    } finally {
+      state.inFlight = false;
+
+      final currentState = _resourceRefreshStates[uri];
+      final currentSubscription = _resourceSubscriptions[uri];
+      if (_closed ||
+          currentSubscription == null ||
+          currentSubscription.controller.isClosed ||
+          !identical(currentState, state) ||
+          !identical(currentSubscription, state.subscription)) {
+        if (identical(currentState, state)) {
+          _resourceRefreshStates.remove(uri);
+        }
+      } else if (state.trailingRefreshQueued) {
+        state.inFlight = true;
+        unawaited(_drainResourceRefreshQueue(uri, state));
+      } else {
+        _resourceRefreshStates.remove(uri);
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -243,17 +326,63 @@ class MCPClient {
   /// Must be called before any other method.  Safe to call multiple times —
   /// subsequent calls are no-ops.
   Future<void> initialize() async {
-    if (_initialized) return;
-    await _doInitialize();
+    await _ensureInitialized();
   }
 
-  Future<void> _doInitialize() async {
+  Future<void> _ensureInitialized({
+    bool forceReinitialize = false,
+    bool replayResourceSubscriptions = false,
+  }) {
+    if (_closed) {
+      throw const MCPException('MCP client is closed');
+    }
+    if (_initialized && !forceReinitialize) {
+      return Future.value();
+    }
+    final existing = _initializeFuture;
+    if (existing != null) {
+      return existing;
+    }
+
+    final future = _runInitialize(
+      replayResourceSubscriptions: replayResourceSubscriptions,
+    );
+    _initializeFuture = future;
+    return future.whenComplete(() {
+      if (identical(_initializeFuture, future)) {
+        _initializeFuture = null;
+      }
+    });
+  }
+
+  Future<void> _runInitialize({
+    required bool replayResourceSubscriptions,
+  }) async {
+    _initialized = false;
+    try {
+      await _doInitialize(
+        replayResourceSubscriptions: replayResourceSubscriptions,
+      );
+      _initialized = true;
+    } catch (_) {
+      _initialized = false;
+      if (transport
+          case final StreamableHttpClientTransport streamableTransport) {
+        await streamableTransport.resetHandshakeState();
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _doInitialize({
+    required bool replayResourceSubscriptions,
+  }) async {
     final response = await transport.send(
       JsonRpcRequest(
         method: 'initialize',
         id: _id,
         params: {
-          'protocolVersion': '2024-11-05',
+          'protocolVersion': '2025-06-18',
           'capabilities': {
             'tools': {},
             'prompts': {},
@@ -266,26 +395,92 @@ class MCPClient {
     if (response.isError) {
       throw MCPException('Initialize failed: ${response.error}');
     }
-    // Send initialized notification (fire-and-forget, no response expected).
-    try {
-      await transport.send(
-        JsonRpcRequest(method: 'notifications/initialized', id: _id),
+
+    final result = response.result;
+    if (result is! Map) {
+      throw const MCPException(
+        'Initialize failed: result must contain protocolVersion',
       );
-    } catch (_) {
-      // Notifications may not return a response — ignore errors.
     }
-    _initialized = true;
+    final protocolVersion = result['protocolVersion'];
+    if (protocolVersion is! String) {
+      throw const MCPException(
+        'Initialize failed: result.protocolVersion must be a string',
+      );
+    }
+    if (protocolVersion != '2025-06-18') {
+      throw MCPException(
+        'Unsupported protocolVersion "$protocolVersion" from initialize',
+      );
+    }
+
+    if (transport
+        case final StreamableHttpClientTransport streamableTransport) {
+      streamableTransport.setProtocolVersion(protocolVersion);
+    }
+
+    await transport.sendNotification(
+      JsonRpcNotification(method: 'notifications/initialized'),
+    );
+
+    if (replayResourceSubscriptions) {
+      await _replayActiveResourceSubscriptions();
+    }
+
+    if (transport
+        case final StreamableHttpClientTransport streamableTransport) {
+      await streamableTransport.startNotificationListener();
+    }
+  }
+
+  Future<void> _replayActiveResourceSubscriptions() async {
+    for (final entry in _resourceSubscriptions.entries.toList()) {
+      final subscription = entry.value;
+      if (subscription.controller.isClosed) {
+        continue;
+      }
+      final response = await transport.send(
+        JsonRpcRequest(
+          method: 'resources/subscribe',
+          id: _id,
+          params: {'uri': entry.key},
+        ),
+      );
+      if (response.isError) {
+        throw MCPException(
+          'resources/subscribe "${entry.key}" failed: ${response.error}',
+        );
+      }
+    }
+  }
+
+  Future<void> _recoverFromSessionExpiry() {
+    if (_closed) {
+      return Future.value();
+    }
+    return _ensureInitialized(
+      forceReinitialize: true,
+      replayResourceSubscriptions: true,
+    );
   }
 
   /// Send a request, retrying with reconnect if the policy allows.
   Future<JsonRpcResponse> _send(JsonRpcRequest request) async {
     final policy = reconnectPolicy;
     if (policy == null) {
-      return transport.send(request);
+      try {
+        return await transport.send(request);
+      } on MCPSessionExpiredException {
+        await _recoverFromSessionExpiry();
+        return transport.send(request);
+      }
     }
     for (var attempt = 0; attempt <= policy.maxAttempts; attempt++) {
       try {
         return await transport.send(request);
+      } on MCPSessionExpiredException {
+        await _recoverFromSessionExpiry();
+        return transport.send(request);
       } catch (e) {
         if (attempt >= policy.maxAttempts) rethrow;
         // Try to reconnect.
@@ -297,7 +492,7 @@ class MCPClient {
           _listenToTransport();
           _initialized = false;
           try {
-            await _doInitialize();
+            await _ensureInitialized();
           } catch (_) {
             // Will retry on the next loop iteration.
           }
@@ -527,19 +722,22 @@ class MCPClient {
   /// The subscription is automatically cancelled when the stream is cancelled.
   ///
   /// The server must support `resources/subscribe`. When the transport is an
-  /// [SseClientTransport], server-pushed `notifications/resources/updated`
-  /// messages are delivered automatically. For transports without server push
-  /// (e.g. [HttpClientTransport]), call [notifyResourceUpdated] yourself.
+  /// [StreamableHttpClientTransport], server-pushed
+  /// `notifications/resources/updated` messages are delivered automatically.
+  /// For transports without server push, call [notifyResourceUpdated] yourself.
   Stream<MCPResourceContent> subscribeResource(String uri) {
     final existing = _resourceSubscriptions[uri];
-    if (existing != null && !existing.isClosed) {
-      return existing.stream;
+    if (existing != null && !existing.controller.isClosed) {
+      return existing.controller.stream;
     }
 
     final controller = StreamController<MCPResourceContent>.broadcast(
       onCancel: () => _unsubscribeResource(uri),
     );
-    _resourceSubscriptions[uri] = controller;
+    _resourceSubscriptions[uri] = _ResourceSubscription(
+      controller: controller,
+      generation: _nextResourceSubscriptionGeneration++,
+    );
 
     // Send subscribe request (best-effort; server may not support it).
     unawaited(
@@ -569,6 +767,7 @@ class MCPClient {
 
   Future<void> _unsubscribeResource(String uri) async {
     _resourceSubscriptions.remove(uri);
+    _resourceRefreshStates.remove(uri);
     try {
       await initialize();
       await _send(
@@ -585,11 +784,12 @@ class MCPClient {
 
   /// Push a resource update to all active subscribers for [uri].
   ///
-  /// Called automatically for [SseClientTransport] when the server sends a
+  /// Called automatically for [StreamableHttpClientTransport] when the server
+  /// sends a
   /// `notifications/resources/updated` message. Call it manually when using a
   /// transport without server push.
   void notifyResourceUpdated(String uri, MCPResourceContent content) {
-    _resourceSubscriptions[uri]?.add(content);
+    _resourceSubscriptions[uri]?.controller.add(content);
   }
 
   // ---------------------------------------------------------------------------
@@ -598,14 +798,34 @@ class MCPClient {
 
   /// Close the transport connection and all resource subscriptions.
   Future<void> close() async {
+    _closed = true;
     await _notificationSub?.cancel();
-    for (final controller in _resourceSubscriptions.values) {
-      await controller.close();
+    for (final subscription in _resourceSubscriptions.values.toList()) {
+      await subscription.controller.close();
     }
     _resourceSubscriptions.clear();
+    _resourceRefreshStates.clear();
     await transport.close();
   }
 }
 
 /// Factory function that creates a fresh [MCPTransport] for reconnection.
 typedef MCPTransportFactory = MCPTransport Function();
+
+class _ResourceRefreshState {
+  _ResourceRefreshState(this.subscription);
+
+  final _ResourceSubscription subscription;
+  bool inFlight = false;
+  bool trailingRefreshQueued = false;
+}
+
+class _ResourceSubscription {
+  const _ResourceSubscription({
+    required this.controller,
+    required this.generation,
+  });
+
+  final StreamController<MCPResourceContent> controller;
+  final int generation;
+}

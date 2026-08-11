@@ -17,7 +17,7 @@ void main() {
             jsonSchema: const {'type': 'object'},
             fromJson: (json) => json,
           ),
-          execute: (_, __) async => 'ok',
+          execute: (_, _) async => 'ok',
         ),
       },
     );
@@ -74,6 +74,7 @@ Map<String, dynamic> _toSnapshot(StreamTextEvent event) {
       'type': 'tool-input-end',
       'toolName': toolName,
     },
+    StreamTextUsageEvent() => {'type': 'usage'},
     StreamTextToolResultEvent(:final preliminary) => {
       'type': 'tool-result',
       'preliminary': preliminary,
@@ -87,7 +88,7 @@ Map<String, dynamic> _toSnapshot(StreamTextEvent event) {
   };
 }
 
-class _ConformanceStreamModel implements LanguageModelV3 {
+class _ConformanceStreamModel extends LanguageModelV4 {
   @override
   String get modelId => 'conformance-stream';
 
@@ -95,52 +96,48 @@ class _ConformanceStreamModel implements LanguageModelV3 {
   String get provider => 'fake';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     throw UnimplementedError();
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable([
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable([
         const StreamPartTextStart(id: 'text-0'),
         const StreamPartTextDelta(id: 'text-0', delta: 'hi'),
         const StreamPartTextEnd(id: 'text-0'),
         const StreamPartSource(
-          source: LanguageModelV3SourcePart(
+          source: LanguageModelV4SourcePart(
             id: 'src-1',
             url: 'https://example.com',
           ),
         ),
         StreamPartFile(
-          file: LanguageModelV3FilePart(
+          file: LanguageModelV4FilePart(
             data: DataContentUrl(Uri.parse('https://example.com/a.pdf')),
             mediaType: 'application/pdf',
           ),
         ),
-        const StreamPartToolCallStart(
-          toolCallId: 'call_1',
-          toolName: 'weather',
-        ),
-        const StreamPartToolCallDelta(
-          toolCallId: 'call_1',
-          toolName: 'weather',
-          argsTextDelta: '{"city":"Paris"}',
-        ),
-        const StreamPartToolCallEnd(
-          toolCallId: 'call_1',
-          toolName: 'weather',
-          input: {'city': 'Paris'},
+        const StreamPartToolInputStart(id: 'call_1', toolName: 'weather'),
+        const StreamPartToolInputDelta(id: 'call_1', delta: '{"city":"Paris"}'),
+        const StreamPartToolInputEnd(id: 'call_1'),
+        const StreamPartToolCall(
+          toolCall: LanguageModelV4ToolCallPart(
+            toolCallId: 'call_1',
+            toolName: 'weather',
+            input: {'city': 'Paris'},
+          ),
         ),
         const StreamPartFinish(
-          finishReason: LanguageModelV3FinishReason.toolCalls,
+          finishReason: LanguageModelV4FinishReason.toolCalls,
         ),
       ]),
     );

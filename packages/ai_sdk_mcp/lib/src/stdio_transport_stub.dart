@@ -12,14 +12,18 @@ import 'json_rpc.dart';
 /// On non-web platforms the real implementation in `stdio_transport_io.dart` is
 /// selected via a conditional import.
 class StdioMCPTransport implements MCPTransport {
-  StdioMCPTransport({required this.command, this.args = const []});
+  StdioMCPTransport({
+    required this.command,
+    this.args = const [],
+    Object? processStarter,
+  });
 
   final String command;
   final List<String> args;
 
   static const _unsupported =
       'Stdio MCP transport is not available on web/Flutter web. '
-      'Use SseClientTransport or HttpClientTransport instead.';
+      'Use StreamableHttpClientTransport instead.';
 
   @override
   Stream<Map<String, dynamic>> get notifications =>
@@ -27,6 +31,10 @@ class StdioMCPTransport implements MCPTransport {
 
   @override
   Future<JsonRpcResponse> send(JsonRpcRequest request) =>
+      throw UnsupportedError(_unsupported);
+
+  @override
+  Future<void> sendNotification(JsonRpcNotification notification) =>
       throw UnsupportedError(_unsupported);
 
   @override

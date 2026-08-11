@@ -5,7 +5,10 @@ import 'dart:typed_data';
 
 import 'package:ai_sdk_ollama/ai_sdk_ollama.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+import 'package:dio/dio.dart';
 import 'package:test/test.dart';
+
+import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
   group('OllamaProvider', () {
@@ -14,7 +17,7 @@ void main() {
       final model = provider('llama3');
       expect(model.provider, 'ollama');
       expect(model.modelId, 'llama3');
-      expect(model.specificationVersion, 'v3');
+      expect(model.specificationVersion, 'v4');
     });
 
     test('creates embedding model with correct provider/spec/modelId', () {
@@ -36,13 +39,175 @@ void main() {
       final model = provider('phi3');
       expect(model.modelId, 'phi3');
     });
+
+    test('reuses an injected client across multiple requests', () async {
+      final server = await _TestServer.start((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'done': true,
+            'done_reason': 'stop',
+            'message': {'role': 'assistant', 'content': 'ok'},
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      var interceptedRequests = 0;
+      final client = Dio(BaseOptions(baseUrl: server.baseUrl))
+        ..interceptors.add(
+          InterceptorsWrapper(
+            onRequest: (options, handler) {
+              interceptedRequests++;
+              handler.next(options);
+            },
+          ),
+        );
+      addTearDown(() => client.close(force: true));
+
+      final provider = OllamaProvider(baseUrl: server.baseUrl, client: client);
+
+      await provider(
+        'llama3',
+      ).doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('first')));
+      await provider(
+        'llama3',
+      ).doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('second')));
+
+      expect(interceptedRequests, 2);
+    });
+
+    test(
+      'doGenerate cancels an in-flight Dio request via abortSignal',
+      () async {
+        final adapter = _CancellationHttpClientAdapter();
+        final client = _cancellationClient(adapter, 'http://localhost/api');
+        addTearDown(() => client.close(force: true));
+        final abortSignal = _TestAbortSignal();
+        final model = OllamaProvider(
+          baseUrl: 'http://localhost/api',
+          client: client,
+        ).call('llama3');
+
+        final future = model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: _userPrompt('hi'),
+            abortSignal: abortSignal,
+          ),
+        );
+
+        await adapter.fetchStarted.future;
+        expect(adapter.lastOptions?.cancelToken, isNotNull);
+        abortSignal.cancel();
+
+        await expectLater(future, throwsA(isA<AiOperationCancelledError>()));
+        expect(adapter.fetchCount, 1);
+      },
+    );
+
+    test(
+      'doGenerate surfaces AiOperationCancelledError for a pre-cancelled abortSignal',
+      () async {
+        final adapter = _CancellationHttpClientAdapter();
+        final client = _cancellationClient(adapter, 'http://localhost/api');
+        addTearDown(() => client.close(force: true));
+        final abortSignal = _TestAbortSignal()..cancel();
+        final model = OllamaProvider(
+          baseUrl: 'http://localhost/api',
+          client: client,
+        ).call('llama3');
+
+        await expectLater(
+          model.doGenerate(
+            LanguageModelV4CallOptions(
+              prompt: _userPrompt('hi'),
+              abortSignal: abortSignal,
+            ),
+          ),
+          throwsA(isA<AiOperationCancelledError>()),
+        );
+        expect(adapter.fetchCount, 0);
+      },
+    );
+
+    test('doStream cancels the Dio handshake via abortSignal', () async {
+      final adapter = _CancellationHttpClientAdapter();
+      final client = _cancellationClient(adapter, 'http://localhost/api');
+      addTearDown(() => client.close(force: true));
+      final abortSignal = _TestAbortSignal();
+      final model = OllamaProvider(
+        baseUrl: 'http://localhost/api',
+        client: client,
+      ).call('llama3');
+
+      final future = model.doStream(
+        LanguageModelV4CallOptions(
+          prompt: _userPrompt('hi'),
+          abortSignal: abortSignal,
+        ),
+      );
+
+      await adapter.fetchStarted.future;
+      expect(adapter.lastOptions?.cancelToken, isNotNull);
+      abortSignal.cancel();
+
+      await expectLater(future, throwsA(isA<AiOperationCancelledError>()));
+      expect(adapter.fetchCount, 1);
+    });
+
+    test(
+      'dispose closes owned clients and leaves injected clients open',
+      () async {
+        final server = await _TestServer.start((request) async {
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'done': true,
+              'done_reason': 'stop',
+              'message': {'role': 'assistant', 'content': 'ok'},
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final ownedProvider = OllamaProvider(baseUrl: server.baseUrl);
+        ownedProvider.dispose();
+        await expectLater(
+          ownedProvider('llama3').doGenerate(
+            LanguageModelV4CallOptions(prompt: _userPrompt('after-dispose')),
+          ),
+          throwsA(anything),
+        );
+
+        final client = Dio(BaseOptions(baseUrl: server.baseUrl));
+        final adapter = attachTrackingAdapter(client);
+        final injectedProvider = OllamaProvider(
+          baseUrl: server.baseUrl,
+          client: client,
+        );
+
+        injectedProvider.dispose(force: false);
+        await injectedProvider('llama3').doGenerate(
+          LanguageModelV4CallOptions(prompt: _userPrompt('still-open')),
+        );
+
+        expect(adapter.closeCount, 0);
+        client.close(force: true);
+        expect(adapter.closeCount, 1);
+        expect(adapter.lastForce, true);
+      },
+    );
   });
 
-  group('LanguageModelV3 interface', () {
-    test('language model implements LanguageModelV3', () {
+  group('LanguageModelV4 interface', () {
+    test('language model extends LanguageModelV4', () {
       final provider = OllamaProvider();
       final model = provider('llama3');
-      expect(model, isA<LanguageModelV3>());
+      expect(model, isA<LanguageModelV4>());
     });
   });
 
@@ -97,14 +262,14 @@ void main() {
         ).call('llama3.2-vision');
 
         final result = await model.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
               messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
                   content: [
-                    LanguageModelV3TextPart(text: 'describe this'),
-                    LanguageModelV3ImagePart(
+                    LanguageModelV4TextPart(text: 'describe this'),
+                    LanguageModelV4ImagePart(
                       image: DataContentBytes(
                         Uint8List.fromList(utf8.encode('img')),
                       ),
@@ -115,7 +280,7 @@ void main() {
               ],
             ),
             tools: const [
-              LanguageModelV3FunctionTool(
+              LanguageModelV4FunctionTool(
                 name: 'weather',
                 description: 'Get the weather',
                 inputSchema: {'type': 'object'},
@@ -140,15 +305,14 @@ void main() {
         expect((userMessage['images'] as List).single, imageB64);
 
         // Tool calls parsed; real usage tokens reported.
-        expect(result.finishReason, LanguageModelV3FinishReason.toolCalls);
+        expect(result.finishReason, LanguageModelV4FinishReason.toolCalls);
         final toolCall = result.content
-            .whereType<LanguageModelV3ToolCallPart>()
+            .whereType<LanguageModelV4ToolCallPart>()
             .single;
         expect(toolCall.toolName, 'weather');
         expect(toolCall.input, {'city': 'Paris'});
-        expect(result.usage?.inputTokens, 18);
-        expect(result.usage?.outputTokens, 9);
-        expect(result.usage?.totalTokens, 27);
+        expect(result.usage.inputTokens.total, 18);
+        expect(result.usage.outputTokens.total, 9);
       },
     );
 
@@ -177,13 +341,13 @@ void main() {
         final model = OllamaProvider(baseUrl: server.baseUrl).call('llama3');
 
         await model.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
               messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.tool,
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.tool,
                   content: [
-                    LanguageModelV3ToolResultPart(
+                    LanguageModelV4ToolResultPart(
                       toolCallId: 'call_1',
                       toolName: 'weather',
                       output: ToolResultOutputText('sunny'),
@@ -204,87 +368,84 @@ void main() {
       },
     );
 
-    test(
-      'serializes system prompt, system message, assistant tool calls, '
-      'and generation options',
-      () async {
-        late Map<String, dynamic> captured;
-        final server = await _TestServer.start((request) async {
-          final body = await utf8.decoder.bind(request).join();
-          captured = (jsonDecode(body) as Map).cast<String, dynamic>();
-          request.response.statusCode = 200;
-          request.response.headers.contentType = ContentType.json;
-          request.response.write(
-            jsonEncode({
-              'done': true,
-              'done_reason': 'stop',
-              'message': {'role': 'assistant', 'content': 'ok'},
-            }),
-          );
-          await request.response.close();
-        });
-        addTearDown(server.close);
-
-        final model = OllamaProvider(baseUrl: server.baseUrl).call('llama3');
-
-        await model.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
-              system: 'be terse',
-              messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.system,
-                  content: [LanguageModelV3TextPart(text: 'extra system')],
-                ),
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.assistant,
-                  content: [
-                    LanguageModelV3TextPart(text: 'let me check'),
-                    LanguageModelV3ToolCallPart(
-                      toolCallId: 'call_1',
-                      toolName: 'weather',
-                      input: {'city': 'Paris'},
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            temperature: 0.5,
-            topP: 0.9,
-            topK: 40,
-            seed: 7,
-            maxOutputTokens: 128,
-            stopSequences: const ['STOP'],
-          ),
+    test('serializes system prompt, system message, assistant tool calls, '
+        'and generation options', () async {
+      late Map<String, dynamic> captured;
+      final server = await _TestServer.start((request) async {
+        final body = await utf8.decoder.bind(request).join();
+        captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'done': true,
+            'done_reason': 'stop',
+            'message': {'role': 'assistant', 'content': 'ok'},
+          }),
         );
+        await request.response.close();
+      });
+      addTearDown(server.close);
 
-        final messages = (captured['messages'] as List)
-            .cast<Map<String, dynamic>>();
-        // prompt.system becomes the first system message.
-        expect(messages[0]['role'], 'system');
-        expect(messages[0]['content'], 'be terse');
-        // An explicit system-role message is preserved.
-        expect(messages[1]['role'], 'system');
-        expect(messages[1]['content'], 'extra system');
-        // Assistant tool calls serialized into Ollama's tool_calls field.
-        final assistant = messages[2];
-        expect(assistant['role'], 'assistant');
-        expect(assistant['content'], 'let me check');
-        final toolCalls = (assistant['tool_calls'] as List)
-            .cast<Map<String, dynamic>>();
-        final fn = toolCalls.single['function'] as Map<String, dynamic>;
-        expect(fn['name'], 'weather');
-        expect(fn['arguments'], {'city': 'Paris'});
-        // Generation options serialized under the Ollama options field.
-        final options = captured['options'] as Map<String, dynamic>;
-        expect(options['temperature'], 0.5);
-        expect(options['top_p'], 0.9);
-        expect(options['top_k'], 40);
-        expect(options['seed'], 7);
-        expect(options['num_predict'], 128);
-        expect(options['stop'], ['STOP']);
-      },
-    );
+      final model = OllamaProvider(baseUrl: server.baseUrl).call('llama3');
+
+      await model.doGenerate(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
+            system: 'be terse',
+            messages: [
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.system,
+                content: [LanguageModelV4TextPart(text: 'extra system')],
+              ),
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.assistant,
+                content: [
+                  LanguageModelV4TextPart(text: 'let me check'),
+                  LanguageModelV4ToolCallPart(
+                    toolCallId: 'call_1',
+                    toolName: 'weather',
+                    input: {'city': 'Paris'},
+                  ),
+                ],
+              ),
+            ],
+          ),
+          temperature: 0.5,
+          topP: 0.9,
+          topK: 40,
+          seed: 7,
+          maxOutputTokens: 128,
+          stopSequences: const ['STOP'],
+        ),
+      );
+
+      final messages = (captured['messages'] as List)
+          .cast<Map<String, dynamic>>();
+      // prompt.system becomes the first system message.
+      expect(messages[0]['role'], 'system');
+      expect(messages[0]['content'], 'be terse');
+      // An explicit system-role message is preserved.
+      expect(messages[1]['role'], 'system');
+      expect(messages[1]['content'], 'extra system');
+      // Assistant tool calls serialized into Ollama's tool_calls field.
+      final assistant = messages[2];
+      expect(assistant['role'], 'assistant');
+      expect(assistant['content'], 'let me check');
+      final toolCalls = (assistant['tool_calls'] as List)
+          .cast<Map<String, dynamic>>();
+      final fn = toolCalls.single['function'] as Map<String, dynamic>;
+      expect(fn['name'], 'weather');
+      expect(fn['arguments'], {'city': 'Paris'});
+      // Generation options serialized under the Ollama options field.
+      final options = captured['options'] as Map<String, dynamic>;
+      expect(options['temperature'], 0.5);
+      expect(options['top_p'], 0.9);
+      expect(options['top_k'], 40);
+      expect(options['seed'], 7);
+      expect(options['num_predict'], 128);
+      expect(options['stop'], ['STOP']);
+    });
 
     test(
       'serializes base64 and file-part images and structured tool results',
@@ -310,29 +471,29 @@ void main() {
         final model = OllamaProvider(baseUrl: server.baseUrl).call('llava');
 
         await model.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
               messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.tool,
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.tool,
                   content: [
-                    LanguageModelV3ToolResultPart(
+                    LanguageModelV4ToolResultPart(
                       toolCallId: 'call_1',
                       toolName: 'weather',
                       output: ToolResultOutputContent([
-                        LanguageModelV3TextPart(text: 'sunny'),
+                        LanguageModelV4TextPart(text: 'sunny'),
                       ]),
                     ),
                   ],
                 ),
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
                   content: [
-                    LanguageModelV3ImagePart(
+                    LanguageModelV4ImagePart(
                       image: DataContentBase64(rawB64),
                       mediaType: 'image/png',
                     ),
-                    LanguageModelV3FilePart(
+                    LanguageModelV4FilePart(
                       data: DataContentBytes(
                         Uint8List.fromList(utf8.encode('filebytes')),
                       ),
@@ -376,14 +537,14 @@ void main() {
 
       final model = OllamaProvider(baseUrl: server.baseUrl).call('llava');
       await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
                 content: [
-                  LanguageModelV3TextPart(text: 'see this'),
-                  LanguageModelV3ImagePart(
+                  LanguageModelV4TextPart(text: 'see this'),
+                  LanguageModelV4ImagePart(
                     image: DataContentUrl(Uri.parse('https://x/y.png')),
                     mediaType: 'image/png',
                   ),
@@ -429,12 +590,12 @@ void main() {
 
         final model = OllamaProvider(baseUrl: server.baseUrl).call('llama3');
         final result = await model.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
               messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
-                  content: [LanguageModelV3TextPart(text: 'time?')],
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'time?')],
                 ),
               ],
             ),
@@ -442,7 +603,7 @@ void main() {
         );
 
         final call = result.content
-            .whereType<LanguageModelV3ToolCallPart>()
+            .whereType<LanguageModelV4ToolCallPart>()
             .single;
         expect(call.toolName, 'now');
         expect(call.input, <String, dynamic>{});
@@ -486,12 +647,12 @@ void main() {
       final model = OllamaProvider(baseUrl: server.baseUrl).call('llama3');
 
       final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'weather?')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'weather?')],
               ),
             ],
           ),
@@ -503,14 +664,17 @@ void main() {
         parts.whereType<StreamPartTextDelta>().map((p) => p.delta).join(),
         'thinking',
       );
-      final start = parts.whereType<StreamPartToolCallStart>().single;
+      final start = parts.whereType<StreamPartToolInputStart>().single;
       expect(start.toolName, 'weather');
-      final end = parts.whereType<StreamPartToolCallEnd>().single;
-      expect(end.input, {'city': 'Paris'});
+      final end = parts.whereType<StreamPartToolInputEnd>().single;
+      expect(end.id, start.id);
+      expect(parts.whereType<StreamPartToolCall>().single.toolCall.input, {
+        'city': 'Paris',
+      });
       final finish = parts.whereType<StreamPartFinish>().single;
-      expect(finish.finishReason, LanguageModelV3FinishReason.toolCalls);
-      expect(finish.usage?.inputTokens, 6);
-      expect(finish.usage?.outputTokens, 3);
+      expect(finish.finishReason, LanguageModelV4FinishReason.toolCalls);
+      expect(finish.usage.inputTokens.total, 6);
+      expect(finish.usage.outputTokens.total, 3);
     });
 
     test(
@@ -540,12 +704,12 @@ void main() {
 
         final model = OllamaProvider(baseUrl: server.baseUrl).call('llama3');
         final streamResult = await model.doStream(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
               messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
-                  content: [LanguageModelV3TextPart(text: 'hi')],
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'hi')],
                 ),
               ],
             ),
@@ -558,43 +722,40 @@ void main() {
           'hello world',
         );
         final finish = parts.whereType<StreamPartFinish>().single;
-        expect(finish.finishReason, LanguageModelV3FinishReason.length);
-        expect(finish.usage?.inputTokens, 4);
-        expect(finish.usage?.outputTokens, 2);
+        expect(finish.finishReason, LanguageModelV4FinishReason.length);
+        expect(finish.usage.inputTokens.total, 4);
+        expect(finish.usage.outputTokens.total, 2);
       },
     );
 
-    test(
-      'emits a StreamPartError when stream processing throws',
-      () async {
-        final server = await _TestServer.start((request) async {
-          // 200 response whose body is invalid UTF-8, so utf8.decode throws
-          // inside _processStream and is routed to a StreamPartError.
-          request.response.statusCode = 200;
-          request.response.headers.contentType = ContentType.json;
-          request.response.add([0xff, 0xfe, 0xfd]);
-          await request.response.close();
-        });
-        addTearDown(server.close);
+    test('emits a StreamPartError when stream processing throws', () async {
+      final server = await _TestServer.start((request) async {
+        // 200 response whose body is invalid UTF-8, so utf8.decode throws
+        // inside _processStream and is routed to a StreamPartError.
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.add([0xff, 0xfe, 0xfd]);
+        await request.response.close();
+      });
+      addTearDown(server.close);
 
-        final model = OllamaProvider(baseUrl: server.baseUrl).call('llama3');
-        final streamResult = await model.doStream(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
-              messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
-                  content: [LanguageModelV3TextPart(text: 'hi')],
-                ),
-              ],
-            ),
+      final model = OllamaProvider(baseUrl: server.baseUrl).call('llama3');
+      final streamResult = await model.doStream(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
+            messages: [
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
+              ),
+            ],
           ),
-        );
+        ),
+      );
 
-        final parts = await streamResult.stream.toList();
-        expect(parts.whereType<StreamPartError>(), isNotEmpty);
-      },
-    );
+      final parts = await streamResult.stream.toList();
+      expect(parts.whereType<StreamPartError>(), isNotEmpty);
+    });
   });
 
   group('Ollama doEmbed wire format', () {
@@ -659,6 +820,29 @@ void main() {
   });
 }
 
+LanguageModelV4Prompt _userPrompt(String text) {
+  return LanguageModelV4Prompt(
+    messages: [
+      LanguageModelV4Message(
+        role: LanguageModelV4Role.user,
+        content: [LanguageModelV4TextPart(text: text)],
+      ),
+    ],
+  );
+}
+
+Dio _cancellationClient(HttpClientAdapter adapter, String baseUrl) {
+  final client = Dio(
+    BaseOptions(
+      baseUrl: baseUrl,
+      headers: {'Content-Type': 'application/json'},
+      responseType: ResponseType.json,
+    ),
+  );
+  client.httpClientAdapter = adapter;
+  return client;
+}
+
 class _TestServer {
   _TestServer._(this._server);
 
@@ -679,4 +863,56 @@ class _TestServer {
   String get baseUrl => 'http://${_server.address.host}:${_server.port}/api';
 
   Future<void> close() => _server.close(force: true);
+}
+
+class _TestAbortSignal implements LanguageModelV4AbortSignal {
+  final Completer<void> _completer = Completer<void>();
+  bool _isCancelled = false;
+
+  @override
+  bool get isCancelled => _isCancelled;
+
+  @override
+  Future<void> get onCancelled => _completer.future;
+
+  void cancel() {
+    if (_isCancelled) return;
+    _isCancelled = true;
+    _completer.complete();
+  }
+}
+
+class _CancellationHttpClientAdapter implements HttpClientAdapter {
+  int fetchCount = 0;
+  RequestOptions? lastOptions;
+  final Completer<void> fetchStarted = Completer<void>();
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) {
+    fetchCount++;
+    lastOptions = options;
+    if (!fetchStarted.isCompleted) {
+      fetchStarted.complete();
+    }
+
+    final completer = Completer<ResponseBody>();
+    cancelFuture?.then((_) {
+      if (!completer.isCompleted) {
+        completer.completeError(
+          DioException.requestCancelled(
+            requestOptions: options,
+            reason: 'abortSignal',
+          ),
+        );
+      }
+    });
+    return completer.future;
+  }
+
+  @override
+  void close({bool force = false}) {}
 }

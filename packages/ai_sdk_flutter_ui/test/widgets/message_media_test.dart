@@ -14,12 +14,21 @@ const _pngBase64 =
 
 void main() {
   group('MessageImage', () {
+    test('raw url mapping requires an explicit host provider', () {
+      expect(
+        () => imageProviderFor(
+          DataContentUrl(Uri.parse('https://example.com/a.png')),
+        ),
+        throwsUnsupportedError,
+      );
+    });
+
     testWidgets('renders byte data via a MemoryImage', (tester) async {
       final bytes = base64Decode(_pngBase64);
       await tester.pumpWidget(
         _wrap(
           MessageImage(
-            image: LanguageModelV3ImagePart(image: DataContentBytes(bytes)),
+            image: LanguageModelV4ImagePart(image: DataContentBytes(bytes)),
           ),
         ),
       );
@@ -32,7 +41,7 @@ void main() {
       await tester.pumpWidget(
         _wrap(
           const MessageImage(
-            image: LanguageModelV3ImagePart(
+            image: LanguageModelV4ImagePart(
               image: DataContentBase64(_pngBase64),
             ),
           ),
@@ -43,13 +52,30 @@ void main() {
       expect(image.image, isA<MemoryImage>());
     });
 
-    testWidgets('renders url data via a NetworkImage', (tester) async {
+    testWidgets('blocks url data unless the host opts in', (tester) async {
       await tester.pumpWidget(
         _wrap(
           MessageImage(
-            image: LanguageModelV3ImagePart(
+            image: LanguageModelV4ImagePart(
               image: DataContentUrl(Uri.parse('https://example.com/a.png')),
             ),
+          ),
+        ),
+      );
+
+      expect(find.byType(Image), findsNothing);
+      expect(find.byIcon(Icons.broken_image_outlined), findsOneWidget);
+      expect(find.bySemanticsLabel('Remote image blocked'), findsOneWidget);
+    });
+
+    testWidgets('uses the host provider for trusted url data', (tester) async {
+      await tester.pumpWidget(
+        _wrap(
+          MessageImage(
+            image: LanguageModelV4ImagePart(
+              image: DataContentUrl(Uri.parse('https://example.com/a.png')),
+            ),
+            remoteImageProviderBuilder: (url) => NetworkImage(url.toString()),
           ),
         ),
       );
@@ -65,7 +91,7 @@ void main() {
         await tester.pumpWidget(
           _wrap(
             MessageImage(
-              image: LanguageModelV3ImagePart(
+              image: LanguageModelV4ImagePart(
                 image: DataContentBytes(Uint8List.fromList(const [1, 2, 3, 4])),
               ),
             ),
@@ -85,7 +111,7 @@ void main() {
       await tester.pumpWidget(
         _wrap(
           MessageAttachment(
-            file: LanguageModelV3FilePart(
+            file: LanguageModelV4FilePart(
               data: DataContentUrl(Uri.parse('https://example.com/r.pdf')),
               mediaType: 'application/pdf',
               filename: 'report.pdf',
@@ -103,7 +129,7 @@ void main() {
       await tester.pumpWidget(
         _wrap(
           MessageAttachment(
-            file: LanguageModelV3FilePart(
+            file: LanguageModelV4FilePart(
               data: DataContentUrl(Uri.parse('https://example.com/r.pdf')),
               mediaType: 'application/pdf',
             ),
@@ -119,7 +145,7 @@ void main() {
       await tester.pumpWidget(
         _wrap(
           MessageAttachment(
-            file: LanguageModelV3FilePart(
+            file: LanguageModelV4FilePart(
               data: DataContentUrl(Uri.parse('https://example.com/r.pdf')),
               mediaType: 'application/pdf',
               filename: 'report.pdf',
@@ -131,6 +157,47 @@ void main() {
 
       await tester.tap(find.text('report.pdf'));
       expect(tapped, isTrue);
+    });
+
+    testWidgets('exposes accessible labels for images and attachments', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+
+      await tester.pumpWidget(
+        _wrap(
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const MessageImage(
+                image: LanguageModelV4ImagePart(
+                  image: DataContentBase64(_pngBase64),
+                  mediaType: 'image/png',
+                ),
+              ),
+              MessageAttachment(
+                file: LanguageModelV4FilePart(
+                  data: DataContentUrl(Uri.parse('https://example.com/r.pdf')),
+                  mediaType: 'application/pdf',
+                  filename: 'report.pdf',
+                ),
+                onTap: () {},
+              ),
+            ],
+          ),
+        ),
+      );
+
+      final imageNode = tester
+          .getSemantics(find.byType(MessageImage))
+          .getSemanticsData();
+      final attachmentNode = tester
+          .getSemantics(find.byType(MessageAttachment))
+          .getSemanticsData();
+      expect(imageNode.label, 'Attached image, image/png');
+      expect(attachmentNode.label, 'Attachment: report.pdf');
+      expect(attachmentNode.value, 'application/pdf');
+      semantics.dispose();
     });
   });
 }

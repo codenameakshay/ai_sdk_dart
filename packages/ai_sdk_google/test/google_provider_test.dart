@@ -5,9 +5,11 @@ import 'dart:typed_data';
 
 import 'package:ai_sdk_google/ai_sdk_google.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
 import '../../ai_sdk_provider/test/contract/language_model_contract.dart';
+import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
   group('GoogleGenerativeAIProvider', () {
@@ -55,34 +57,123 @@ void main() {
       ).call('gemini-2.0-flash');
 
       final result = await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
         ),
       );
 
-      expect(result.finishReason, LanguageModelV3FinishReason.stop);
-      expect(result.usage?.totalTokens, 16);
-      // No cachedContentTokenCount → no input token breakdown.
-      expect(result.usage?.inputTokenDetails, isNull);
+      expect(result.finishReason, LanguageModelV4FinishReason.stop);
+      expect(result.usage.inputTokens.total, 10);
+      expect(result.usage.inputTokens.cacheRead, isNull);
+      expect(result.usage.outputTokens.total, 6);
       expect(
-        result.content.whereType<LanguageModelV3TextPart>().single.text,
+        result.content.whereType<LanguageModelV4TextPart>().single.text,
         'Hello from gemini',
       );
       expect(
-        result.content.whereType<LanguageModelV3ToolCallPart>().single.toolName,
+        result.content.whereType<LanguageModelV4ToolCallPart>().single.toolName,
         'weather',
       );
     });
 
-    test('doGenerate maps cachedContentTokenCount into inputTokenDetails',
-        () async {
+    test(
+      'doGenerate maps cachedContentTokenCount into nested inputTokens',
+      () async {
+        final server = await _TestServer.start((request) async {
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'candidates': [
+                {
+                  'finishReason': 'STOP',
+                  'content': {
+                    'parts': [
+                      {'text': 'hi'},
+                    ],
+                  },
+                },
+              ],
+              'usageMetadata': {
+                'promptTokenCount': 100,
+                'candidatesTokenCount': 6,
+                'totalTokenCount': 106,
+                'cachedContentTokenCount': 80,
+              },
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = GoogleGenerativeAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('gemini-2.0-flash');
+
+        final result = await model.doGenerate(
+          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        );
+
+        expect(result.usage.inputTokens.total, 100);
+        expect(result.usage.inputTokens.cacheRead, 80);
+        expect(result.usage.inputTokens.cacheWrite, isNull);
+        expect(result.usage.inputTokens.noCache, 20);
+        expect(result.usage.outputTokens.total, 6);
+      },
+    );
+
+    test('credentials are resolved immediately before each request', () async {
+      final apiKeys = <String?>[];
+      final server = await _TestServer.start((request) async {
+        apiKeys.add(request.uri.queryParameters['key']);
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'candidates': [
+              {
+                'finishReason': 'STOP',
+                'content': {
+                  'parts': [
+                    {'text': 'ok'},
+                  ],
+                },
+              },
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      var token = 'first-key';
+      final provider = GoogleGenerativeAIProvider(
+        baseUrl: server.baseUrl,
+        credentialProvider: () async => token,
+      );
+
+      await provider
+          .call('gemini-2.0-flash')
+          .doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('first')));
+      token = 'second-key';
+      await provider
+          .call('gemini-2.0-flash')
+          .doGenerate(
+            LanguageModelV4CallOptions(prompt: _userPrompt('second')),
+          );
+
+      expect(apiKeys, ['first-key', 'second-key']);
+    });
+
+    test('reuses an injected client across multiple requests', () async {
       final server = await _TestServer.start((request) async {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
@@ -93,47 +184,251 @@ void main() {
                 'finishReason': 'STOP',
                 'content': {
                   'parts': [
-                    {'text': 'hi'},
+                    {'text': 'ok'},
                   ],
                 },
               },
             ],
-            'usageMetadata': {
-              'promptTokenCount': 100,
-              'candidatesTokenCount': 6,
-              'totalTokenCount': 106,
-              'cachedContentTokenCount': 80,
-            },
           }),
         );
         await request.response.close();
       });
       addTearDown(server.close);
 
-      final model = GoogleGenerativeAIProvider(
+      var interceptedRequests = 0;
+      final client = Dio(BaseOptions(baseUrl: server.baseUrl))
+        ..interceptors.add(
+          InterceptorsWrapper(
+            onRequest: (options, handler) {
+              interceptedRequests++;
+              handler.next(options);
+            },
+          ),
+        );
+      addTearDown(() => client.close(force: true));
+
+      final provider = GoogleGenerativeAIProvider(
         apiKey: 'test',
         baseUrl: server.baseUrl,
+        client: client,
+      );
+
+      await provider
+          .call('gemini-2.0-flash')
+          .doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('first')));
+      await provider
+          .call('gemini-2.0-flash')
+          .doGenerate(
+            LanguageModelV4CallOptions(prompt: _userPrompt('second')),
+          );
+
+      expect(interceptedRequests, 2);
+    });
+
+    test(
+      'doGenerate cancels an in-flight Dio request via abortSignal',
+      () async {
+        final adapter = _CancellationHttpClientAdapter();
+        final client = _cancellationClient(adapter, 'http://localhost/v1beta');
+        addTearDown(() => client.close(force: true));
+        final abortSignal = _TestAbortSignal();
+        final model = GoogleGenerativeAIProvider(
+          apiKey: 'test',
+          baseUrl: 'http://localhost/v1beta',
+          client: client,
+        ).call('gemini-2.0-flash');
+
+        final future = model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: _userPrompt('hi'),
+            abortSignal: abortSignal,
+          ),
+        );
+
+        await adapter.fetchStarted.future;
+        expect(adapter.lastOptions?.cancelToken, isNotNull);
+        abortSignal.cancel();
+
+        await expectLater(future, throwsA(isA<AiOperationCancelledError>()));
+        expect(adapter.fetchCount, 1);
+      },
+    );
+
+    test(
+      'doGenerate surfaces AiOperationCancelledError for a pre-cancelled abortSignal',
+      () async {
+        final adapter = _CancellationHttpClientAdapter();
+        final client = _cancellationClient(adapter, 'http://localhost/v1beta');
+        addTearDown(() => client.close(force: true));
+        final abortSignal = _TestAbortSignal()..cancel();
+        final model = GoogleGenerativeAIProvider(
+          apiKey: 'test',
+          baseUrl: 'http://localhost/v1beta',
+          client: client,
+        ).call('gemini-2.0-flash');
+
+        await expectLater(
+          model.doGenerate(
+            LanguageModelV4CallOptions(
+              prompt: _userPrompt('hi'),
+              abortSignal: abortSignal,
+            ),
+          ),
+          throwsA(isA<AiOperationCancelledError>()),
+        );
+        expect(adapter.fetchCount, 0);
+      },
+    );
+
+    test('doStream cancels the Dio handshake via abortSignal', () async {
+      final adapter = _CancellationHttpClientAdapter();
+      final client = _cancellationClient(adapter, 'http://localhost/v1beta');
+      addTearDown(() => client.close(force: true));
+      final abortSignal = _TestAbortSignal();
+      final model = GoogleGenerativeAIProvider(
+        apiKey: 'test',
+        baseUrl: 'http://localhost/v1beta',
+        client: client,
       ).call('gemini-2.0-flash');
 
-      final result = await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
-            messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
-              ),
-            ],
-          ),
+      final future = model.doStream(
+        LanguageModelV4CallOptions(
+          prompt: _userPrompt('hi'),
+          abortSignal: abortSignal,
         ),
       );
 
-      // promptTokenCount already includes cached tokens, so inputTokens stays
-      // the total and the uncached remainder is surfaced via noCacheTokens.
-      expect(result.usage?.inputTokens, 100);
-      expect(result.usage?.inputTokenDetails?.cacheReadTokens, 80);
-      expect(result.usage?.inputTokenDetails?.noCacheTokens, 20);
+      await adapter.fetchStarted.future;
+      expect(adapter.lastOptions?.cancelToken, isNotNull);
+      abortSignal.cancel();
+
+      await expectLater(future, throwsA(isA<AiOperationCancelledError>()));
+      expect(adapter.fetchCount, 1);
     });
+
+    test(
+      'stream and embedding resolve api keys immediately before dispatch',
+      () async {
+        final apiKeys = <String, String?>{};
+        final server = await _TestServer.start((request) async {
+          apiKeys[request.uri.path] = request.uri.queryParameters['key'];
+          switch (request.uri.path) {
+            case '/v1beta/models/gemini-2.0-flash:streamGenerateContent':
+              request.response.statusCode = 200;
+              request.response.headers.set('content-type', 'text/event-stream');
+              request.response.write(
+                'data: {"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}\n\n',
+              );
+              request.response.write(
+                'data: {"candidates":[{"content":{"parts":[]},"finishReason":"STOP"}]}\n\n',
+              );
+              break;
+            case '/v1beta/models/text-embedding-004:batchEmbedContents':
+              request.response.statusCode = 200;
+              request.response.headers.contentType = ContentType.json;
+              request.response.write(
+                jsonEncode({
+                  'embeddings': [
+                    {
+                      'values': [0.1, 0.2],
+                    },
+                  ],
+                }),
+              );
+              break;
+            default:
+              fail('Unexpected path: ${request.uri.path}');
+          }
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        var token = 'stream-key';
+        final provider = GoogleGenerativeAIProvider(
+          baseUrl: server.baseUrl,
+          credentialProvider: () async => token,
+        );
+
+        final stream = await provider
+            .call('gemini-2.0-flash')
+            .doStream(
+              LanguageModelV4CallOptions(prompt: _userPrompt('stream')),
+            );
+        await stream.stream.drain<void>();
+
+        token = 'embed-key';
+        await provider
+            .embedding('text-embedding-004')
+            .doEmbed(const EmbeddingModelV2CallOptions(values: ['a']));
+
+        expect(apiKeys, {
+          '/v1beta/models/gemini-2.0-flash:streamGenerateContent': 'stream-key',
+          '/v1beta/models/text-embedding-004:batchEmbedContents': 'embed-key',
+        });
+      },
+    );
+
+    test(
+      'dispose closes owned clients and leaves injected clients open',
+      () async {
+        final server = await _TestServer.start((request) async {
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'candidates': [
+                {
+                  'finishReason': 'STOP',
+                  'content': {
+                    'parts': [
+                      {'text': 'ok'},
+                    ],
+                  },
+                },
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final ownedProvider = GoogleGenerativeAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        );
+        ownedProvider.dispose();
+        await expectLater(
+          ownedProvider
+              .call('gemini-2.0-flash')
+              .doGenerate(
+                LanguageModelV4CallOptions(
+                  prompt: _userPrompt('after-dispose'),
+                ),
+              ),
+          throwsA(anything),
+        );
+
+        final client = Dio(BaseOptions(baseUrl: server.baseUrl));
+        final adapter = attachTrackingAdapter(client);
+        final injectedProvider = GoogleGenerativeAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+          client: client,
+        );
+
+        injectedProvider.dispose(force: false);
+        await injectedProvider
+            .call('gemini-2.0-flash')
+            .doGenerate(
+              LanguageModelV4CallOptions(prompt: _userPrompt('still-open')),
+            );
+
+        expect(adapter.closeCount, 0);
+        client.close(force: true);
+        expect(adapter.closeCount, 1);
+        expect(adapter.lastForce, true);
+      },
+    );
 
     test('doGenerate extracts provider-native source and file parts', () async {
       final server = await _TestServer.start((request) async {
@@ -184,21 +479,21 @@ void main() {
       ).call('gemini-2.0-flash');
 
       final result = await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
         ),
       );
 
-      expect(result.content.whereType<LanguageModelV3FilePart>(), hasLength(2));
+      expect(result.content.whereType<LanguageModelV4FilePart>(), hasLength(2));
       final source = result.content
-          .whereType<LanguageModelV3SourcePart>()
+          .whereType<LanguageModelV4SourcePart>()
           .single;
       expect(source.url, 'https://example.com/source');
       expect(source.title, 'Example Source');
@@ -230,12 +525,12 @@ void main() {
       ).call('gemini-2.0-flash');
 
       final stream = await model.doStream(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
@@ -249,7 +544,7 @@ void main() {
       );
       expect(
         parts.whereType<StreamPartFinish>().single.finishReason,
-        LanguageModelV3FinishReason.stop,
+        LanguageModelV4FinishReason.stop,
       );
     });
 
@@ -273,12 +568,12 @@ void main() {
       ).call('gemini-2.0-flash');
 
       final stream = await model.doStream(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
@@ -323,19 +618,19 @@ void main() {
         baseUrl: server.baseUrl,
       ).call('gemini-2.0-flash');
 
-      Future<void> call(LanguageModelV3ToolChoice toolChoice) async {
+      Future<void> call(LanguageModelV4ToolChoice toolChoice) async {
         await model.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
               messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
-                  content: [LanguageModelV3TextPart(text: 'hi')],
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'hi')],
                 ),
               ],
             ),
             tools: const [
-              LanguageModelV3FunctionTool(
+              LanguageModelV4FunctionTool(
                 name: 'weather',
                 description: 'Get weather',
                 inputSchema: {'type': 'object'},
@@ -411,17 +706,17 @@ void main() {
           baseUrl: server.baseUrl,
         ).call('gemini-2.0-flash');
         final result = await model.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
               messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
-                  content: [LanguageModelV3TextPart(text: 'hi')],
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'hi')],
                 ),
               ],
             ),
             tools: const [
-              LanguageModelV3FunctionTool(
+              LanguageModelV4FunctionTool(
                 name: 'weather',
                 inputSchema: {'type': 'object'},
                 strict: true,
@@ -431,7 +726,7 @@ void main() {
         );
 
         final call = result.content
-            .whereType<LanguageModelV3ToolCallPart>()
+            .whereType<LanguageModelV4ToolCallPart>()
             .single;
         expect(call.input, ['not', 'object']);
       },
@@ -508,12 +803,12 @@ void main() {
       ).call('gemini-2.0-flash');
 
       final result = await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
@@ -524,7 +819,7 @@ void main() {
       );
 
       expect(
-        result.content.whereType<LanguageModelV3TextPart>().single.text,
+        result.content.whereType<LanguageModelV4TextPart>().single.text,
         'ok',
       );
     });
@@ -582,20 +877,20 @@ void main() {
         ).call('gemini-2.0-flash');
 
         final result = await model.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
               messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
                   content: [
-                    LanguageModelV3TextPart(text: 'check this'),
-                    LanguageModelV3ImagePart(
+                    LanguageModelV4TextPart(text: 'check this'),
+                    LanguageModelV4ImagePart(
                       image: DataContentBytes(
                         Uint8List.fromList(utf8.encode('img')),
                       ),
                       mediaType: 'image/png',
                     ),
-                    LanguageModelV3FilePart(
+                    LanguageModelV4FilePart(
                       data: DataContentUrl(
                         Uri.parse('https://example.com/doc.pdf'),
                       ),
@@ -603,10 +898,10 @@ void main() {
                     ),
                   ],
                 ),
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.tool,
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.tool,
                   content: [
-                    LanguageModelV3ToolResultPart(
+                    LanguageModelV4ToolResultPart(
                       toolCallId: 'call_1',
                       toolName: 'weather',
                       isError: true,
@@ -620,7 +915,7 @@ void main() {
         );
 
         expect(
-          result.content.whereType<LanguageModelV3TextPart>().single.text,
+          result.content.whereType<LanguageModelV4TextPart>().single.text,
           'ok',
         );
       },
@@ -631,7 +926,7 @@ void main() {
         request.response.statusCode = 200;
         request.response.headers.set('content-type', 'text/event-stream');
         request.response.write(
-          'data: {"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":2,"totalTokenCount":7},"candidates":[{"content":{"parts":[{"text":"Hello"}]}}]}\n\n',
+          'data: {"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":2,"totalTokenCount":7,"cachedContentTokenCount":3},"candidates":[{"content":{"parts":[{"text":"Hello"}]}}]}\n\n',
         );
         request.response.write(
           'data: {"promptFeedback":{"blockReason":"SAFETY"},"candidates":[{"content":{"parts":[]},"finishReason":"STOP"}]}\n\n',
@@ -646,12 +941,12 @@ void main() {
       ).call('gemini-2.0-flash');
 
       final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
@@ -661,20 +956,23 @@ void main() {
       final finish = (await streamResult.stream.toList())
           .whereType<StreamPartFinish>()
           .single;
-      expect(finish.usage?.totalTokens, 7);
+      expect(finish.usage.inputTokens.total, 5);
+      expect(finish.usage.inputTokens.cacheRead, 3);
+      expect(finish.usage.inputTokens.noCache, 2);
+      expect(finish.usage.outputTokens.total, 2);
       expect(finish.providerMetadata?['google']?['model'], 'gemini-2.0-flash');
       expect(finish.providerMetadata?['google']?['warnings'], isNotEmpty);
     });
 
     test('exposes specification metadata for language model', () {
-      final model = const GoogleGenerativeAIProvider().call('gemini-2.0-flash');
+      final model = GoogleGenerativeAIProvider().call('gemini-2.0-flash');
       expect(model.provider, 'google');
-      expect(model.specificationVersion, 'v3');
+      expect(model.specificationVersion, 'v4');
       expect(model.modelId, 'gemini-2.0-flash');
     });
 
     test('exposes specification metadata for embedding model', () {
-      final model = const GoogleGenerativeAIProvider().embedding(
+      final model = GoogleGenerativeAIProvider().embedding(
         'text-embedding-004',
       );
       expect(model.provider, 'google');
@@ -682,67 +980,70 @@ void main() {
       expect(model.modelId, 'text-embedding-004');
     });
 
-    test('doGenerate serializes system, generation config, and stops', () async {
-      late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
-        final body = await utf8.decoder.bind(request).join();
-        captured = (jsonDecode(body) as Map).cast<String, dynamic>();
-        request.response.statusCode = 200;
-        request.response.headers.contentType = ContentType.json;
-        request.response.write(
-          jsonEncode({
-            'candidates': [
-              {
-                'finishReason': 'STOP',
-                'content': {
-                  'parts': [
-                    {'text': 'ok'},
-                  ],
+    test(
+      'doGenerate serializes system, generation config, and stops',
+      () async {
+        late Map<String, dynamic> captured;
+        final server = await _TestServer.start((request) async {
+          final body = await utf8.decoder.bind(request).join();
+          captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'candidates': [
+                {
+                  'finishReason': 'STOP',
+                  'content': {
+                    'parts': [
+                      {'text': 'ok'},
+                    ],
+                  },
                 },
-              },
-            ],
-          }),
-        );
-        await request.response.close();
-      });
-      addTearDown(server.close);
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
 
-      final model = GoogleGenerativeAIProvider(
-        apiKey: 'test',
-        baseUrl: server.baseUrl,
-      ).call('gemini-2.0-flash');
+        final model = GoogleGenerativeAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('gemini-2.0-flash');
 
-      await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
-            system: 'You are concise.',
-            messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
-              ),
-            ],
+        await model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              system: 'You are concise.',
+              messages: [
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'hi')],
+                ),
+              ],
+            ),
+            maxOutputTokens: 128,
+            temperature: 0.5,
+            topP: 0.9,
+            topK: 40,
+            stopSequences: const ['STOP', 'END'],
           ),
-          maxOutputTokens: 128,
-          temperature: 0.5,
-          topP: 0.9,
-          topK: 40,
-          stopSequences: const ['STOP', 'END'],
-        ),
-      );
+        );
 
-      expect(
-        ((captured['systemInstruction'] as Map)['parts'] as List).first,
-        {'text': 'You are concise.'},
-      );
-      final config = (captured['generationConfig'] as Map)
-          .cast<String, dynamic>();
-      expect(config['maxOutputTokens'], 128);
-      expect(config['temperature'], 0.5);
-      expect(config['topP'], 0.9);
-      expect(config['topK'], 40);
-      expect(config['stopSequences'], ['STOP', 'END']);
-    });
+        expect(
+          ((captured['systemInstruction'] as Map)['parts'] as List).first,
+          {'text': 'You are concise.'},
+        );
+        final config = (captured['generationConfig'] as Map)
+            .cast<String, dynamic>();
+        expect(config['maxOutputTokens'], 128);
+        expect(config['temperature'], 0.5);
+        expect(config['topP'], 0.9);
+        expect(config['topK'], 40);
+        expect(config['stopSequences'], ['STOP', 'END']);
+      },
+    );
 
     test('doGenerate tolerates empty candidates and content', () async {
       final server = await _TestServer.start((request) async {
@@ -759,12 +1060,12 @@ void main() {
       ).call('gemini-2.0-flash');
 
       final result = await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
@@ -772,12 +1073,13 @@ void main() {
       );
 
       expect(result.content, isEmpty);
-      expect(result.finishReason, LanguageModelV3FinishReason.unknown);
-      expect(result.usage, isNull);
+      expect(result.finishReason, LanguageModelV4FinishReason.unknown);
+      expect(result.usage.inputTokens.total, isNull);
+      expect(result.usage.outputTokens.total, isNull);
     });
 
     test('doGenerate maps each finish reason to the AI SDK value', () async {
-      Future<LanguageModelV3FinishReason> resolve(String? reason) async {
+      Future<LanguageModelV4FinishReason> resolve(String? reason) async {
         final server = await _TestServer.start((request) async {
           request.response.statusCode = 200;
           request.response.headers.contentType = ContentType.json;
@@ -785,7 +1087,7 @@ void main() {
             jsonEncode({
               'candidates': [
                 {
-                  if (reason != null) 'finishReason': reason,
+                  'finishReason': ?reason,
                   'content': {
                     'parts': [
                       {'text': 'x'},
@@ -803,12 +1105,12 @@ void main() {
           baseUrl: server.baseUrl,
         ).call('gemini-2.0-flash');
         final result = await model.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
               messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
-                  content: [LanguageModelV3TextPart(text: 'hi')],
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'hi')],
                 ),
               ],
             ),
@@ -817,21 +1119,18 @@ void main() {
         return result.finishReason;
       }
 
-      expect(await resolve('MAX_TOKENS'), LanguageModelV3FinishReason.length);
+      expect(await resolve('MAX_TOKENS'), LanguageModelV4FinishReason.length);
       expect(
         await resolve('SAFETY'),
-        LanguageModelV3FinishReason.contentFilter,
+        LanguageModelV4FinishReason.contentFilter,
       );
       expect(
         await resolve('RECITATION'),
-        LanguageModelV3FinishReason.contentFilter,
+        LanguageModelV4FinishReason.contentFilter,
       );
-      expect(await resolve('OTHER'), LanguageModelV3FinishReason.other);
-      expect(
-        await resolve('BLOCKLIST'),
-        LanguageModelV3FinishReason.other,
-      );
-      expect(await resolve(null), LanguageModelV3FinishReason.unknown);
+      expect(await resolve('OTHER'), LanguageModelV4FinishReason.other);
+      expect(await resolve('BLOCKLIST'), LanguageModelV4FinishReason.other);
+      expect(await resolve(null), LanguageModelV4FinishReason.unknown);
     });
 
     test('doGenerate parses string and num usage token counts', () async {
@@ -867,21 +1166,20 @@ void main() {
       ).call('gemini-2.0-flash');
 
       final result = await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
         ),
       );
 
-      expect(result.usage?.inputTokens, 11);
-      expect(result.usage?.outputTokens, 4);
-      expect(result.usage?.totalTokens, 15);
+      expect(result.usage.inputTokens.total, 11);
+      expect(result.usage.outputTokens.total, 4);
     });
 
     test('serializes assistant tool calls into function calls', () async {
@@ -915,13 +1213,13 @@ void main() {
       ).call('gemini-2.0-flash');
 
       await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.assistant,
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.assistant,
                 content: [
-                  LanguageModelV3ToolCallPart(
+                  LanguageModelV4ToolCallPart(
                     toolCallId: 'call_1',
                     toolName: 'weather',
                     input: const {'city': 'Paris'},
@@ -936,8 +1234,8 @@ void main() {
       final contents = (captured['contents'] as List)
           .cast<Map<String, dynamic>>();
       expect(contents.single['role'], 'model');
-      final fnCall = ((contents.single['parts'] as List).single
-          as Map)['functionCall'];
+      final fnCall =
+          ((contents.single['parts'] as List).single as Map)['functionCall'];
       expect(fnCall, {
         'name': 'weather',
         'args': {'city': 'Paris'},
@@ -977,14 +1275,12 @@ void main() {
       // A reasoning part is not serialized into any wire part, so the
       // empty-parts fallback joins any text parts in the message.
       await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.assistant,
-                content: [
-                  LanguageModelV3ReasoningPart(text: 'thinking...'),
-                ],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.assistant,
+                content: [LanguageModelV4ReasoningPart(text: 'thinking...')],
               ),
             ],
           ),
@@ -1028,30 +1324,30 @@ void main() {
       ).call('gemini-2.0-flash');
 
       await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.tool,
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.tool,
                 content: [
-                  LanguageModelV3ToolResultPart(
+                  LanguageModelV4ToolResultPart(
                     toolCallId: 'call_1',
                     toolName: 'lookup',
                     output: ToolResultOutputContent([
-                      LanguageModelV3TextPart(text: 'summary'),
-                      LanguageModelV3ImagePart(
+                      LanguageModelV4TextPart(text: 'summary'),
+                      LanguageModelV4ImagePart(
                         image: DataContentBytes(
                           Uint8List.fromList(utf8.encode('img')),
                         ),
                         mediaType: 'image/png',
                       ),
-                      LanguageModelV3FilePart(
+                      LanguageModelV4FilePart(
                         data: DataContentBase64(imageB64),
                         mediaType: 'application/pdf',
                         filename: 'doc.pdf',
                       ),
                       // Unsupported inside tool-result content -> 'unsupported'.
-                      LanguageModelV3ToolCallPart(
+                      LanguageModelV4ToolCallPart(
                         toolCallId: 'x',
                         toolName: 'y',
                         input: const {},
@@ -1068,8 +1364,7 @@ void main() {
       final contents = (captured['contents'] as List)
           .cast<Map<String, dynamic>>();
       final response =
-          ((contents.single['parts'] as List).single
-                  as Map)['functionResponse']
+          ((contents.single['parts'] as List).single as Map)['functionResponse']
               as Map;
       final output = (response['response'] as Map)['output'] as Map;
       expect(output['type'], 'content');
@@ -1104,13 +1399,13 @@ void main() {
       ).call('gemini-2.0-flash');
 
       final stream = await model.doStream(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             system: 'be brief',
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
@@ -1119,7 +1414,7 @@ void main() {
           topP: 0.8,
           topK: 10,
           tools: const [
-            LanguageModelV3FunctionTool(
+            LanguageModelV4FunctionTool(
               name: 'weather',
               description: 'Get weather',
               inputSchema: {'type': 'object'},
@@ -1133,10 +1428,9 @@ void main() {
       );
       await stream.stream.toList();
 
-      expect(
-        ((captured['systemInstruction'] as Map)['parts'] as List).first,
-        {'text': 'be brief'},
-      );
+      expect(((captured['systemInstruction'] as Map)['parts'] as List).first, {
+        'text': 'be brief',
+      });
       final config = (captured['generationConfig'] as Map)
           .cast<String, dynamic>();
       expect(config['maxOutputTokens'], 64);
@@ -1148,14 +1442,11 @@ void main() {
               as List);
       expect((declarations.single as Map)['name'], 'weather');
       expect((declarations.single as Map)['description'], 'Get weather');
-      expect(
-        captured['toolConfig']['functionCallingConfig']['mode'],
-        'ANY',
-      );
+      expect(captured['toolConfig']['functionCallingConfig']['mode'], 'ANY');
       expect(captured['cachedContent'], 'cachedContents/9');
     });
 
-    test('doStream surfaces function calls and inline files in deltas', () async {
+    test('doStream emits tool call stream parts for Gemini functionCall', () async {
       final server = await _TestServer.start((request) async {
         request.response.statusCode = 200;
         request.response.headers.set('content-type', 'text/event-stream');
@@ -1175,12 +1466,12 @@ void main() {
       ).call('gemini-2.0-flash');
 
       final stream = await model.doStream(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
@@ -1192,10 +1483,231 @@ void main() {
         parts.whereType<StreamPartTextDelta>().map((e) => e.delta).join(),
         'go',
       );
+      final toolStart = parts.whereType<StreamPartToolInputStart>().single;
+      expect(toolStart.toolName, 'weather');
+      expect(toolStart.id, startsWith('tool-'));
+
+      final toolDelta = parts.whereType<StreamPartToolInputDelta>().single;
+      expect(toolDelta.id, toolStart.id);
+      expect(toolDelta.delta, '{"city":"NYC"}');
+
+      final toolEnd = parts.whereType<StreamPartToolInputEnd>().single;
+      expect(toolEnd.id, toolStart.id);
+
+      final toolCall = parts.whereType<StreamPartToolCall>().single.toolCall;
+      expect(toolCall.toolCallId, toolStart.id);
+      expect(toolCall.toolName, 'weather');
+      expect(toolCall.input, {'city': 'NYC'});
+
+      expect(
+        parts
+            .where(
+              (part) =>
+                  part is StreamPartToolInputStart ||
+                  part is StreamPartToolInputDelta ||
+                  part is StreamPartToolInputEnd ||
+                  part is StreamPartToolCall,
+            )
+            .map((part) => part.runtimeType)
+            .toList(),
+        [
+          StreamPartToolInputStart,
+          StreamPartToolInputDelta,
+          StreamPartToolInputEnd,
+          StreamPartToolCall,
+        ],
+      );
       expect(
         parts.whereType<StreamPartFinish>().single.finishReason,
-        LanguageModelV3FinishReason.length,
+        LanguageModelV4FinishReason.length,
       );
+    });
+
+    test(
+      'doStream reuses one tool call ID for cumulative functionCall args and ends once',
+      () async {
+        final server = await _TestServer.start((request) async {
+          request.response.statusCode = 200;
+          request.response.headers.set('content-type', 'text/event-stream');
+          request.response.write(
+            'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"weather","args":"{\\"city\\":\\"N"}}]}}]}\n\n',
+          );
+          request.response.write(
+            'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"weather","args":"{\\"city\\":\\"NY\\"}"}}]}}]}\n\n',
+          );
+          request.response.write(
+            'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"weather","args":"{\\"city\\":\\"NY\\"}"}}]}}]}\n\n',
+          );
+          request.response.write(
+            'data: {"candidates":[{"content":{"parts":[]},"finishReason":"STOP"}]}\n\n',
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = GoogleGenerativeAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('gemini-2.0-flash');
+
+        final stream = await model.doStream(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'hi')],
+                ),
+              ],
+            ),
+          ),
+        );
+
+        final parts = await stream.stream.toList();
+        final starts = parts.whereType<StreamPartToolInputStart>().toList();
+        expect(starts, hasLength(1));
+        expect(starts.single.toolName, 'weather');
+
+        final deltas = parts.whereType<StreamPartToolInputDelta>().toList();
+        expect(deltas, hasLength(2));
+        expect(deltas.first.id, starts.single.id);
+        expect(deltas.first.delta, '{"city":"N');
+        expect(deltas.last.id, starts.single.id);
+        expect(deltas.last.delta, 'Y"}');
+
+        final ends = parts.whereType<StreamPartToolInputEnd>().toList();
+        expect(ends, hasLength(1));
+        expect(ends.single.id, starts.single.id);
+
+        final toolCalls = parts.whereType<StreamPartToolCall>().toList();
+        expect(toolCalls, hasLength(1));
+        expect(toolCalls.single.toolCall.toolCallId, starts.single.id);
+        expect(toolCalls.single.toolCall.toolName, 'weather');
+        expect(toolCalls.single.toolCall.input, '{"city":"NY"}');
+      },
+    );
+
+    test(
+      'doStream emits raw chunks and closes the previous tool call when Gemini switches tools',
+      () async {
+        final server = await _TestServer.start((request) async {
+          request.response.statusCode = 200;
+          request.response.headers.set('content-type', 'text/event-stream');
+          request.response.write(
+            'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"weather","args":{"city":"Paris"}}}]}}]}\n\n',
+          );
+          request.response.write(
+            'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"calendar","args":{"day":"today"}}}]},"finishReason":"STOP"}]}\n\n',
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = GoogleGenerativeAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('gemini-2.0-flash');
+
+        final stream = await model.doStream(
+          LanguageModelV4CallOptions(
+            prompt: _userPrompt('hi'),
+            includeRawChunks: true,
+          ),
+        );
+
+        final parts = await stream.stream.toList();
+        expect(parts.whereType<StreamPartRaw>(), hasLength(2));
+        final calls = parts.whereType<StreamPartToolCall>().toList();
+        expect(calls, hasLength(2));
+        expect(calls[0].toolCall.toolName, 'weather');
+        expect(calls[0].toolCall.input, {'city': 'Paris'});
+        expect(calls[1].toolCall.toolName, 'calendar');
+        expect(calls[1].toolCall.input, {'day': 'today'});
+      },
+    );
+
+    test(
+      'doStream preserves raw non-object functionCall args verbatim',
+      () async {
+        final server = await _TestServer.start((request) async {
+          request.response.statusCode = 200;
+          request.response.headers.set('content-type', 'text/event-stream');
+          request.response.write(
+            'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"weather","args":"not-json"}}]},"finishReason":"STOP"}]}\n\n',
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = GoogleGenerativeAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('gemini-2.0-flash');
+
+        final stream = await model.doStream(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'hi')],
+                ),
+              ],
+            ),
+          ),
+        );
+
+        final parts = await stream.stream.toList();
+        final delta = parts.whereType<StreamPartToolInputDelta>().single;
+        expect(delta.delta, 'not-json');
+
+        final end = parts.whereType<StreamPartToolInputEnd>().single;
+        expect(end.id, delta.id);
+        expect(
+          parts.whereType<StreamPartToolCall>().single.toolCall.input,
+          'not-json',
+        );
+      },
+    );
+
+    test('doStream sends stopSequences in generationConfig', () async {
+      late Map<String, dynamic> captured;
+      final server = await _TestServer.start((request) async {
+        captured = (jsonDecode(await utf8.decoder.bind(request).join()) as Map)
+            .cast<String, dynamic>();
+        request.response.statusCode = 200;
+        request.response.headers.set('content-type', 'text/event-stream');
+        request.response.write(
+          'data: {"candidates":[{"content":{"parts":[]},"finishReason":"STOP"}]}\n\n',
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = GoogleGenerativeAIProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).call('gemini-2.0-flash');
+
+      final stream = await model.doStream(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
+            messages: [
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
+              ),
+            ],
+          ),
+          stopSequences: const ['END'],
+        ),
+      );
+
+      await stream.stream.toList();
+
+      final config = (captured['generationConfig'] as Map)
+          .cast<String, dynamic>();
+      expect(config['stopSequences'], ['END']);
     });
 
     test('doStream ignores malformed JSON and missing content', () async {
@@ -1218,12 +1730,12 @@ void main() {
       ).call('gemini-2.0-flash');
 
       final stream = await model.doStream(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
@@ -1234,94 +1746,143 @@ void main() {
       expect(parts.whereType<StreamPartTextDelta>(), isEmpty);
       expect(
         parts.whereType<StreamPartFinish>().single.finishReason,
-        LanguageModelV3FinishReason.stop,
+        LanguageModelV4FinishReason.stop,
       );
     });
 
-    test('doStream emits StreamPartError when reading the body fails', () async {
-      final server = await _TestServer.start((request) async {
-        // Detach the raw socket and promise more bytes than we deliver, then
-        // destroy the connection so the client read fails mid-stream.
-        final socket = await request.response.detachSocket(writeHeaders: false);
-        socket.write(
-          'HTTP/1.1 200 OK\r\n'
-          'content-type: text/event-stream\r\n'
-          'content-length: 4096\r\n'
-          '\r\n'
-          'data: {"candidates":[{"content":{"parts":[{"text":"hi"}]}}]}\n\n',
-        );
-        await socket.flush();
-        socket.destroy();
-      });
-      addTearDown(server.close);
+    test(
+      'doStream emits StreamPartError when reading the body fails',
+      () async {
+        final server = await _TestServer.start((request) async {
+          // Detach the raw socket and promise more bytes than we deliver, then
+          // destroy the connection so the client read fails mid-stream.
+          final socket = await request.response.detachSocket(
+            writeHeaders: false,
+          );
+          socket.write(
+            'HTTP/1.1 200 OK\r\n'
+            'content-type: text/event-stream\r\n'
+            'content-length: 4096\r\n'
+            '\r\n'
+            'data: {"candidates":[{"content":{"parts":[{"text":"hi"}]}}]}\n\n',
+          );
+          await socket.flush();
+          socket.destroy();
+        });
+        addTearDown(server.close);
 
-      final model = GoogleGenerativeAIProvider(
-        apiKey: 'test',
-        baseUrl: server.baseUrl,
-      ).call('gemini-2.0-flash');
+        final model = GoogleGenerativeAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('gemini-2.0-flash');
 
-      final stream = await model.doStream(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
-            messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
-              ),
-            ],
+        final stream = await model.doStream(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'hi')],
+                ),
+              ],
+            ),
           ),
-        ),
-      );
-
-      final parts = await stream.stream.toList();
-      expect(parts.whereType<StreamPartError>(), hasLength(1));
-    });
-
-    test('embedding sends provider options and keeps request metadata', () async {
-      late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
-        final body = await utf8.decoder.bind(request).join();
-        captured = (jsonDecode(body) as Map).cast<String, dynamic>();
-        request.response.statusCode = 200;
-        request.response.headers.contentType = ContentType.json;
-        request.response.write(
-          jsonEncode({
-            'embeddings': [
-              {
-                'values': [0.5, 0.6, 0.7],
-              },
-            ],
-          }),
         );
-        await request.response.close();
-      });
-      addTearDown(server.close);
 
-      final model = GoogleGenerativeAIProvider(
-        apiKey: 'test',
-        baseUrl: server.baseUrl,
-      ).embedding('text-embedding-004');
+        final parts = await stream.stream.toList();
+        expect(parts.whereType<StreamPartError>(), hasLength(1));
+      },
+    );
 
-      final result = await model.doEmbed(
-        const EmbeddingModelV2CallOptions(
-          values: ['only'],
-          providerOptions: {
-            'google': {'taskType': 'RETRIEVAL_QUERY'},
-          },
-        ),
-      );
+    test(
+      'doStream emits stream start before error when the body fails before any valid chunk',
+      () async {
+        final server = await _TestServer.start((request) async {
+          final socket = await request.response.detachSocket(
+            writeHeaders: false,
+          );
+          socket.write(
+            'HTTP/1.1 200 OK\r\n'
+            'content-type: text/event-stream\r\n'
+            'content-length: 4096\r\n'
+            '\r\n',
+          );
+          await socket.flush();
+          socket.destroy();
+        });
+        addTearDown(server.close);
 
-      expect(captured['taskType'], 'RETRIEVAL_QUERY');
-      final requests = (captured['requests'] as List)
-          .cast<Map<String, dynamic>>();
-      expect(requests.single['model'], 'models/text-embedding-004');
-      expect(
-        ((requests.single['content'] as Map)['parts'] as List).single,
-        {'text': 'only'},
-      );
-      expect(result.embeddings.single.value, 'only');
-      expect(result.embeddings.single.embedding, [0.5, 0.6, 0.7]);
-    });
+        final model = GoogleGenerativeAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('gemini-2.0-flash');
+
+        final stream = await model.doStream(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'hi')],
+                ),
+              ],
+            ),
+          ),
+        );
+
+        final parts = await stream.stream.toList();
+        expect(parts[0], isA<StreamPartStreamStart>());
+        expect(parts[1], isA<StreamPartError>());
+      },
+    );
+
+    test(
+      'embedding sends provider options and keeps request metadata',
+      () async {
+        late Map<String, dynamic> captured;
+        final server = await _TestServer.start((request) async {
+          final body = await utf8.decoder.bind(request).join();
+          captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'embeddings': [
+                {
+                  'values': [0.5, 0.6, 0.7],
+                },
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = GoogleGenerativeAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).embedding('text-embedding-004');
+
+        final result = await model.doEmbed(
+          const EmbeddingModelV2CallOptions(
+            values: ['only'],
+            providerOptions: {
+              'google': {'taskType': 'RETRIEVAL_QUERY'},
+            },
+          ),
+        );
+
+        expect(captured['taskType'], 'RETRIEVAL_QUERY');
+        final requests = (captured['requests'] as List)
+            .cast<Map<String, dynamic>>();
+        expect(requests.single['model'], 'models/text-embedding-004');
+        expect(((requests.single['content'] as Map)['parts'] as List).single, {
+          'text': 'only',
+        });
+        expect(result.embeddings.single.value, 'only');
+        expect(result.embeddings.single.embedding, [0.5, 0.6, 0.7]);
+      },
+    );
 
     test('reads promptFeedback and warnings list into warnings', () async {
       final server = await _TestServer.start((request) async {
@@ -1353,12 +1914,12 @@ void main() {
       ).call('gemini-2.0-flash');
 
       final result = await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
@@ -1367,24 +1928,117 @@ void main() {
 
       // promptFeedback + the two non-empty warning strings (empty is skipped).
       expect(result.warnings, hasLength(3));
-      expect(result.warnings, contains('too long'));
-      expect(result.warnings, contains('truncated'));
       expect(
-        result.warnings.any((w) => w.contains('promptFeedback')),
+        result.warnings.any(
+          (warning) =>
+              warning is LanguageModelV4OtherWarning &&
+              warning.message == 'too long',
+        ),
+        isTrue,
+      );
+      expect(
+        result.warnings.any(
+          (warning) =>
+              warning is LanguageModelV4OtherWarning &&
+              warning.message == 'truncated',
+        ),
+        isTrue,
+      );
+      expect(
+        result.warnings.any(
+          (warning) =>
+              warning is LanguageModelV4OtherWarning &&
+              warning.message.contains('promptFeedback'),
+        ),
         isTrue,
       );
     });
 
+    test('reads structured and fallback warning variants', () async {
+      final server = await _TestServer.start((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'warnings': [
+              {'type': 'unsupported', 'feature': 'topK', 'details': 'ignored'},
+              {
+                'type': 'compatibility',
+                'feature': 'sources',
+                'details': 'partial',
+              },
+              {'type': 'deprecated', 'feature': 'legacy-mode'},
+              {'type': 'other', 'message': 'custom'},
+              {'type': 'mystery'},
+              7,
+              '',
+              null,
+            ],
+            'candidates': [
+              {
+                'finishReason': 'STOP',
+                'content': {
+                  'parts': [
+                    {'text': 'ok'},
+                  ],
+                },
+              },
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = GoogleGenerativeAIProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).call('gemini-2.0-flash');
+
+      final result = await model.doGenerate(
+        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+      );
+
+      expect(result.warnings, hasLength(6));
+      expect(
+        result.warnings
+            .whereType<LanguageModelV4UnsupportedWarning>()
+            .single
+            .feature,
+        'topK',
+      );
+      expect(
+        result.warnings
+            .whereType<LanguageModelV4CompatibilityWarning>()
+            .single
+            .feature,
+        'sources',
+      );
+      expect(
+        result.warnings
+            .whereType<LanguageModelV4DeprecatedWarning>()
+            .single
+            .message,
+        'This setting is deprecated.',
+      );
+      expect(
+        result.warnings.whereType<LanguageModelV4OtherWarning>().map(
+          (w) => w.message,
+        ),
+        containsAll(['custom', '{"type":"mystery"}', '7']),
+      );
+    });
+
     test('resolved api key throws when missing', () async {
-      final model = const GoogleGenerativeAIProvider().call('gemini-2.0-flash');
+      final model = GoogleGenerativeAIProvider().call('gemini-2.0-flash');
       await expectLater(
         model.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
               messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
-                  content: [LanguageModelV3TextPart(text: 'hi')],
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'hi')],
                 ),
               ],
             ),
@@ -1419,7 +2073,7 @@ void main() {
 }
 
 Future<Map<String, dynamic>> _captureGoogleRequestBody(
-  LanguageModelV3Prompt prompt,
+  LanguageModelV4Prompt prompt,
 ) async {
   late Map<String, dynamic> captured;
   final server = await _TestServer.start((request) async {
@@ -1449,9 +2103,32 @@ Future<Map<String, dynamic>> _captureGoogleRequestBody(
     apiKey: 'test',
     baseUrl: server.baseUrl,
   ).call('gemini-2.0-flash');
-  await model.doGenerate(LanguageModelV3CallOptions(prompt: prompt));
+  await model.doGenerate(LanguageModelV4CallOptions(prompt: prompt));
   await server.close();
   return captured;
+}
+
+Dio _cancellationClient(HttpClientAdapter adapter, String baseUrl) {
+  final client = Dio(
+    BaseOptions(
+      baseUrl: baseUrl,
+      headers: {'content-type': 'application/json'},
+      responseType: ResponseType.json,
+    ),
+  );
+  client.httpClientAdapter = adapter;
+  return client;
+}
+
+LanguageModelV4Prompt _userPrompt(String text) {
+  return LanguageModelV4Prompt(
+    messages: [
+      LanguageModelV4Message(
+        role: LanguageModelV4Role.user,
+        content: [LanguageModelV4TextPart(text: text)],
+      ),
+    ],
+  );
 }
 
 class _TestServer {
@@ -1474,4 +2151,56 @@ class _TestServer {
   String get baseUrl => 'http://${_server.address.host}:${_server.port}/v1beta';
 
   Future<void> close() => _server.close(force: true);
+}
+
+class _TestAbortSignal implements LanguageModelV4AbortSignal {
+  final Completer<void> _completer = Completer<void>();
+  bool _isCancelled = false;
+
+  @override
+  bool get isCancelled => _isCancelled;
+
+  @override
+  Future<void> get onCancelled => _completer.future;
+
+  void cancel() {
+    if (_isCancelled) return;
+    _isCancelled = true;
+    _completer.complete();
+  }
+}
+
+class _CancellationHttpClientAdapter implements HttpClientAdapter {
+  int fetchCount = 0;
+  RequestOptions? lastOptions;
+  final Completer<void> fetchStarted = Completer<void>();
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) {
+    fetchCount++;
+    lastOptions = options;
+    if (!fetchStarted.isCompleted) {
+      fetchStarted.complete();
+    }
+
+    final completer = Completer<ResponseBody>();
+    cancelFuture?.then((_) {
+      if (!completer.isCompleted) {
+        completer.completeError(
+          DioException.requestCancelled(
+            requestOptions: options,
+            reason: 'abortSignal',
+          ),
+        );
+      }
+    });
+    return completer.future;
+  }
+
+  @override
+  void close({bool force = false}) {}
 }

@@ -37,7 +37,7 @@ void main() {
       final model = CohereProvider(
         apiKey: 'test',
         baseUrl: server.baseUrl,
-      ).embedding('embed-english-v3.0');
+      ).embedding('embed-english-v4.0');
 
       final result = await model.doEmbed(
         const EmbeddingModelV2CallOptions<String>(
@@ -47,7 +47,7 @@ void main() {
 
       // Request serialization.
       expect(capturedPath, '/embed');
-      expect(captured['model'], 'embed-english-v3.0');
+      expect(captured['model'], 'embed-english-v4.0');
       expect(captured['texts'], ['hello world', 'goodbye world']);
       expect(captured['input_type'], 'search_document');
       expect(captured['embedding_types'], ['float']);
@@ -72,7 +72,7 @@ void main() {
       final model = CohereProvider(
         apiKey: 'test',
         baseUrl: server.baseUrl,
-      ).embedding('embed-english-v3.0');
+      ).embedding('embed-english-v4.0');
 
       final result = await model.doEmbed(
         const EmbeddingModelV2CallOptions<String>(values: ['only']),
@@ -109,7 +109,7 @@ void main() {
       final model = CohereProvider(
         apiKey: 'test',
         baseUrl: server.baseUrl,
-      ).rerank('rerank-english-v3.0');
+      ).rerank('rerank-english-v4.0');
 
       final result = await model.doRerank(
         const RerankModelV1CallOptions(
@@ -121,7 +121,7 @@ void main() {
 
       // Request serialization.
       expect(capturedPath, '/rerank');
-      expect(captured['model'], 'rerank-english-v3.0');
+      expect(captured['model'], 'rerank-english-v4.0');
       expect(captured['query'], 'What is AI?');
       expect(captured['documents'], [
         'Machines are useful.',
@@ -155,13 +155,10 @@ void main() {
       final model = CohereProvider(
         apiKey: 'test',
         baseUrl: server.baseUrl,
-      ).rerank('rerank-english-v3.0');
+      ).rerank('rerank-english-v4.0');
 
       final result = await model.doRerank(
-        const RerankModelV1CallOptions(
-          query: 'q',
-          documents: ['a', 'b'],
-        ),
+        const RerankModelV1CallOptions(query: 'q', documents: ['a', 'b']),
       );
 
       expect(captured.containsKey('top_n'), isFalse);
@@ -202,22 +199,22 @@ void main() {
       ).call('command-r-plus');
 
       final result = await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             // Top-level system prompt -> system message (line 98).
             system: 'You are helpful.',
             messages: [
               // Explicit system role message -> 'system' switch arm (line 105).
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.system,
-                content: [LanguageModelV3TextPart(text: 'Stay concise.')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.system,
+                content: [LanguageModelV4TextPart(text: 'Stay concise.')],
               ),
               // File part with image/* media type -> image_url (lines 187-193).
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
                 content: [
-                  LanguageModelV3TextPart(text: 'look'),
-                  LanguageModelV3FilePart(
+                  LanguageModelV4TextPart(text: 'look'),
+                  LanguageModelV4FilePart(
                     data: DataContentBytes(
                       Uint8List.fromList(utf8.encode('file-bytes')),
                     ),
@@ -227,15 +224,15 @@ void main() {
               ),
               // Tool result with content parts -> ToolResultOutputContent
               // branch (lines 204-208).
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.tool,
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.tool,
                 content: [
-                  LanguageModelV3ToolResultPart(
+                  LanguageModelV4ToolResultPart(
                     toolCallId: 'call_9',
                     toolName: 'search',
                     output: ToolResultOutputContent([
-                      LanguageModelV3TextPart(text: 'line one'),
-                      LanguageModelV3TextPart(text: 'line two'),
+                      LanguageModelV4TextPart(text: 'line one'),
+                      LanguageModelV4TextPart(text: 'line two'),
                     ]),
                   ),
                 ],
@@ -280,7 +277,7 @@ void main() {
       expect(captured['max_tokens'], 256);
       expect(captured['stop_sequences'], ['STOP']);
 
-      expect(result.finishReason, LanguageModelV3FinishReason.stop);
+      expect(result.finishReason, LanguageModelV4FinishReason.stop);
     });
 
     test('serializes assistant tool calls with a tool_plan', () async {
@@ -314,16 +311,16 @@ void main() {
       ).call('command-r-plus');
 
       await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
               // Assistant message with text (tool_plan) + tool call
               // (lines 131-148).
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.assistant,
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.assistant,
                 content: [
-                  LanguageModelV3TextPart(text: 'I will check the weather.'),
-                  LanguageModelV3ToolCallPart(
+                  LanguageModelV4TextPart(text: 'I will check the weather.'),
+                  LanguageModelV4ToolCallPart(
                     toolCallId: 'call_5',
                     toolName: 'weather',
                     input: {'city': 'Berlin'},
@@ -380,17 +377,17 @@ void main() {
       ).call('command-r-plus');
 
       await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
           tools: const [
-            LanguageModelV3FunctionTool(
+            LanguageModelV4FunctionTool(
               name: 'weather',
               inputSchema: {'type': 'object'},
             ),
@@ -438,12 +435,12 @@ void main() {
       ).call('command-r-plus');
 
       final result = await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'weather?')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'weather?')],
               ),
             ],
           ),
@@ -451,7 +448,7 @@ void main() {
       );
 
       final toolCall = result.content
-          .whereType<LanguageModelV3ToolCallPart>()
+          .whereType<LanguageModelV4ToolCallPart>()
           .single;
       expect(toolCall.toolName, 'weather');
       expect(toolCall.toolCallId, isNotEmpty);
@@ -492,15 +489,15 @@ void main() {
       ).call('command-r-plus');
 
       await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
                 content: [
                   // DataContentBase64 -> uses the base64 string directly
                   // (line 474).
-                  LanguageModelV3ImagePart(
+                  LanguageModelV4ImagePart(
                     image: const DataContentBase64('QUJD'),
                     mediaType: 'image/webp',
                   ),
@@ -553,14 +550,14 @@ void main() {
       ).call('command-r-plus');
 
       await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
                 content: [
                   // DataContentUrl -> raw URL string (line 471).
-                  LanguageModelV3ImagePart(
+                  LanguageModelV4ImagePart(
                     image: DataContentUrl(
                       Uri.parse('https://example.com/cat.png'),
                     ),
@@ -630,12 +627,12 @@ void main() {
       ).call('command-r-plus');
 
       final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
@@ -645,12 +642,14 @@ void main() {
       final parts = await streamResult.stream.toList();
       final deltas = parts.whereType<StreamPartTextDelta>().toList();
       expect(deltas.map((d) => d.delta).join(), 'Hello world');
-      expect(deltas.every((d) => d.id == '0'), isTrue);
+      expect(deltas.every((d) => d.id == 'text-0'), isTrue);
+      expect(parts.whereType<StreamPartTextStart>().single.id, 'text-0');
+      expect(parts.whereType<StreamPartTextEnd>().single.id, 'text-0');
 
       final finish = parts.whereType<StreamPartFinish>().single;
-      expect(finish.finishReason, LanguageModelV3FinishReason.stop);
-      expect(finish.usage?.inputTokens, 5);
-      expect(finish.usage?.outputTokens, 6);
+      expect(finish.finishReason, LanguageModelV4FinishReason.stop);
+      expect(finish.usage.inputTokens.total, 5);
+      expect(finish.usage.outputTokens.total, 6);
     });
 
     test('emits tool-call-start args delta when start carries args', () async {
@@ -667,10 +666,7 @@ void main() {
                 'tool_calls': {
                   'id': 'call_7',
                   'type': 'function',
-                  'function': {
-                    'name': 'weather',
-                    'arguments': '{"city":"Oslo"}',
-                  },
+                  'function': {'name': 'weather', 'arguments': '{"city":"Oslo"}'},
                 },
               },
             },
@@ -689,12 +685,12 @@ void main() {
       ).call('command-r-plus');
 
       final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'weather?')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'weather?')],
               ),
             ],
           ),
@@ -702,18 +698,21 @@ void main() {
       );
 
       final parts = await streamResult.stream.toList();
-      final start = parts.whereType<StreamPartToolCallStart>().single;
-      expect(start.toolCallId, 'call_7');
+      final start = parts.whereType<StreamPartToolInputStart>().single;
+      expect(start.id, 'call_7');
       expect(start.toolName, 'weather');
 
       // The start event carried args, so a delta is emitted from within
       // tool-call-start handling.
-      final delta = parts.whereType<StreamPartToolCallDelta>().single;
-      expect(delta.toolCallId, 'call_7');
-      expect(delta.argsTextDelta, '{"city":"Oslo"}');
+      final delta = parts.whereType<StreamPartToolInputDelta>().single;
+      expect(delta.id, 'call_7');
+      expect(delta.delta, '{"city":"Oslo"}');
 
-      final end = parts.whereType<StreamPartToolCallEnd>().single;
-      expect(end.input, {'city': 'Oslo'});
+      final end = parts.whereType<StreamPartToolInputEnd>().single;
+      expect(end.id, 'call_7');
+      expect(parts.whereType<StreamPartToolCall>().single.toolCall.input, {
+        'city': 'Oslo',
+      });
     });
 
     test('emits StreamPartError when the stream fails', () async {
@@ -733,12 +732,12 @@ void main() {
       // proof the error path is exercised.
       try {
         final streamResult = await model.doStream(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
               messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
-                  content: [LanguageModelV3TextPart(text: 'hi')],
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'hi')],
                 ),
               ],
             ),
@@ -752,66 +751,68 @@ void main() {
       }
     });
 
-    test('emits StreamPartError when the byte stream aborts mid-flight',
-        () async {
-      // Raw socket server: send valid HTTP headers promising a larger
-      // content-length than the bytes actually written, then destroy the
-      // socket. The response stream opens successfully, but reading the body
-      // throws mid-flight, so _processStream's catchError handler emits a
-      // StreamPartError (lines 338-340).
-      final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-      addTearDown(() => server.close());
-      server.listen((socket) {
-        // Wait for the full request to arrive, then reply with headers that
-        // promise more body than we send so the stream opens but the read
-        // aborts mid-body.
-        socket.listen(
-          (_) {},
-          onDone: () => socket.destroy(),
-          onError: (_) => socket.destroy(),
-        );
-        const body = '{"type":"content-delta"';
-        socket.write(
-          'HTTP/1.1 200 OK\r\n'
-          'Content-Type: application/json\r\n'
-          'Content-Length: 4096\r\n'
-          '\r\n'
-          '$body',
-        );
-        // Flush headers + partial body, give dio time to resolve post() and
-        // start consuming the body stream, then forcibly abort.
-        socket.flush().then((_) async {
-          await Future<void>.delayed(const Duration(milliseconds: 200));
-          socket.destroy();
+    test(
+      'emits StreamPartError when the byte stream aborts mid-flight',
+      () async {
+        // Raw socket server: send valid HTTP headers promising a larger
+        // content-length than the bytes actually written, then destroy the
+        // socket. The response stream opens successfully, but reading the body
+        // throws mid-flight, so _processStream's catchError handler emits a
+        // StreamPartError (lines 338-340).
+        final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+        addTearDown(() => server.close());
+        server.listen((socket) {
+          // Wait for the full request to arrive, then reply with headers that
+          // promise more body than we send so the stream opens but the read
+          // aborts mid-body.
+          socket.listen(
+            (_) {},
+            onDone: () => socket.destroy(),
+            onError: (_) => socket.destroy(),
+          );
+          const body = '{"type":"content-delta"';
+          socket.write(
+            'HTTP/1.1 200 OK\r\n'
+            'Content-Type: application/json\r\n'
+            'Content-Length: 4096\r\n'
+            '\r\n'
+            '$body',
+          );
+          // Flush headers + partial body, give dio time to resolve post() and
+          // start consuming the body stream, then forcibly abort.
+          socket.flush().then((_) async {
+            await Future<void>.delayed(const Duration(milliseconds: 200));
+            socket.destroy();
+          });
         });
-      });
-      final baseUrl = 'http://${server.address.host}:${server.port}';
+        final baseUrl = 'http://${server.address.host}:${server.port}';
 
-      final model = CohereProvider(
-        apiKey: 'test',
-        baseUrl: baseUrl,
-      ).call('command-r-plus');
+        final model = CohereProvider(
+          apiKey: 'test',
+          baseUrl: baseUrl,
+        ).call('command-r-plus');
 
-      try {
-        final streamResult = await model.doStream(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
-              messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
-                  content: [LanguageModelV3TextPart(text: 'hi')],
-                ),
-              ],
+        try {
+          final streamResult = await model.doStream(
+            LanguageModelV4CallOptions(
+              prompt: LanguageModelV4Prompt(
+                messages: [
+                  LanguageModelV4Message(
+                    role: LanguageModelV4Role.user,
+                    content: [LanguageModelV4TextPart(text: 'hi')],
+                  ),
+                ],
+              ),
             ),
-          ),
-        );
-        final parts = await streamResult.stream.toList();
-        expect(parts.whereType<StreamPartError>(), isNotEmpty);
-      } catch (_) {
-        // Some platforms surface the broken body before the stream starts;
-        // either way the error path is exercised.
-      }
-    });
+          );
+          final parts = await streamResult.stream.toList();
+          expect(parts.whereType<StreamPartError>(), isNotEmpty);
+        } catch (_) {
+          // Some platforms surface the broken body before the stream starts;
+          // either way the error path is exercised.
+        }
+      },
+    );
   });
 }
 

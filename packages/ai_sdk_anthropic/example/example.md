@@ -4,8 +4,13 @@
 
 ```sh
 dart pub add ai_sdk_dart ai_sdk_anthropic
-export ANTHROPIC_API_KEY=sk-ant-...
 ```
+
+The top-level `anthropic` factory reads
+`const String.fromEnvironment('ANTHROPIC_API_KEY')`. Use it with
+`fvm dart run --define=ANTHROPIC_API_KEY=sk-ant-... bin/app.dart`, or read
+`Platform.environment['ANTHROPIC_API_KEY']` yourself and pass `apiKey:` to
+`AnthropicProvider` in server and CLI apps.
 
 ---
 
@@ -61,8 +66,8 @@ Claude's native `thinking` content blocks are surfaced as `ReasoningPart` via
 
 ```dart
 final model = wrapLanguageModel(
-  anthropic('claude-sonnet-4-5'),
-  [extractReasoningMiddleware(tagName: 'think')],
+  model: anthropic('claude-sonnet-4-5'),
+  middleware: extractReasoningMiddleware(tagName: 'think'),
 );
 
 final result = await generateText(
@@ -130,8 +135,11 @@ print(result.output); // {capital: Paris, population: 68000000}
 
 ```dart
 final model = wrapLanguageModel(
-  anthropic('claude-sonnet-4-5'),
-  [defaultSettingsMiddleware(temperature: 0.3, maxTokens: 512)],
+  model: anthropic('claude-sonnet-4-5'),
+  middleware: defaultSettingsMiddleware(
+    temperature: 0.3,
+    maxOutputTokens: 512,
+  ),
 );
 
 final result = await generateText(

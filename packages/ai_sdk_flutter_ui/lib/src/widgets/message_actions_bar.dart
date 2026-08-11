@@ -65,7 +65,7 @@ class MessageActionsBar extends StatelessWidget {
         if (copyText != null && copyText.isNotEmpty)
           _ActionButton(
             buttonKey: const ValueKey('message-copy'),
-            tooltip: 'Copy',
+            tooltip: 'Copy message',
             icon: Icons.copy_rounded,
             color: color,
             iconSize: iconSize,
@@ -74,7 +74,7 @@ class MessageActionsBar extends StatelessWidget {
         if (onRegenerate != null)
           _ActionButton(
             buttonKey: const ValueKey('message-regenerate'),
-            tooltip: 'Regenerate',
+            tooltip: 'Regenerate response',
             icon: Icons.refresh_rounded,
             color: color,
             iconSize: iconSize,
@@ -132,14 +132,21 @@ class _ActionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return PressableScale(
-      child: IconButton(
-        key: buttonKey,
-        tooltip: tooltip,
-        onPressed: onPressed,
-        iconSize: iconSize,
-        visualDensity: VisualDensity.compact,
-        color: color,
-        icon: Icon(icon),
+      child: Semantics(
+        button: true,
+        label: tooltip,
+        onTap: onPressed,
+        child: ExcludeSemantics(
+          child: IconButton(
+            key: buttonKey,
+            tooltip: tooltip,
+            onPressed: onPressed,
+            iconSize: iconSize,
+            constraints: const BoxConstraints.tightFor(width: 48, height: 48),
+            color: color,
+            icon: Icon(icon),
+          ),
+        ),
       ),
     );
   }

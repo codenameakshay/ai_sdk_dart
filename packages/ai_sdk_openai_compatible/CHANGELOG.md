@@ -1,9 +1,16 @@
 ## Unreleased
 
+- **Breaking:** migrated the shared language model to the V4 provider contract
+  with unified tools, typed response formats, nested usage, and full stream
+  lifecycle events.
+- Abort signals now cancel live Dio requests and surface a typed cancellation
+  error; streamed warnings are normalized into structured warning types.
+- Provider-managed authentication headers now take precedence over per-call
+  headers; custom non-conflicting headers are still forwarded.
 - **Fixed:** the streaming (`doStream`) and non-streaming (`doGenerate`) paths
   now surface model reasoning/thinking. Streaming `delta` reasoning is emitted
   as `StreamPartReasoningDelta`, and non-streaming `message` reasoning as a
-  `LanguageModelV3ReasoningPart`, so `streamText(...).fullStream` /
+  `LanguageModelV4ReasoningPart`, so `streamText(...).fullStream` /
   `result.reasoning` and `generateText(...).reasoning` are populated when the
   provider returns it. Previously reasoning was silently dropped.
 - **New:** `OpenAICompatibleConfig.reasoningKeys` — the response field names

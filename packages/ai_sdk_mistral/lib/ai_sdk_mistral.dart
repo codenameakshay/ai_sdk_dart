@@ -8,6 +8,6 @@
 /// final model = mistral('mistral-large-latest');
 /// final embedder = mistral.embedding('mistral-embed');
 /// ```
-library ai_sdk_mistral;
+library;
 
 export 'src/mistral_provider.dart';

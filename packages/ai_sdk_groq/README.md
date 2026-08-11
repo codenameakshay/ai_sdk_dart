@@ -6,17 +6,17 @@ Groq provider for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart). Run Llama
 
 ```yaml
 dependencies:
-  ai_sdk_dart: ^1.1.0
-  ai_sdk_groq: ^1.1.0
+  ai_sdk_dart: ^1.2.0
+  ai_sdk_groq: ^1.2.0
 ```
 
 ## Usage
 
-Set your API key via environment variable:
-
-```sh
-export GROQ_API_KEY=gsk_...
-```
+The top-level `groq` factory reads
+`const String.fromEnvironment('GROQ_API_KEY')`. Use it with
+`fvm dart run --define=GROQ_API_KEY=gsk_... bin/app.dart`, or read
+`Platform.environment['GROQ_API_KEY']` yourself and pass `apiKey:` to
+`GroqProvider` in server and CLI apps.
 
 ### Language model
 
@@ -34,6 +34,8 @@ print(result.text);
 ### Streaming
 
 ```dart
+import 'dart:io';
+
 final result = await streamText(
   model: groq('llama-3.3-70b-versatile'),
   prompt: 'Explain recursion briefly.',

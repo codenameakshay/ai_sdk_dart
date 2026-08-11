@@ -1,4 +1,5 @@
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
+import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
 
 import 'helpers/fake_models.dart';
@@ -225,17 +226,24 @@ void main() {
     // ── generateObject passes outputSchema to provider ────────────────────
 
     group('generateObject outputSchema', () {
-      test('passes outputSchema to LanguageModelV3CallOptions', () async {
+      test('passes outputSchema to LanguageModelV4CallOptions', () async {
         final model = FakeTextModel('{"name":"Alice"}');
         final schema = Schema<Map<String, dynamic>>(
           jsonSchema: const {
             'type': 'object',
-            'properties': {'name': {'type': 'string'}},
+            'properties': {
+              'name': {'type': 'string'},
+            },
           },
           fromJson: (j) => j,
         );
         await generateObject(model: model, schema: schema, prompt: 'hi');
-        expect(model.lastCallOptions?.outputSchema, schema.jsonSchema);
+        expect(
+          (model.lastCallOptions?.responseFormat
+                  as LanguageModelV4JsonResponseFormat?)
+              ?.schema,
+          schema.jsonSchema,
+        );
       });
 
       test('generateObject outputSchema matches schema.jsonSchema', () async {
@@ -251,8 +259,15 @@ void main() {
         final model = FakeTextModel('{"city":"Berlin"}');
         await generateObject(model: model, schema: schema, prompt: 'test');
         expect(
-          model.lastCallOptions?.outputSchema,
-          equals({'type': 'object', 'properties': {'city': {'type': 'string'}}}),
+          (model.lastCallOptions?.responseFormat
+                  as LanguageModelV4JsonResponseFormat?)
+              ?.schema,
+          equals({
+            'type': 'object',
+            'properties': {
+              'city': {'type': 'string'},
+            },
+          }),
         );
       });
     });

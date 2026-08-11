@@ -69,10 +69,7 @@ EmbeddingModelV2<VALUE> wrapEmbeddingModel<VALUE>({
 }
 
 class _WrappedEmbeddingModel<VALUE> implements EmbeddingModelV2<VALUE> {
-  const _WrappedEmbeddingModel({
-    required this.inner,
-    required this.middleware,
-  });
+  const _WrappedEmbeddingModel({required this.inner, required this.middleware});
 
   final EmbeddingModelV2<VALUE> inner;
   final EmbeddingModelMiddleware<VALUE> middleware;

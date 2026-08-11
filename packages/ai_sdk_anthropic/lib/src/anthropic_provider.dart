@@ -15,7 +15,16 @@ import 'package:dio/dio.dart';
 /// final result = await generateText(model: model, prompt: 'Hello');
 /// ```
 class AnthropicProvider {
-  const AnthropicProvider({this.apiKey, this.baseUrl});
+  AnthropicProvider({
+    this.apiKey,
+    this.baseUrl,
+    CredentialProvider? credentialProvider,
+    Dio? client,
+  }) : _credentialProvider =
+           credentialProvider ??
+           (() => apiKey ?? const String.fromEnvironment('ANTHROPIC_API_KEY')),
+       _client = client ?? _anthropicDio(baseUrl: baseUrl),
+       _ownsClient = client == null;
 
   /// API key (defaults to `ANTHROPIC_API_KEY` environment variable).
   final String? apiKey;
@@ -23,40 +32,59 @@ class AnthropicProvider {
   /// Base URL for the API.
   final String? baseUrl;
 
+  final CredentialProvider _credentialProvider;
+  final Dio _client;
+  final bool _ownsClient;
+
+  Future<Map<String, String>> _headers() async {
+    final key = await Future.value(_credentialProvider());
+    return {
+      if (key != null && key.isNotEmpty) 'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+    };
+  }
+
+  void dispose({bool force = true}) {
+    if (_ownsClient) {
+      _client.close(force: force);
+    }
+  }
+
   /// Returns a language model for the given [modelId].
-  LanguageModelV3 call(String modelId) => _AnthropicLanguageModel(
+  LanguageModelV4 call(String modelId) => _AnthropicLanguageModel(
     modelId: modelId,
-    apiKey: apiKey,
-    baseUrl: baseUrl,
+    client: _client,
+    headers: _headers,
   );
 }
 
 /// Default Anthropic provider instance.
-const anthropic = AnthropicProvider();
+final anthropic = AnthropicProvider();
 
-class _AnthropicLanguageModel implements LanguageModelV3 {
-  const _AnthropicLanguageModel({
+class _AnthropicLanguageModel extends LanguageModelV4 {
+  _AnthropicLanguageModel({
     required this.modelId,
-    this.apiKey,
-    this.baseUrl,
+    required this.client,
+    required this.headers,
   });
 
   @override
   final String modelId;
-  final String? apiKey;
-  final String? baseUrl;
+  final Dio client;
+  final RequestHeadersProvider headers;
 
   @override
   String get provider => 'anthropic';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
-    final client = _anthropicDio(apiKey: apiKey, baseUrl: baseUrl);
+    final resolvedHeaders = await Future.value(headers());
+    final cancelToken = _cancelTokenFor(options.abortSignal);
     final po = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
@@ -71,21 +99,10 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
       if (options.stopSequences.isNotEmpty)
         'stop_sequences': options.stopSequences,
       if (options.tools.isNotEmpty)
-        'tools': options.tools
-            .map(
-              (tool) => {
-                'name': tool.name,
-                if (tool.description != null) 'description': tool.description,
-                'input_schema': tool.inputSchema,
-                if (tool.inputExamples != null &&
-                    tool.inputExamples!.isNotEmpty)
-                  'input_examples': tool.inputExamples,
-              },
-            )
-            .toList(),
+        'tools': options.tools.map(_toAnthropicTool).toList(),
       if (options.toolChoice != null)
         'tool_choice': _toAnthropicToolChoice(options.toolChoice!),
-      if (thinking != null) 'thinking': thinking,
+      'thinking': ?thinking,
       ...?cleanedPo,
     };
     final Response<Map<String, dynamic>> response;
@@ -93,14 +110,15 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
       response = await client.post<Map<String, dynamic>>(
         '/messages',
         data: requestBody,
-        options: Options(headers: options.headers),
+        options: Options(headers: {...?options.headers, ...resolvedHeaders}),
+        cancelToken: cancelToken,
       );
     } on DioException catch (e) {
       throw await _apiCallError(e, provider);
     }
 
     final data = response.data ?? <String, dynamic>{};
-    final content = <LanguageModelV3ContentPart>[];
+    final content = <LanguageModelV4ContentPart>[];
 
     final parts = (data['content'] as List?) ?? const [];
     for (final part in parts) {
@@ -109,7 +127,7 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
       if (type == 'text') {
         final text = map['text']?.toString();
         if (text != null && text.isNotEmpty) {
-          content.add(LanguageModelV3TextPart(text: text));
+          content.add(LanguageModelV4TextPart(text: text));
         }
 
         final citations = (map['citations'] as List?) ?? const [];
@@ -118,7 +136,7 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
           final url = citation['url']?.toString();
           if (url != null && url.isNotEmpty) {
             content.add(
-              LanguageModelV3SourcePart(
+              LanguageModelV4SourcePart(
                 id: 'anthropic_source_$i',
                 url: url,
                 title: citation['title']?.toString(),
@@ -130,7 +148,7 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
       } else if (type == 'tool_use') {
         final rawInput = map['input'];
         content.add(
-          LanguageModelV3ToolCallPart(
+          LanguageModelV4ToolCallPart(
             toolCallId: map['id']?.toString() ?? _generateId('tool'),
             toolName: map['name']?.toString() ?? 'unknown_tool',
             input: rawInput is Map
@@ -142,7 +160,7 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
         final text = map['thinking']?.toString() ?? '';
         if (text.isNotEmpty) {
           content.add(
-            LanguageModelV3ReasoningPart(
+            LanguageModelV4ReasoningPart(
               text: text,
               signature: map['signature']?.toString(),
             ),
@@ -152,7 +170,7 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
         final redacted = map['data']?.toString();
         if (redacted != null && redacted.isNotEmpty) {
           content.add(
-            LanguageModelV3RedactedReasoningPart(
+            LanguageModelV4RedactedReasoningPart(
               data: Uint8List.fromList(utf8.encode(redacted)),
             ),
           );
@@ -162,13 +180,14 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
 
     final usage = (data['usage'] as Map?)?.cast<String, dynamic>();
     final warnings = _readWarnings(data['warnings']);
-    return LanguageModelV3GenerateResult(
+    return LanguageModelV4GenerateResult(
       content: content,
       finishReason: _mapAnthropicFinishReason(data['stop_reason']?.toString()),
       rawFinishReason: data['stop_reason']?.toString(),
       usage: usage == null ? null : _anthropicUsageFrom(usage),
       warnings: warnings,
-      response: LanguageModelV3ResponseMetadata(
+      request: LanguageModelV4RequestMetadata(body: requestBody),
+      response: LanguageModelV4ResponseMetadata(
         id: data['id']?.toString(),
         modelId: data['model']?.toString() ?? modelId,
         timestamp: DateTime.now().toUtc(),
@@ -176,16 +195,16 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
           (key, value) => MapEntry(key, value.join(',')),
         ),
         body: data,
-        requestBody: requestBody,
       ),
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    final client = _anthropicDio(apiKey: apiKey, baseUrl: baseUrl);
+    final resolvedHeaders = await Future.value(headers());
+    final cancelToken = _cancelTokenFor(options.abortSignal);
     final po = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
@@ -199,21 +218,10 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
       if (options.temperature != null) 'temperature': options.temperature,
       if (options.topP != null) 'top_p': options.topP,
       if (options.tools.isNotEmpty)
-        'tools': options.tools
-            .map(
-              (tool) => {
-                'name': tool.name,
-                if (tool.description != null) 'description': tool.description,
-                'input_schema': tool.inputSchema,
-                if (tool.inputExamples != null &&
-                    tool.inputExamples!.isNotEmpty)
-                  'input_examples': tool.inputExamples,
-              },
-            )
-            .toList(),
+        'tools': options.tools.map(_toAnthropicTool).toList(),
       if (options.toolChoice != null)
         'tool_choice': _toAnthropicToolChoice(options.toolChoice!),
-      if (thinking != null) 'thinking': thinking,
+      'thinking': ?thinking,
       ...?cleanedPo,
     };
     final Response<ResponseBody> response;
@@ -223,8 +231,9 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
         data: requestBody,
         options: Options(
           responseType: ResponseType.stream,
-          headers: options.headers,
+          headers: {...?options.headers, ...resolvedHeaders},
         ),
+        cancelToken: cancelToken,
       );
     } on DioException catch (e) {
       throw await _apiCallError(e, provider);
@@ -239,21 +248,20 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
     }
     // coverage:ignore-end
 
-    final controller = StreamController<LanguageModelV3StreamPart>();
+    final controller = StreamController<LanguageModelV4StreamPart>();
     final toolState = <int, _ToolState>{};
+    final reasoningState = <int, _ReasoningState>{};
     var textStarted = false;
-    LanguageModelV3Usage? streamUsage;
-    final streamWarnings = <String>[];
+    var streamStarted = false;
+    LanguageModelV4Usage? streamUsage;
+    final streamWarnings = <LanguageModelV4Warning>[];
     String? responseId;
     String? responseModel;
     Map<String, dynamic>? lastChunk;
-    final rawResponse = <String, Object?>{
-      'requestBody': requestBody,
-      'statusCode': response.statusCode,
-      'headers': response.headers.map.map(
-        (key, value) => MapEntry(key, value.join(',')),
-      ),
-    };
+    final responseHeaders = response.headers.map.map(
+      (key, value) => MapEntry(key, value.join(',')),
+    );
+    final responseTimestamp = DateTime.now().toUtc();
 
     unawaited(() async {
       try {
@@ -263,6 +271,17 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
           lastChunk = json;
           final type = json['type']?.toString();
           streamWarnings.addAll(_readWarnings(json['warnings']));
+          if (!streamStarted) {
+            streamStarted = true;
+            controller.add(
+              StreamPartStreamStart(
+                warnings: List.unmodifiable(streamWarnings),
+              ),
+            );
+          }
+          if (options.includeRawChunks) {
+            controller.add(StreamPartRaw(rawValue: json));
+          }
 
           switch (type) {
             case 'message_start':
@@ -292,8 +311,12 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
                 final name = block['name']?.toString() ?? 'unknown_tool';
                 toolState[index] = _ToolState(id: id, name: name);
                 controller.add(
-                  StreamPartToolCallStart(toolCallId: id, toolName: name),
+                  StreamPartToolInputStart(id: id, toolName: name),
                 );
+              } else if (blockType == 'thinking') {
+                final id = block['id']?.toString() ?? 'reasoning-$index';
+                reasoningState[index] = _ReasoningState(id: id);
+                controller.add(StreamPartReasoningStart(id: id));
               }
               break;
             case 'content_block_delta':
@@ -319,17 +342,20 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
                 if (state != null && chunk != null && chunk.isNotEmpty) {
                   state.argumentsBuffer.write(chunk);
                   controller.add(
-                    StreamPartToolCallDelta(
-                      toolCallId: state.id,
-                      toolName: state.name,
-                      argsTextDelta: chunk,
-                    ),
+                    StreamPartToolInputDelta(id: state.id, delta: chunk),
                   );
                 }
               } else if (deltaType == 'thinking_delta') {
                 final reasoning = delta['thinking']?.toString();
                 if (reasoning != null && reasoning.isNotEmpty) {
-                  controller.add(StreamPartReasoningDelta(delta: reasoning));
+                  final state = reasoningState.putIfAbsent(index, () {
+                    final next = _ReasoningState(id: 'reasoning-$index');
+                    controller.add(StreamPartReasoningStart(id: next.id));
+                    return next;
+                  });
+                  controller.add(
+                    StreamPartReasoningDelta(id: state.id, delta: reasoning),
+                  );
                 }
               }
               break;
@@ -337,13 +363,20 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
               final index = _intOrNull(json['index']) ?? 0;
               final state = toolState.remove(index);
               if (state != null) {
+                controller.add(StreamPartToolInputEnd(id: state.id));
                 controller.add(
-                  StreamPartToolCallEnd(
-                    toolCallId: state.id,
-                    toolName: state.name,
-                    input: _safeParseJson(state.argumentsBuffer.toString()),
+                  StreamPartToolCall(
+                    toolCall: LanguageModelV4ToolCallPart(
+                      toolCallId: state.id,
+                      toolName: state.name,
+                      input: _safeParseJson(state.argumentsBuffer.toString()),
+                    ),
                   ),
                 );
+              }
+              final reasoning = reasoningState.remove(index);
+              if (reasoning != null) {
+                controller.add(StreamPartReasoningEnd(id: reasoning.id));
               }
               break;
             case 'message_delta':
@@ -361,18 +394,48 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
                 if (textStarted) {
                   controller.add(const StreamPartTextEnd(id: 'text-0'));
                 }
+                for (final state in toolState.values.toList()) {
+                  controller.add(StreamPartToolInputEnd(id: state.id));
+                  controller.add(
+                    StreamPartToolCall(
+                      toolCall: LanguageModelV4ToolCallPart(
+                        toolCallId: state.id,
+                        toolName: state.name,
+                        input: _safeParseJson(state.argumentsBuffer.toString()),
+                      ),
+                    ),
+                  );
+                }
+                toolState.clear();
+                for (final state in reasoningState.values.toList()) {
+                  controller.add(StreamPartReasoningEnd(id: state.id));
+                }
+                reasoningState.clear();
+                controller.add(
+                  StreamPartResponseMetadata(
+                    metadata: LanguageModelV4ResponseMetadata(
+                      id: responseId,
+                      modelId: responseModel,
+                      timestamp: responseTimestamp,
+                      headers: responseHeaders,
+                      body: lastChunk,
+                    ),
+                  ),
+                );
                 controller.add(
                   StreamPartFinish(
                     finishReason: _mapAnthropicFinishReason(stopReason),
                     rawFinishReason: stopReason,
-                    usage: streamUsage,
+                    usage: streamUsage ?? const LanguageModelV4Usage(),
                     providerMetadata: {
                       provider: {
-                        if (responseId != null) 'id': responseId,
-                        if (responseModel != null) 'model': responseModel,
+                        'id': ?responseId,
+                        'model': ?responseModel,
                         'timestamp': DateTime.now().toUtc().toIso8601String(),
                         if (streamWarnings.isNotEmpty)
-                          'warnings': streamWarnings,
+                          'warnings': streamWarnings
+                              .map((warning) => warning.type)
+                              .toList(growable: false),
                       },
                     },
                   ),
@@ -383,37 +446,41 @@ class _AnthropicLanguageModel implements LanguageModelV3 {
               controller.add(StreamPartError(error: json));
               break;
           }
-
-          rawResponse['responseMetadata'] = {
-            if (responseId != null) 'id': responseId,
-            if (responseModel != null) 'modelId': responseModel,
-            'timestamp': DateTime.now().toUtc().toIso8601String(),
-          };
-          rawResponse['warnings'] = List<String>.from(streamWarnings);
-          rawResponse['body'] = lastChunk;
         }
       } catch (error) {
+        if (!streamStarted) {
+          streamStarted = true;
+          controller.add(const StreamPartStreamStart());
+        }
         controller.add(StreamPartError(error: error));
       } finally {
+        if (!streamStarted) {
+          controller.add(const StreamPartStreamStart());
+        }
         await controller.close();
       }
     }());
 
-    return LanguageModelV3StreamResult(
+    return LanguageModelV4StreamResult(
       stream: controller.stream,
-      rawResponse: rawResponse,
+      warnings: List.unmodifiable(streamWarnings),
+      request: LanguageModelV4RequestMetadata(body: requestBody),
+      response: LanguageModelV4ResponseMetadata(
+        id: responseId,
+        modelId: responseModel,
+        timestamp: responseTimestamp,
+        headers: responseHeaders,
+        body: lastChunk,
+      ),
     );
   }
 }
 
-Dio _anthropicDio({String? apiKey, String? baseUrl}) {
-  final resolvedApiKey =
-      apiKey ?? const String.fromEnvironment('ANTHROPIC_API_KEY');
+Dio _anthropicDio({String? baseUrl}) {
   return Dio(
     BaseOptions(
       baseUrl: baseUrl ?? 'https://api.anthropic.com/v1',
       headers: {
-        if (resolvedApiKey.isNotEmpty) 'x-api-key': resolvedApiKey,
         'anthropic-version': '2023-06-01',
         'content-type': 'application/json',
       },
@@ -421,39 +488,39 @@ Dio _anthropicDio({String? apiKey, String? baseUrl}) {
   );
 }
 
-List<Map<String, dynamic>> _toAnthropicMessages(LanguageModelV3Prompt prompt) {
+List<Map<String, dynamic>> _toAnthropicMessages(LanguageModelV4Prompt prompt) {
   final out = <Map<String, dynamic>>[];
 
   for (final message in prompt.messages) {
     final role = switch (message.role) {
-      LanguageModelV3Role.system => 'user',
-      LanguageModelV3Role.user => 'user',
-      LanguageModelV3Role.assistant => 'assistant',
-      LanguageModelV3Role.tool => 'user',
+      LanguageModelV4Role.system => 'user',
+      LanguageModelV4Role.user => 'user',
+      LanguageModelV4Role.assistant => 'assistant',
+      LanguageModelV4Role.tool => 'user',
     };
 
     final contentParts = <Map<String, dynamic>>[];
     for (final part in message.content) {
-      if (part is LanguageModelV3TextPart) {
+      if (part is LanguageModelV4TextPart) {
         contentParts.add({'type': 'text', 'text': part.text});
-      } else if (part is LanguageModelV3ImagePart) {
+      } else if (part is LanguageModelV4ImagePart) {
         final image = _toAnthropicImagePart(part);
         if (image != null) {
           contentParts.add(image);
         }
-      } else if (part is LanguageModelV3FilePart) {
+      } else if (part is LanguageModelV4FilePart) {
         final document = _toAnthropicFilePart(part);
         if (document != null) {
           contentParts.add(document);
         }
-      } else if (part is LanguageModelV3ToolCallPart) {
+      } else if (part is LanguageModelV4ToolCallPart) {
         contentParts.add({
           'type': 'tool_use',
           'id': part.toolCallId,
           'name': part.toolName,
           'input': part.input,
         });
-      } else if (part is LanguageModelV3ToolResultPart) {
+      } else if (part is LanguageModelV4ToolResultPart) {
         contentParts.add({
           'type': 'tool_result',
           'tool_use_id': part.toolCallId,
@@ -470,7 +537,7 @@ List<Map<String, dynamic>> _toAnthropicMessages(LanguageModelV3Prompt prompt) {
   return out;
 }
 
-Map<String, dynamic> _toAnthropicToolChoice(LanguageModelV3ToolChoice choice) {
+Map<String, dynamic> _toAnthropicToolChoice(LanguageModelV4ToolChoice choice) {
   return switch (choice) {
     ToolChoiceAuto() => {'type': 'auto'},
     ToolChoiceNone() => {'type': 'auto'},
@@ -479,14 +546,14 @@ Map<String, dynamic> _toAnthropicToolChoice(LanguageModelV3ToolChoice choice) {
   };
 }
 
-LanguageModelV3FinishReason _mapAnthropicFinishReason(String? reason) {
+LanguageModelV4FinishReason _mapAnthropicFinishReason(String? reason) {
   return switch (reason) {
-    'end_turn' => LanguageModelV3FinishReason.stop,
-    'max_tokens' => LanguageModelV3FinishReason.length,
-    'tool_use' => LanguageModelV3FinishReason.toolCalls,
-    'stop_sequence' => LanguageModelV3FinishReason.stop,
-    null => LanguageModelV3FinishReason.unknown,
-    _ => LanguageModelV3FinishReason.other,
+    'end_turn' => LanguageModelV4FinishReason.stop,
+    'max_tokens' => LanguageModelV4FinishReason.length,
+    'tool_use' => LanguageModelV4FinishReason.toolCalls,
+    'stop_sequence' => LanguageModelV4FinishReason.stop,
+    null => LanguageModelV4FinishReason.unknown,
+    _ => LanguageModelV4FinishReason.other,
   };
 }
 
@@ -510,7 +577,9 @@ Map<String, dynamic>? _safeParseMap(String input) {
   // `Map<String, dynamic>`, so the first guard above always wins. This cast
   // path only exists for a hypothetical non-`<String, dynamic>` Map and is
   // unreachable via the SSE data-line input that calls this.
-  if (parsed is Map) return parsed.cast<String, dynamic>(); // coverage:ignore-line
+  if (parsed is Map) {
+    return parsed.cast<String, dynamic>(); // coverage:ignore-line
+  }
   return null;
 }
 
@@ -529,22 +598,22 @@ int? _intOrNull(Object? value) => switch (value) {
   _ => null,
 };
 
-/// Builds a [LanguageModelV3Usage] from an Anthropic `usage` object, mapping the
-/// prompt-cache token fields into [LanguageModelV3InputTokenDetails].
+/// Builds a [LanguageModelV4Usage] from an Anthropic `usage` object, mapping
+/// the prompt-cache token fields into nested V4 input token usage fields.
 ///
 /// Anthropic reports cache tokens *separately* from `input_tokens` (unlike
-/// OpenAI/Google, where cached tokens are a subset of the prompt count), so the
-/// reported [LanguageModelV3Usage.inputTokens] is the sum of the fresh input,
-/// cache-read, and cache-creation tokens. When the response carries no cache
-/// fields the total collapses back to `input_tokens`, preserving prior
-/// behaviour.
+/// OpenAI/Google, where cached tokens are a subset of the prompt count), so
+/// the reported [LanguageModelV4InputTokenUsage.total] is the sum of the fresh
+/// input, cache-read, and cache-creation tokens. When the response carries no
+/// cache fields the total collapses back to `input_tokens`, preserving prior
+/// behaviour while leaving the cache breakdown unset.
 ///
 /// [previous] carries usage forward across streaming events: `message_start`
 /// reports the input/cache breakdown while later `message_delta` events report
 /// only `output_tokens`.
-LanguageModelV3Usage _anthropicUsageFrom(
+LanguageModelV4Usage _anthropicUsageFrom(
   Map<String, dynamic> usage, {
-  LanguageModelV3Usage? previous,
+  LanguageModelV4Usage? previous,
 }) {
   final inputTokens = _intOrNull(usage['input_tokens']);
   final outputTokens = _intOrNull(usage['output_tokens']);
@@ -556,19 +625,20 @@ LanguageModelV3Usage _anthropicUsageFrom(
   if (inputTokens != null || hasCache) {
     totalInput = (inputTokens ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0);
   } else {
-    totalInput = previous?.inputTokens;
+    totalInput = previous?.inputTokens.total;
   }
 
-  return LanguageModelV3Usage(
-    inputTokens: totalInput,
-    outputTokens: outputTokens ?? previous?.outputTokens,
-    inputTokenDetails: hasCache
-        ? LanguageModelV3InputTokenDetails(
-            noCacheTokens: inputTokens,
-            cacheReadTokens: cacheRead,
-            cacheWriteTokens: cacheWrite,
-          )
-        : previous?.inputTokenDetails,
+  return LanguageModelV4Usage(
+    inputTokens: LanguageModelV4InputTokenUsage(
+      total: totalInput,
+      noCache: hasCache ? inputTokens : previous?.inputTokens.noCache,
+      cacheRead: hasCache ? cacheRead : previous?.inputTokens.cacheRead,
+      cacheWrite: hasCache ? cacheWrite : previous?.inputTokens.cacheWrite,
+    ),
+    outputTokens: LanguageModelV4OutputTokenUsage(
+      total: outputTokens ?? previous?.outputTokens.total,
+    ),
+    raw: usage,
   );
 }
 
@@ -577,7 +647,7 @@ String _generateId(String prefix) {
   return '$prefix-$micros';
 }
 
-Map<String, dynamic>? _toAnthropicImagePart(LanguageModelV3ImagePart part) {
+Map<String, dynamic>? _toAnthropicImagePart(LanguageModelV4ImagePart part) {
   if (part.image is DataContentUrl) {
     return {
       'type': 'image',
@@ -600,10 +670,10 @@ Map<String, dynamic>? _toAnthropicImagePart(LanguageModelV3ImagePart part) {
   };
 }
 
-Map<String, dynamic>? _toAnthropicFilePart(LanguageModelV3FilePart part) {
+Map<String, dynamic>? _toAnthropicFilePart(LanguageModelV4FilePart part) {
   if (part.mediaType.startsWith('image/')) {
     return _toAnthropicImagePart(
-      LanguageModelV3ImagePart(image: part.data, mediaType: part.mediaType),
+      LanguageModelV4ImagePart(image: part.data, mediaType: part.mediaType),
     );
   }
 
@@ -627,25 +697,25 @@ Map<String, dynamic>? _toAnthropicFilePart(LanguageModelV3FilePart part) {
   };
 }
 
-Object _toAnthropicToolResultContent(LanguageModelV3ToolResultOutput output) {
+Object _toAnthropicToolResultContent(LanguageModelV4ToolResultOutput output) {
   if (output is ToolResultOutputText) return output.text;
   if (output is! ToolResultOutputContent) return '';
   return output.parts.map(_toAnthropicToolResultPart).toList();
 }
 
 Map<String, dynamic> _toAnthropicToolResultPart(
-  LanguageModelV3ContentPart part,
+  LanguageModelV4ContentPart part,
 ) {
-  if (part is LanguageModelV3TextPart) {
+  if (part is LanguageModelV4TextPart) {
     return {'type': 'text', 'text': part.text};
   }
 
-  if (part is LanguageModelV3ImagePart) {
+  if (part is LanguageModelV4ImagePart) {
     final image = _toAnthropicImagePart(part);
     if (image != null) return image;
   }
 
-  if (part is LanguageModelV3FilePart) {
+  if (part is LanguageModelV4FilePart) {
     final file = _toAnthropicFilePart(part);
     if (file != null) return file;
   }
@@ -653,7 +723,7 @@ Map<String, dynamic> _toAnthropicToolResultPart(
   return {'type': 'text', 'text': '[unsupported tool result content]'};
 }
 
-String? _toBase64(LanguageModelV3DataContent data) {
+String? _toBase64(LanguageModelV4DataContent data) {
   return switch (data) {
     DataContentBytes(:final bytes) => base64Encode(bytes),
     DataContentBase64(:final base64) => base64,
@@ -664,13 +734,63 @@ String? _toBase64(LanguageModelV3DataContent data) {
   };
 }
 
-List<String> _readWarnings(Object? warningsRaw) {
-  if (warningsRaw is! List) return const [];
+Map<String, dynamic> _toAnthropicTool(LanguageModelV4Tool tool) =>
+    switch (tool) {
+      LanguageModelV4FunctionTool() => {
+        'name': tool.name,
+        if (tool.description != null) 'description': tool.description,
+        'input_schema': tool.inputSchema,
+        if (tool.inputExamples case final examples? when examples.isNotEmpty)
+          'input_examples': examples,
+      },
+      LanguageModelV4ProviderDefinedTool() => {
+        'type': tool.id.split('.').last,
+        'name': tool.name,
+        if (tool.description != null) 'description': tool.description,
+        ...tool.args,
+      },
+    };
+
+List<LanguageModelV4Warning> _readWarnings(Object? warningsRaw) {
+  if (warningsRaw is! List) {
+    return const [];
+  }
+
   return warningsRaw
-      .map((item) => item?.toString())
-      .whereType<String>()
-      .where((item) => item.isNotEmpty)
-      .toList();
+      .map(_parseWarning)
+      .whereType<LanguageModelV4Warning>()
+      .toList(growable: false);
+}
+
+LanguageModelV4Warning? _parseWarning(Object? item) {
+  if (item == null) return null;
+  if (item is String) {
+    return item.isEmpty ? null : LanguageModelV4OtherWarning(message: item);
+  }
+  if (item is Map) {
+    final map = item.cast<Object?, Object?>();
+    final type = map['type']?.toString();
+    final feature = map['feature']?.toString();
+    final details = map['details']?.toString();
+    return switch (type) {
+      'unsupported' when feature != null => LanguageModelV4UnsupportedWarning(
+        feature: feature,
+        details: details,
+      ),
+      'compatibility' when feature != null =>
+        LanguageModelV4CompatibilityWarning(feature: feature, details: details),
+      'deprecated' when feature != null => LanguageModelV4DeprecatedWarning(
+        setting: feature,
+        message: details ?? 'This setting is deprecated.',
+      ),
+      'other' => LanguageModelV4OtherWarning(
+        message: map['message']?.toString() ?? jsonEncode(item),
+      ),
+      _ => LanguageModelV4OtherWarning(message: jsonEncode(item)),
+    };
+  }
+  final text = item.toString();
+  return text.isEmpty ? null : LanguageModelV4OtherWarning(message: text);
 }
 
 class _ToolState {
@@ -679,6 +799,12 @@ class _ToolState {
   final String id;
   final String name;
   final StringBuffer argumentsBuffer = StringBuffer();
+}
+
+class _ReasoningState {
+  _ReasoningState({required this.id});
+
+  final String id;
 }
 
 /// Extracts the `thinking` configuration from raw [providerOptions].
@@ -712,10 +838,31 @@ class _ToolState {
 /// Maps a [DioException] from a non-2xx response to a typed [AiApiCallError]
 /// carrying the provider's message/status/code. Drains a streamed error body
 /// (`ResponseType.stream`) when present so the message is recoverable.
-Future<AiApiCallError> _apiCallError(
-  DioException error,
-  String provider,
-) async {
+CancelToken? _cancelTokenFor(LanguageModelV4AbortSignal? abortSignal) {
+  if (abortSignal == null) {
+    return null;
+  }
+
+  final cancelToken = CancelToken();
+  if (abortSignal.isCancelled) {
+    cancelToken.cancel('abortSignal');
+    return cancelToken;
+  }
+
+  unawaited(
+    abortSignal.onCancelled.then((_) {
+      if (!cancelToken.isCancelled) {
+        cancelToken.cancel('abortSignal');
+      }
+    }),
+  );
+  return cancelToken;
+}
+
+Future<AiSdkError> _apiCallError(DioException error, String provider) async {
+  if (error.type == DioExceptionType.cancel || CancelToken.isCancel(error)) {
+    return const AiOperationCancelledError();
+  }
   final data = error.response?.data;
   Object? body = data;
   if (data is ResponseBody) {

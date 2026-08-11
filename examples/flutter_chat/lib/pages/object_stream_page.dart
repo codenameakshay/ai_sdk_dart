@@ -10,13 +10,16 @@ import '../config.dart';
 /// The model generates a country profile as a typed map.
 /// Each partial update is shown live as fields arrive.
 class ObjectStreamPage extends StatefulWidget {
-  const ObjectStreamPage({super.key});
+  const ObjectStreamPage({super.key, this.controller});
+
+  final ObjectStreamController<Map<String, dynamic>>? controller;
 
   @override
   State<ObjectStreamPage> createState() => _ObjectStreamPageState();
 }
 
 class _ObjectStreamPageState extends State<ObjectStreamPage> {
+  ObjectStreamController<Map<String, dynamic>>? _ownedObjectController;
   late final ObjectStreamController<Map<String, dynamic>> _objectController;
   final _countryController = TextEditingController(text: 'Japan');
 
@@ -50,19 +53,18 @@ class _ObjectStreamPageState extends State<ObjectStreamPage> {
   @override
   void initState() {
     super.initState();
-    // useObject-style: hand the controller a model + schema up front, then just
-    // call `submit(prompt)` — it runs streamText(output: Output.object(...))
-    // and binds the partial-output stream for you.
-    _objectController = ObjectStreamController<Map<String, dynamic>>(
-      model: OpenAIProvider(apiKey: openAiApiKey)('gpt-4.1-mini'),
-      schema: _schema,
-      onError: (err) => _showSnackBar('Error: $err'),
-    );
+    _objectController =
+        widget.controller ??
+        (_ownedObjectController = ObjectStreamController<Map<String, dynamic>>(
+          model: OpenAIProvider(apiKey: openAiApiKey)('gpt-4.1-mini'),
+          schema: _schema,
+          onError: (err) => _showSnackBar('Error: $err'),
+        ));
   }
 
   @override
   void dispose() {
-    _objectController.dispose();
+    _ownedObjectController?.dispose();
     _countryController.dispose();
     super.dispose();
   }

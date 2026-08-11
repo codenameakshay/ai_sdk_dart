@@ -243,14 +243,19 @@ class _StreamingCursorState extends State<StreamingCursor>
     vsync: this,
     duration: AiMotion.cursorPeriod,
   );
-  bool _started = false;
+  bool? _reducedMotion;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_started) return;
-    _started = true;
-    if (!AiMotion.reduced(context)) _controller.repeat();
+    final reducedMotion = AiMotion.reduced(context);
+    if (_reducedMotion == reducedMotion) return;
+    _reducedMotion = reducedMotion;
+    if (reducedMotion) {
+      _controller.stop();
+      return;
+    }
+    _controller.repeat();
   }
 
   @override

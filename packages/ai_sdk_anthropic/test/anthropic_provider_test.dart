@@ -5,9 +5,11 @@ import 'dart:typed_data';
 
 import 'package:ai_sdk_anthropic/ai_sdk_anthropic.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
 import '../../ai_sdk_provider/test/contract/language_model_contract.dart';
+import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
   group('AnthropicProvider', () {
@@ -48,28 +50,30 @@ void main() {
       ).call('claude-sonnet-4-5');
 
       final result = await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'weather?')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'weather?')],
               ),
             ],
           ),
         ),
       );
 
-      expect(result.finishReason, LanguageModelV3FinishReason.toolCalls);
-      expect(result.usage?.inputTokens, 12);
-      // No cache fields in the response → no input token breakdown.
-      expect(result.usage?.inputTokenDetails, isNull);
+      expect(result.finishReason, LanguageModelV4FinishReason.toolCalls);
+      expect(result.usage.inputTokens.total, 12);
+      // No cache fields in the response -> no input token breakdown.
+      expect(result.usage.inputTokens.noCache, isNull);
+      expect(result.usage.inputTokens.cacheRead, isNull);
+      expect(result.usage.inputTokens.cacheWrite, isNull);
       expect(
-        result.content.whereType<LanguageModelV3ReasoningPart>().length,
+        result.content.whereType<LanguageModelV4ReasoningPart>().length,
         1,
       );
       expect(
-        result.content.whereType<LanguageModelV3ToolCallPart>().single.toolName,
+        result.content.whereType<LanguageModelV4ToolCallPart>().single.toolName,
         'weather',
       );
     });
@@ -106,12 +110,12 @@ void main() {
         baseUrl: server.baseUrl,
       ).call('claude-sonnet-4-5');
       final stream = await model.doStream(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
@@ -124,15 +128,238 @@ void main() {
         'Hello',
       );
       expect(
-        parts.whereType<StreamPartToolCallStart>().single.toolName,
+        parts.whereType<StreamPartToolInputStart>().single.toolName,
         'weather',
       );
-      expect(parts.whereType<StreamPartToolCallEnd>().single.input, isA<Map>());
+      expect(
+        parts.whereType<StreamPartToolCall>().single.toolCall.input,
+        isA<Map>(),
+      );
       expect(
         parts.whereType<StreamPartFinish>().single.finishReason,
-        LanguageModelV3FinishReason.toolCalls,
+        LanguageModelV4FinishReason.toolCalls,
       );
     });
+
+    test('credentials are resolved immediately before each request', () async {
+      final apiKeys = <String?>[];
+      final server = await _TestServer.start((request) async {
+        apiKeys.add(request.headers.value('x-api-key'));
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'stop_reason': 'end_turn',
+            'content': [
+              {'type': 'text', 'text': 'ok'},
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      var token = 'first-key';
+      final provider = AnthropicProvider(
+        baseUrl: server.baseUrl,
+        credentialProvider: () async => token,
+      );
+
+      await provider
+          .call('claude-sonnet-4-5')
+          .doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('first')));
+      token = 'second-key';
+      await provider
+          .call('claude-sonnet-4-5')
+          .doGenerate(
+            LanguageModelV4CallOptions(prompt: _userPrompt('second')),
+          );
+
+      expect(apiKeys, ['first-key', 'second-key']);
+    });
+
+    test('reuses an injected client across multiple requests', () async {
+      final server = await _TestServer.start((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'stop_reason': 'end_turn',
+            'content': [
+              {'type': 'text', 'text': 'ok'},
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      var interceptedRequests = 0;
+      final client = Dio(BaseOptions(baseUrl: server.baseUrl))
+        ..interceptors.add(
+          InterceptorsWrapper(
+            onRequest: (options, handler) {
+              interceptedRequests++;
+              handler.next(options);
+            },
+          ),
+        );
+      addTearDown(() => client.close(force: true));
+
+      final provider = AnthropicProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+        client: client,
+      );
+
+      await provider
+          .call('claude-sonnet-4-5')
+          .doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('first')));
+      await provider
+          .call('claude-sonnet-4-5')
+          .doGenerate(
+            LanguageModelV4CallOptions(prompt: _userPrompt('second')),
+          );
+
+      expect(interceptedRequests, 2);
+    });
+
+    test(
+      'doGenerate cancels an in-flight Dio request via abortSignal',
+      () async {
+        final adapter = _CancellationHttpClientAdapter();
+        final client = _cancellationClient(adapter, 'http://localhost/v1');
+        addTearDown(() => client.close(force: true));
+        final abortSignal = _TestAbortSignal();
+        final model = AnthropicProvider(
+          apiKey: 'test',
+          baseUrl: 'http://localhost/v1',
+          client: client,
+        ).call('claude-sonnet-4-5');
+
+        final future = model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: _userPrompt('hi'),
+            abortSignal: abortSignal,
+          ),
+        );
+
+        await adapter.fetchStarted.future;
+        expect(adapter.lastOptions?.cancelToken, isNotNull);
+        abortSignal.cancel();
+
+        await expectLater(future, throwsA(isA<AiOperationCancelledError>()));
+        expect(adapter.fetchCount, 1);
+      },
+    );
+
+    test(
+      'doGenerate surfaces AiOperationCancelledError for a pre-cancelled abortSignal',
+      () async {
+        final adapter = _CancellationHttpClientAdapter();
+        final client = _cancellationClient(adapter, 'http://localhost/v1');
+        addTearDown(() => client.close(force: true));
+        final abortSignal = _TestAbortSignal()..cancel();
+        final model = AnthropicProvider(
+          apiKey: 'test',
+          baseUrl: 'http://localhost/v1',
+          client: client,
+        ).call('claude-sonnet-4-5');
+
+        await expectLater(
+          model.doGenerate(
+            LanguageModelV4CallOptions(
+              prompt: _userPrompt('hi'),
+              abortSignal: abortSignal,
+            ),
+          ),
+          throwsA(isA<AiOperationCancelledError>()),
+        );
+        expect(adapter.fetchCount, 0);
+      },
+    );
+
+    test('doStream cancels the Dio handshake via abortSignal', () async {
+      final adapter = _CancellationHttpClientAdapter();
+      final client = _cancellationClient(adapter, 'http://localhost/v1');
+      addTearDown(() => client.close(force: true));
+      final abortSignal = _TestAbortSignal();
+      final model = AnthropicProvider(
+        apiKey: 'test',
+        baseUrl: 'http://localhost/v1',
+        client: client,
+      ).call('claude-sonnet-4-5');
+
+      final future = model.doStream(
+        LanguageModelV4CallOptions(
+          prompt: _userPrompt('hi'),
+          abortSignal: abortSignal,
+        ),
+      );
+
+      await adapter.fetchStarted.future;
+      expect(adapter.lastOptions?.cancelToken, isNotNull);
+      abortSignal.cancel();
+
+      await expectLater(future, throwsA(isA<AiOperationCancelledError>()));
+      expect(adapter.fetchCount, 1);
+    });
+
+    test(
+      'dispose closes owned clients and leaves injected clients open',
+      () async {
+        final server = await _TestServer.start((request) async {
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'stop_reason': 'end_turn',
+              'content': [
+                {'type': 'text', 'text': 'ok'},
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final ownedProvider = AnthropicProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        );
+        ownedProvider.dispose();
+        await expectLater(
+          ownedProvider
+              .call('claude-sonnet-4-5')
+              .doGenerate(
+                LanguageModelV4CallOptions(
+                  prompt: _userPrompt('after-dispose'),
+                ),
+              ),
+          throwsA(anything),
+        );
+
+        final client = Dio(BaseOptions(baseUrl: server.baseUrl));
+        final adapter = attachTrackingAdapter(client);
+        final injectedProvider = AnthropicProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+          client: client,
+        );
+
+        injectedProvider.dispose(force: false);
+        await injectedProvider
+            .call('claude-sonnet-4-5')
+            .doGenerate(
+              LanguageModelV4CallOptions(prompt: _userPrompt('still-open')),
+            );
+
+        expect(adapter.closeCount, 0);
+        client.close(force: true);
+        expect(adapter.closeCount, 1);
+        expect(adapter.lastForce, true);
+      },
+    );
 
     test('maps tool choice modes to anthropic wire format', () async {
       final seenBodies = <Map<String, dynamic>>[];
@@ -159,19 +386,19 @@ void main() {
         baseUrl: server.baseUrl,
       ).call('claude-sonnet-4-5');
 
-      Future<void> call(LanguageModelV3ToolChoice toolChoice) async {
+      Future<void> call(LanguageModelV4ToolChoice toolChoice) async {
         await model.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
               messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
-                  content: [LanguageModelV3TextPart(text: 'hi')],
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'hi')],
                 ),
               ],
             ),
             tools: const [
-              LanguageModelV3FunctionTool(
+              LanguageModelV4FunctionTool(
                 name: 'weather',
                 inputSchema: {'type': 'object'},
               ),
@@ -222,17 +449,17 @@ void main() {
       ).call('claude-sonnet-4-5');
 
       await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
           tools: const [
-            LanguageModelV3FunctionTool(
+            LanguageModelV4FunctionTool(
               name: 'weather',
               inputSchema: {'type': 'object'},
               inputExamples: [
@@ -274,12 +501,12 @@ void main() {
         baseUrl: server.baseUrl,
       ).call('claude-sonnet-4-5');
       final result = await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
@@ -287,7 +514,7 @@ void main() {
       );
 
       final source = result.content
-          .whereType<LanguageModelV3SourcePart>()
+          .whereType<LanguageModelV4SourcePart>()
           .single;
       expect(source.url, 'https://example.com/a');
       expect(source.title, 'Example A');
@@ -323,17 +550,17 @@ void main() {
           baseUrl: server.baseUrl,
         ).call('claude-sonnet-4-5');
         final result = await model.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
               messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
-                  content: [LanguageModelV3TextPart(text: 'hi')],
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'hi')],
                 ),
               ],
             ),
             tools: const [
-              LanguageModelV3FunctionTool(
+              LanguageModelV4FunctionTool(
                 name: 'weather',
                 inputSchema: {'type': 'object'},
                 strict: true,
@@ -343,7 +570,7 @@ void main() {
         );
 
         final call = result.content
-            .whereType<LanguageModelV3ToolCallPart>()
+            .whereType<LanguageModelV4ToolCallPart>()
             .single;
         expect(call.input, 'not-an-object');
       },
@@ -375,12 +602,12 @@ void main() {
       ).call('claude-sonnet-4-5');
 
       final result = await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
@@ -393,7 +620,7 @@ void main() {
       );
 
       expect(
-        result.content.whereType<LanguageModelV3TextPart>().single.text,
+        result.content.whereType<LanguageModelV4TextPart>().single.text,
         'ok',
       );
     });
@@ -449,35 +676,35 @@ void main() {
         ).call('claude-sonnet-4-5');
 
         final result = await model.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
               messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
                   content: [
-                    LanguageModelV3TextPart(text: 'check these files'),
-                    LanguageModelV3ImagePart(
+                    LanguageModelV4TextPart(text: 'check these files'),
+                    LanguageModelV4ImagePart(
                       image: DataContentBytes(
                         Uint8List.fromList(utf8.encode('img')),
                       ),
                       mediaType: 'image/png',
                     ),
-                    LanguageModelV3FilePart(
+                    LanguageModelV4FilePart(
                       data: DataContentBase64(fileB64),
                       mediaType: 'application/pdf',
                       filename: 'doc.pdf',
                     ),
                   ],
                 ),
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.tool,
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.tool,
                   content: [
-                    LanguageModelV3ToolResultPart(
+                    LanguageModelV4ToolResultPart(
                       toolCallId: 'toolu_1',
                       toolName: 'weather',
                       isError: true,
                       output: ToolResultOutputContent([
-                        LanguageModelV3TextPart(text: 'error payload'),
+                        LanguageModelV4TextPart(text: 'error payload'),
                       ]),
                     ),
                   ],
@@ -488,7 +715,7 @@ void main() {
         );
 
         expect(
-          result.content.whereType<LanguageModelV3TextPart>().single.text,
+          result.content.whereType<LanguageModelV4TextPart>().single.text,
           'ok',
         );
       },
@@ -520,12 +747,12 @@ void main() {
       ).call('claude-sonnet-4-5');
 
       final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
@@ -535,69 +762,125 @@ void main() {
       final finish = (await streamResult.stream.toList())
           .whereType<StreamPartFinish>()
           .single;
-      expect(finish.usage?.inputTokens, 8);
-      expect(finish.usage?.outputTokens, 3);
+      expect(finish.usage.inputTokens.total, 8);
+      expect(finish.usage.outputTokens.total, 3);
       expect(finish.providerMetadata?['anthropic']?['id'], 'msg_123');
       expect(
         finish.providerMetadata?['anthropic']?['warnings'],
-        contains('careful'),
+        contains('other'),
       );
     });
+    test(
+      'stream emits raw chunks and closes explicit thinking and tool blocks',
+      () async {
+        final server = await _TestServer.start((request) async {
+          request.response.statusCode = 200;
+          request.response.headers.set('content-type', 'text/event-stream');
+          request.response.write(
+            'data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","id":"thinking-1"}}\n\n',
+          );
+          request.response.write(
+            'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"pondering"}}\n\n',
+          );
+          request.response.write(
+            'data: {"type":"content_block_stop","index":0}\n\n',
+          );
+          request.response.write(
+            'data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"lookup"}}\n\n',
+          );
+          request.response.write(
+            'data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\\"city\\":\\"Paris\\"}"}}\n\n',
+          );
+          request.response.write(
+            'data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}\n\n',
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
 
-    test('doGenerate maps cache_read/creation into inputTokenDetails',
-        () async {
-      final server = await _TestServer.start((request) async {
-        request.response.statusCode = 200;
-        request.response.headers.contentType = ContentType.json;
-        request.response.write(
-          jsonEncode({
-            'id': 'msg_c',
-            'model': 'claude-sonnet-4-5',
-            'stop_reason': 'end_turn',
-            'content': [
-              {'type': 'text', 'text': 'hi'},
-            ],
-            'usage': {
-              'input_tokens': 10,
-              'output_tokens': 5,
-              'cache_read_input_tokens': 100,
-              'cache_creation_input_tokens': 20,
-            },
-          }),
-        );
-        await request.response.close();
-      });
-      addTearDown(server.close);
+        final model = AnthropicProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('claude-sonnet-4-5');
 
-      final model = AnthropicProvider(
-        apiKey: 'test',
-        baseUrl: server.baseUrl,
-      ).call('claude-sonnet-4-5');
-
-      final result = await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
-            messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
-              ),
-            ],
+        final streamResult = await model.doStream(
+          LanguageModelV4CallOptions(
+            prompt: _userPrompt('hi'),
+            includeRawChunks: true,
           ),
-        ),
-      );
+        );
 
-      // Anthropic reports cache tokens separately, so inputTokens is the sum:
-      // input_tokens (10) + cache_read (100) + cache_creation (20) = 130.
-      expect(result.usage?.inputTokens, 130);
-      expect(result.usage?.outputTokens, 5);
-      expect(result.usage?.inputTokenDetails?.noCacheTokens, 10);
-      expect(result.usage?.inputTokenDetails?.cacheReadTokens, 100);
-      expect(result.usage?.inputTokenDetails?.cacheWriteTokens, 20);
-    });
+        final parts = await streamResult.stream.toList();
+        expect(parts.whereType<StreamPartRaw>(), isNotEmpty);
+        expect(
+          parts.whereType<StreamPartReasoningStart>().single.id,
+          'thinking-1',
+        );
+        expect(
+          parts.whereType<StreamPartReasoningEnd>().single.id,
+          'thinking-1',
+        );
+        expect(parts.whereType<StreamPartToolInputEnd>().single.id, 'toolu_1');
+        expect(parts.whereType<StreamPartToolCall>().single.toolCall.input, {
+          'city': 'Paris',
+        });
+      },
+    );
+    test(
+      'doGenerate maps cache_read/creation into V4 input token fields',
+      () async {
+        final server = await _TestServer.start((request) async {
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'id': 'msg_c',
+              'model': 'claude-sonnet-4-5',
+              'stop_reason': 'end_turn',
+              'content': [
+                {'type': 'text', 'text': 'hi'},
+              ],
+              'usage': {
+                'input_tokens': 10,
+                'output_tokens': 5,
+                'cache_read_input_tokens': 100,
+                'cache_creation_input_tokens': 20,
+              },
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
 
-    test('stream carries cache token details from message_start to finish',
-        () async {
+        final model = AnthropicProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('claude-sonnet-4-5');
+
+        final result = await model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'hi')],
+                ),
+              ],
+            ),
+          ),
+        );
+
+        // Anthropic reports cache tokens separately, so inputTokens is the sum:
+        // input_tokens (10) + cache_read (100) + cache_creation (20) = 130.
+        expect(result.usage.inputTokens.total, 130);
+        expect(result.usage.outputTokens.total, 5);
+        expect(result.usage.inputTokens.noCache, 10);
+        expect(result.usage.inputTokens.cacheRead, 100);
+        expect(result.usage.inputTokens.cacheWrite, 20);
+      },
+    );
+
+    test('stream carries cache token fields from message_start to finish', () async {
       final server = await _TestServer.start((request) async {
         request.response.statusCode = 200;
         request.response.headers.set('content-type', 'text/event-stream');
@@ -625,12 +908,12 @@ void main() {
       ).call('claude-sonnet-4-5');
 
       final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
@@ -641,12 +924,12 @@ void main() {
           .whereType<StreamPartFinish>()
           .single;
       // input_tokens (8) + cache_read (40) = 48; output from message_delta.
-      expect(finish.usage?.inputTokens, 48);
-      expect(finish.usage?.outputTokens, 3);
-      // Details captured at message_start survive the output-only delta.
-      expect(finish.usage?.inputTokenDetails?.noCacheTokens, 8);
-      expect(finish.usage?.inputTokenDetails?.cacheReadTokens, 40);
-      expect(finish.usage?.inputTokenDetails?.cacheWriteTokens, 0);
+      expect(finish.usage.inputTokens.total, 48);
+      expect(finish.usage.outputTokens.total, 3);
+      // Cache breakdown captured at message_start survives the output-only delta.
+      expect(finish.usage.inputTokens.noCache, 8);
+      expect(finish.usage.inputTokens.cacheRead, 40);
+      expect(finish.usage.inputTokens.cacheWrite, 0);
     });
 
     // ── AnthropicThinkingOptions / speed ─────────────────────────────────
@@ -687,53 +970,55 @@ void main() {
         expect(map['thinking'], {'type': 'enabled', 'budget_tokens': 2000});
       });
 
-      test('doGenerate sends thinking object when passed via providerOptions',
-          () async {
-        late Map<String, dynamic> captured;
-        final server = await _TestServer.start((request) async {
-          final body = await utf8.decoder.bind(request).join();
-          captured = (jsonDecode(body) as Map).cast<String, dynamic>();
-          request.response.statusCode = 200;
-          request.response.headers.contentType = ContentType.json;
-          request.response.write(
-            jsonEncode({
-              'stop_reason': 'end_turn',
-              'content': [
-                {'type': 'text', 'text': 'ok'},
-              ],
-            }),
-          );
-          await request.response.close();
-        });
-        addTearDown(server.close);
+      test(
+        'doGenerate sends thinking object when passed via providerOptions',
+        () async {
+          late Map<String, dynamic> captured;
+          final server = await _TestServer.start((request) async {
+            final body = await utf8.decoder.bind(request).join();
+            captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+            request.response.statusCode = 200;
+            request.response.headers.contentType = ContentType.json;
+            request.response.write(
+              jsonEncode({
+                'stop_reason': 'end_turn',
+                'content': [
+                  {'type': 'text', 'text': 'ok'},
+                ],
+              }),
+            );
+            await request.response.close();
+          });
+          addTearDown(server.close);
 
-        final model = AnthropicProvider(
-          apiKey: 'test',
-          baseUrl: server.baseUrl,
-        ).call('claude-3-7-sonnet-20250219');
-        await model.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
-              messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
-                  content: [LanguageModelV3TextPart(text: 'think')],
-                ),
-              ],
+          final model = AnthropicProvider(
+            apiKey: 'test',
+            baseUrl: server.baseUrl,
+          ).call('claude-3-7-sonnet-20250219');
+          await model.doGenerate(
+            LanguageModelV4CallOptions(
+              prompt: LanguageModelV4Prompt(
+                messages: [
+                  LanguageModelV4Message(
+                    role: LanguageModelV4Role.user,
+                    content: [LanguageModelV4TextPart(text: 'think')],
+                  ),
+                ],
+              ),
+              providerOptions: {
+                'anthropic': const AnthropicThinkingOptions(
+                  budgetTokens: 4096,
+                ).toMap(),
+              },
             ),
-            providerOptions: {
-              'anthropic': const AnthropicThinkingOptions(
-                budgetTokens: 4096,
-              ).toMap(),
-            },
-          ),
-        );
+          );
 
-        expect(captured['thinking'], {
-          'type': 'enabled',
-          'budget_tokens': 4096,
-        });
-      });
+          expect(captured['thinking'], {
+            'type': 'enabled',
+            'budget_tokens': 4096,
+          });
+        },
+      );
 
       test('doGenerate sends disabled thinking when speed=fast', () async {
         late Map<String, dynamic> captured;
@@ -759,12 +1044,12 @@ void main() {
           baseUrl: server.baseUrl,
         ).call('claude-3-5-haiku-20241022');
         await model.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
               messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
-                  content: [LanguageModelV3TextPart(text: 'quick')],
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'quick')],
                 ),
               ],
             ),
@@ -783,7 +1068,7 @@ void main() {
 
     test('exposes specification version and provider id', () {
       final model = AnthropicProvider(apiKey: 'test').call('claude-sonnet-4-5');
-      expect(model.specificationVersion, 'v3');
+      expect(model.specificationVersion, 'v4');
       expect(model.provider, 'anthropic');
       expect(model.modelId, 'claude-sonnet-4-5');
     });
@@ -813,12 +1098,12 @@ void main() {
       ).call('claude-sonnet-4-5');
 
       final result = await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
@@ -828,7 +1113,7 @@ void main() {
 
       expect(captured['stop_sequences'], ['STOP', 'END']);
       // 'stop_sequence' maps to stop finish reason.
-      expect(result.finishReason, LanguageModelV3FinishReason.stop);
+      expect(result.finishReason, LanguageModelV4FinishReason.stop);
     });
 
     test('maps unknown stop_reason to other', () async {
@@ -853,19 +1138,19 @@ void main() {
       ).call('claude-sonnet-4-5');
 
       final result = await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
         ),
       );
 
-      expect(result.finishReason, LanguageModelV3FinishReason.other);
+      expect(result.finishReason, LanguageModelV4FinishReason.other);
     });
 
     test('decodes redacted_thinking content part', () async {
@@ -893,12 +1178,12 @@ void main() {
       ).call('claude-sonnet-4-5');
 
       final result = await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
@@ -906,7 +1191,7 @@ void main() {
       );
 
       final redacted = result.content
-          .whereType<LanguageModelV3RedactedReasoningPart>()
+          .whereType<LanguageModelV4RedactedReasoningPart>()
           .single;
       expect(utf8.decode(redacted.data), 'REDACTED-PAYLOAD');
     });
@@ -936,19 +1221,19 @@ void main() {
       ).call('claude-sonnet-4-5');
 
       await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
                 content: [
-                  LanguageModelV3TextPart(text: 'look'),
-                  LanguageModelV3ImagePart(
+                  LanguageModelV4TextPart(text: 'look'),
+                  LanguageModelV4ImagePart(
                     image: DataContentUrl(
                       Uri.parse('https://example.com/pic.png'),
                     ),
                   ),
-                  LanguageModelV3FilePart(
+                  LanguageModelV4FilePart(
                     data: DataContentUrl(
                       Uri.parse('https://example.com/doc.pdf'),
                     ),
@@ -957,10 +1242,10 @@ void main() {
                   ),
                 ],
               ),
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.assistant,
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.assistant,
                 content: [
-                  LanguageModelV3ToolCallPart(
+                  LanguageModelV4ToolCallPart(
                     toolCallId: 'toolu_1',
                     toolName: 'weather',
                     input: const {'city': 'Paris'},
@@ -1022,26 +1307,26 @@ void main() {
       ).call('claude-sonnet-4-5');
 
       await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.tool,
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.tool,
                 content: [
-                  LanguageModelV3ToolResultPart(
+                  LanguageModelV4ToolResultPart(
                     toolCallId: 'toolu_1',
                     toolName: 'render',
                     output: ToolResultOutputContent([
-                      LanguageModelV3TextPart(text: 'text part'),
-                      LanguageModelV3ImagePart(
+                      LanguageModelV4TextPart(text: 'text part'),
+                      LanguageModelV4ImagePart(
                         image: DataContentBase64(imageB64),
                         mediaType: 'image/png',
                       ),
-                      LanguageModelV3FilePart(
+                      LanguageModelV4FilePart(
                         data: DataContentBase64(fileB64),
                         mediaType: 'application/pdf',
                       ),
-                      LanguageModelV3SourcePart(
+                      LanguageModelV4SourcePart(
                         id: 's1',
                         url: 'https://example.com',
                       ),
@@ -1059,7 +1344,8 @@ void main() {
       final toolResult = (messages.single['content'] as List)
           .cast<Map<String, dynamic>>()
           .single;
-      final parts = (toolResult['content'] as List).cast<Map<String, dynamic>>();
+      final parts = (toolResult['content'] as List)
+          .cast<Map<String, dynamic>>();
       expect(parts[0], {'type': 'text', 'text': 'text part'});
       expect(parts[1]['type'], 'image');
       expect((parts[1]['source'] as Map)['data'], imageB64);
@@ -1097,13 +1383,13 @@ void main() {
       ).call('claude-sonnet-4-5');
 
       await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.tool,
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.tool,
                 content: [
-                  LanguageModelV3ToolResultPart(
+                  LanguageModelV4ToolResultPart(
                     toolCallId: 'toolu_1',
                     toolName: 'weather',
                     output: ToolResultOutputText('sunny'),
@@ -1123,8 +1409,7 @@ void main() {
       expect(toolResult['content'], 'sunny');
     });
 
-    test('drops image part with url data source unsupported by base64',
-        () async {
+    test('drops image part with url data source unsupported by base64', () async {
       // A base64-less data content (URL) for an image inside a file part with a
       // non-image media type goes through the document/base64 branch and is
       // dropped when no base64 is available — exercised via _toBase64 url path.
@@ -1152,19 +1437,19 @@ void main() {
       ).call('claude-sonnet-4-5');
 
       await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.tool,
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.tool,
                 content: [
-                  LanguageModelV3ToolResultPart(
+                  LanguageModelV4ToolResultPart(
                     toolCallId: 'toolu_1',
                     toolName: 'render',
                     output: ToolResultOutputContent([
                       // Image media-type file part that resolves through the
                       // image URL branch.
-                      LanguageModelV3FilePart(
+                      LanguageModelV4FilePart(
                         data: DataContentUrl(
                           Uri.parse('https://example.com/pic.png'),
                         ),
@@ -1184,13 +1469,13 @@ void main() {
       final toolResult = (messages.single['content'] as List)
           .cast<Map<String, dynamic>>()
           .single;
-      final parts = (toolResult['content'] as List).cast<Map<String, dynamic>>();
+      final parts = (toolResult['content'] as List)
+          .cast<Map<String, dynamic>>();
       expect(parts.single['type'], 'image');
       expect((parts.single['source'] as Map)['type'], 'url');
     });
 
-    test('stream handles message_start, thinking_delta, tools and errors',
-        () async {
+    test('stream handles message_start, thinking_delta, tools and errors', () async {
       late Map<String, dynamic> captured;
       final server = await _TestServer.start((request) async {
         final body = await utf8.decoder.bind(request).join();
@@ -1232,17 +1517,17 @@ void main() {
       ).call('claude-3-7-sonnet-20250219');
 
       final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
           tools: const [
-            LanguageModelV3FunctionTool(
+            LanguageModelV4FunctionTool(
               name: 'weather',
               description: 'Get weather',
               inputSchema: {'type': 'object'},
@@ -1275,14 +1560,11 @@ void main() {
         parts.whereType<StreamPartReasoningDelta>().single.delta,
         'pondering',
       );
-      expect(
-        parts.whereType<StreamPartTextDelta>().single.delta,
-        'Hi',
-      );
+      expect(parts.whereType<StreamPartTextDelta>().single.delta, 'Hi');
       expect(parts.whereType<StreamPartError>(), isNotEmpty);
       expect(
         parts.whereType<StreamPartFinish>().single.finishReason,
-        LanguageModelV3FinishReason.stop,
+        LanguageModelV4FinishReason.stop,
       );
     });
 
@@ -1299,9 +1581,7 @@ void main() {
       // test flaky under different socket timing.
       final server = await _TestServer.start((request) async {
         await request.drain<void>();
-        final socket = await request.response.detachSocket(
-          writeHeaders: false,
-        );
+        final socket = await request.response.detachSocket(writeHeaders: false);
         socket.write(
           'HTTP/1.1 200 OK\r\n'
           'content-type: text/event-stream\r\n'
@@ -1324,12 +1604,12 @@ void main() {
       ).call('claude-sonnet-4-5');
 
       final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
@@ -1340,6 +1620,49 @@ void main() {
       // The abrupt disconnect propagates as a StreamPartError.
       expect(parts.whereType<StreamPartError>(), isNotEmpty);
     });
+
+    test(
+      'stream emits stream start before error when the body fails before any valid chunk',
+      () async {
+        final server = await _TestServer.start((request) async {
+          await request.drain<void>();
+          final socket = await request.response.detachSocket(
+            writeHeaders: false,
+          );
+          socket.write(
+            'HTTP/1.1 200 OK\r\n'
+            'content-type: text/event-stream\r\n'
+            'content-length: 4096\r\n'
+            '\r\n',
+          );
+          await socket.flush();
+          socket.destroy();
+        });
+        addTearDown(server.close);
+
+        final model = AnthropicProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('claude-sonnet-4-5');
+
+        final streamResult = await model.doStream(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'hi')],
+                ),
+              ],
+            ),
+          ),
+        );
+
+        final parts = await streamResult.stream.toList();
+        expect(parts[0], isA<StreamPartStreamStart>());
+        expect(parts[1], isA<StreamPartError>());
+      },
+    );
 
     test('doStream forwards extra providerOptions into request body', () async {
       // providerOptions carrying a key beyond thinking/speed leaves a non-null
@@ -1363,12 +1686,12 @@ void main() {
       ).call('claude-sonnet-4-5');
 
       final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
@@ -1384,8 +1707,7 @@ void main() {
       expect(captured['metadata'], {'trace_id': 'stream-abc'});
     });
 
-    test('doStream tolerates content_block_delta with no delta field',
-        () async {
+    test('doStream tolerates content_block_delta with no delta field', () async {
       // A content_block_delta event missing its `delta` falls back to the empty
       // map, so the unknown delta type is simply ignored.
       final server = await _TestServer.start((request) async {
@@ -1414,12 +1736,12 @@ void main() {
       ).call('claude-sonnet-4-5');
 
       final streamResult = await model.doStream(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'hi')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
               ),
             ],
           ),
@@ -1434,7 +1756,7 @@ void main() {
       );
       expect(
         parts.whereType<StreamPartFinish>().single.finishReason,
-        LanguageModelV3FinishReason.stop,
+        LanguageModelV4FinishReason.stop,
       );
     });
 
@@ -1451,7 +1773,7 @@ void main() {
           );
           // message_delta with usage only (no `delta`, and no output_tokens):
           // exercises both the empty-map delta fallback and the
-          // `streamUsage?.outputTokens` carry-over fallback.
+          // `streamUsage?.outputTokens.total` carry-over fallback.
           request.response.write(
             'data: {"type":"message_delta","usage":{"input_tokens":9}}\n\n',
           );
@@ -1468,12 +1790,12 @@ void main() {
         ).call('claude-sonnet-4-5');
 
         final streamResult = await model.doStream(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
               messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
-                  content: [LanguageModelV3TextPart(text: 'hi')],
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'hi')],
                 ),
               ],
             ),
@@ -1484,16 +1806,15 @@ void main() {
             .whereType<StreamPartFinish>()
             .single;
         // input_tokens updated from the usage-only delta...
-        expect(finish.usage?.inputTokens, 9);
+        expect(finish.usage.inputTokens.total, 9);
         // ...while output_tokens carries over from message_start (1) because the
         // usage-only delta omitted it.
-        expect(finish.usage?.outputTokens, 1);
-        expect(finish.finishReason, LanguageModelV3FinishReason.stop);
+        expect(finish.usage.outputTokens.total, 1);
+        expect(finish.finishReason, LanguageModelV4FinishReason.stop);
       },
     );
 
-    test('doGenerate synthesizes a tool call id when none is provided',
-        () async {
+    test('doGenerate synthesizes a tool call id when none is provided', () async {
       // A tool_use content block with no `id` forces the `_generateId` fallback.
       final server = await _TestServer.start((request) async {
         request.response.statusCode = 200;
@@ -1523,12 +1844,12 @@ void main() {
       ).call('claude-sonnet-4-5');
 
       final result = await model.doGenerate(
-        LanguageModelV3CallOptions(
-          prompt: LanguageModelV3Prompt(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
             messages: [
-              LanguageModelV3Message(
-                role: LanguageModelV3Role.user,
-                content: [LanguageModelV3TextPart(text: 'weather?')],
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'weather?')],
               ),
             ],
           ),
@@ -1536,12 +1857,107 @@ void main() {
       );
 
       final call = result.content
-          .whereType<LanguageModelV3ToolCallPart>()
+          .whereType<LanguageModelV4ToolCallPart>()
           .single;
       expect(call.toolName, 'weather');
       // The synthesized id uses the `tool-<micros>` shape from _generateId.
       expect(call.toolCallId, startsWith('tool-'));
     });
+
+    test(
+      'serializes provider-defined tools and parses structured warnings',
+      () async {
+        late Map<String, dynamic> captured;
+        final server = await _TestServer.start((request) async {
+          final body = await utf8.decoder.bind(request).join();
+          captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'stop_reason': 'end_turn',
+              'content': [
+                {'type': 'text', 'text': 'ok'},
+              ],
+              'warnings': [
+                {
+                  'type': 'unsupported',
+                  'feature': 'top_k',
+                  'details': 'ignored',
+                },
+                {
+                  'type': 'compatibility',
+                  'feature': 'sources',
+                  'details': 'partial',
+                },
+                {'type': 'deprecated', 'feature': 'legacy-mode'},
+                {'type': 'other', 'message': 'custom'},
+                {'type': 'mystery'},
+                7,
+                '',
+                null,
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = AnthropicProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('claude-sonnet-4-5');
+
+        final result = await model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: _userPrompt('hi'),
+            tools: const [
+              LanguageModelV4ProviderDefinedTool(
+                id: 'anthropic.web_search_20250305',
+                name: 'web_search',
+                args: {'max_uses': 2},
+              ),
+            ],
+          ),
+        );
+
+        final tools = (captured['tools'] as List).cast<Map<String, dynamic>>();
+        expect(tools.single, {
+          'type': 'web_search_20250305',
+          'name': 'web_search',
+          'max_uses': 2,
+        });
+
+        expect(result.warnings, hasLength(6));
+        expect(
+          result.warnings
+              .whereType<LanguageModelV4UnsupportedWarning>()
+              .single
+              .feature,
+          'top_k',
+        );
+        expect(
+          result.warnings
+              .whereType<LanguageModelV4CompatibilityWarning>()
+              .single
+              .feature,
+          'sources',
+        );
+        expect(
+          result.warnings
+              .whereType<LanguageModelV4DeprecatedWarning>()
+              .single
+              .message,
+          'This setting is deprecated.',
+        );
+        expect(
+          result.warnings.whereType<LanguageModelV4OtherWarning>().map(
+            (w) => w.message,
+          ),
+          containsAll(['custom', '{"type":"mystery"}', '7']),
+        );
+      },
+    );
 
     runProviderContractTests(
       providerName: 'anthropic',
@@ -1569,7 +1985,7 @@ void main() {
 }
 
 Future<Map<String, dynamic>> _captureAnthropicRequestBody(
-  LanguageModelV3Prompt prompt,
+  LanguageModelV4Prompt prompt,
 ) async {
   late Map<String, dynamic> captured;
   final server = await _TestServer.start((request) async {
@@ -1593,9 +2009,32 @@ Future<Map<String, dynamic>> _captureAnthropicRequestBody(
     apiKey: 'test',
     baseUrl: server.baseUrl,
   ).call('claude-sonnet-4-5');
-  await model.doGenerate(LanguageModelV3CallOptions(prompt: prompt));
+  await model.doGenerate(LanguageModelV4CallOptions(prompt: prompt));
   await server.close();
   return captured;
+}
+
+Dio _cancellationClient(HttpClientAdapter adapter, String baseUrl) {
+  final client = Dio(
+    BaseOptions(
+      baseUrl: baseUrl,
+      headers: {'Content-Type': 'application/json'},
+      responseType: ResponseType.json,
+    ),
+  );
+  client.httpClientAdapter = adapter;
+  return client;
+}
+
+LanguageModelV4Prompt _userPrompt(String text) {
+  return LanguageModelV4Prompt(
+    messages: [
+      LanguageModelV4Message(
+        role: LanguageModelV4Role.user,
+        content: [LanguageModelV4TextPart(text: text)],
+      ),
+    ],
+  );
 }
 
 class _TestServer {
@@ -1618,4 +2057,56 @@ class _TestServer {
   String get baseUrl => 'http://${_server.address.host}:${_server.port}/v1';
 
   Future<void> close() => _server.close(force: true);
+}
+
+class _TestAbortSignal implements LanguageModelV4AbortSignal {
+  final Completer<void> _completer = Completer<void>();
+  bool _isCancelled = false;
+
+  @override
+  bool get isCancelled => _isCancelled;
+
+  @override
+  Future<void> get onCancelled => _completer.future;
+
+  void cancel() {
+    if (_isCancelled) return;
+    _isCancelled = true;
+    _completer.complete();
+  }
+}
+
+class _CancellationHttpClientAdapter implements HttpClientAdapter {
+  int fetchCount = 0;
+  RequestOptions? lastOptions;
+  final Completer<void> fetchStarted = Completer<void>();
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) {
+    fetchCount++;
+    lastOptions = options;
+    if (!fetchStarted.isCompleted) {
+      fetchStarted.complete();
+    }
+
+    final completer = Completer<ResponseBody>();
+    cancelFuture?.then((_) {
+      if (!completer.isCompleted) {
+        completer.completeError(
+          DioException.requestCancelled(
+            requestOptions: options,
+            reason: 'abortSignal',
+          ),
+        );
+      }
+    });
+    return completer.future;
+  }
+
+  @override
+  void close({bool force = false}) {}
 }

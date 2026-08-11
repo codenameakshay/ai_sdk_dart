@@ -22,9 +22,7 @@ void main() {
 
     setUp(() {
       calls = <MethodCall>[];
-      TestDefaultBinaryMessengerBinding
-          .instance
-          .defaultBinaryMessenger
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(SystemChannels.platform, (call) async {
             calls.add(call);
             return null;
@@ -130,9 +128,7 @@ void main() {
     testWidgets('collapses to a plain child under reduced motion', (
       tester,
     ) async {
-      await tester.pumpWidget(
-        _reduced(const PressableScale(child: Text('x'))),
-      );
+      await tester.pumpWidget(_reduced(const PressableScale(child: Text('x'))));
       // Under reduced motion there is no Listener / Transform — just the child.
       expect(
         find.descendant(
@@ -150,9 +146,7 @@ void main() {
       tester,
     ) async {
       await tester.pumpWidget(
-        _reduced(
-          const AiEntrance(child: Text('arrived')),
-        ),
+        _reduced(const AiEntrance(child: Text('arrived'))),
       );
       // didChangeDependencies sets the controller to its end value (1) without
       // ticking, so the child is already fully visible on the first frame.
@@ -171,11 +165,7 @@ void main() {
     testWidgets('animates from transparent to opaque with motion enabled', (
       tester,
     ) async {
-      await tester.pumpWidget(
-        _wrap(
-          const AiEntrance(child: Text('arrived')),
-        ),
-      );
+      await tester.pumpWidget(_wrap(const AiEntrance(child: Text('arrived'))));
 
       Opacity opacity() => tester.widget<Opacity>(
         find.descendant(

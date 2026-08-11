@@ -1,3 +1,13 @@
+## Unreleased
+
+- **Breaking:** replaced the language-model V3 seam with `LanguageModelV4` and
+  removed the obsolete V3 language-model paths.
+- Added unified typed tools, response formats, reasoning controls, abort
+  signals, supported URLs, structured warnings, request/response metadata,
+  nested token usage, and the complete V4 stream lifecycle.
+
+---
+
 ## 1.2.0
 
 ### Error hierarchy

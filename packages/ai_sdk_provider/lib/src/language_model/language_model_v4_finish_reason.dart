@@ -1,5 +1,5 @@
 /// The reason a language model generation finished.
-enum LanguageModelV3FinishReason {
+enum LanguageModelV4FinishReason {
   /// The model reached a natural stop point.
   stop,
 

@@ -7,14 +7,11 @@ Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
 
 void main() {
   group('UsageView', () {
-    testWidgets('renders input, output, and total token counts', (
-      tester,
-    ) async {
+    testWidgets('renders input and output token counts', (tester) async {
       // Build the usage at runtime so the UsageView construction is non-const.
-      final usage = LanguageModelV3Usage(
-        inputTokens: 10,
-        outputTokens: 20,
-        totalTokens: 30,
+      final usage = LanguageModelV4Usage(
+        inputTokens: const LanguageModelV4InputTokenUsage(total: 10),
+        outputTokens: const LanguageModelV4OutputTokenUsage(total: 20),
       );
       await tester.pumpWidget(_wrap(UsageView(usage: usage)));
 
@@ -22,13 +19,18 @@ void main() {
       expect(find.textContaining('10'), findsOneWidget);
       expect(find.textContaining('Output'), findsOneWidget);
       expect(find.textContaining('20'), findsOneWidget);
-      expect(find.textContaining('Total'), findsOneWidget);
-      expect(find.textContaining('30'), findsOneWidget);
+      expect(find.textContaining('Total'), findsNothing);
     });
 
     testWidgets('omits fields whose token count is null', (tester) async {
       await tester.pumpWidget(
-        _wrap(const UsageView(usage: LanguageModelV3Usage(inputTokens: 5))),
+        _wrap(
+          const UsageView(
+            usage: LanguageModelV4Usage(
+              inputTokens: LanguageModelV4InputTokenUsage(total: 5),
+            ),
+          ),
+        ),
       );
 
       expect(find.textContaining('Input'), findsOneWidget);
@@ -39,7 +41,9 @@ void main() {
     testWidgets('renders nothing when all token counts are null', (
       tester,
     ) async {
-      await tester.pumpWidget(_wrap(const UsageView(usage: LanguageModelV3Usage())));
+      await tester.pumpWidget(
+        _wrap(const UsageView(usage: LanguageModelV4Usage())),
+      );
 
       expect(find.byType(SizedBox), findsWidgets);
       expect(find.textContaining('Input'), findsNothing);

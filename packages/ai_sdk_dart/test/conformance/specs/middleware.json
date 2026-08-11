@@ -9,7 +9,7 @@
       "expected": {
         "provider": "fake",
         "modelId": "fake-model",
-        "specificationVersion": "v3"
+        "specificationVersion": "v4"
       }
     },
     {

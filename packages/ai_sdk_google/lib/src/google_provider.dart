@@ -15,7 +15,16 @@ import 'package:dio/dio.dart';
 /// final result = await generateText(model: model, prompt: 'Hello');
 /// ```
 class GoogleGenerativeAIProvider {
-  const GoogleGenerativeAIProvider({this.apiKey, this.baseUrl});
+  GoogleGenerativeAIProvider({
+    this.apiKey,
+    this.baseUrl,
+    CredentialProvider? credentialProvider,
+    Dio? client,
+  }) : _credentialProvider =
+           credentialProvider ??
+           (() => apiKey ?? const String.fromEnvironment('GOOGLE_API_KEY')),
+       _client = client ?? _googleDio(baseUrl: baseUrl),
+       _ownsClient = client == null;
 
   /// API key (defaults to `GOOGLE_GENERATIVE_AI_API_KEY` environment variable).
   final String? apiKey;
@@ -23,41 +32,60 @@ class GoogleGenerativeAIProvider {
   /// Base URL for the API.
   final String? baseUrl;
 
+  final CredentialProvider _credentialProvider;
+  final Dio _client;
+  final bool _ownsClient;
+
+  Future<String> _apiKey() async {
+    final key = await Future.value(_credentialProvider());
+    if (key == null || key.isEmpty) {
+      throw StateError('Missing GOOGLE_API_KEY for Google provider.');
+    }
+    return key;
+  }
+
+  void dispose({bool force = true}) {
+    if (_ownsClient) {
+      _client.close(force: force);
+    }
+  }
+
   /// Returns a language model for the given [modelId].
-  LanguageModelV3 call(String modelId) =>
-      _GoogleLanguageModel(modelId: modelId, apiKey: apiKey, baseUrl: baseUrl);
+  LanguageModelV4 call(String modelId) =>
+      _GoogleLanguageModel(modelId: modelId, client: _client, apiKey: _apiKey);
 
   /// Returns an embedding model for the given [modelId].
   EmbeddingModelV2<String> embedding(String modelId) =>
-      _GoogleEmbeddingModel(modelId: modelId, apiKey: apiKey, baseUrl: baseUrl);
+      _GoogleEmbeddingModel(modelId: modelId, client: _client, apiKey: _apiKey);
 }
 
 /// Default Google Generative AI provider instance.
-const google = GoogleGenerativeAIProvider();
+final google = GoogleGenerativeAIProvider();
 
-class _GoogleLanguageModel implements LanguageModelV3 {
-  const _GoogleLanguageModel({
+class _GoogleLanguageModel extends LanguageModelV4 {
+  _GoogleLanguageModel({
     required this.modelId,
-    this.apiKey,
-    this.baseUrl,
+    required this.client,
+    required this.apiKey,
   });
 
   @override
   final String modelId;
-  final String? apiKey;
-  final String? baseUrl;
+  final Dio client;
+  final CredentialProvider apiKey;
 
   @override
   String get provider => 'google';
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
-    final client = _googleDio(baseUrl: baseUrl);
+    final resolvedApiKey = await Future.value(apiKey());
+    final cancelToken = _cancelTokenFor(options.abortSignal);
     final modelPath = _modelPath(modelId);
     final providerOptions = options.providerOptions != null
         ? options.providerOptions![provider]
@@ -82,7 +110,7 @@ class _GoogleLanguageModel implements LanguageModelV3 {
       if (options.tools.isNotEmpty) ...{
         'tools': [
           {
-            'functionDeclarations': options.tools
+            'functionDeclarations': options.functionTools
                 .map(
                   (tool) => {
                     'name': tool.name,
@@ -103,9 +131,10 @@ class _GoogleLanguageModel implements LanguageModelV3 {
     try {
       response = await client.post<Map<String, dynamic>>(
         '/$modelPath:generateContent',
-        queryParameters: {'key': _resolvedApiKey(apiKey)},
+        queryParameters: {'key': resolvedApiKey},
         data: requestBody,
         options: Options(headers: options.headers),
+        cancelToken: cancelToken,
       );
     } on DioException catch (e) {
       throw await _apiCallError(e, provider);
@@ -117,7 +146,7 @@ class _GoogleLanguageModel implements LanguageModelV3 {
         ? (candidates.first as Map).cast<String, dynamic>()
         : <String, dynamic>{};
 
-    final content = <LanguageModelV3ContentPart>[];
+    final content = <LanguageModelV4ContentPart>[];
     final contentObj =
         (first['content'] as Map?)?.cast<String, dynamic>() ??
         <String, dynamic>{};
@@ -127,20 +156,18 @@ class _GoogleLanguageModel implements LanguageModelV3 {
       if (partMap['text'] is String) {
         final text = partMap['text'].toString();
         if (text.isNotEmpty) {
-          content.add(LanguageModelV3TextPart(text: text));
+          content.add(LanguageModelV4TextPart(text: text));
         }
       }
       final functionCall = (partMap['functionCall'] as Map?)
           ?.cast<String, dynamic>();
       if (functionCall != null) {
-        final rawArgs = functionCall['args'];
+        final toolCall = _parseGoogleFunctionCall(functionCall);
         content.add(
-          LanguageModelV3ToolCallPart(
+          LanguageModelV4ToolCallPart(
             toolCallId: _generateId('tool'),
-            toolName: functionCall['name']?.toString() ?? 'unknown_tool',
-            input: rawArgs is Map
-                ? rawArgs.cast<String, dynamic>()
-                : (rawArgs ?? const {}),
+            toolName: toolCall.toolName,
+            input: toolCall.input,
           ),
         );
       }
@@ -154,7 +181,7 @@ class _GoogleLanguageModel implements LanguageModelV3 {
           final parsed = Uri.tryParse(uri);
           if (parsed != null) {
             content.add(
-              LanguageModelV3FilePart(
+              LanguageModelV4FilePart(
                 data: DataContentUrl(parsed),
                 mediaType: mime,
               ),
@@ -171,7 +198,7 @@ class _GoogleLanguageModel implements LanguageModelV3 {
         final data = inlineData['data']?.toString();
         if (data != null && data.isNotEmpty) {
           content.add(
-            LanguageModelV3FilePart(
+            LanguageModelV4FilePart(
               data: DataContentBase64(data),
               mediaType: mime,
             ),
@@ -191,7 +218,7 @@ class _GoogleLanguageModel implements LanguageModelV3 {
       final url = web['uri']?.toString();
       if (url == null || url.isEmpty) continue;
       content.add(
-        LanguageModelV3SourcePart(
+        LanguageModelV4SourcePart(
           id: 'google_source_$i',
           url: url,
           title: web['title']?.toString(),
@@ -202,29 +229,30 @@ class _GoogleLanguageModel implements LanguageModelV3 {
 
     final usage = (data['usageMetadata'] as Map?)?.cast<String, dynamic>();
     final warnings = _readGoogleWarnings(data);
-    return LanguageModelV3GenerateResult(
+    return LanguageModelV4GenerateResult(
       content: content,
       finishReason: _mapGoogleFinishReason(first['finishReason']?.toString()),
       rawFinishReason: first['finishReason']?.toString(),
       usage: usage == null ? null : _googleUsageFrom(usage),
       warnings: warnings,
-      response: LanguageModelV3ResponseMetadata(
+      request: LanguageModelV4RequestMetadata(body: requestBody),
+      response: LanguageModelV4ResponseMetadata(
         modelId: modelId,
         timestamp: DateTime.now().toUtc(),
         headers: response.headers.map.map(
           (key, value) => MapEntry(key, value.join(',')),
         ),
         body: data,
-        requestBody: requestBody,
       ),
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    final client = _googleDio(baseUrl: baseUrl);
+    final resolvedApiKey = await Future.value(apiKey());
+    final cancelToken = _cancelTokenFor(options.abortSignal);
     final modelPath = _modelPath(modelId);
     final providerOptions = options.providerOptions != null
         ? options.providerOptions![provider]
@@ -243,11 +271,13 @@ class _GoogleLanguageModel implements LanguageModelV3 {
         if (options.temperature != null) 'temperature': options.temperature,
         if (options.topP != null) 'topP': options.topP,
         if (options.topK != null) 'topK': options.topK,
+        if (options.stopSequences.isNotEmpty)
+          'stopSequences': options.stopSequences,
       },
       if (options.tools.isNotEmpty) ...{
         'tools': [
           {
-            'functionDeclarations': options.tools
+            'functionDeclarations': options.functionTools
                 .map(
                   (tool) => {
                     'name': tool.name,
@@ -267,12 +297,13 @@ class _GoogleLanguageModel implements LanguageModelV3 {
     try {
       response = await client.post<ResponseBody>(
         '/$modelPath:streamGenerateContent',
-        queryParameters: {'alt': 'sse', 'key': _resolvedApiKey(apiKey)},
+        queryParameters: {'alt': 'sse', 'key': resolvedApiKey},
         data: requestBody,
         options: Options(
           responseType: ResponseType.stream,
           headers: options.headers,
         ),
+        cancelToken: cancelToken,
       );
     } on DioException catch (e) {
       throw await _apiCallError(e, provider);
@@ -282,28 +313,21 @@ class _GoogleLanguageModel implements LanguageModelV3 {
     if (body == null) {
       // Defensive; Dio stream body is never null on a 200 streaming response.
       // coverage:ignore-start
-      throw StateError(
-        'Google stream response body is null.',
-      );
+      throw StateError('Google stream response body is null.');
       // coverage:ignore-end
     }
 
-    final controller = StreamController<LanguageModelV3StreamPart>();
+    final controller = StreamController<LanguageModelV4StreamPart>();
     var textStarted = false;
-    LanguageModelV3Usage? streamUsage;
-    final warnings = <String>[];
+    var streamStarted = false;
+    final activeToolCalls = <int, _GoogleStreamFunctionCallState>{};
+    LanguageModelV4Usage? streamUsage;
+    final warnings = <LanguageModelV4Warning>[];
     Map<String, dynamic>? lastChunk;
-    final rawResponse = <String, Object?>{
-      'requestBody': requestBody,
-      'statusCode': response.statusCode,
-      'headers': response.headers.map.map(
-        (key, value) => MapEntry(key, value.join(',')),
-      ),
-      'responseMetadata': {
-        'modelId': modelId,
-        'timestamp': DateTime.now().toUtc().toIso8601String(),
-      },
-    };
+    final responseHeaders = response.headers.map.map(
+      (key, value) => MapEntry(key, value.join(',')),
+    );
+    final responseTimestamp = DateTime.now().toUtc();
 
     unawaited(() async {
       try {
@@ -312,6 +336,15 @@ class _GoogleLanguageModel implements LanguageModelV3 {
           if (json == null) continue;
           lastChunk = json;
           warnings.addAll(_readGoogleWarnings(json));
+          if (!streamStarted) {
+            streamStarted = true;
+            controller.add(
+              StreamPartStreamStart(warnings: List.unmodifiable(warnings)),
+            );
+          }
+          if (options.includeRawChunks) {
+            controller.add(StreamPartRaw(rawValue: json));
+          }
           final usage = (json['usageMetadata'] as Map?)
               ?.cast<String, dynamic>();
           if (usage != null) {
@@ -324,7 +357,8 @@ class _GoogleLanguageModel implements LanguageModelV3 {
               (first['content'] as Map?)?.cast<String, dynamic>() ??
               <String, dynamic>{};
           final parts = (content['parts'] as List?) ?? const [];
-          for (final part in parts) {
+          for (var partIndex = 0; partIndex < parts.length; partIndex++) {
+            final part = parts[partIndex];
             final map = (part as Map).cast<String, dynamic>();
             final text = map['text']?.toString();
             if (text != null && text.isNotEmpty) {
@@ -333,6 +367,46 @@ class _GoogleLanguageModel implements LanguageModelV3 {
                 controller.add(const StreamPartTextStart(id: 'text-0'));
               }
               controller.add(StreamPartTextDelta(id: 'text-0', delta: text));
+            }
+
+            final functionCall = (map['functionCall'] as Map?)
+                ?.cast<String, dynamic>();
+            if (functionCall != null) {
+              final toolCall = _parseGoogleFunctionCall(functionCall);
+              var state = activeToolCalls[partIndex];
+              if (state == null || state.toolName != toolCall.toolName) {
+                if (state != null) {
+                  _emitGoogleToolCall(controller, state);
+                }
+                state = _GoogleStreamFunctionCallState(
+                  toolCallId: _generateId('tool'),
+                  toolName: toolCall.toolName,
+                  input: toolCall.input,
+                );
+                activeToolCalls[partIndex] = state;
+                controller.add(
+                  StreamPartToolInputStart(
+                    id: state.toolCallId,
+                    toolName: state.toolName,
+                  ),
+                );
+              }
+
+              final argsDelta = _googleFunctionArgsDelta(
+                previous: state.argsText,
+                current: toolCall.argsText,
+              );
+              state
+                ..input = toolCall.input
+                ..argsText = toolCall.argsText;
+              if (argsDelta.isNotEmpty) {
+                controller.add(
+                  StreamPartToolInputDelta(
+                    id: state.toolCallId,
+                    delta: argsDelta,
+                  ),
+                );
+              }
             }
 
             final fileData = (map['fileData'] as Map?)?.cast<String, dynamic>();
@@ -345,7 +419,7 @@ class _GoogleLanguageModel implements LanguageModelV3 {
               if (parsed != null) {
                 controller.add(
                   StreamPartFile(
-                    file: LanguageModelV3FilePart(
+                    file: LanguageModelV4FilePart(
                       data: DataContentUrl(parsed),
                       mediaType: mime,
                     ),
@@ -364,7 +438,7 @@ class _GoogleLanguageModel implements LanguageModelV3 {
               if (data != null && data.isNotEmpty) {
                 controller.add(
                   StreamPartFile(
-                    file: LanguageModelV3FilePart(
+                    file: LanguageModelV4FilePart(
                       data: DataContentBase64(data),
                       mediaType: mime,
                     ),
@@ -386,7 +460,7 @@ class _GoogleLanguageModel implements LanguageModelV3 {
             if (url == null || url.isEmpty) continue;
             controller.add(
               StreamPartSource(
-                source: LanguageModelV3SourcePart(
+                source: LanguageModelV4SourcePart(
                   id: 'google_source_$i',
                   url: url,
                   title: web['title']?.toString(),
@@ -401,50 +475,78 @@ class _GoogleLanguageModel implements LanguageModelV3 {
             if (textStarted) {
               controller.add(const StreamPartTextEnd(id: 'text-0'));
             }
+            for (final state in activeToolCalls.values.toList()) {
+              _emitGoogleToolCall(controller, state);
+            }
+            activeToolCalls.clear();
+            controller.add(
+              StreamPartResponseMetadata(
+                metadata: LanguageModelV4ResponseMetadata(
+                  modelId: modelId,
+                  timestamp: responseTimestamp,
+                  headers: responseHeaders,
+                  body: lastChunk,
+                ),
+              ),
+            );
             controller.add(
               StreamPartFinish(
                 finishReason: _mapGoogleFinishReason(finishReason),
                 rawFinishReason: finishReason,
-                usage: streamUsage,
+                usage: streamUsage ?? const LanguageModelV4Usage(),
                 providerMetadata: {
                   provider: {
                     'model': modelId,
                     'timestamp': DateTime.now().toUtc().toIso8601String(),
-                    if (warnings.isNotEmpty) 'warnings': warnings,
+                    if (warnings.isNotEmpty)
+                      'warnings': warnings
+                          .map((warning) => warning.type)
+                          .toList(growable: false),
                   },
                 },
               ),
             );
           }
-
-          rawResponse['warnings'] = List<String>.from(warnings);
-          rawResponse['body'] = lastChunk;
         }
       } catch (error) {
+        if (!streamStarted) {
+          streamStarted = true;
+          controller.add(const StreamPartStreamStart());
+        }
         controller.add(StreamPartError(error: error));
       } finally {
+        if (!streamStarted) {
+          controller.add(const StreamPartStreamStart());
+        }
         await controller.close();
       }
     }());
 
-    return LanguageModelV3StreamResult(
+    return LanguageModelV4StreamResult(
       stream: controller.stream,
-      rawResponse: rawResponse,
+      warnings: List.unmodifiable(warnings),
+      request: LanguageModelV4RequestMetadata(body: requestBody),
+      response: LanguageModelV4ResponseMetadata(
+        modelId: modelId,
+        timestamp: responseTimestamp,
+        headers: responseHeaders,
+        body: lastChunk,
+      ),
     );
   }
 }
 
 class _GoogleEmbeddingModel implements EmbeddingModelV2<String> {
-  const _GoogleEmbeddingModel({
+  _GoogleEmbeddingModel({
     required this.modelId,
-    this.apiKey,
-    this.baseUrl,
+    required this.client,
+    required this.apiKey,
   });
 
   @override
   final String modelId;
-  final String? apiKey;
-  final String? baseUrl;
+  final Dio client;
+  final CredentialProvider apiKey;
 
   @override
   String get provider => 'google';
@@ -456,7 +558,7 @@ class _GoogleEmbeddingModel implements EmbeddingModelV2<String> {
   Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
     EmbeddingModelV2CallOptions<String> options,
   ) async {
-    final client = _googleDio(baseUrl: baseUrl);
+    final resolvedApiKey = await Future.value(apiKey());
     final modelPath = _modelPath(modelId);
     final providerOptions = options.providerOptions != null
         ? options.providerOptions![provider]
@@ -480,7 +582,7 @@ class _GoogleEmbeddingModel implements EmbeddingModelV2<String> {
     try {
       response = await client.post<Map<String, dynamic>>(
         '/$modelPath:batchEmbedContents',
-        queryParameters: {'key': _resolvedApiKey(apiKey)},
+        queryParameters: {'key': resolvedApiKey},
         data: embedRequest,
         options: Options(headers: options.headers),
       );
@@ -518,49 +620,41 @@ Dio _googleDio({String? baseUrl}) {
   );
 }
 
-String _resolvedApiKey(String? apiKey) {
-  final resolved = apiKey ?? const String.fromEnvironment('GOOGLE_API_KEY');
-  if (resolved.isEmpty) {
-    throw StateError('Missing GOOGLE_API_KEY for Google provider.');
-  }
-  return resolved;
-}
-
 String _modelPath(String modelId) {
   if (modelId.startsWith('models/')) return modelId;
   return 'models/$modelId';
 }
 
 List<Map<String, dynamic>> _toGoogleContents(
-  List<LanguageModelV3Message> messages,
+  List<LanguageModelV4Message> messages,
 ) {
   return messages.map((message) {
     final role = switch (message.role) {
-      LanguageModelV3Role.system => 'user',
-      LanguageModelV3Role.user => 'user',
-      LanguageModelV3Role.assistant => 'model',
-      LanguageModelV3Role.tool => 'user',
+      LanguageModelV4Role.system => 'user',
+      LanguageModelV4Role.user => 'user',
+      LanguageModelV4Role.assistant => 'model',
+      LanguageModelV4Role.tool => 'user',
     };
 
     final parts = <Map<String, dynamic>>[];
     for (final part in message.content) {
-      if (part is LanguageModelV3TextPart) {
+      if (part is LanguageModelV4TextPart) {
         parts.add({'text': part.text});
-      } else if (part is LanguageModelV3ImagePart) {
+      } else if (part is LanguageModelV4ImagePart) {
         final imagePart = _toGoogleInlinePart(part.image, part.mediaType);
         if (imagePart != null) {
           parts.add(imagePart);
         }
-      } else if (part is LanguageModelV3FilePart) {
+      } else if (part is LanguageModelV4FilePart) {
         final filePart = _toGoogleInlinePart(part.data, part.mediaType);
         if (filePart != null) {
           parts.add(filePart);
         }
-      } else if (part is LanguageModelV3ToolCallPart) {
+      } else if (part is LanguageModelV4ToolCallPart) {
         parts.add({
           'functionCall': {'name': part.toolName, 'args': part.input},
         });
-      } else if (part is LanguageModelV3ToolResultPart) {
+      } else if (part is LanguageModelV4ToolResultPart) {
         parts.add({
           'functionResponse': {
             'name': part.toolName,
@@ -576,7 +670,7 @@ List<Map<String, dynamic>> _toGoogleContents(
 
     if (parts.isEmpty) {
       final fallbackText = message.content
-          .whereType<LanguageModelV3TextPart>()
+          .whereType<LanguageModelV4TextPart>()
           .map((e) => e.text)
           .join('\n');
       parts.add({'text': fallbackText});
@@ -586,15 +680,15 @@ List<Map<String, dynamic>> _toGoogleContents(
   }).toList();
 }
 
-LanguageModelV3FinishReason _mapGoogleFinishReason(String? reason) {
+LanguageModelV4FinishReason _mapGoogleFinishReason(String? reason) {
   return switch (reason) {
-    'STOP' => LanguageModelV3FinishReason.stop,
-    'MAX_TOKENS' => LanguageModelV3FinishReason.length,
-    'SAFETY' => LanguageModelV3FinishReason.contentFilter,
-    'RECITATION' => LanguageModelV3FinishReason.contentFilter,
-    'OTHER' => LanguageModelV3FinishReason.other,
-    null => LanguageModelV3FinishReason.unknown,
-    _ => LanguageModelV3FinishReason.other,
+    'STOP' => LanguageModelV4FinishReason.stop,
+    'MAX_TOKENS' => LanguageModelV4FinishReason.length,
+    'SAFETY' => LanguageModelV4FinishReason.contentFilter,
+    'RECITATION' => LanguageModelV4FinishReason.contentFilter,
+    'OTHER' => LanguageModelV4FinishReason.other,
+    null => LanguageModelV4FinishReason.unknown,
+    _ => LanguageModelV4FinishReason.other,
   };
 }
 
@@ -616,7 +710,9 @@ Map<String, dynamic>? _safeParseMap(String input) {
     final decoded = jsonDecode(input);
     if (decoded is Map<String, dynamic>) return decoded;
     // jsonDecode of a JSON object always yields a Map<String, dynamic>.
-    if (decoded is Map) return decoded.cast<String, dynamic>(); // coverage:ignore-line
+    if (decoded is Map) {
+      return decoded.cast<String, dynamic>(); // coverage:ignore-line
+    }
     return null;
   } catch (_) {
     return null;
@@ -630,24 +726,72 @@ int? _intOrNull(Object? value) => switch (value) {
   _ => null,
 };
 
-/// Builds a [LanguageModelV3Usage] from a Gemini `usageMetadata` object, mapping
-/// `cachedContentTokenCount` into [LanguageModelV3InputTokenDetails].
-///
-/// Gemini's `promptTokenCount` already includes cached tokens, so `inputTokens`
-/// stays the total and the uncached remainder is surfaced via `noCacheTokens`.
-LanguageModelV3Usage _googleUsageFrom(Map<String, dynamic> usage) {
+_GoogleFunctionCall _parseGoogleFunctionCall(
+  Map<String, dynamic> functionCall,
+) {
+  final rawArgs = functionCall['args'];
+  final input = rawArgs is Map
+      ? rawArgs.cast<String, dynamic>()
+      : (rawArgs ?? const {});
+  return _GoogleFunctionCall(
+    toolName: functionCall['name']?.toString() ?? 'unknown_tool',
+    input: input,
+    argsText: _googleFunctionArgsText(rawArgs, input),
+  );
+}
+
+String _googleFunctionArgsText(Object? rawArgs, Object input) =>
+    switch (rawArgs) {
+      String value => value,
+      null => jsonEncode(input),
+      _ => jsonEncode(rawArgs),
+    };
+
+String _googleFunctionArgsDelta({
+  required String previous,
+  required String current,
+}) {
+  if (current.isEmpty || current == previous) return '';
+  if (current.startsWith(previous)) {
+    return current.substring(previous.length);
+  }
+  return current;
+}
+
+void _emitGoogleToolCall(
+  StreamController<LanguageModelV4StreamPart> controller,
+  _GoogleStreamFunctionCallState state,
+) {
+  controller.add(StreamPartToolInputEnd(id: state.toolCallId));
+  controller.add(
+    StreamPartToolCall(
+      toolCall: LanguageModelV4ToolCallPart(
+        toolCallId: state.toolCallId,
+        toolName: state.toolName,
+        input: state.input,
+      ),
+    ),
+  );
+}
+
+/// Gemini's `promptTokenCount` already includes cached tokens, so `total`
+/// remains the reported prompt total and the uncached remainder is surfaced via
+/// `noCache`.
+LanguageModelV4Usage _googleUsageFrom(Map<String, dynamic> usage) {
   final inputTokens = _intOrNull(usage['promptTokenCount']);
   final cacheRead = _intOrNull(usage['cachedContentTokenCount']);
-  return LanguageModelV3Usage(
-    inputTokens: inputTokens,
-    outputTokens: _intOrNull(usage['candidatesTokenCount']),
-    totalTokens: _intOrNull(usage['totalTokenCount']),
-    inputTokenDetails: cacheRead == null
-        ? null
-        : LanguageModelV3InputTokenDetails(
-            noCacheTokens: inputTokens == null ? null : inputTokens - cacheRead,
-            cacheReadTokens: cacheRead,
-          ),
+  return LanguageModelV4Usage(
+    inputTokens: LanguageModelV4InputTokenUsage(
+      total: inputTokens,
+      noCache: cacheRead == null || inputTokens == null
+          ? null
+          : inputTokens - cacheRead,
+      cacheRead: cacheRead,
+    ),
+    outputTokens: LanguageModelV4OutputTokenUsage(
+      total: _intOrNull(usage['candidatesTokenCount']),
+    ),
+    raw: usage,
   );
 }
 
@@ -656,8 +800,33 @@ String _generateId(String prefix) {
   return '$prefix-$micros';
 }
 
+class _GoogleFunctionCall {
+  const _GoogleFunctionCall({
+    required this.toolName,
+    required this.input,
+    required this.argsText,
+  });
+
+  final String toolName;
+  final Object input;
+  final String argsText;
+}
+
+class _GoogleStreamFunctionCallState {
+  _GoogleStreamFunctionCallState({
+    required this.toolCallId,
+    required this.toolName,
+    required this.input,
+  });
+
+  final String toolCallId;
+  final String toolName;
+  Object input;
+  String argsText = '';
+}
+
 Map<String, dynamic>? _toGoogleInlinePart(
-  LanguageModelV3DataContent data,
+  LanguageModelV4DataContent data,
   String? mediaType,
 ) {
   if (data is DataContentUrl) {
@@ -679,7 +848,7 @@ Map<String, dynamic>? _toGoogleInlinePart(
   };
 }
 
-Object _toGoogleToolResultOutput(LanguageModelV3ToolResultOutput output) {
+Object _toGoogleToolResultOutput(LanguageModelV4ToolResultOutput output) {
   if (output is ToolResultOutputText) {
     return {'type': 'text', 'text': output.text};
   }
@@ -693,17 +862,17 @@ Object _toGoogleToolResultOutput(LanguageModelV3ToolResultOutput output) {
   return {'type': 'unknown'}; // coverage:ignore-line
 }
 
-Map<String, dynamic> _toGoogleToolResultPart(LanguageModelV3ContentPart part) {
-  if (part is LanguageModelV3TextPart) {
+Map<String, dynamic> _toGoogleToolResultPart(LanguageModelV4ContentPart part) {
+  if (part is LanguageModelV4TextPart) {
     return {'type': 'text', 'text': part.text};
   }
-  if (part is LanguageModelV3ImagePart) {
+  if (part is LanguageModelV4ImagePart) {
     return {
       'type': 'image',
       ...?_toGoogleInlinePart(part.image, part.mediaType),
     };
   }
-  if (part is LanguageModelV3FilePart) {
+  if (part is LanguageModelV4FilePart) {
     return {
       'type': 'file',
       'mediaType': part.mediaType,
@@ -714,7 +883,7 @@ Map<String, dynamic> _toGoogleToolResultPart(LanguageModelV3ContentPart part) {
   return {'type': 'unsupported'};
 }
 
-String? _toBase64(LanguageModelV3DataContent data) {
+String? _toBase64(LanguageModelV4DataContent data) {
   return switch (data) {
     DataContentBytes(:final bytes) => base64Encode(bytes),
     DataContentBase64(:final base64) => base64,
@@ -723,26 +892,59 @@ String? _toBase64(LanguageModelV3DataContent data) {
   };
 }
 
-List<String> _readGoogleWarnings(Map<String, dynamic> payload) {
-  final warnings = <String>[];
+List<LanguageModelV4Warning> _readGoogleWarnings(Map<String, dynamic> payload) {
+  final warnings = <LanguageModelV4Warning>[];
   final promptFeedback = payload['promptFeedback'];
   if (promptFeedback != null) {
-    warnings.add('promptFeedback: ${jsonEncode(promptFeedback)}');
+    warnings.add(
+      LanguageModelV4OtherWarning(
+        message: 'promptFeedback: ${jsonEncode(promptFeedback)}',
+      ),
+    );
   }
   final list = payload['warnings'];
   if (list is List) {
     for (final item in list) {
-      final warning = item?.toString();
-      if (warning != null && warning.isNotEmpty) {
-        warnings.add(warning);
-      }
+      final warning = _parseGoogleWarning(item);
+      if (warning != null) warnings.add(warning);
     }
   }
   return warnings;
 }
 
+LanguageModelV4Warning? _parseGoogleWarning(Object? item) {
+  if (item == null) return null;
+  if (item is String) {
+    return item.isEmpty ? null : LanguageModelV4OtherWarning(message: item);
+  }
+  if (item is Map) {
+    final map = item.cast<Object?, Object?>();
+    final type = map['type']?.toString();
+    final feature = map['feature']?.toString();
+    final details = map['details']?.toString();
+    return switch (type) {
+      'unsupported' when feature != null => LanguageModelV4UnsupportedWarning(
+        feature: feature,
+        details: details,
+      ),
+      'compatibility' when feature != null =>
+        LanguageModelV4CompatibilityWarning(feature: feature, details: details),
+      'deprecated' when feature != null => LanguageModelV4DeprecatedWarning(
+        setting: feature,
+        message: details ?? 'This setting is deprecated.',
+      ),
+      'other' => LanguageModelV4OtherWarning(
+        message: map['message']?.toString() ?? jsonEncode(item),
+      ),
+      _ => LanguageModelV4OtherWarning(message: jsonEncode(item)),
+    };
+  }
+  final text = item.toString();
+  return text.isEmpty ? null : LanguageModelV4OtherWarning(message: text);
+}
+
 Map<String, dynamic> _googleToolChoicePayload(
-  LanguageModelV3ToolChoice? choice,
+  LanguageModelV4ToolChoice? choice,
 ) {
   if (choice == null) {
     return const {};
@@ -765,10 +967,31 @@ Map<String, dynamic> _googleToolChoicePayload(
 /// Maps a [DioException] from a non-2xx response to a typed [AiApiCallError]
 /// carrying the provider's message/status/code. Drains a streamed error body
 /// (`ResponseType.stream`) when present so the message is recoverable.
-Future<AiApiCallError> _apiCallError(
-  DioException error,
-  String provider,
-) async {
+CancelToken? _cancelTokenFor(LanguageModelV4AbortSignal? abortSignal) {
+  if (abortSignal == null) {
+    return null;
+  }
+
+  final cancelToken = CancelToken();
+  if (abortSignal.isCancelled) {
+    cancelToken.cancel('abortSignal');
+    return cancelToken;
+  }
+
+  unawaited(
+    abortSignal.onCancelled.then((_) {
+      if (!cancelToken.isCancelled) {
+        cancelToken.cancel('abortSignal');
+      }
+    }),
+  );
+  return cancelToken;
+}
+
+Future<AiSdkError> _apiCallError(DioException error, String provider) async {
+  if (error.type == DioExceptionType.cancel || CancelToken.isCancel(error)) {
+    return const AiOperationCancelledError();
+  }
   final data = error.response?.data;
   Object? body = data;
   if (data is ResponseBody) {

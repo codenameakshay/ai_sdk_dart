@@ -19,32 +19,40 @@ void main() {
       test('exposes finishReason and rawFinishReason', () async {
         final model = FakeTextModel(
           'done',
-          finishReason: LanguageModelV3FinishReason.stop,
+          finishReason: LanguageModelV4FinishReason.stop,
           rawFinishReason: 'stop',
         );
         final result = await generateText(model: model, prompt: 'hi');
-        expect(result.finishReason, LanguageModelV3FinishReason.stop);
+        expect(result.finishReason, LanguageModelV4FinishReason.stop);
         expect(result.rawFinishReason, 'stop');
       });
 
       test('exposes usage from model response', () async {
         final model = FakeTextModel(
           'done',
-          usage: const LanguageModelV3Usage(
-            inputTokens: 5,
-            outputTokens: 3,
-            totalTokens: 8,
+          usage: const LanguageModelV4Usage(
+            inputTokens: LanguageModelV4InputTokenUsage(total: 5),
+            outputTokens: LanguageModelV4OutputTokenUsage(total: 3),
           ),
         );
         final result = await generateText(model: model, prompt: 'hi');
-        expect(result.usage?.inputTokens, 5);
-        expect(result.usage?.outputTokens, 3);
+        expect(result.usage?.inputTokens.total, 5);
+        expect(result.usage?.outputTokens.total, 3);
       });
 
       test('exposes warnings from model response', () async {
         final model = FakeTextModel('done', warnings: ['deprecation: old-api']);
         final result = await generateText(model: model, prompt: 'hi');
-        expect(result.warnings, contains('deprecation: old-api'));
+        expect(
+          result.warnings,
+          contains(
+            isA<LanguageModelV4OtherWarning>().having(
+              (warning) => warning.message,
+              'message',
+              'deprecation: old-api',
+            ),
+          ),
+        );
       });
 
       test('steps contains single step for single-step generation', () async {
@@ -53,7 +61,7 @@ void main() {
         expect(result.steps.length, 1);
         expect(result.steps[0].stepNumber, 0);
         expect(result.steps[0].text, 'Hello!');
-        expect(result.steps[0].finishReason, LanguageModelV3FinishReason.stop);
+        expect(result.steps[0].finishReason, LanguageModelV4FinishReason.stop);
       });
     });
 
@@ -87,7 +95,7 @@ void main() {
         final model = FakeTextModel(
           'answer',
           sources: [
-            const LanguageModelV3SourcePart(
+            const LanguageModelV4SourcePart(
               id: 's1',
               url: 'https://example.com',
               title: 'Example',
@@ -130,7 +138,10 @@ void main() {
           GenerateTextFinishEvent<dynamic>? finishEvent;
           final model = FakeTextModel(
             'hello',
-            usage: const LanguageModelV3Usage(inputTokens: 2, outputTokens: 1),
+            usage: const LanguageModelV4Usage(
+              inputTokens: LanguageModelV4InputTokenUsage(total: 2),
+              outputTokens: LanguageModelV4OutputTokenUsage(total: 1),
+            ),
           );
           await generateText(
             model: model,
@@ -140,8 +151,8 @@ void main() {
           expect(finishEvent, isNotNull);
           expect(finishEvent!.text, 'hello');
           expect(finishEvent!.steps.length, 1);
-          expect(finishEvent!.usage?.inputTokens, 2);
-          expect(finishEvent!.finishReason, LanguageModelV3FinishReason.stop);
+          expect(finishEvent!.usage?.inputTokens.total, 2);
+          expect(finishEvent!.finishReason, LanguageModelV4FinishReason.stop);
         },
       );
 
@@ -193,20 +204,20 @@ void main() {
       test('single tool call + text produces 2 steps', () async {
         final model = FakeMultiStepModel([
           // Step 1: tool call
-          LanguageModelV3GenerateResult(
+          LanguageModelV4GenerateResult(
             content: [
-              const LanguageModelV3ToolCallPart(
+              const LanguageModelV4ToolCallPart(
                 toolCallId: 'c1',
                 toolName: 'calc',
                 input: {'op': 'add', 'a': 1, 'b': 2},
               ),
             ],
-            finishReason: LanguageModelV3FinishReason.toolCalls,
+            finishReason: LanguageModelV4FinishReason.toolCalls,
           ),
           // Step 2: text answer
-          const LanguageModelV3GenerateResult(
-            content: [LanguageModelV3TextPart(text: 'The answer is 3')],
-            finishReason: LanguageModelV3FinishReason.stop,
+          const LanguageModelV4GenerateResult(
+            content: [LanguageModelV4TextPart(text: 'The answer is 3')],
+            finishReason: LanguageModelV4FinishReason.stop,
           ),
         ]);
 
@@ -230,26 +241,25 @@ void main() {
       });
 
       test('totalUsage aggregates usage across all steps', () async {
-        final usage = const LanguageModelV3Usage(
-          inputTokens: 10,
-          outputTokens: 5,
-          totalTokens: 15,
+        final usage = const LanguageModelV4Usage(
+          inputTokens: LanguageModelV4InputTokenUsage(total: 10),
+          outputTokens: LanguageModelV4OutputTokenUsage(total: 5),
         );
         final model = FakeMultiStepModel([
-          LanguageModelV3GenerateResult(
+          LanguageModelV4GenerateResult(
             content: [
-              const LanguageModelV3ToolCallPart(
+              const LanguageModelV4ToolCallPart(
                 toolCallId: 'c1',
                 toolName: 'noop',
                 input: {},
               ),
             ],
-            finishReason: LanguageModelV3FinishReason.toolCalls,
+            finishReason: LanguageModelV4FinishReason.toolCalls,
             usage: usage,
           ),
-          LanguageModelV3GenerateResult(
-            content: [const LanguageModelV3TextPart(text: 'done')],
-            finishReason: LanguageModelV3FinishReason.stop,
+          LanguageModelV4GenerateResult(
+            content: [const LanguageModelV4TextPart(text: 'done')],
+            finishReason: LanguageModelV4FinishReason.stop,
             usage: usage,
           ),
         ]);
@@ -264,13 +274,13 @@ void main() {
                 jsonSchema: const {'type': 'object'},
                 fromJson: (json) => json,
               ),
-              execute: (_, __) async => 'ok',
+              execute: (_, _) async => 'ok',
             ),
           },
         );
 
-        expect(result.totalUsage?.inputTokens, 20);
-        expect(result.totalUsage?.outputTokens, 10);
+        expect(result.totalUsage?.inputTokens.total, 20);
+        expect(result.totalUsage?.outputTokens.total, 10);
       });
     });
 
@@ -308,14 +318,14 @@ void main() {
                   jsonSchema: const {'type': 'object'},
                   fromJson: (json) => json,
                 ),
-                execute: (_, __) async => 'a',
+                execute: (_, _) async => 'a',
               ),
               'toolB': tool<Map<String, dynamic>, String>(
                 inputSchema: Schema<Map<String, dynamic>>(
                   jsonSchema: const {'type': 'object'},
                   fromJson: (json) => json,
                 ),
-                execute: (_, __) async => 'b',
+                execute: (_, _) async => 'b',
               ),
             },
             prepareStep: (_) async =>
@@ -336,19 +346,19 @@ void main() {
         'stopAfterMaxCalls(1) stops after one step even with tools',
         () async {
           final model = FakeMultiStepModel([
-            LanguageModelV3GenerateResult(
+            LanguageModelV4GenerateResult(
               content: [
-                const LanguageModelV3ToolCallPart(
+                const LanguageModelV4ToolCallPart(
                   toolCallId: 'c1',
                   toolName: 'noop',
                   input: {},
                 ),
               ],
-              finishReason: LanguageModelV3FinishReason.toolCalls,
+              finishReason: LanguageModelV4FinishReason.toolCalls,
             ),
-            const LanguageModelV3GenerateResult(
-              content: [LanguageModelV3TextPart(text: 'done')],
-              finishReason: LanguageModelV3FinishReason.stop,
+            const LanguageModelV4GenerateResult(
+              content: [LanguageModelV4TextPart(text: 'done')],
+              finishReason: LanguageModelV4FinishReason.stop,
             ),
           ]);
 
@@ -363,7 +373,7 @@ void main() {
                   jsonSchema: const {'type': 'object'},
                   fromJson: (json) => json,
                 ),
-                execute: (_, __) async => 'ok',
+                execute: (_, _) async => 'ok',
               ),
             },
           );
@@ -390,8 +400,8 @@ void main() {
         expect(
           result.responseMessages.every(
             (m) =>
-                m.role == LanguageModelV3Role.assistant ||
-                m.role == LanguageModelV3Role.tool,
+                m.role == LanguageModelV4Role.assistant ||
+                m.role == LanguageModelV4Role.tool,
           ),
           isTrue,
         );

@@ -10,7 +10,7 @@ import 'package:image_picker/image_picker.dart';
 import '../config.dart';
 
 /// Multimodal: send image + text, get model analysis.
-/// Uses [LanguageModelV3ImagePart] in messages.
+/// Uses [LanguageModelV4ImagePart] in messages.
 class MultimodalPage extends StatefulWidget {
   const MultimodalPage({super.key});
 
@@ -91,11 +91,11 @@ class _MultimodalPageState extends State<MultimodalPage> {
           ModelMessage.parts(
             role: ModelMessageRole.user,
             parts: [
-              LanguageModelV3ImagePart(
+              LanguageModelV4ImagePart(
                 image: DataContentBytes(_imageBytes!),
                 mediaType: _mediaType ?? 'image/jpeg',
               ),
-              LanguageModelV3TextPart(text: question),
+              LanguageModelV4TextPart(text: question),
             ],
           ),
         ],

@@ -39,14 +39,19 @@ class _TypingIndicatorState extends State<TypingIndicator>
     vsync: this,
     duration: AiMotion.typingPeriod,
   );
-  bool _started = false;
+  bool? _reducedMotion;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_started) return;
-    _started = true;
-    if (!AiMotion.reduced(context)) _controller.repeat();
+    final reducedMotion = AiMotion.reduced(context);
+    if (_reducedMotion == reducedMotion) return;
+    _reducedMotion = reducedMotion;
+    if (reducedMotion) {
+      _controller.stop();
+      return;
+    }
+    _controller.repeat();
   }
 
   @override
@@ -61,32 +66,39 @@ class _TypingIndicatorState extends State<TypingIndicator>
     final color = widget.dotColor ?? scheme.onSurfaceVariant;
     final label = widget.label;
 
-    return Row(
-      key: const ValueKey('typing-indicator'),
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        for (var i = 0; i < 3; i++)
-          Padding(
-            padding: EdgeInsets.only(right: i == 2 ? 0 : 5),
-            child: _Dot(
-              key: ValueKey('typing-dot-$i'),
-              controller: _controller,
-              index: i,
-              color: color,
-              size: widget.dotSize,
-            ),
-          ),
-        if (label != null) ...[
-          const SizedBox(width: 9),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: scheme.onSurfaceVariant,
-            ),
-          ),
-        ],
-      ],
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      label: label ?? 'Assistant is typing',
+      child: ExcludeSemantics(
+        child: Row(
+          key: const ValueKey('typing-indicator'),
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            for (var i = 0; i < 3; i++)
+              Padding(
+                padding: EdgeInsets.only(right: i == 2 ? 0 : 5),
+                child: _Dot(
+                  key: ValueKey('typing-dot-$i'),
+                  controller: _controller,
+                  index: i,
+                  color: color,
+                  size: widget.dotSize,
+                ),
+              ),
+            if (label != null) ...[
+              const SizedBox(width: 9),
+              Text(
+                label,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }
@@ -128,7 +140,10 @@ class _Dot extends StatelessWidget {
         final wave = AiMotion.gentle.transform(raw.clamp(0.0, 1.0));
         return Opacity(
           opacity: 0.3 + 0.7 * wave,
-          child: Transform.translate(offset: Offset(0, -1.5 * wave), child: child),
+          child: Transform.translate(
+            offset: Offset(0, -1.5 * wave),
+            child: child,
+          ),
         );
       },
       child: dot,

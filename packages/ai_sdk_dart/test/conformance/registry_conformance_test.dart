@@ -32,7 +32,7 @@ void main() {
 
       test('resolves language model by provider:modelId string', () async {
         final model = registry.languageModel('fake:gpt-4o');
-        expect(model, isA<LanguageModelV3>());
+        expect(model, isA<LanguageModelV4>());
         expect(model.modelId, 'gpt-4o');
       });
 
@@ -133,7 +133,8 @@ void main() {
         registry = createProviderRegistry({
           'fake': RegistrableProvider(
             languageModelFactory: (id) => FakeTextModel('hi', modelId: id),
-            embeddingModelFactory: (id) => FakeEmbeddingModel([0.1], modelId: id),
+            embeddingModelFactory: (id) =>
+                FakeEmbeddingModel([0.1], modelId: id),
             imageModelFactory: (id) => _FakeImageModel(id),
             speechModelFactory: (id) => FakeSpeechModel(
               audio: Uint8List(0),
@@ -175,20 +176,25 @@ void main() {
         );
       });
 
-      test('throws UnsupportedError when speechModelFactory not registered', () {
-        expect(
-          () => registry.speechModel('no-extras:tts-1'),
-          throwsA(isA<UnsupportedError>()),
-        );
-      });
+      test(
+        'throws UnsupportedError when speechModelFactory not registered',
+        () {
+          expect(
+            () => registry.speechModel('no-extras:tts-1'),
+            throwsA(isA<UnsupportedError>()),
+          );
+        },
+      );
 
-      test('throws UnsupportedError when transcriptionModelFactory not set',
-          () {
-        expect(
-          () => registry.transcriptionModel('no-extras:whisper-1'),
-          throwsA(isA<UnsupportedError>()),
-        );
-      });
+      test(
+        'throws UnsupportedError when transcriptionModelFactory not set',
+        () {
+          expect(
+            () => registry.transcriptionModel('no-extras:whisper-1'),
+            throwsA(isA<UnsupportedError>()),
+          );
+        },
+      );
     });
 
     // ── RegistrableProvider ───────────────────────────────────────────────
@@ -200,7 +206,7 @@ void main() {
           embeddingModelFactory: (modelId) => FakeEmbeddingModel([0.1]),
         );
         expect(provider, isNotNull);
-        expect(provider.languageModelFactory('test'), isA<LanguageModelV3>());
+        expect(provider.languageModelFactory('test'), isA<LanguageModelV4>());
         expect(
           provider.embeddingModelFactory('test'),
           isA<EmbeddingModelV2<String>>(),
@@ -231,6 +237,5 @@ class _FakeImageModel implements ImageModelV3 {
   @override
   Future<ImageModelV3GenerateResult> doGenerate(
     ImageModelV3CallOptions options,
-  ) async =>
-      const ImageModelV3GenerateResult(images: []);
+  ) async => const ImageModelV3GenerateResult(images: []);
 }

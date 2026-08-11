@@ -5,6 +5,6 @@
 ///   fvm flutter run --dart-define=OPENAI_API_KEY=sk-...
 ///   fvm flutter build apk --dart-define=OPENAI_API_KEY=sk-...
 ///
-/// For production apps, consider flutter_dotenv or flutter_secure_storage
-/// to avoid baking the key into the binary.
+/// Do not ship a long-lived provider secret this way. For production, prefer a
+/// trusted proxy or backend-minted short-lived credentials.
 const String openAiApiKey = String.fromEnvironment('OPENAI_API_KEY');

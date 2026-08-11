@@ -4,8 +4,13 @@
 
 ```sh
 dart pub add ai_sdk_dart ai_sdk_google
-export GOOGLE_API_KEY=AIza...
 ```
+
+The top-level `google` factory reads
+`const String.fromEnvironment('GOOGLE_API_KEY')`. Use it with
+`fvm dart run --define=GOOGLE_API_KEY=AIza... bin/app.dart`, or read
+`Platform.environment['GOOGLE_API_KEY']` yourself and pass `apiKey:` to
+`GoogleGenerativeAIProvider` in server and CLI apps.
 
 ---
 

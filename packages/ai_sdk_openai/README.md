@@ -6,17 +6,17 @@ OpenAI provider for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart). Support
 
 ```yaml
 dependencies:
-  ai_sdk_dart: ^1.1.0
-  ai_sdk_openai: ^1.1.0
+  ai_sdk_dart: ^1.2.0
+  ai_sdk_openai: ^1.2.0
 ```
 
 ## Usage
 
-Set your API key via environment variable:
-
-```sh
-export OPENAI_API_KEY=sk-...
-```
+The top-level `openai` factory reads
+`const String.fromEnvironment('OPENAI_API_KEY')`. Use it with
+`fvm dart run --define=OPENAI_API_KEY=sk-... bin/app.dart`, or read
+`Platform.environment['OPENAI_API_KEY']` yourself and pass `apiKey:` to
+`OpenAIProvider` in server and CLI apps.
 
 ### Language model
 
@@ -34,6 +34,8 @@ print(result.text);
 ### Streaming
 
 ```dart
+import 'dart:io';
+
 final result = await streamText(
   model: openai('gpt-4.1'),
   prompt: 'Tell me a joke.',

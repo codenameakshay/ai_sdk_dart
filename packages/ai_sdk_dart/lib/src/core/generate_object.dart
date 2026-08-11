@@ -17,7 +17,7 @@ class GenerateObjectResult<T> {
   });
 
   final T object;
-  final LanguageModelV3GenerateResult response;
+  final LanguageModelV4GenerateResult response;
   final Map<String, dynamic> rawJson;
 }
 
@@ -39,7 +39,7 @@ class GenerateObjectResult<T> {
 /// print(result.object);
 /// ```
 Future<GenerateObjectResult<T>> generateObject<T>({
-  required LanguageModelV3 model,
+  required LanguageModelV4 model,
   required Schema<T> schema,
   String? system,
   String? prompt,
@@ -49,21 +49,21 @@ Future<GenerateObjectResult<T>> generateObject<T>({
   double? topP,
   Duration? timeout,
 }) async {
-  final normalizedMessages = <LanguageModelV3Message>[
+  final normalizedMessages = <LanguageModelV4Message>[
     if (prompt != null)
-      LanguageModelV3Message(
-        role: LanguageModelV3Role.user,
-        content: [LanguageModelV3TextPart(text: prompt)],
+      LanguageModelV4Message(
+        role: LanguageModelV4Role.user,
+        content: [LanguageModelV4TextPart(text: prompt)],
       ),
     ...?messages?.map(
-      (m) => LanguageModelV3Message(
+      (m) => LanguageModelV4Message(
         role: switch (m.role) {
-          ModelMessageRole.system => LanguageModelV3Role.system,
-          ModelMessageRole.user => LanguageModelV3Role.user,
-          ModelMessageRole.assistant => LanguageModelV3Role.assistant,
-          ModelMessageRole.tool => LanguageModelV3Role.tool,
+          ModelMessageRole.system => LanguageModelV4Role.system,
+          ModelMessageRole.user => LanguageModelV4Role.user,
+          ModelMessageRole.assistant => LanguageModelV4Role.assistant,
+          ModelMessageRole.tool => LanguageModelV4Role.tool,
         },
-        content: m.parts ?? [LanguageModelV3TextPart(text: m.content ?? '')],
+        content: m.parts ?? [LanguageModelV4TextPart(text: m.content ?? '')],
       ),
     ),
   ];
@@ -76,15 +76,17 @@ Future<GenerateObjectResult<T>> generateObject<T>({
   ].join('\n');
 
   final generateCall = model.doGenerate(
-    LanguageModelV3CallOptions(
-      prompt: LanguageModelV3Prompt(
+    LanguageModelV4CallOptions(
+      prompt: LanguageModelV4Prompt(
         system: instruction,
         messages: normalizedMessages,
       ),
       maxOutputTokens: maxOutputTokens,
       temperature: temperature,
       topP: topP,
-      outputSchema: schema.jsonSchema,
+      responseFormat: LanguageModelV4JsonResponseFormat(
+        schema: schema.jsonSchema,
+      ),
     ),
   );
   final response = await (timeout != null
@@ -92,7 +94,7 @@ Future<GenerateObjectResult<T>> generateObject<T>({
       : generateCall);
 
   final text = response.content
-      .whereType<LanguageModelV3TextPart>()
+      .whereType<LanguageModelV4TextPart>()
       .map((part) => part.text)
       .join();
 
@@ -118,10 +120,10 @@ Future<GenerateObjectResult<T>> generateObject<T>({
 }
 
 Map<String, dynamic> _extractJsonObject(
-  List<LanguageModelV3ContentPart> parts,
+  List<LanguageModelV4ContentPart> parts,
 ) {
   final text = parts
-      .whereType<LanguageModelV3TextPart>()
+      .whereType<LanguageModelV4TextPart>()
       .map((part) => part.text)
       .join();
   if (text.isEmpty) {

@@ -4,8 +4,10 @@ import 'dart:io';
 
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_mcp/ai_sdk_mcp.dart';
-import 'package:ai_sdk_mcp/src/json_rpc.dart';
+import 'package:http/http.dart' as http;
 import 'package:test/test.dart';
+
+import 'support/fake_streamable_http_server.dart';
 
 // ---------------------------------------------------------------------------
 // Mock plain-HTTP JSON-RPC server (mirrors the conformance helper).
@@ -37,14 +39,19 @@ class _MockHttpServer {
       _responseQueue.add(_CannedResponse(jsonBody: response));
 
   /// Queue a raw HTTP response (status + raw body) — used for error/parse paths.
-  void enqueueRaw({required int status, required String body}) =>
-      _responseQueue.add(_CannedResponse(status: status, rawBody: body));
+  void enqueueRaw({
+    required int status,
+    required String body,
+    String? contentType,
+  }) => _responseQueue.add(
+    _CannedResponse(status: status, rawBody: body, contentType: contentType),
+  );
 
   void enqueueInitialize() {
     enqueueJson({
       'jsonrpc': '2.0',
       'result': {
-        'protocolVersion': '2024-11-05',
+        'protocolVersion': '2025-06-18',
         'capabilities': {'tools': {}},
         'serverInfo': {'name': 'test', 'version': '1.0.0'},
       },
@@ -54,6 +61,12 @@ class _MockHttpServer {
 
   Future<void> _serve() async {
     await for (final request in _server) {
+      if (request.method == 'GET' || request.method == 'DELETE') {
+        request.response.statusCode = 405;
+        await request.response.close();
+        continue;
+      }
+
       headerLog.add(request.headers);
       final bodyText = await utf8.decoder.bind(request).join();
       Object? id;
@@ -86,11 +99,17 @@ class _MockHttpServer {
 }
 
 class _CannedResponse {
-  _CannedResponse({this.jsonBody, this.status = 200, this.rawBody});
+  _CannedResponse({
+    this.jsonBody,
+    this.status = 200,
+    this.rawBody,
+    this.contentType,
+  });
 
   final Map<String, dynamic>? jsonBody;
   final int status;
   final String? rawBody;
+  final String? contentType;
 
   void write(HttpResponse res, Object? id) {
     res.statusCode = status;
@@ -98,6 +117,9 @@ class _CannedResponse {
       res.headers.contentType = ContentType.json;
       res.write(jsonEncode(Map.of(jsonBody!)..['id'] = id));
     } else {
+      if (contentType != null) {
+        res.headers.set('Content-Type', contentType!);
+      }
       res.write(rawBody ?? '');
     }
   }
@@ -114,13 +136,19 @@ class _ScriptedTransport implements MCPTransport {
 
   final FutureOr<JsonRpcResponse> Function(JsonRpcRequest request) _handler;
   final _notifications = StreamController<Map<String, dynamic>>.broadcast();
+  final sentNotifications = <JsonRpcNotification>[];
   int sendCount = 0;
   bool closed = false;
 
   void pushNotification(Map<String, dynamic> message) =>
       _notifications.add(message);
 
-  void pushError(Object error) => _notifications.addError(error);
+  void pushError(Object error) {
+    if (_notifications.isClosed) {
+      return;
+    }
+    _notifications.addError(error);
+  }
 
   @override
   Stream<Map<String, dynamic>> get notifications => _notifications.stream;
@@ -129,6 +157,11 @@ class _ScriptedTransport implements MCPTransport {
   Future<JsonRpcResponse> send(JsonRpcRequest request) async {
     sendCount++;
     return _handler(request);
+  }
+
+  @override
+  Future<void> sendNotification(JsonRpcNotification notification) async {
+    sentNotifications.add(notification);
   }
 
   @override
@@ -141,9 +174,19 @@ class _ScriptedTransport implements MCPTransport {
 /// A transport that does NOT override [notifications], so the abstract default
 /// (`json_rpc.dart`) getter is exercised.
 class _DefaultNotificationsTransport extends MCPTransport {
+  final sentNotifications = <JsonRpcNotification>[];
+
   @override
   Future<JsonRpcResponse> send(JsonRpcRequest request) async {
+    if (request.method == 'initialize') {
+      return _initResult(request);
+    }
     return const JsonRpcResponse(result: {});
+  }
+
+  @override
+  Future<void> sendNotification(JsonRpcNotification notification) async {
+    sentNotifications.add(notification);
   }
 
   @override
@@ -153,49 +196,259 @@ class _DefaultNotificationsTransport extends MCPTransport {
 JsonRpcResponse _ok(JsonRpcRequest req, Map<String, dynamic> result) =>
     JsonRpcResponse(result: result, id: req.id);
 
-JsonRpcResponse _err(JsonRpcRequest req, String message) => JsonRpcResponse(
-  error: {'code': -32000, 'message': message},
-  id: req.id,
-);
+JsonRpcResponse _err(JsonRpcRequest req, String message) =>
+    JsonRpcResponse(error: {'code': -32000, 'message': message}, id: req.id);
 
 JsonRpcResponse _initResult(JsonRpcRequest req) => _ok(req, {
-  'protocolVersion': '2024-11-05',
+  'protocolVersion': '2025-06-18',
   'capabilities': {'tools': {}},
   'serverInfo': {'name': 'fake', 'version': '1.0.0'},
 });
 
+class _TrackingClient extends http.BaseClient {
+  _TrackingClient(this._inner);
+
+  final http.Client _inner;
+  bool closed = false;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) {
+    return _inner.send(request);
+  }
+
+  @override
+  void close() {
+    closed = true;
+    _inner.close();
+  }
+}
+
+class _StreamedResponseClient extends http.BaseClient {
+  _StreamedResponseClient(this._handler);
+
+  final Future<http.StreamedResponse> Function(http.BaseRequest request)
+  _handler;
+  bool closed = false;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) {
+    return _handler(request);
+  }
+
+  @override
+  void close() {
+    closed = true;
+  }
+}
+
+class _FakeProcess implements Process {
+  _FakeProcess({
+    IOSink? stdin,
+    Stream<List<int>>? stdout,
+    Stream<List<int>>? stderr,
+    Future<int>? exitCode,
+  }) : stdin = stdin ?? IOSink(StreamController<List<int>>().sink),
+       stdout = stdout ?? const Stream<List<int>>.empty(),
+       stderr = stderr ?? const Stream<List<int>>.empty(),
+       _exitCode = exitCode ?? Completer<int>().future;
+
+  final Future<int> _exitCode;
+  bool killed = false;
+
+  @override
+  final IOSink stdin;
+
+  @override
+  final Stream<List<int>> stdout;
+
+  @override
+  final Stream<List<int>> stderr;
+
+  @override
+  Future<int> get exitCode => _exitCode;
+
+  @override
+  int get pid => 4242;
+
+  @override
+  bool kill([ProcessSignal signal = ProcessSignal.sigterm]) {
+    killed = true;
+    return true;
+  }
+}
+
+class _ThrowingStreamConsumer implements StreamConsumer<List<int>> {
+  _ThrowingStreamConsumer(this.error);
+
+  final Object error;
+
+  @override
+  Future<void> addStream(Stream<List<int>> stream) async {
+    await stream.drain<void>();
+    throw error;
+  }
+
+  @override
+  Future<void> close() async {}
+}
+
 void main() {
   // =========================================================================
-  // HttpClientTransport edge paths
+  // StreamableHttpClientTransport edge paths
   // =========================================================================
 
-  group('HttpClientTransport', () {
-    test('throws MCPException on non-2xx HTTP status', () async {
+  group('StreamableHttpClientTransport', () {
+    test(
+      'throws a typed transport error on non-2xx HTTP status without leaking the response body',
+      () async {
+        final mock = await _MockHttpServer.start();
+        addTearDown(mock.close);
+        final secretUri = Uri(
+          scheme: mock.uri.scheme,
+          userInfo: 'alice:super-secret',
+          host: mock.uri.host,
+          port: mock.uri.port,
+          path: mock.uri.path,
+          queryParameters: {'token': 'query-secret'},
+          fragment: 'frag-secret',
+        );
+        final safeUri = Uri(
+          scheme: mock.uri.scheme,
+          host: mock.uri.host,
+          port: mock.uri.port,
+          path: mock.uri.path,
+        );
+        mock.enqueueRaw(
+          status: 503,
+          body: 'service unavailable token=super-secret body=${'x' * 256}',
+        );
+        mock.enqueueRaw(
+          status: 503,
+          body: 'service unavailable token=super-secret body=${'x' * 256}',
+        );
+
+        final transport = StreamableHttpClientTransport(url: secretUri);
+        addTearDown(transport.close);
+
+        final future = transport.send(JsonRpcRequest(method: 'ping', id: 1));
+
+        await expectLater(
+          future,
+          throwsA(
+            isA<MCPTransportException>()
+                .having((e) => e.statusCode, 'statusCode', 503)
+                .having((e) => e.method, 'method', 'POST')
+                .having((e) => e.uri, 'uri', safeUri),
+          ),
+        );
+
+        MCPTransportException? error;
+        try {
+          await transport.send(JsonRpcRequest(method: 'ping', id: 2));
+          fail('Expected MCPTransportException');
+        } on MCPTransportException catch (caught) {
+          error = caught;
+        }
+
+        expect(error, isNotNull);
+        expect(error.toString(), contains('HTTP 503'));
+        expect(error.toString(), contains('POST'));
+        expect(error.toString(), contains(safeUri.toString()));
+        expect(error.toString(), isNot(contains('super-secret')));
+        expect(error.toString(), isNot(contains('service unavailable')));
+        expect(error.toString(), isNot(contains('token=')));
+        expect(error.toString(), isNot(contains('query-secret')));
+        expect(error.toString(), isNot(contains('frag-secret')));
+        expect(error.toString(), isNot(contains('alice:')));
+        expect(error.uri, safeUri);
+        expect(error.uri.userInfo, isEmpty);
+        expect(error.uri.query, isEmpty);
+        expect(error.uri.fragment, isEmpty);
+        expect(error.uri.toString(), contains(safeUri.toString()));
+        expect(error.uri.toString(), isNot(contains('super-secret')));
+        expect(error.uri.toString(), isNot(contains('query-secret')));
+        expect(error.uri.toString(), isNot(contains('frag-secret')));
+        expect(error.message, isNot(contains('?')));
+        expect(error.message, isNot(contains('#')));
+        expect(error.message, isNot(contains('@')));
+        expect(error.toString().length, lessThan(220));
+      },
+    );
+
+    test('sendNotification redacts transport errors the same way', () async {
       final mock = await _MockHttpServer.start();
       addTearDown(mock.close);
-      mock.enqueueRaw(status: 503, body: 'service unavailable');
+      final secretUri = Uri(
+        scheme: mock.uri.scheme,
+        userInfo: 'notify:top-secret',
+        host: mock.uri.host,
+        port: mock.uri.port,
+        path: mock.uri.path,
+        queryParameters: {'apiKey': 'notify-query-secret'},
+        fragment: 'notify-frag-secret',
+      );
+      final safeUri = Uri(
+        scheme: mock.uri.scheme,
+        host: mock.uri.host,
+        port: mock.uri.port,
+        path: mock.uri.path,
+      );
+      mock.enqueueRaw(status: 401, body: 'Bearer top-secret should never leak');
+      mock.enqueueRaw(status: 401, body: 'Bearer top-secret should never leak');
 
-      final transport = HttpClientTransport(url: mock.uri);
+      final transport = StreamableHttpClientTransport(url: secretUri);
       addTearDown(transport.close);
 
+      final future = transport.sendNotification(
+        JsonRpcNotification(method: 'notifications/initialized'),
+      );
+
       await expectLater(
-        transport.send(JsonRpcRequest(method: 'ping', id: 1)),
+        future,
         throwsA(
-          isA<MCPException>().having(
-            (e) => e.message,
-            'message',
-            allOf(contains('HTTP 503'), contains('service unavailable')),
-          ),
+          isA<MCPTransportException>()
+              .having((e) => e.statusCode, 'statusCode', 401)
+              .having((e) => e.method, 'method', 'POST')
+              .having((e) => e.uri, 'uri', safeUri),
         ),
       );
+
+      MCPTransportException? error;
+      try {
+        await transport.sendNotification(
+          JsonRpcNotification(method: 'notifications/initialized'),
+        );
+        fail('Expected MCPTransportException');
+      } on MCPTransportException catch (caught) {
+        error = caught;
+      }
+
+      expect(error, isNotNull);
+      expect(error.toString(), contains(safeUri.toString()));
+      expect(error.toString(), isNot(contains('top-secret')));
+      expect(error.toString(), isNot(contains('Bearer')));
+      expect(error.toString(), isNot(contains('notify:')));
+      expect(error.toString(), isNot(contains('notify-query-secret')));
+      expect(error.toString(), isNot(contains('notify-frag-secret')));
+      expect(error.uri, safeUri);
+      expect(error.uri.userInfo, isEmpty);
+      expect(error.uri.query, isEmpty);
+      expect(error.uri.fragment, isEmpty);
+      expect(error.uri.toString(), isNot(contains('top-secret')));
+      expect(error.uri.toString(), isNot(contains('notify-query-secret')));
+      expect(error.uri.toString(), isNot(contains('notify-frag-secret')));
     });
 
     test('throws MCPException when body is not a JSON object', () async {
       final mock = await _MockHttpServer.start();
       addTearDown(mock.close);
-      mock.enqueueRaw(status: 200, body: '["not", "an", "object"]');
+      mock.enqueueRaw(
+        status: 200,
+        body: '["not", "an", "object"]',
+        contentType: 'application/json',
+      );
 
-      final transport = HttpClientTransport(url: mock.uri);
+      final transport = StreamableHttpClientTransport(url: mock.uri);
       addTearDown(transport.close);
 
       await expectLater(
@@ -215,7 +468,7 @@ void main() {
       addTearDown(mock.close);
       mock.enqueueJson({'jsonrpc': '2.0', 'result': {}});
 
-      final transport = HttpClientTransport(
+      final transport = StreamableHttpClientTransport(
         url: mock.uri,
         headers: {'Authorization': 'Bearer secret-token'},
       );
@@ -230,474 +483,397 @@ void main() {
       );
     });
 
-    test('notifications stream is empty', () async {
-      final transport = HttpClientTransport(
+    test('notifications getter returns a stream', () async {
+      final transport = StreamableHttpClientTransport(
         url: Uri.parse('http://localhost:1/mcp'),
       );
       addTearDown(transport.close);
-      expect(await transport.notifications.isEmpty, isTrue);
+      expect(transport.notifications, isA<Stream<Map<String, dynamic>>>());
     });
-  });
 
-  // =========================================================================
-  // SseClientTransport edge paths (using the conformance-style SSE flow is
-  // covered elsewhere; here we target the uncovered error/inline/header lines).
-  // =========================================================================
+    test(
+      'sendNotification posts JSON-RPC without an id and ignores 202 body',
+      () async {
+        final mock = await _MockHttpServer.start();
+        addTearDown(mock.close);
+        mock.enqueueRaw(status: 202, body: '');
 
-  group('SseClientTransport edge paths', () {
-    test('uses explicit postUrl without waiting for an endpoint event '
-        'and parses an inline JSON-RPC response body', () async {
-      // Server: GET /sse opens a stream that never emits an `endpoint` event;
-      // POST replies inline with the JSON-RPC body (200). This drives the
-      // `_explicitPostUrl` branch (line 156) and the inline-response branch
-      // (lines 325-331).
-      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      addTearDown(() => server.close(force: true));
-      final headerSeen = Completer<String?>();
+        final transport = StreamableHttpClientTransport(url: mock.uri);
+        addTearDown(transport.close);
 
-      server.listen((request) async {
-        if (request.method == 'GET') {
-          request.response.statusCode = 200;
-          request.response.headers.set('Content-Type', 'text/event-stream');
-          request.response.bufferOutput = false;
-          // Flush headers (so the client's streamed GET resolves) via a
-          // comment line, but never advertise an endpoint.
-          request.response.write(': open\n\n');
-          await request.response.flush();
-          return;
-        }
-        // POST: reply inline with a JSON-RPC result.
-        if (!headerSeen.isCompleted) {
-          headerSeen.complete(request.headers.value('authorization'));
-        }
-        final bodyText = await utf8.decoder.bind(request).join();
-        final body = (jsonDecode(bodyText) as Map).cast<String, dynamic>();
-        request.response.statusCode = 200;
-        request.response.headers.contentType = ContentType.json;
-        request.response.write(
-          jsonEncode({
-            'jsonrpc': '2.0',
-            'id': body['id'],
-            'result': {
-              'protocolVersion': '2024-11-05',
-              'capabilities': {'tools': {}},
-              'serverInfo': {'name': 'inline', 'version': '1.0.0'},
-            },
-          }),
+        await transport.sendNotification(
+          JsonRpcNotification(method: 'notifications/initialized'),
         );
-        await request.response.close();
-      });
 
-      final sseUri = Uri.parse(
-        'http://${server.address.address}:${server.port}/sse',
-      );
-      final postUri = Uri.parse(
-        'http://${server.address.address}:${server.port}/messages',
-      );
+        expect(mock.requestLog, hasLength(1));
+        final sent = mock.requestLog.single;
+        expect(sent['method'], 'notifications/initialized');
+        expect(sent.containsKey('id'), isFalse);
+      },
+    );
+    test(
+      'request timeout sends notifications/cancelled and returns promptly',
+      () async {
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse(sessionId: 'session-1');
+        server.queueSseResponse(const [], closeStream: false);
 
-      final transport = SseClientTransport(
-        url: sseUri,
-        postUrl: postUri,
-        headers: {'Authorization': 'Bearer abc'},
-        connectTimeout: const Duration(seconds: 5),
-        requestTimeout: const Duration(seconds: 5),
-      );
-      addTearDown(transport.close);
-
-      final resp = await transport.send(
-        JsonRpcRequest(method: 'initialize', id: 1),
-      );
-      expect(resp.isError, isFalse);
-      expect((resp.result as Map)['protocolVersion'], '2024-11-05');
-      expect(transport.resolvedPostUrl, postUri);
-      expect(await headerSeen.future, 'Bearer abc');
-    });
-
-    test('throws MCPException when the SSE connect returns a non-2xx status',
-        () async {
-      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      addTearDown(() => server.close(force: true));
-      server.listen((request) async {
-        request.response.statusCode = 401;
-        request.response.write('unauthorized');
-        await request.response.close();
-      });
-
-      final transport = SseClientTransport(
-        url: Uri.parse(
-          'http://${server.address.address}:${server.port}/sse',
-        ),
-        connectTimeout: const Duration(seconds: 5),
-      );
-      addTearDown(transport.close);
-
-      await expectLater(
-        transport.send(JsonRpcRequest(method: 'ping', id: 1)),
-        throwsA(
-          isA<MCPException>().having(
-            (e) => e.message,
-            'message',
-            contains('SSE connect failed: HTTP 401'),
+        final client = MCPClient(
+          transport: StreamableHttpClientTransport(
+            url: server.uri,
+            requestTimeout: const Duration(milliseconds: 80),
           ),
-        ),
-      );
-    });
-
-    test('falls back to the SSE url for POSTs when no endpoint event arrives '
-        'within connectTimeout', () async {
-      // No `endpoint` event and no explicit postUrl → after connectTimeout the
-      // transport falls back to the SSE url itself (lines 188/190/191). The
-      // POST then succeeds inline.
-      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      addTearDown(() => server.close(force: true));
-
-      server.listen((request) async {
-        if (request.method == 'GET') {
-          request.response.statusCode = 200;
-          request.response.headers.set('Content-Type', 'text/event-stream');
-          request.response.bufferOutput = false;
-          // Flush headers so the streamed GET resolves; emit no endpoint event.
-          request.response.write(': open\n\n');
-          await request.response.flush();
-          return; // keep open, no endpoint event
-        }
-        final bodyText = await utf8.decoder.bind(request).join();
-        final body = (jsonDecode(bodyText) as Map).cast<String, dynamic>();
-        request.response.statusCode = 200;
-        request.response.headers.contentType = ContentType.json;
-        request.response.write(
-          jsonEncode({'jsonrpc': '2.0', 'id': body['id'], 'result': {}}),
         );
-        await request.response.close();
-      });
+        addTearDown(client.close);
 
-      final sseUri = Uri.parse(
-        'http://${server.address.address}:${server.port}/sse',
-      );
-      final transport = SseClientTransport(
-        url: sseUri,
-        connectTimeout: const Duration(milliseconds: 150),
-        requestTimeout: const Duration(seconds: 5),
-      );
-      addTearDown(transport.close);
-
-      final resp = await transport.send(
-        JsonRpcRequest(method: 'ping', id: 1),
-      );
-      expect(resp.isError, isFalse);
-      expect(transport.resolvedPostUrl, sseUri);
-    });
-
-    test('throws MCPException when POST returns a non-2xx status', () async {
-      // Endpoint event is advertised so we get past _ensureConnected, then the
-      // POST itself fails with a 500 (lines 315/316).
-      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      addTearDown(() => server.close(force: true));
-
-      server.listen((request) async {
-        if (request.method == 'GET') {
-          request.response.statusCode = 200;
-          request.response.headers.set('Content-Type', 'text/event-stream');
-          request.response.bufferOutput = false;
-          request.response.write('event: endpoint\n');
-          request.response.write('data: /messages\n\n');
-          return;
-        }
-        request.response.statusCode = 500;
-        request.response.write('boom');
-        await request.response.close();
-      });
-
-      final transport = SseClientTransport(
-        url: Uri.parse(
-          'http://${server.address.address}:${server.port}/sse',
-        ),
-        connectTimeout: const Duration(seconds: 5),
-        requestTimeout: const Duration(seconds: 5),
-      );
-      addTearDown(transport.close);
-
-      await expectLater(
-        transport.send(JsonRpcRequest(method: 'ping', id: 1)),
-        throwsA(
-          isA<MCPException>().having(
-            (e) => e.message,
-            'message',
-            allOf(contains('HTTP 500'), contains('boom')),
-          ),
-        ),
-      );
-    });
-
-    test('stream error fails pending requests (SSE stream error path)',
-        () async {
-      // GET /sse advertises the endpoint then abruptly closes the underlying
-      // socket. The POST request is in flight (the POST handler never replies),
-      // so the pending completer must be failed when the stream errors/ends
-      // (lines 254/255 + 258-263).
-      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      addTearDown(() => server.close(force: true));
-
-      HttpResponse? sseResponse;
-      server.listen((request) async {
-        if (request.method == 'GET') {
-          request.response.statusCode = 200;
-          request.response.headers.set('Content-Type', 'text/event-stream');
-          request.response.bufferOutput = false;
-          request.response.write('event: endpoint\n');
-          request.response.write('data: /messages\n\n');
-          sseResponse = request.response;
-          return;
-        }
-        // POST: ack but never deliver a response, then sever the SSE stream so
-        // the pending request fails.
-        request.response.statusCode = 202;
-        request.response.write('Accepted');
-        await request.response.close();
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-        await sseResponse?.close();
-      });
-
-      final transport = SseClientTransport(
-        url: Uri.parse(
-          'http://${server.address.address}:${server.port}/sse',
-        ),
-        connectTimeout: const Duration(seconds: 5),
-        requestTimeout: const Duration(seconds: 5),
-      );
-      addTearDown(transport.close);
-
-      await expectLater(
-        transport.send(JsonRpcRequest(method: 'ping', id: 1)),
-        throwsA(
-          isA<MCPException>().having(
-            (e) => e.message,
-            'message',
-            contains('SSE stream closed by server'),
-          ),
-        ),
-      );
-    });
-
-    test('times out waiting for an SSE response (requestTimeout)', () async {
-      // Endpoint advertised; POST is acked 202 but a matching response never
-      // arrives over the stream, so the request completer times out (the
-      // `onTimeout` callback in send()).
-      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      addTearDown(() => server.close(force: true));
-
-      server.listen((request) async {
-        if (request.method == 'GET') {
-          request.response.statusCode = 200;
-          request.response.headers.set('Content-Type', 'text/event-stream');
-          request.response.bufferOutput = false;
-          request.response.write('event: endpoint\n');
-          request.response.write('data: /messages\n\n');
-          await request.response.flush();
-          return; // keep open, never deliver a response
-        }
-        request.response.statusCode = 202;
-        request.response.write('Accepted');
-        await request.response.close();
-      });
-
-      final transport = SseClientTransport(
-        url: Uri.parse(
-          'http://${server.address.address}:${server.port}/sse',
-        ),
-        connectTimeout: const Duration(seconds: 5),
-        requestTimeout: const Duration(milliseconds: 200),
-      );
-      addTearDown(transport.close);
-
-      await expectLater(
-        transport.send(JsonRpcRequest(method: 'slow', id: 1)),
-        throwsA(
-          isA<MCPException>().having(
-            (e) => e.message,
-            'message',
-            contains('Timeout waiting for SSE response to slow'),
-          ),
-        ),
-      );
-    });
-
-    test('close() during an in-progress connect fails the awaiting caller',
-        () async {
-      // GET opens the stream (flushes headers) but never advertises an endpoint,
-      // and there is no explicit postUrl, so _ensureConnected is parked waiting
-      // for the endpoint event. Closing mid-connect must complete the pending
-      // `_ready` with an error rather than hang until connectTimeout.
-      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      addTearDown(() => server.close(force: true));
-
-      server.listen((request) async {
-        if (request.method == 'GET') {
-          request.response.statusCode = 200;
-          request.response.headers.set('Content-Type', 'text/event-stream');
-          request.response.bufferOutput = false;
-          request.response.write(': open\n\n');
-          await request.response.flush();
-          return; // keep open, no endpoint event
-        }
-        request.response.statusCode = 202;
-        await request.response.close();
-      });
-
-      final transport = SseClientTransport(
-        url: Uri.parse(
-          'http://${server.address.address}:${server.port}/sse',
-        ),
-        // Long connect timeout so the only way out is close().
-        connectTimeout: const Duration(seconds: 30),
-        requestTimeout: const Duration(seconds: 30),
-      );
-
-      final pending = transport.send(JsonRpcRequest(method: 'ping', id: 1));
-      // Attach the expectation NOW (before close()) so the error that close()
-      // triggers on `pending` is observed rather than escaping as unhandled.
-      final expectation = expectLater(
-        pending,
-        throwsA(
-          isA<MCPException>().having(
-            (e) => e.message,
-            'message',
-            contains('SSE transport closed'),
-          ),
-        ),
-      );
-      // Let the connect park on the missing endpoint event, then close.
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-      await transport.close();
-      await expectation;
-    });
-
-    test('an errored SSE byte stream fails pending requests via the '
-        'stream onError path', () async {
-      // Use a RAW TCP server so we can promise a large Content-Length, send the
-      // endpoint event, then destroy the socket before the body completes. The
-      // client's HTTP parser surfaces this truncation as a STREAM ERROR (not a
-      // clean done), driving _handleStreamError and SseLineSink.addError.
-      final tcp = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-      addTearDown(() async {
-        try {
-          await tcp.close();
-        } catch (_) {}
-      });
-
-      Socket? sseSocket;
-      tcp.listen((socket) {
-        final buffer = StringBuffer();
-        socket.cast<List<int>>().transform(utf8.decoder).listen((chunk) async {
-          buffer.write(chunk);
-          // Wait until we have a full request (headers end with a blank line).
-          if (!buffer.toString().contains('\r\n\r\n')) return;
-          final requestText = buffer.toString();
-          buffer.clear();
-          final isGet = requestText.startsWith('GET');
-          if (isGet) {
-            // Promise more body than we will actually send, then sever the
-            // connection mid-stream → truncated body → client stream error.
-            sseSocket = socket;
-            socket.write(
-              'HTTP/1.1 200 OK\r\n'
-              'Content-Type: text/event-stream\r\n'
-              'Content-Length: 100000\r\n'
-              '\r\n'
-              'event: endpoint\n'
-              'data: /messages\n\n',
-            );
-            await socket.flush();
-          } else {
-            // POST: ack with 202 then destroy the SSE socket shortly after.
-            socket.write(
-              'HTTP/1.1 202 Accepted\r\n'
-              'Content-Length: 8\r\n'
-              '\r\n'
-              'Accepted',
-            );
-            await socket.flush();
-            await Future<void>.delayed(const Duration(milliseconds: 50));
-            sseSocket?.destroy();
-          }
-        });
-      });
-
-      final transport = SseClientTransport(
-        url: Uri.parse(
-          'http://${tcp.address.address}:${tcp.port}/sse',
-        ),
-        connectTimeout: const Duration(seconds: 5),
-        requestTimeout: const Duration(seconds: 5),
-      );
-      addTearDown(transport.close);
-
-      await expectLater(
-        transport.send(JsonRpcRequest(method: 'ping', id: 1)),
-        throwsA(
-          isA<MCPException>().having(
-            (e) => e.message,
-            'message',
-            anyOf(
-              contains('SSE stream error'),
-              contains('SSE stream closed by server'),
+        await expectLater(
+          client.tools(),
+          throwsA(
+            isA<MCPException>().having(
+              (e) => e.message,
+              'message',
+              contains('timed out'),
             ),
           ),
+        );
+
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        expect(server.cancelNotificationCount, 1);
+        final cancelled = server.requestLog.lastWhere(
+          (request) => request.body?['method'] == 'notifications/cancelled',
+        );
+        expect((cancelled.body?['params'] as Map)['requestId'], isA<int>());
+        expect((cancelled.body?['params'] as Map)['reason'], isNotEmpty);
+      },
+    );
+
+    test(
+      'rejects JSON responses whose id does not match the request id',
+      () async {
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueJsonResponse({
+          'jsonrpc': '2.0',
+          'id': 999,
+          'result': {'ok': true},
+        }, injectRequestId: false);
+
+        final transport = StreamableHttpClientTransport(url: server.uri);
+        addTearDown(transport.close);
+
+        await expectLater(
+          transport.send(JsonRpcRequest(method: 'ping', id: 1)),
+          throwsA(
+            isA<MCPException>().having(
+              (e) => e.message,
+              'message',
+              contains('Unexpected JSON-RPC response id'),
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'rejects SSE responses whose id does not match the request id',
+      () async {
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueSseResponse([
+          FakeSseFrame.json({
+            'jsonrpc': '2.0',
+            'id': 999,
+            'result': {'ok': true},
+          }, id: 'evt-1'),
+        ], injectRequestId: false);
+
+        final transport = StreamableHttpClientTransport(
+          url: server.uri,
+          requestTimeout: const Duration(milliseconds: 200),
+        );
+        addTearDown(transport.close);
+
+        await expectLater(
+          transport.send(JsonRpcRequest(method: 'ping', id: 1)),
+          throwsA(
+            isA<MCPException>().having(
+              (e) => e.message,
+              'message',
+              contains('Unexpected JSON-RPC response id'),
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'close sends DELETE, accepts 405, and does not close an injected client',
+      () async {
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.deleteStatusCode = 405;
+        server.queueInitializeResponse(sessionId: 'session-1');
+
+        final trackingClient = _TrackingClient(http.Client());
+        final transport = StreamableHttpClientTransport(
+          url: server.uri,
+          client: trackingClient,
+        );
+        final client = MCPClient(transport: transport);
+
+        await client.initialize();
+        await client.close();
+        await client.close();
+
+        expect(server.deleteRequestCount, 1);
+        expect(trackingClient.closed, isFalse);
+      },
+    );
+
+    test('rejects invalid Mcp-Session-Id values from initialize', () async {
+      final server = await FakeStreamableHttpServer.start();
+      addTearDown(server.close);
+      server.queueInitializeResponse(sessionId: 'bad session');
+
+      final client = MCPClient(
+        transport: StreamableHttpClientTransport(url: server.uri),
+      );
+      addTearDown(client.close);
+
+      await expectLater(
+        client.initialize(),
+        throwsA(
+          isA<MCPException>().having(
+            (e) => e.message,
+            'message',
+            contains('Mcp-Session-Id'),
+          ),
         ),
       );
     });
-  });
 
-  // =========================================================================
-  // SseLineSink: addError + close paths (lines 436/438/441/443/444)
-  // =========================================================================
+    test(
+      'throws a typed session-expired error on a 404 for an active session',
+      () async {
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse(sessionId: 'session-1');
 
-  group('SSE line parser ($_SseLabel)', () {
-    test('forwards a stream error and closes on done', () async {
-      // Drive _parseSse via a real SSE GET whose stream emits an event then is
-      // closed by the server. The eventTransformed sink's close() (and the
-      // underlying addError path on an upstream error) are exercised here.
-      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      addTearDown(() => server.close(force: true));
+        final transport = StreamableHttpClientTransport(url: server.uri);
+        addTearDown(transport.close);
 
-      server.listen((request) async {
-        request.response.statusCode = 200;
-        request.response.headers.set('Content-Type', 'text/event-stream');
-        request.response.bufferOutput = false;
-        // Emit a notification with NO trailing blank line, then close — this
-        // forces the sink's close()/_flush() to emit the buffered event.
-        request.response.write('event: message\n');
-        request.response.write(
-          'data: ${jsonEncode({'jsonrpc': '2.0', 'method': 'notifications/x'})}\n',
+        final initResp = await transport.send(
+          JsonRpcRequest(method: 'initialize', id: 1),
         );
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-        await request.response.close();
+        expect((initResp.result as Map)['protocolVersion'], '2025-06-18');
+
+        transport.setProtocolVersion('2025-06-18');
+        server.expireCurrentSession();
+
+        await expectLater(
+          transport.send(JsonRpcRequest(method: 'ping', id: 2)),
+          throwsA(isA<MCPSessionExpiredException>()),
+        );
+      },
+    );
+
+    test(
+      'sendNotification marks the session expired on a 404 and later calls fail before the network',
+      () async {
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse(sessionId: 'session-1');
+
+        final transport = StreamableHttpClientTransport(url: server.uri);
+        addTearDown(transport.close);
+
+        final initResp = await transport.send(
+          JsonRpcRequest(method: 'initialize', id: 1),
+        );
+        expect((initResp.result as Map)['protocolVersion'], '2025-06-18');
+
+        transport.setProtocolVersion('2025-06-18');
+        server.expireCurrentSession();
+
+        await expectLater(
+          transport.sendNotification(
+            JsonRpcNotification(method: 'notifications/ping'),
+          ),
+          throwsA(isA<MCPSessionExpiredException>()),
+        );
+
+        final requestCountAfter404 = server.requestLog.length;
+        await expectLater(
+          transport.send(JsonRpcRequest(method: 'ping', id: 2)),
+          throwsA(isA<MCPSessionExpiredException>()),
+        );
+        expect(server.requestLog, hasLength(requestCountAfter404));
+      },
+    );
+
+    test(
+      'throws when a 2xx response uses an unexpected Content-Type',
+      () async {
+        final mock = await _MockHttpServer.start();
+        addTearDown(mock.close);
+        mock.enqueueRaw(
+          status: 200,
+          body: '{"jsonrpc":"2.0","id":1,"result":{"ok":true}}',
+          contentType: 'text/plain',
+        );
+
+        final transport = StreamableHttpClientTransport(url: mock.uri);
+        addTearDown(transport.close);
+
+        await expectLater(
+          transport.send(JsonRpcRequest(method: 'ping', id: 1)),
+          throwsA(
+            isA<MCPException>().having(
+              (e) => e.message,
+              'message',
+              contains('Unexpected MCP response Content-Type'),
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'rejects JSON-RPC payloads with an unexpected jsonrpc version',
+      () async {
+        final mock = await _MockHttpServer.start();
+        addTearDown(mock.close);
+        mock.enqueueJson({
+          'jsonrpc': '1.0',
+          'result': {'ok': true},
+        });
+
+        final transport = StreamableHttpClientTransport(url: mock.uri);
+        addTearDown(transport.close);
+
+        await expectLater(
+          transport.send(JsonRpcRequest(method: 'ping', id: 1)),
+          throwsA(
+            isA<MCPException>().having(
+              (e) => e.message,
+              'message',
+              contains('Unexpected JSON-RPC response format'),
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'rejects JSON-RPC payloads that contain both result and error',
+      () async {
+        final mock = await _MockHttpServer.start();
+        addTearDown(mock.close);
+        mock.enqueueJson({
+          'jsonrpc': '2.0',
+          'result': {'ok': true},
+          'error': {'code': -1, 'message': 'boom'},
+        });
+
+        final transport = StreamableHttpClientTransport(url: mock.uri);
+        addTearDown(transport.close);
+
+        await expectLater(
+          transport.send(JsonRpcRequest(method: 'ping', id: 1)),
+          throwsA(
+            isA<MCPException>().having(
+              (e) => e.message,
+              'message',
+              contains('Unexpected JSON-RPC response format'),
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'surfaces SSE notifications before failing when the stream closes without a response',
+      () async {
+        final client = _StreamedResponseClient((request) async {
+          expect(request.method, 'POST');
+          return http.StreamedResponse(
+            Stream<List<int>>.fromIterable([
+              utf8.encode(
+                'data: {"jsonrpc":"2.0","method":"notifications/progress","params":{"step":1}}\n\n',
+              ),
+            ]),
+            200,
+            headers: const {'content-type': 'text/event-stream'},
+          );
+        });
+        final transport = StreamableHttpClientTransport(
+          url: Uri.parse('http://example.com/mcp'),
+          client: client,
+          requestTimeout: const Duration(milliseconds: 200),
+        );
+        addTearDown(transport.close);
+
+        final notifications = <Map<String, dynamic>>[];
+        final sub = transport.notifications.listen(notifications.add);
+        addTearDown(sub.cancel);
+
+        await expectLater(
+          transport.send(JsonRpcRequest(method: 'ping', id: 1)),
+          throwsA(
+            isA<MCPException>().having(
+              (e) => e.message,
+              'message',
+              contains('closed before responding'),
+            ),
+          ),
+        );
+
+        expect(
+          notifications.single,
+          containsPair('method', 'notifications/progress'),
+        );
+      },
+    );
+
+    test('surfaces SSE byte-stream errors as MCPException', () async {
+      final controller = StreamController<List<int>>();
+      final client = _StreamedResponseClient((request) async {
+        expect(request.method, 'POST');
+        return http.StreamedResponse(
+          controller.stream,
+          200,
+          headers: const {'content-type': 'text/event-stream'},
+        );
+      });
+      final transport = StreamableHttpClientTransport(
+        url: Uri.parse('http://example.com/mcp'),
+        client: client,
+        requestTimeout: const Duration(milliseconds: 200),
+      );
+      addTearDown(() async {
+        await controller.close();
+        await transport.close();
       });
 
-      final transport = SseClientTransport(
-        url: Uri.parse(
-          'http://${server.address.address}:${server.port}/sse',
+      final future = transport.send(JsonRpcRequest(method: 'ping', id: 1));
+      controller.add(
+        utf8.encode(
+          'data: {"jsonrpc":"2.0","method":"notifications/progress"}\n\n',
         ),
-        postUrl: Uri.parse(
-          'http://${server.address.address}:${server.port}/messages',
+      );
+      controller.addError(StateError('sse boom'));
+
+      await expectLater(
+        future,
+        throwsA(
+          isA<MCPException>().having(
+            (e) => e.message,
+            'message',
+            contains('SSE response stream error'),
+          ),
         ),
-        connectTimeout: const Duration(seconds: 5),
       );
-      addTearDown(transport.close);
-
-      final received = <Map<String, dynamic>>[];
-      final sub = transport.notifications.listen(received.add);
-      addTearDown(sub.cancel);
-
-      // Force the SSE connection to open.
-      // ignore: unawaited_futures
-      transport.send(JsonRpcRequest(method: 'noop', id: 99)).catchError(
-        (_) => const JsonRpcResponse(result: {}),
-      );
-
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-      // The event buffered before close() was flushed and surfaced.
-      expect(received.any((m) => m['method'] == 'notifications/x'), isTrue);
     });
   });
 
@@ -706,8 +882,7 @@ void main() {
   // =========================================================================
 
   group('MCPClient error branches', () {
-    test('default-notifications transport drives the abstract getter',
-        () async {
+    test('default-notifications transport drives the abstract getter', () async {
       // _DefaultNotificationsTransport does not override `notifications`, so the
       // abstract default getter in json_rpc.dart (line 78) runs when the client
       // wires up its notification subscription.
@@ -717,6 +892,11 @@ void main() {
       await client.initialize();
       // A second initialize is a no-op (already initialized).
       await client.initialize();
+      expect(transport.sentNotifications, hasLength(1));
+      expect(
+        transport.sentNotifications.single.method,
+        'notifications/initialized',
+      );
     });
 
     test('tools/list JSON-RPC error throws MCPException', () async {
@@ -788,15 +968,13 @@ void main() {
 
       // Exercise the dynamicTool execute closure (line 343).
       final tool = toolSet['echo']!;
-      final result = await tool.execute!(
-        {'value': 'hi'},
-        const ToolExecutionOptions(),
-      );
+      final result = await tool.execute!({
+        'value': 'hi',
+      }, const ToolExecutionOptions());
       expect(result, 'got: hi');
     });
 
-    test('callTool JSON-RPC error (not isError) throws MCPException',
-        () async {
+    test('callTool JSON-RPC error (not isError) throws MCPException', () async {
       final transport = _ScriptedTransport((req) {
         if (req.method == 'initialize') return _initResult(req);
         if (req.method == 'notifications/initialized') return _ok(req, {});
@@ -890,26 +1068,28 @@ void main() {
       );
     });
 
-    test('readResource returns octet-stream fallback when result is not a Map',
-        () async {
-      // The JSON-RPC `result` is a non-Map (a String), so the `result is! Map`
-      // fallback runs.
-      final transport = _ScriptedTransport((req) {
-        if (req.method == 'initialize') return _initResult(req);
-        if (req.method == 'notifications/initialized') return _ok(req, {});
-        if (req.method == 'resources/read') {
-          return JsonRpcResponse(result: 'not-a-map', id: req.id);
-        }
-        return _ok(req, {});
-      });
-      final client = MCPClient(transport: transport);
-      addTearDown(client.close);
+    test(
+      'readResource returns octet-stream fallback when result is not a Map',
+      () async {
+        // The JSON-RPC `result` is a non-Map (a String), so the `result is! Map`
+        // fallback runs.
+        final transport = _ScriptedTransport((req) {
+          if (req.method == 'initialize') return _initResult(req);
+          if (req.method == 'notifications/initialized') return _ok(req, {});
+          if (req.method == 'resources/read') {
+            return JsonRpcResponse(result: 'not-a-map', id: req.id);
+          }
+          return _ok(req, {});
+        });
+        final client = MCPClient(transport: transport);
+        addTearDown(client.close);
 
-      final content = await client.readResource('file:///raw');
-      expect(content.uri, 'file:///raw');
-      expect(content.mimeType, 'application/octet-stream');
-      expect(content.text, isNull);
-    });
+        final content = await client.readResource('file:///raw');
+        expect(content.uri, 'file:///raw');
+        expect(content.mimeType, 'application/octet-stream');
+        expect(content.text, isNull);
+      },
+    );
 
     test('readResource returns octet-stream fallback when result has no '
         'usable contents', () async {
@@ -950,59 +1130,61 @@ void main() {
       expect(content.mimeType, 'application/octet-stream');
     });
 
-    test('subscribeResource reuses the existing controller on second call',
-        () async {
-      var subscribeRequests = 0;
-      final transport = _ScriptedTransport((req) {
-        if (req.method == 'initialize') return _initResult(req);
-        if (req.method == 'notifications/initialized') return _ok(req, {});
-        if (req.method == 'resources/subscribe') subscribeRequests++;
-        return _ok(req, {});
-      });
-      final client = MCPClient(transport: transport);
-      addTearDown(client.close);
+    test(
+      'subscribeResource reuses the existing controller on second call',
+      () async {
+        var subscribeRequests = 0;
+        final transport = _ScriptedTransport((req) {
+          if (req.method == 'initialize') return _initResult(req);
+          if (req.method == 'notifications/initialized') return _ok(req, {});
+          if (req.method == 'resources/subscribe') subscribeRequests++;
+          return _ok(req, {});
+        });
+        final client = MCPClient(transport: transport);
+        addTearDown(client.close);
 
-      final s1 = client.subscribeResource('file:///dup');
-      // Let the first subscribe round-trip settle.
-      await Future<void>.delayed(const Duration(milliseconds: 30));
-      final s2 = client.subscribeResource('file:///dup'); // existing path
+        final s1 = client.subscribeResource('file:///dup');
+        // Let the first subscribe round-trip settle.
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        final s2 = client.subscribeResource('file:///dup'); // existing path
 
-      expect(s1, isA<Stream<MCPResourceContent>>());
-      expect(s2, isA<Stream<MCPResourceContent>>());
-      await Future<void>.delayed(const Duration(milliseconds: 30));
-      // The existing-controller branch must NOT issue a second subscribe.
-      expect(subscribeRequests, 1);
-    });
+        expect(s1, isA<Stream<MCPResourceContent>>());
+        expect(s2, isA<Stream<MCPResourceContent>>());
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        // The existing-controller branch must NOT issue a second subscribe.
+        expect(subscribeRequests, 1);
+      },
+    );
 
-    test('subscribeResource swallows a resources/subscribe server error',
-        () async {
-      // The server returns an error for resources/subscribe; the client must
-      // surface it through _subscribeResourceOnServer (lines 564/565) but
-      // swallow it via the .catchError so subscribeResource itself succeeds.
-      var subscribeErrored = false;
-      final transport = _ScriptedTransport((req) {
-        if (req.method == 'initialize') return _initResult(req);
-        if (req.method == 'notifications/initialized') return _ok(req, {});
-        if (req.method == 'resources/subscribe') {
-          subscribeErrored = true;
-          return _err(req, 'unsupported');
-        }
-        return _ok(req, {});
-      });
-      final client = MCPClient(transport: transport);
-      addTearDown(client.close);
+    test(
+      'subscribeResource swallows a resources/subscribe server error',
+      () async {
+        // The server returns an error for resources/subscribe; the client must
+        // surface it through _subscribeResourceOnServer (lines 564/565) but
+        // swallow it via the .catchError so subscribeResource itself succeeds.
+        var subscribeErrored = false;
+        final transport = _ScriptedTransport((req) {
+          if (req.method == 'initialize') return _initResult(req);
+          if (req.method == 'notifications/initialized') return _ok(req, {});
+          if (req.method == 'resources/subscribe') {
+            subscribeErrored = true;
+            return _err(req, 'unsupported');
+          }
+          return _ok(req, {});
+        });
+        final client = MCPClient(transport: transport);
+        addTearDown(client.close);
 
-      final updates = <MCPResourceContent>[];
-      final sub = client
-          .subscribeResource('file:///err')
-          .listen(updates.add);
-      addTearDown(sub.cancel);
+        final updates = <MCPResourceContent>[];
+        final sub = client.subscribeResource('file:///err').listen(updates.add);
+        addTearDown(sub.cancel);
 
-      await Future<void>.delayed(const Duration(milliseconds: 30));
-      expect(subscribeErrored, isTrue);
-      // No crash; subscription is still live.
-      expect(updates, isEmpty);
-    });
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        expect(subscribeErrored, isTrue);
+        // No crash; subscription is still live.
+        expect(updates, isEmpty);
+      },
+    );
 
     test('transport notification error is swallowed by the client', () async {
       // Pushing an error onto the transport notifications stream must be caught
@@ -1022,6 +1204,278 @@ void main() {
       // Client is still usable.
       expect(transport.closed, isFalse);
     });
+
+    test(
+      'resource update bursts coalesce per URI while distinct URIs refresh independently',
+      () async {
+        final readA1 = Completer<JsonRpcResponse>();
+        final readA2 = Completer<JsonRpcResponse>();
+        final readB1 = Completer<JsonRpcResponse>();
+        var readARequests = 0;
+        var readBRequests = 0;
+
+        final transport = _ScriptedTransport((req) {
+          if (req.method == 'initialize') return _initResult(req);
+          if (req.method == 'notifications/initialized') return _ok(req, {});
+          if (req.method == 'resources/subscribe') return _ok(req, {});
+          if (req.method != 'resources/read') return _ok(req, {});
+
+          final uri = req.params?['uri'];
+          if (uri == 'file:///a') {
+            readARequests++;
+            if (readARequests == 1) return readA1.future;
+            if (readARequests == 2) return readA2.future;
+          }
+          if (uri == 'file:///b') {
+            readBRequests++;
+            if (readBRequests == 1) return readB1.future;
+          }
+          fail(
+            'Unexpected resources/read for $uri (#${uri == 'file:///a' ? readARequests : readBRequests})',
+          );
+        });
+
+        final client = MCPClient(transport: transport);
+        addTearDown(client.close);
+
+        final updatesA = <MCPResourceContent>[];
+        final updatesB = <MCPResourceContent>[];
+        final subA = client.subscribeResource('file:///a').listen(updatesA.add);
+        final subB = client.subscribeResource('file:///b').listen(updatesB.add);
+        addTearDown(subA.cancel);
+        addTearDown(subB.cancel);
+
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+
+        transport.pushNotification({
+          'jsonrpc': '2.0',
+          'method': 'notifications/resources/updated',
+          'params': {'uri': 'file:///a'},
+        });
+        transport.pushNotification({
+          'jsonrpc': '2.0',
+          'method': 'notifications/resources/updated',
+          'params': {'uri': 'file:///a'},
+        });
+        transport.pushNotification({
+          'jsonrpc': '2.0',
+          'method': 'notifications/resources/updated',
+          'params': {'uri': 'file:///a'},
+        });
+        transport.pushNotification({
+          'jsonrpc': '2.0',
+          'method': 'notifications/resources/updated',
+          'params': {'uri': 'file:///b'},
+        });
+
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        expect(readARequests, 1);
+        expect(readBRequests, 1);
+
+        readB1.complete(
+          JsonRpcResponse(
+            id: 100,
+            result: {
+              'contents': [
+                {'uri': 'file:///b', 'mimeType': 'text/plain', 'text': 'b-1'},
+              ],
+            },
+          ),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        expect(updatesB.map((it) => it.text), ['b-1']);
+
+        readA1.complete(
+          JsonRpcResponse(
+            id: 101,
+            result: {
+              'contents': [
+                {'uri': 'file:///a', 'mimeType': 'text/plain', 'text': 'a-1'},
+              ],
+            },
+          ),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        expect(readARequests, 2);
+        expect(updatesA.map((it) => it.text), ['a-1']);
+
+        readA2.complete(
+          JsonRpcResponse(
+            id: 102,
+            result: {
+              'contents': [
+                {'uri': 'file:///a', 'mimeType': 'text/plain', 'text': 'a-2'},
+              ],
+            },
+          ),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        expect(readARequests, 2);
+        expect(updatesA.map((it) => it.text), ['a-1', 'a-2']);
+      },
+    );
+
+    test('close prevents a queued trailing refresh from starting', () async {
+      final firstRead = Completer<JsonRpcResponse>();
+      var readRequests = 0;
+
+      final transport = _ScriptedTransport((req) {
+        if (req.method == 'initialize') return _initResult(req);
+        if (req.method == 'notifications/initialized') return _ok(req, {});
+        if (req.method == 'resources/subscribe') return _ok(req, {});
+        if (req.method == 'resources/read') {
+          readRequests++;
+          if (readRequests == 1) return firstRead.future;
+        }
+        fail('Unexpected ${req.method} request #$readRequests');
+      });
+
+      final client = MCPClient(transport: transport);
+
+      final updates = <MCPResourceContent>[];
+      final sub = client.subscribeResource('file:///close').listen(updates.add);
+      addTearDown(sub.cancel);
+
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+
+      transport.pushNotification({
+        'jsonrpc': '2.0',
+        'method': 'notifications/resources/updated',
+        'params': {'uri': 'file:///close'},
+      });
+      transport.pushNotification({
+        'jsonrpc': '2.0',
+        'method': 'notifications/resources/updated',
+        'params': {'uri': 'file:///close'},
+      });
+
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(readRequests, 1);
+
+      final closeFuture = client.close();
+      firstRead.complete(
+        JsonRpcResponse(
+          id: 103,
+          result: {
+            'contents': [
+              {
+                'uri': 'file:///close',
+                'mimeType': 'text/plain',
+                'text': 'stale',
+              },
+            ],
+          },
+        ),
+      );
+
+      await closeFuture;
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+
+      expect(readRequests, 1);
+      expect(updates, isEmpty);
+    });
+
+    test(
+      'unsubscribe and resubscribe do not deliver stale in-flight reads to the new controller',
+      () async {
+        final staleRead = Completer<JsonRpcResponse>();
+        final freshRead = Completer<JsonRpcResponse>();
+        var readRequests = 0;
+
+        final transport = _ScriptedTransport((req) {
+          if (req.method == 'initialize') return _initResult(req);
+          if (req.method == 'notifications/initialized') return _ok(req, {});
+          if (req.method == 'resources/subscribe') return _ok(req, {});
+          if (req.method == 'resources/unsubscribe') return _ok(req, {});
+          if (req.method != 'resources/read') return _ok(req, {});
+
+          readRequests++;
+          if (readRequests == 1) return staleRead.future;
+          if (readRequests == 2) return freshRead.future;
+          fail('Unexpected resources/read #$readRequests');
+        });
+
+        final client = MCPClient(transport: transport);
+        addTearDown(client.close);
+
+        final firstUpdates = <MCPResourceContent>[];
+        final secondUpdates = <MCPResourceContent>[];
+
+        final sub1 = client
+            .subscribeResource('file:///swap')
+            .listen(firstUpdates.add);
+
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+
+        transport.pushNotification({
+          'jsonrpc': '2.0',
+          'method': 'notifications/resources/updated',
+          'params': {'uri': 'file:///swap'},
+        });
+        transport.pushNotification({
+          'jsonrpc': '2.0',
+          'method': 'notifications/resources/updated',
+          'params': {'uri': 'file:///swap'},
+        });
+
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        expect(readRequests, 1);
+
+        await sub1.cancel();
+
+        final sub2 = client
+            .subscribeResource('file:///swap')
+            .listen(secondUpdates.add);
+        addTearDown(sub2.cancel);
+
+        staleRead.complete(
+          JsonRpcResponse(
+            id: 200,
+            result: {
+              'contents': [
+                {
+                  'uri': 'file:///swap',
+                  'mimeType': 'text/plain',
+                  'text': 'stale',
+                },
+              ],
+            },
+          ),
+        );
+
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        expect(readRequests, 1);
+        expect(firstUpdates, isEmpty);
+        expect(secondUpdates, isEmpty);
+
+        transport.pushNotification({
+          'jsonrpc': '2.0',
+          'method': 'notifications/resources/updated',
+          'params': {'uri': 'file:///swap'},
+        });
+
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        expect(readRequests, 2);
+
+        freshRead.complete(
+          JsonRpcResponse(
+            id: 201,
+            result: {
+              'contents': [
+                {
+                  'uri': 'file:///swap',
+                  'mimeType': 'text/plain',
+                  'text': 'fresh',
+                },
+              ],
+            },
+          ),
+        );
+
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        expect(secondUpdates.map((it) => it.text), ['fresh']);
+      },
+    );
   });
 
   // =========================================================================
@@ -1029,60 +1483,62 @@ void main() {
   // =========================================================================
 
   group('MCPClient reconnect', () {
-    test('reconnects via the transport factory and succeeds after a failure',
-        () async {
-      // First transport fails every tools/list; reconnect swaps in a fresh
-      // transport (via the factory) that succeeds. Exercises 286-300.
-      var built = 0;
-      late _ScriptedTransport first;
+    test(
+      'reconnects via the transport factory and succeeds after a failure',
+      () async {
+        // First transport fails every tools/list; reconnect swaps in a fresh
+        // transport (via the factory) that succeeds. Exercises 286-300.
+        var built = 0;
+        late _ScriptedTransport first;
 
-      _ScriptedTransport makeWorking() {
-        return _ScriptedTransport((req) {
+        _ScriptedTransport makeWorking() {
+          return _ScriptedTransport((req) {
+            switch (req.method) {
+              case 'initialize':
+                return _initResult(req);
+              case 'notifications/initialized':
+                return _ok(req, {});
+              case 'tools/list':
+                return _ok(req, {'tools': []});
+              default:
+                return _ok(req, {});
+            }
+          });
+        }
+
+        first = _ScriptedTransport((req) {
           switch (req.method) {
             case 'initialize':
               return _initResult(req);
             case 'notifications/initialized':
               return _ok(req, {});
             case 'tools/list':
-              return _ok(req, {'tools': []});
+              throw const MCPException('transport down');
             default:
               return _ok(req, {});
           }
         });
-      }
 
-      first = _ScriptedTransport((req) {
-        switch (req.method) {
-          case 'initialize':
-            return _initResult(req);
-          case 'notifications/initialized':
-            return _ok(req, {});
-          case 'tools/list':
-            throw const MCPException('transport down');
-          default:
-            return _ok(req, {});
-        }
-      });
+        final client = MCPClient(
+          transport: first,
+          reconnectPolicy: const MCPReconnectPolicy(
+            maxAttempts: 3,
+            initialDelayMs: 1,
+            maxDelayMs: 5,
+          ),
+          transportFactory: () {
+            built++;
+            return makeWorking();
+          },
+        );
+        addTearDown(client.close);
 
-      final client = MCPClient(
-        transport: first,
-        reconnectPolicy: const MCPReconnectPolicy(
-          maxAttempts: 3,
-          initialDelayMs: 1,
-          maxDelayMs: 5,
-        ),
-        transportFactory: () {
-          built++;
-          return makeWorking();
-        },
-      );
-      addTearDown(client.close);
-
-      final toolSet = await client.tools();
-      expect(toolSet, isEmpty);
-      expect(built, greaterThanOrEqualTo(1));
-      expect(first.closed, isTrue); // old transport was closed on reconnect
-    });
+        final toolSet = await client.tools();
+        expect(toolSet, isEmpty);
+        expect(built, greaterThanOrEqualTo(1));
+        expect(first.closed, isTrue); // old transport was closed on reconnect
+      },
+    );
 
     test('exhausts attempts and rethrows when every attempt fails', () async {
       _ScriptedTransport makeFailing() => _ScriptedTransport((req) {
@@ -1104,6 +1560,111 @@ void main() {
 
       await expectLater(client.tools(), throwsA(isA<MCPException>()));
     });
+
+    test(
+      'resource refresh queues a trailing replay when a second update lands mid-read',
+      () async {
+        final readRelease = Completer<void>();
+        var readCount = 0;
+        final transport = _ScriptedTransport((req) async {
+          switch (req.method) {
+            case 'initialize':
+              return _initResult(req);
+            case 'notifications/initialized':
+              return _ok(req, {});
+            case 'resources/subscribe':
+              return _ok(req, {});
+            case 'resources/read':
+              readCount++;
+              if (readCount == 1) {
+                await readRelease.future;
+              }
+              return _ok(req, {
+                'contents': [
+                  {
+                    'uri': 'memory://doc',
+                    'mimeType': 'text/plain',
+                    'text': 'value-$readCount',
+                  },
+                ],
+              });
+            default:
+              return _ok(req, {});
+          }
+        });
+        final client = MCPClient(transport: transport);
+        addTearDown(client.close);
+
+        final updates = <MCPResourceContent>[];
+        final sub = client
+            .subscribeResource('memory://doc')
+            .listen(updates.add);
+        addTearDown(sub.cancel);
+
+        await Future<void>.delayed(Duration.zero);
+        transport.pushNotification({
+          'jsonrpc': '2.0',
+          'method': 'notifications/resources/updated',
+          'params': {'uri': 'memory://doc'},
+        });
+        await Future<void>.delayed(Duration.zero);
+        transport.pushNotification({
+          'jsonrpc': '2.0',
+          'method': 'notifications/resources/updated',
+          'params': {'uri': 'memory://doc'},
+        });
+
+        readRelease.complete();
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+
+        expect(readCount, 2);
+        expect(updates.map((update) => update.text).toList(), [
+          'value-1',
+          'value-2',
+        ]);
+      },
+    );
+
+    test('policy retries reinitialize after session expiry', () async {
+      var initializeCalls = 0;
+      var toolsListCalls = 0;
+      final transport = _ScriptedTransport((req) {
+        switch (req.method) {
+          case 'initialize':
+            initializeCalls++;
+            return _initResult(req);
+          case 'notifications/initialized':
+            return _ok(req, {});
+          case 'tools/list':
+            toolsListCalls++;
+            if (toolsListCalls == 1) {
+              throw MCPSessionExpiredException(
+                method: 'POST',
+                uri: Uri(),
+                statusCode: 404,
+                context: 'session expired',
+              );
+            }
+            return _ok(req, {'tools': []});
+          default:
+            return _ok(req, {});
+        }
+      });
+      final client = MCPClient(
+        transport: transport,
+        reconnectPolicy: const MCPReconnectPolicy(
+          maxAttempts: 1,
+          initialDelayMs: 1,
+          maxDelayMs: 1,
+        ),
+      );
+      addTearDown(client.close);
+
+      final tools = await client.tools();
+      expect(tools, isEmpty);
+      expect(initializeCalls, 2);
+      expect(toolsListCalls, 2);
+    });
   });
 
   // =========================================================================
@@ -1112,28 +1673,64 @@ void main() {
 
   group('StdioMCPTransport (subprocess)', () {
     final dartExe = Platform.resolvedExecutable;
-    final fixture =
-        'packages/ai_sdk_mcp/test/fixtures/echo_stdio_server.dart';
+    final fixture = 'packages/ai_sdk_mcp/test/fixtures/echo_stdio_server.dart';
 
-    test('starts a subprocess, sends a request, and receives the response',
-        () async {
-      final transport = StdioMCPTransport(command: dartExe, args: [fixture]);
-      addTearDown(transport.close);
+    test(
+      'concurrent cold-start operations spawn exactly one child process',
+      () async {
+        var startCalls = 0;
+        final startGate = Completer<void>();
 
-      final initResp = await transport
-          .send(JsonRpcRequest(method: 'initialize', id: 1))
-          .timeout(const Duration(seconds: 20));
-      expect(initResp.isError, isFalse);
-      expect((initResp.result as Map)['protocolVersion'], '2024-11-05');
+        final transport = StdioMCPTransport(
+          command: dartExe,
+          args: [fixture],
+          processStarter: (command, args) async {
+            startCalls++;
+            await startGate.future;
+            return Process.start(command, args);
+          },
+        );
+        addTearDown(transport.close);
 
-      // A second send reuses the already-started process (line 29 early return).
-      final toolsResp = await transport
-          .send(JsonRpcRequest(method: 'tools/list', id: 2))
-          .timeout(const Duration(seconds: 20));
-      final tools = (toolsResp.result as Map)['tools'] as List;
-      expect(tools, hasLength(1));
-      expect((tools.first as Map)['name'], 'echo');
-    });
+        final notificationFuture = transport.sendNotification(
+          JsonRpcNotification(method: 'notifications/ping'),
+        );
+        final initializeFuture = transport.send(
+          JsonRpcRequest(method: 'initialize', id: 1),
+        );
+
+        startGate.complete();
+
+        await notificationFuture;
+        final response = await initializeFuture.timeout(
+          const Duration(seconds: 20),
+        );
+        expect(startCalls, 1);
+        expect(response.isError, isFalse);
+      },
+    );
+
+    test(
+      'starts a subprocess, sends a request, and receives the response',
+      () async {
+        final transport = StdioMCPTransport(command: dartExe, args: [fixture]);
+        addTearDown(transport.close);
+
+        final initResp = await transport
+            .send(JsonRpcRequest(method: 'initialize', id: 1))
+            .timeout(const Duration(seconds: 20));
+        expect(initResp.isError, isFalse);
+        expect((initResp.result as Map)['protocolVersion'], '2025-06-18');
+
+        // A second send reuses the already-started process (line 29 early return).
+        final toolsResp = await transport
+            .send(JsonRpcRequest(method: 'tools/list', id: 2))
+            .timeout(const Duration(seconds: 20));
+        final tools = (toolsResp.result as Map)['tools'] as List;
+        expect(tools, hasLength(1));
+        expect((tools.first as Map)['name'], 'echo');
+      },
+    );
 
     test('drives the full client over stdio', () async {
       final client = MCPClient(
@@ -1150,26 +1747,40 @@ void main() {
       expect(result, 'echo: world');
     });
 
-    test('surfaces server-initiated notifications (with split-line framing)',
-        () async {
-      final transport = StdioMCPTransport(command: dartExe, args: [fixture]);
-      addTearDown(transport.close);
+    test(
+      'client initialize does not wait for a stdio notification response',
+      () async {
+        final client = MCPClient(
+          transport: StdioMCPTransport(command: dartExe, args: [fixture]),
+        );
+        addTearDown(client.close);
 
-      final received = <Map<String, dynamic>>[];
-      final sub = transport.notifications.listen(received.add);
-      addTearDown(sub.cancel);
+        await client.initialize().timeout(const Duration(seconds: 20));
+      },
+    );
 
-      final resp = await transport
-          .send(JsonRpcRequest(method: 'emit_notification', id: 1))
-          .timeout(const Duration(seconds: 20));
-      expect(resp.isError, isFalse);
+    test(
+      'surfaces server-initiated notifications (with split-line framing)',
+      () async {
+        final transport = StdioMCPTransport(command: dartExe, args: [fixture]);
+        addTearDown(transport.close);
 
-      await Future<void>.delayed(const Duration(milliseconds: 300));
-      expect(
-        received.any((m) => m['method'] == 'notifications/message'),
-        isTrue,
-      );
-    });
+        final received = <Map<String, dynamic>>[];
+        final sub = transport.notifications.listen(received.add);
+        addTearDown(sub.cancel);
+
+        final resp = await transport
+            .send(JsonRpcRequest(method: 'emit_notification', id: 1))
+            .timeout(const Duration(seconds: 20));
+        expect(resp.isError, isFalse);
+
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        expect(
+          received.any((m) => m['method'] == 'notifications/message'),
+          isTrue,
+        );
+      },
+    );
 
     test('returns a JSON-RPC error response for an unknown method', () async {
       final transport = StdioMCPTransport(command: dartExe, args: [fixture]);
@@ -1182,18 +1793,372 @@ void main() {
       expect(resp.error!['message'], contains('Method not found'));
     });
 
+    test(
+      'close during cold start rejects the pending caller and later sends',
+      () async {
+        var startCalls = 0;
+        final startGate = Completer<void>();
+
+        final transport = StdioMCPTransport(
+          command: dartExe,
+          args: [fixture],
+          processStarter: (command, args) async {
+            startCalls++;
+            await startGate.future;
+            return Process.start(command, args);
+          },
+        );
+
+        final pending = transport.send(
+          JsonRpcRequest(method: 'initialize', id: 1),
+        );
+        final closeMatcher = throwsA(
+          isA<MCPException>().having(
+            (e) => e.message,
+            'message',
+            contains('Stdio transport closed'),
+          ),
+        );
+
+        final pendingExpectation = expectLater(pending, closeMatcher);
+
+        final closeFuture = transport.close();
+        startGate.complete();
+
+        await pendingExpectation;
+        await closeFuture;
+        expect(startCalls, 1);
+        await expectLater(
+          transport.send(JsonRpcRequest(method: 'initialize', id: 2)),
+          closeMatcher,
+        );
+      },
+    );
+
+    test(
+      'process exit fails each pending request once and rejects later sends',
+      () async {
+        final transport = StdioMCPTransport(command: dartExe, args: [fixture]);
+        addTearDown(transport.close);
+
+        final first = transport.send(
+          JsonRpcRequest(method: 'exit_after_delay', id: 1),
+        );
+        final second = transport.send(
+          JsonRpcRequest(method: 'exit_after_delay', id: 2),
+        );
+
+        final exitMatcher = throwsA(
+          isA<MCPException>().having(
+            (e) => e.message,
+            'message',
+            contains('Stdio MCP process exited with code 17'),
+          ),
+        );
+
+        await expectLater(first, exitMatcher);
+        await expectLater(second, exitMatcher);
+        await expectLater(
+          transport.send(JsonRpcRequest(method: 'initialize', id: 3)),
+          exitMatcher,
+        );
+        await expectLater(
+          transport.sendNotification(
+            JsonRpcNotification(method: 'notifications/ping'),
+          ),
+          exitMatcher,
+        );
+      },
+    );
+
+    test(
+      'close() fails deterministically stalled pending requests and rejects later sends',
+      () async {
+        final transport = StdioMCPTransport(command: dartExe, args: [fixture]);
+        addTearDown(transport.close);
+
+        final ackReady = Completer<void>();
+        final sub = transport.notifications.listen((message) {
+          if (message['method'] != 'notifications/message') return;
+          final params = message['params'];
+          if (params is Map && params['ack'] == 'close-stall-ready') {
+            if (!ackReady.isCompleted) ackReady.complete();
+          }
+        });
+        addTearDown(sub.cancel);
+
+        await transport
+            .send(JsonRpcRequest(method: 'initialize', id: 0))
+            .timeout(const Duration(seconds: 20));
+
+        final first = transport.send(
+          JsonRpcRequest(
+            method: 'ack_then_stall',
+            id: 1,
+            params: {'ack': 'close-stall-ready'},
+          ),
+        );
+        final second = transport.send(JsonRpcRequest(method: 'stall', id: 2));
+
+        final closeMatcher = throwsA(
+          isA<MCPException>().having(
+            (e) => e.message,
+            'message',
+            contains('Stdio transport closed'),
+          ),
+        );
+
+        final firstExpectation = expectLater(first, closeMatcher);
+        final secondExpectation = expectLater(second, closeMatcher);
+
+        await ackReady.future.timeout(const Duration(seconds: 20));
+        await transport.close();
+
+        await firstExpectation;
+        await secondExpectation;
+        await expectLater(
+          transport.send(JsonRpcRequest(method: 'initialize', id: 3)),
+          closeMatcher,
+        );
+        await expectLater(
+          transport.sendNotification(
+            JsonRpcNotification(method: 'notifications/ping'),
+          ),
+          closeMatcher,
+        );
+      },
+    );
+
+    test('process exit reports only a sanitized stderr summary', () async {
+      final transport = StdioMCPTransport(command: dartExe, args: [fixture]);
+      addTearDown(transport.close);
+
+      await expectLater(
+        transport.send(JsonRpcRequest(method: 'exit_with_stderr', id: 1)),
+        throwsA(
+          isA<MCPException>()
+              .having(
+                (e) => e.message,
+                'message',
+                contains('Stdio MCP process exited with code 23'),
+              )
+              .having(
+                (e) => e.message,
+                'message',
+                contains('stderr characters'),
+              )
+              .having(
+                (e) => e.message,
+                'message',
+                isNot(contains('stderr-tail-marker')),
+              )
+              .having((e) => e.message, 'message', isNot(contains('AAAAA'))),
+        ),
+      );
+    });
+
+    test('process exit errors do not expose secret stderr content', () async {
+      final transport = StdioMCPTransport(command: dartExe, args: [fixture]);
+      addTearDown(transport.close);
+
+      await expectLater(
+        transport.send(
+          JsonRpcRequest(method: 'exit_with_secret_stderr', id: 1),
+        ),
+        throwsA(
+          isA<MCPException>()
+              .having(
+                (e) => e.message,
+                'message',
+                contains('Stdio MCP process exited with code 29'),
+              )
+              .having(
+                (e) => e.message,
+                'message',
+                contains('stderr characters'),
+              )
+              .having(
+                (e) => e.message,
+                'message',
+                isNot(contains('Authorization')),
+              )
+              .having((e) => e.message, 'message', isNot(contains('Bearer')))
+              .having(
+                (e) => e.message,
+                'message',
+                isNot(contains('sk-live-stdio-token')),
+              ),
+        ),
+      );
+    });
+
     test('close() is idempotent and tears down the process', () async {
       final transport = StdioMCPTransport(command: dartExe, args: [fixture]);
-      await transport.send(JsonRpcRequest(method: 'initialize', id: 1))
+      await transport
+          .send(JsonRpcRequest(method: 'initialize', id: 1))
           .timeout(const Duration(seconds: 20));
       await transport.close();
       // Second close is a no-op (process already null, controller closed).
       await transport.close();
       expect(await transport.notifications.isEmpty, isTrue);
     });
+
+    test('wraps non-MCP startup failures with process context', () async {
+      final transport = StdioMCPTransport(
+        command: 'missing-command',
+        processStarter: (command, args) async {
+          throw StateError('spawn failed');
+        },
+      );
+
+      await expectLater(
+        transport.send(JsonRpcRequest(method: 'initialize', id: 1)),
+        throwsA(
+          isA<MCPException>().having(
+            (e) => e.message,
+            'message',
+            contains('Failed to start stdio MCP process'),
+          ),
+        ),
+      );
+    });
+
+    test(
+      'stdout decoding errors terminate pending calls and future writes',
+      () async {
+        final process = _FakeProcess(
+          stdout: Stream<List<int>>.error(StateError('stdout blew up')),
+          stderr: const Stream<List<int>>.empty(),
+        );
+        final transport = StdioMCPTransport(
+          command: 'fake',
+          processStarter: (command, args) async => process,
+        );
+        addTearDown(transport.close);
+
+        final pending = transport.send(
+          JsonRpcRequest(method: 'initialize', id: 1),
+        );
+
+        final matcher = throwsA(
+          isA<MCPException>().having(
+            (e) => e.message,
+            'message',
+            contains('stdout stream error'),
+          ),
+        );
+        await expectLater(pending, matcher);
+        await expectLater(
+          transport.sendNotification(
+            JsonRpcNotification(method: 'notifications/ping'),
+          ),
+          matcher,
+        );
+        expect(process.killed, isTrue);
+      },
+    );
+
+    test('process exits without stderr and surfaces the exit code', () async {
+      final exitCode = Completer<int>();
+      final process = _FakeProcess(exitCode: exitCode.future);
+      final transport = StdioMCPTransport(
+        command: 'fake',
+        processStarter: (command, args) async => process,
+      );
+      addTearDown(transport.close);
+
+      final pending = transport.send(
+        JsonRpcRequest(method: 'initialize', id: 1),
+      );
+      exitCode.complete(9);
+
+      await expectLater(
+        pending,
+        throwsA(
+          isA<MCPException>().having(
+            (e) => e.message,
+            'message',
+            contains('exited with code 9'),
+          ),
+        ),
+      );
+    });
+
+    test(
+      'write failures surface for both requests and notifications',
+      () async {
+        final writeError = StateError('stdin flush failed');
+        final process = _FakeProcess(
+          stdin: IOSink(_ThrowingStreamConsumer(writeError)),
+        );
+        final transport = StdioMCPTransport(
+          command: 'fake',
+          processStarter: (command, args) async => process,
+        );
+        addTearDown(transport.close);
+
+        await expectLater(
+          transport.send(JsonRpcRequest(method: 'initialize', id: 1)),
+          throwsA(
+            isA<MCPException>().having(
+              (e) => e.message,
+              'message',
+              contains('Failed to write to stdio MCP process'),
+            ),
+          ),
+        );
+        await expectLater(
+          transport.sendNotification(
+            JsonRpcNotification(method: 'notifications/initialized'),
+          ),
+          throwsA(
+            isA<MCPException>().having(
+              (e) => e.message,
+              'message',
+              contains('Failed to write notification to stdio MCP process'),
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'partial JSON over 1 MiB terminates without leaking buffered frame contents',
+      () async {
+        final overflowFragment = '{' * ((1024 * 1024) + 1);
+        final process = _FakeProcess(
+          stdout: Stream<List<int>>.fromIterable([
+            utf8.encode('$overflowFragment\n'),
+          ]),
+        );
+        final transport = StdioMCPTransport(
+          command: 'fake',
+          processStarter: (command, args) async => process,
+        );
+        addTearDown(transport.close);
+
+        final pending = transport
+            .send(JsonRpcRequest(method: 'initialize', id: 1))
+            .timeout(const Duration(seconds: 2));
+
+        final matcher = throwsA(
+          isA<MCPException>()
+              .having((e) => e.message, 'message', contains('frame exceeded'))
+              .having(
+                (e) => e.message,
+                'message',
+                isNot(contains(overflowFragment.substring(0, 64))),
+              ),
+        );
+        await expectLater(pending, matcher);
+        await expectLater(
+          transport.sendNotification(
+            JsonRpcNotification(method: 'notifications/initialized'),
+          ),
+          matcher,
+        );
+        expect(process.killed, isTrue);
+      },
+    );
   });
 }
-
-/// Label used in a group name to keep the SSE-parser group description unique
-/// and self-documenting.
-const _SseLabel = '_SseLineSink';

@@ -43,12 +43,12 @@ void main() {
       ).call('command-r');
       await expectLater(
         model.doGenerate(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
               messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
-                  content: [LanguageModelV3TextPart(text: 'hi')],
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'hi')],
                 ),
               ],
             ),
@@ -70,7 +70,7 @@ void main() {
       final model = CohereProvider(
         apiKey: 'bad',
         baseUrl: baseUrl,
-      ).embedding('embed-english-v3.0');
+      ).embedding('embed-english-v4.0');
       await expectLater(
         model.doEmbed(
           const EmbeddingModelV2CallOptions<String>(values: ['hello']),
@@ -91,13 +91,10 @@ void main() {
       final model = CohereProvider(
         apiKey: 'bad',
         baseUrl: baseUrl,
-      ).rerank('rerank-english-v3.0');
+      ).rerank('rerank-english-v4.0');
       await expectLater(
         model.doRerank(
-          const RerankModelV1CallOptions(
-            query: 'q',
-            documents: ['a', 'b'],
-          ),
+          const RerankModelV1CallOptions(query: 'q', documents: ['a', 'b']),
         ),
         throwsA(
           isA<AiApiCallError>()
@@ -107,39 +104,41 @@ void main() {
       );
     });
 
-    test('doStream drains a streamed error body and surfaces the message',
-        () async {
-      // doStream issues the /chat request with ResponseType.stream, so a
-      // non-2xx response arrives as a dio ResponseBody rather than decoded
-      // JSON. _apiCallError must drain that byte stream to recover the
-      // provider message (exercises the ResponseBody branch).
-      final baseUrl = await startErrorServer(
-        statusCode: 401,
-        message: 'invalid api token',
-      );
-      final model = CohereProvider(
-        apiKey: 'bad',
-        baseUrl: baseUrl,
-      ).call('command-r-plus');
-      await expectLater(
-        model.doStream(
-          LanguageModelV3CallOptions(
-            prompt: LanguageModelV3Prompt(
-              messages: [
-                LanguageModelV3Message(
-                  role: LanguageModelV3Role.user,
-                  content: [LanguageModelV3TextPart(text: 'hi')],
-                ),
-              ],
+    test(
+      'doStream drains a streamed error body and surfaces the message',
+      () async {
+        // doStream issues the /chat request with ResponseType.stream, so a
+        // non-2xx response arrives as a dio ResponseBody rather than decoded
+        // JSON. _apiCallError must drain that byte stream to recover the
+        // provider message (exercises the ResponseBody branch).
+        final baseUrl = await startErrorServer(
+          statusCode: 401,
+          message: 'invalid api token',
+        );
+        final model = CohereProvider(
+          apiKey: 'bad',
+          baseUrl: baseUrl,
+        ).call('command-r-plus');
+        await expectLater(
+          model.doStream(
+            LanguageModelV4CallOptions(
+              prompt: LanguageModelV4Prompt(
+                messages: [
+                  LanguageModelV4Message(
+                    role: LanguageModelV4Role.user,
+                    content: [LanguageModelV4TextPart(text: 'hi')],
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-        throwsA(
-          isA<AiApiCallError>()
-              .having((e) => e.message, 'message', 'invalid api token')
-              .having((e) => e.statusCode, 'statusCode', 401),
-        ),
-      );
-    });
+          throwsA(
+            isA<AiApiCallError>()
+                .having((e) => e.message, 'message', 'invalid api token')
+                .having((e) => e.statusCode, 'statusCode', 401),
+          ),
+        );
+      },
+    );
   });
 }

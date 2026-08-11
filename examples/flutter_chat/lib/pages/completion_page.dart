@@ -9,13 +9,16 @@ import '../config.dart';
 ///
 /// The user types a prompt; the response streams directly into a text area.
 class CompletionPage extends StatefulWidget {
-  const CompletionPage({super.key});
+  const CompletionPage({super.key, this.controller});
+
+  final CompletionController? controller;
 
   @override
   State<CompletionPage> createState() => _CompletionPageState();
 }
 
 class _CompletionPageState extends State<CompletionPage> {
+  CompletionController? _ownedCompletion;
   late final CompletionController _completion;
   final _promptController = TextEditingController();
 
@@ -29,18 +32,20 @@ class _CompletionPageState extends State<CompletionPage> {
   @override
   void initState() {
     super.initState();
-    _completion = CompletionController(
-      agent: ToolLoopAgent(
-        model: OpenAIProvider(apiKey: openAiApiKey)('gpt-4.1-mini'),
-        instructions: 'You are a helpful assistant. Be concise.',
-      ),
-      onError: (err) => _showSnackBar('Error: $err'),
-    );
+    _completion =
+        widget.controller ??
+        (_ownedCompletion = CompletionController(
+          agent: ToolLoopAgent(
+            model: OpenAIProvider(apiKey: openAiApiKey)('gpt-4.1-mini'),
+            instructions: 'You are a helpful assistant. Be concise.',
+          ),
+          onError: (err) => _showSnackBar('Error: $err'),
+        ));
   }
 
   @override
   void dispose() {
-    _completion.dispose();
+    _ownedCompletion?.dispose();
     _promptController.dispose();
     super.dispose();
   }

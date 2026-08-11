@@ -12,10 +12,10 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 /// A fake language model that returns a static text response.
 ///
 /// Optionally supports reasoning, sources, and custom usage/finishReason.
-class FakeTextModel implements LanguageModelV3 {
+class FakeTextModel extends LanguageModelV4 {
   FakeTextModel(
     this.text, {
-    this.finishReason = LanguageModelV3FinishReason.stop,
+    this.finishReason = LanguageModelV4FinishReason.stop,
     this.rawFinishReason = 'stop',
     this.usage,
     this.warnings = const [],
@@ -28,13 +28,13 @@ class FakeTextModel implements LanguageModelV3 {
   });
 
   final String text;
-  final LanguageModelV3FinishReason finishReason;
+  final LanguageModelV4FinishReason finishReason;
   final String? rawFinishReason;
-  final LanguageModelV3Usage? usage;
+  final LanguageModelV4Usage? usage;
   final List<String> warnings;
   final String? reasoning;
   final bool redactedReasoning;
-  final List<LanguageModelV3SourcePart> sources;
+  final List<LanguageModelV4SourcePart> sources;
   final ProviderMetadata? providerMetadata;
 
   @override
@@ -44,39 +44,43 @@ class FakeTextModel implements LanguageModelV3 {
   final String modelId;
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
+
+  List<LanguageModelV4Warning> get structuredWarnings => warnings
+      .map((warning) => LanguageModelV4OtherWarning(message: warning))
+      .toList(growable: false);
 
   /// Last options passed to doGenerate — useful for verifying what was sent.
-  LanguageModelV3CallOptions? lastCallOptions;
+  LanguageModelV4CallOptions? lastCallOptions;
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     lastCallOptions = options;
-    final content = <LanguageModelV3ContentPart>[
-      if (reasoning != null) LanguageModelV3ReasoningPart(text: reasoning!),
+    final content = <LanguageModelV4ContentPart>[
+      if (reasoning != null) LanguageModelV4ReasoningPart(text: reasoning!),
       if (redactedReasoning)
-        LanguageModelV3RedactedReasoningPart(data: Uint8List(0)),
-      LanguageModelV3TextPart(text: text),
+        LanguageModelV4RedactedReasoningPart(data: Uint8List(0)),
+      LanguageModelV4TextPart(text: text),
       ...sources,
     ];
-    return LanguageModelV3GenerateResult(
+    return LanguageModelV4GenerateResult(
       content: content,
       finishReason: finishReason,
       rawFinishReason: rawFinishReason,
       usage: usage,
-      warnings: warnings,
+      warnings: structuredWarnings,
       providerMetadata: providerMetadata,
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     lastCallOptions = options;
-    return LanguageModelV3StreamResult(
+    return LanguageModelV4StreamResult(
       stream: simulateReadableStream(
         parts: [
           StreamPartTextStart(id: 'text-1'),
@@ -85,14 +89,11 @@ class FakeTextModel implements LanguageModelV3 {
           StreamPartFinish(
             finishReason: finishReason,
             rawFinishReason: rawFinishReason,
-            usage: usage,
+            usage: usage ?? const LanguageModelV4Usage(),
           ),
         ],
       ),
-      // Pass warnings via rawResponse so streamText can extract them.
-      rawResponse: warnings.isEmpty
-          ? null
-          : <Object?, Object?>{'warnings': warnings},
+      warnings: structuredWarnings,
     );
   }
 }
@@ -100,14 +101,14 @@ class FakeTextModel implements LanguageModelV3 {
 /// A fake language model backed by a list of stream parts.
 ///
 /// Useful for testing exact event sequences in streamText.
-class FakeStreamModel implements LanguageModelV3 {
+class FakeStreamModel extends LanguageModelV4 {
   FakeStreamModel(
     this.parts, {
     this.provider = 'fake',
     this.modelId = 'fake-stream-model',
   });
 
-  final List<LanguageModelV3StreamPart> parts;
+  final List<LanguageModelV4StreamPart> parts;
 
   @override
   final String provider;
@@ -116,34 +117,34 @@ class FakeStreamModel implements LanguageModelV3 {
   final String modelId;
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     final textParts = parts.whereType<StreamPartTextDelta>();
     final text = textParts.map((p) => p.delta).join();
     final finish = parts.whereType<StreamPartFinish>().firstOrNull;
-    return LanguageModelV3GenerateResult(
-      content: [LanguageModelV3TextPart(text: text)],
-      finishReason: finish?.finishReason ?? LanguageModelV3FinishReason.stop,
+    return LanguageModelV4GenerateResult(
+      content: [LanguageModelV4TextPart(text: text)],
+      finishReason: finish?.finishReason ?? LanguageModelV4FinishReason.stop,
       usage: finish?.usage,
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3StreamResult(
+    return LanguageModelV4StreamResult(
       stream: simulateReadableStream(parts: parts),
     );
   }
 }
 
 /// A fake language model that emits a stream error.
-class FakeErrorStreamModel implements LanguageModelV3 {
+class FakeErrorStreamModel extends LanguageModelV4 {
   FakeErrorStreamModel(
     this.error, {
     this.provider = 'fake',
@@ -159,30 +160,30 @@ class FakeErrorStreamModel implements LanguageModelV3 {
   final String modelId;
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     throw error;
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
-    return LanguageModelV3StreamResult(
-      stream: Stream<LanguageModelV3StreamPart>.fromIterable([
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable([
         StreamPartError(error: error),
-        StreamPartFinish(finishReason: LanguageModelV3FinishReason.error),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.error),
       ]),
     );
   }
 }
 
 /// A fake language model that returns a single tool call.
-class FakeToolModel implements LanguageModelV3 {
+class FakeToolModel extends LanguageModelV4 {
   FakeToolModel({
     required this.toolName,
     required this.toolInput,
@@ -202,49 +203,51 @@ class FakeToolModel implements LanguageModelV3 {
   final String modelId;
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
-  LanguageModelV3CallOptions? lastCallOptions;
+  LanguageModelV4CallOptions? lastCallOptions;
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     lastCallOptions = options;
-    return LanguageModelV3GenerateResult(
+    return LanguageModelV4GenerateResult(
       content: [
-        LanguageModelV3ToolCallPart(
+        LanguageModelV4ToolCallPart(
           toolCallId: toolCallId,
           toolName: toolName,
           input: toolInput,
         ),
       ],
-      finishReason: LanguageModelV3FinishReason.toolCalls,
+      finishReason: LanguageModelV4FinishReason.toolCalls,
       rawFinishReason: 'tool_calls',
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     lastCallOptions = options;
     final argsJson = jsonEncode(toolInput);
-    return LanguageModelV3StreamResult(
+    return LanguageModelV4StreamResult(
       stream: simulateReadableStream(
         parts: [
-          StreamPartToolCallStart(toolCallId: toolCallId, toolName: toolName),
-          StreamPartToolCallDelta(
-            toolCallId: toolCallId,
-            toolName: toolName,
-            argsTextDelta: argsJson,
+          StreamPartToolInputStart(id: toolCallId, toolName: toolName),
+          StreamPartToolInputDelta(id: toolCallId, delta: argsJson),
+          StreamPartToolInputEnd(id: toolCallId),
+          StreamPartToolCall(
+            toolCall: LanguageModelV4ToolCallPart(
+              toolCallId: toolCallId,
+              toolName: toolName,
+              input: toolInput,
+            ),
           ),
-          StreamPartToolCallEnd(
-            toolCallId: toolCallId,
-            toolName: toolName,
-            input: toolInput,
+          StreamPartFinish(
+            finishReason: LanguageModelV4FinishReason.toolCalls,
+            usage: const LanguageModelV4Usage(),
           ),
-          StreamPartFinish(finishReason: LanguageModelV3FinishReason.toolCalls),
         ],
       ),
     );
@@ -255,14 +258,14 @@ class FakeToolModel implements LanguageModelV3 {
 ///
 /// Useful for multi-step testing where the first call returns a tool call
 /// and subsequent calls return text responses.
-class FakeMultiStepModel implements LanguageModelV3 {
+class FakeMultiStepModel extends LanguageModelV4 {
   FakeMultiStepModel(
     this.responses, {
     this.provider = 'fake',
     this.modelId = 'fake-multistep-model',
   });
 
-  final List<LanguageModelV3GenerateResult> responses;
+  final List<LanguageModelV4GenerateResult> responses;
   int _callCount = 0;
 
   @override
@@ -272,53 +275,48 @@ class FakeMultiStepModel implements LanguageModelV3 {
   final String modelId;
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     return responses[_callCount++ % responses.length];
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     final result = await doGenerate(options);
-    final parts = <LanguageModelV3StreamPart>[];
+    final parts = <LanguageModelV4StreamPart>[];
     for (final part in result.content) {
-      if (part is LanguageModelV3TextPart) {
+      if (part is LanguageModelV4TextPart) {
         parts.add(StreamPartTextStart(id: 'text-1'));
         parts.add(StreamPartTextDelta(id: 'text-1', delta: part.text));
         parts.add(StreamPartTextEnd(id: 'text-1'));
-      } else if (part is LanguageModelV3ToolCallPart) {
+      } else if (part is LanguageModelV4ToolCallPart) {
         parts.add(
-          StreamPartToolCallStart(
-            toolCallId: part.toolCallId,
+          StreamPartToolInputStart(
+            id: part.toolCallId,
             toolName: part.toolName,
           ),
         );
-        parts.add(
-          StreamPartToolCallEnd(
-            toolCallId: part.toolCallId,
-            toolName: part.toolName,
-            input: part.input,
-          ),
-        );
+        parts.add(StreamPartToolInputEnd(id: part.toolCallId));
+        parts.add(StreamPartToolCall(toolCall: part));
       }
     }
     parts.add(
       StreamPartFinish(finishReason: result.finishReason, usage: result.usage),
     );
-    return LanguageModelV3StreamResult(
+    return LanguageModelV4StreamResult(
       stream: simulateReadableStream(parts: parts),
     );
   }
 }
 
 /// A fake language model that always throws on doGenerate/doStream.
-class FakeErrorModel implements LanguageModelV3 {
+class FakeErrorModel extends LanguageModelV4 {
   FakeErrorModel(
     this.error, {
     this.provider = 'fake',
@@ -334,25 +332,25 @@ class FakeErrorModel implements LanguageModelV3 {
   final String modelId;
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     throw error;
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     throw error;
   }
 }
 
 /// A fake language model that captures all call options for inspection.
-class FakeCapturingModel implements LanguageModelV3 {
+class FakeCapturingModel extends LanguageModelV4 {
   FakeCapturingModel({
     this.responseText = '',
     this.provider = 'fake',
@@ -368,33 +366,36 @@ class FakeCapturingModel implements LanguageModelV3 {
   final String modelId;
 
   @override
-  String get specificationVersion => 'v3';
+  String get specificationVersion => 'v4';
 
-  final List<LanguageModelV3CallOptions> capturedOptions = [];
+  final List<LanguageModelV4CallOptions> capturedOptions = [];
 
   @override
-  Future<LanguageModelV3GenerateResult> doGenerate(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
   ) async {
     capturedOptions.add(options);
-    return LanguageModelV3GenerateResult(
-      content: [LanguageModelV3TextPart(text: responseText)],
-      finishReason: LanguageModelV3FinishReason.stop,
+    return LanguageModelV4GenerateResult(
+      content: [LanguageModelV4TextPart(text: responseText)],
+      finishReason: LanguageModelV4FinishReason.stop,
     );
   }
 
   @override
-  Future<LanguageModelV3StreamResult> doStream(
-    LanguageModelV3CallOptions options,
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
   ) async {
     capturedOptions.add(options);
-    return LanguageModelV3StreamResult(
+    return LanguageModelV4StreamResult(
       stream: simulateReadableStream(
         parts: [
           StreamPartTextStart(id: 'text-1'),
           StreamPartTextDelta(id: 'text-1', delta: responseText),
           StreamPartTextEnd(id: 'text-1'),
-          StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+          StreamPartFinish(
+            finishReason: LanguageModelV4FinishReason.stop,
+            usage: const LanguageModelV4Usage(),
+          ),
         ],
       ),
     );

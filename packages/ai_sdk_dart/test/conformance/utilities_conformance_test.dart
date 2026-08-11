@@ -83,7 +83,7 @@ void main() {
           const StreamPartTextStart(id: 't1'),
           const StreamPartTextDelta(id: 't1', delta: 'hello'),
           const StreamPartTextEnd(id: 't1'),
-          StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+          StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
         ];
 
         final emitted = await simulateReadableStream(parts: parts).toList();
@@ -96,11 +96,11 @@ void main() {
 
       test('emits parts in correct typed order', () async {
         final parts = [
-          const StreamPartReasoningDelta(delta: 'thinking'),
+          const StreamPartReasoningDelta(id: 'reasoning-0', delta: 'thinking'),
           const StreamPartTextStart(id: 't1'),
           const StreamPartTextDelta(id: 't1', delta: 'done'),
           const StreamPartTextEnd(id: 't1'),
-          StreamPartFinish(finishReason: LanguageModelV3FinishReason.stop),
+          StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
         ];
 
         final emitted = await simulateReadableStream(parts: parts).toList();
@@ -149,10 +149,7 @@ void main() {
         ];
 
         final stopwatch = Stopwatch()..start();
-        await simulateReadableStream(
-          parts: parts,
-          chunkDelayInMs: 20,
-        ).toList();
+        await simulateReadableStream(parts: parts, chunkDelayInMs: 20).toList();
         stopwatch.stop();
         // 3 gaps × 20ms = at least 60ms
         expect(stopwatch.elapsedMilliseconds, greaterThanOrEqualTo(40));
@@ -188,9 +185,9 @@ void main() {
     group('convertToModelMessages()', () {
       test('converts single text user message', () {
         final messages = [
-          LanguageModelV3Message(
-            role: LanguageModelV3Role.user,
-            content: [const LanguageModelV3TextPart(text: 'hello')],
+          LanguageModelV4Message(
+            role: LanguageModelV4Role.user,
+            content: [const LanguageModelV4TextPart(text: 'hello')],
           ),
         ];
         final result = convertToModelMessages(messages);
@@ -201,9 +198,9 @@ void main() {
 
       test('converts assistant message', () {
         final messages = [
-          LanguageModelV3Message(
-            role: LanguageModelV3Role.assistant,
-            content: [const LanguageModelV3TextPart(text: 'world')],
+          LanguageModelV4Message(
+            role: LanguageModelV4Role.assistant,
+            content: [const LanguageModelV4TextPart(text: 'world')],
           ),
         ];
         final result = convertToModelMessages(messages);
@@ -213,9 +210,9 @@ void main() {
 
       test('converts system message', () {
         final messages = [
-          LanguageModelV3Message(
-            role: LanguageModelV3Role.system,
-            content: [const LanguageModelV3TextPart(text: 'be helpful')],
+          LanguageModelV4Message(
+            role: LanguageModelV4Role.system,
+            content: [const LanguageModelV4TextPart(text: 'be helpful')],
           ),
         ];
         final result = convertToModelMessages(messages);
@@ -225,11 +222,11 @@ void main() {
 
       test('converts multi-part message to ModelMessage.parts', () {
         final messages = [
-          LanguageModelV3Message(
-            role: LanguageModelV3Role.user,
+          LanguageModelV4Message(
+            role: LanguageModelV4Role.user,
             content: [
-              const LanguageModelV3TextPart(text: 'look at this'),
-              LanguageModelV3ImagePart(
+              const LanguageModelV4TextPart(text: 'look at this'),
+              LanguageModelV4ImagePart(
                 mediaType: 'image/png',
                 image: DataContentUrl(Uri.parse('https://example.com/img.png')),
               ),
@@ -246,11 +243,14 @@ void main() {
       });
 
       test('round-trips single-text messages', () {
-        const original = ModelMessage(role: ModelMessageRole.user, content: 'hi');
+        const original = ModelMessage(
+          role: ModelMessageRole.user,
+          content: 'hi',
+        );
         final messages = [
-          LanguageModelV3Message(
-            role: LanguageModelV3Role.user,
-            content: [const LanguageModelV3TextPart(text: 'hi')],
+          LanguageModelV4Message(
+            role: LanguageModelV4Role.user,
+            content: [const LanguageModelV4TextPart(text: 'hi')],
           ),
         ];
         final result = convertToModelMessages(messages);
@@ -267,7 +267,10 @@ void main() {
         final messages = [
           const ModelMessage(role: ModelMessageRole.system, content: 'sys'),
           const ModelMessage(role: ModelMessageRole.user, content: 'hi'),
-          const ModelMessage(role: ModelMessageRole.assistant, content: 'hello'),
+          const ModelMessage(
+            role: ModelMessageRole.assistant,
+            content: 'hello',
+          ),
         ];
         final result = pruneMessages(messages);
         expect(result, hasLength(3));
@@ -293,12 +296,18 @@ void main() {
           role: ModelMessageRole.system,
           content: 'sys',
         );
-        final u1 = const ModelMessage(role: ModelMessageRole.user, content: 'u1');
+        final u1 = const ModelMessage(
+          role: ModelMessageRole.user,
+          content: 'u1',
+        );
         final a1 = const ModelMessage(
           role: ModelMessageRole.assistant,
           content: 'a1',
         );
-        final u2 = const ModelMessage(role: ModelMessageRole.user, content: 'u2');
+        final u2 = const ModelMessage(
+          role: ModelMessageRole.user,
+          content: 'u2',
+        );
         final a2 = const ModelMessage(
           role: ModelMessageRole.assistant,
           content: 'a2',
@@ -311,23 +320,25 @@ void main() {
         expect(result[2].content, 'a2');
       });
 
-      test('system message is always kept and not counted against maxMessages',
-          () {
-        final sys = const ModelMessage(
-          role: ModelMessageRole.system,
-          content: 'instructions',
-        );
-        final messages = [
-          sys,
-          const ModelMessage(role: ModelMessageRole.user, content: 'old1'),
-          const ModelMessage(role: ModelMessageRole.user, content: 'old2'),
-          const ModelMessage(role: ModelMessageRole.user, content: 'new'),
-        ];
-        final result = pruneMessages(messages, maxMessages: 1);
-        expect(result, hasLength(2)); // sys + newest
-        expect(result[0].role, ModelMessageRole.system);
-        expect(result[1].content, 'new');
-      });
+      test(
+        'system message is always kept and not counted against maxMessages',
+        () {
+          final sys = const ModelMessage(
+            role: ModelMessageRole.system,
+            content: 'instructions',
+          );
+          final messages = [
+            sys,
+            const ModelMessage(role: ModelMessageRole.user, content: 'old1'),
+            const ModelMessage(role: ModelMessageRole.user, content: 'old2'),
+            const ModelMessage(role: ModelMessageRole.user, content: 'new'),
+          ];
+          final result = pruneMessages(messages, maxMessages: 1);
+          expect(result, hasLength(2)); // sys + newest
+          expect(result[0].role, ModelMessageRole.system);
+          expect(result[1].content, 'new');
+        },
+      );
 
       test('no trimming when list length <= maxMessages', () {
         final messages = [

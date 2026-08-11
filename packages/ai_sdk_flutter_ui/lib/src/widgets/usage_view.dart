@@ -36,7 +36,8 @@ class UsageView extends StatelessWidget {
       spacing: spacing,
       runSpacing: spacing,
       children: [
-        for (final (label, count) in entries) _UsagePill(label: label, count: count),
+        for (final (label, count) in entries)
+          _UsagePill(label: label, count: count),
       ],
     );
   }

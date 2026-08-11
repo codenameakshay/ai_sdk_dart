@@ -69,7 +69,7 @@ class MessageImage extends StatelessWidget {
                 child: child,
               );
             },
-            errorBuilder: (context, _, __) => Semantics(
+            errorBuilder: (context, _, _) => Semantics(
               label: 'Image failed to load',
               image: true,
               child: _ImageError(width: width, height: height),

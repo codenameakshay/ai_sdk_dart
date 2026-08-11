@@ -154,6 +154,8 @@ class _ChatComposerState extends State<ChatComposer> {
                   ? PressableScale(
                       key: const ValueKey('composer-trailing-stop'),
                       child: Semantics(
+                        key: const ValueKey('chat-composer-stop-semantics'),
+                        container: true,
                         button: true,
                         label: 'Stop response',
                         onTap: _stop,
@@ -170,6 +172,8 @@ class _ChatComposerState extends State<ChatComposer> {
                   : PressableScale(
                       key: const ValueKey('composer-trailing-send'),
                       child: Semantics(
+                        key: const ValueKey('chat-composer-send-semantics'),
+                        container: true,
                         button: true,
                         enabled: sendEnabled,
                         label: 'Send message',

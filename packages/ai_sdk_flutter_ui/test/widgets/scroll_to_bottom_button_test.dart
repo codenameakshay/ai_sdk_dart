@@ -1,5 +1,3 @@
-import 'dart:ui' as ui;
-
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_dart/test.dart';
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
@@ -68,7 +66,7 @@ void main() {
 
     testWidgets('tapping scrolls to the bottom', (tester) async {
       await tester.pumpWidget(harness());
-      await tester.pump();
+      await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('scroll-to-bottom')), findsOneWidget);
 
       await tester.tap(find.byKey(const ValueKey('scroll-to-bottom')));
@@ -83,10 +81,12 @@ void main() {
       final semantics = tester.ensureSemantics();
 
       await tester.pumpWidget(harness());
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       final node = tester
-          .getSemantics(find.byKey(const ValueKey('scroll-to-bottom')))
+          .getSemantics(
+            find.byKey(const ValueKey('scroll-to-bottom-semantics')),
+          )
           .getSemanticsData();
       expect(node.label, 'Scroll to latest message');
       final size = tester.getSize(

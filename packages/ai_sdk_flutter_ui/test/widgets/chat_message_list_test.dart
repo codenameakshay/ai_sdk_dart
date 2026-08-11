@@ -93,6 +93,7 @@ void main() {
       addTearDown(controller.dispose);
 
       await tester.pumpWidget(_wrap(ChatMessageList(controller: controller)));
+      await tester.pumpAndSettle();
 
       expect(find.text('first user'), findsOneWidget);
       expect(find.text('first assistant'), findsOneWidget);
@@ -112,6 +113,7 @@ void main() {
       addTearDown(controller.dispose);
 
       await tester.pumpWidget(_wrap(ChatMessageList(controller: controller)));
+      await tester.pumpAndSettle();
 
       final userNode = tester
           .getSemantics(find.byType(ChatMessageBubble))

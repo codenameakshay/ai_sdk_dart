@@ -1,5 +1,3 @@
-import 'dart:ui' as ui;
-
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -62,7 +60,7 @@ void main() {
       final node = tester
           .getSemantics(find.bySemanticsLabel('Assistant is typing'))
           .getSemanticsData();
-      expect(node.hasFlag(ui.SemanticsFlag.isLiveRegion), isTrue);
+      expect(node.flagsCollection.isLiveRegion, isTrue);
       semantics.dispose();
     });
   });

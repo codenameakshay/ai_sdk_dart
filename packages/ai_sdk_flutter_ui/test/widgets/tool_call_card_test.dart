@@ -119,10 +119,7 @@ void main() {
 
       expect(find.text('Result'), findsOneWidget);
       // The body lists the runtimeType of the single content part.
-      expect(
-        find.textContaining('LanguageModelV3TextPart'),
-        findsOneWidget,
-      );
+      expect(find.textContaining('LanguageModelV3TextPart'), findsOneWidget);
     });
   });
 }

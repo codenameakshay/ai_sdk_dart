@@ -126,7 +126,9 @@ void main() {
       await tester.pumpWidget(_wrap(ChatComposer(onSend: (_) {})));
 
       final sendNode = tester
-          .getSemantics(find.byKey(const ValueKey('chat-composer-send')))
+          .getSemantics(
+            find.byKey(const ValueKey('chat-composer-send-semantics')),
+          )
           .getSemanticsData();
       expect(sendNode.label, 'Send message');
       expect(sendNode.hasAction(ui.SemanticsAction.tap), isTrue);
@@ -139,10 +141,12 @@ void main() {
       await tester.pumpWidget(
         _wrap(ChatComposer(onSend: (_) {}, isLoading: true, onStop: () {})),
       );
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       final stopNode = tester
-          .getSemantics(find.byKey(const ValueKey('chat-composer-stop')))
+          .getSemantics(
+            find.byKey(const ValueKey('chat-composer-stop-semantics')),
+          )
           .getSemanticsData();
       expect(stopNode.label, 'Stop response');
       expect(stopNode.hasAction(ui.SemanticsAction.tap), isTrue);

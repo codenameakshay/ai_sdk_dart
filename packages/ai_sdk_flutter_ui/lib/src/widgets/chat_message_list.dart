@@ -262,6 +262,7 @@ class _ChatMessageListState extends State<ChatMessageList> {
     );
     if (plainText != null && plainText.isNotEmpty) {
       return Semantics(
+        key: const ValueKey('assistant-message-semantics'),
         container: true,
         label: 'Assistant message',
         value: plainText,

@@ -135,9 +135,7 @@ class AssistantMessageView extends StatelessWidget {
     if (builder != null) return builder(context, text);
     // Bubbleless assistant prose reads as the body of the turn; give it a
     // comfortable reading line-height.
-    final style = Theme.of(
-      context,
-    ).textTheme.bodyMedium?.copyWith(height: 1.5);
+    final style = Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.5);
     return SelectableText(text, style: style);
   }
 

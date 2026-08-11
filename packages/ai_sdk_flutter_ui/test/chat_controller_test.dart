@@ -372,14 +372,14 @@ void main() {
         );
         await pumpUntil(() => controller.status == ChatStatus.awaitingApproval);
 
-      controller.addToolApprovalResponse(
-        approvalId: 'approval_c1',
-        approved: true,
-      );
-      await pumpUntil(() => agent.invocations.length == 2);
-      agent.invocations.last.emitText('final answer');
-      await agent.invocations.last.finish(finalText: 'final answer');
-      await pumpUntil(() => controller.status == ChatStatus.ready);
+        controller.addToolApprovalResponse(
+          approvalId: 'approval_c1',
+          approved: true,
+        );
+        await pumpUntil(() => agent.invocations.length == 2);
+        agent.invocations.last.emitText('final answer');
+        await agent.invocations.last.finish(finalText: 'final answer');
+        await pumpUntil(() => controller.status == ChatStatus.ready);
 
         expect(controller.pendingApprovalRequests, isEmpty);
         expect(controller.messages.last.role, ModelMessageRole.assistant);

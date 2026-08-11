@@ -10,35 +10,37 @@ Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
 
 void main() {
   group('AssistantMessageView', () {
-    testWidgets('renders text, reasoning, a tool call, and a source from parts',
-        (tester) async {
-      final message = ModelMessage.parts(
-        role: ModelMessageRole.assistant,
-        parts: const [
-          LanguageModelV3ReasoningPart(text: 'thinking hard'),
-          LanguageModelV3TextPart(text: 'Here is the answer'),
-          LanguageModelV3ToolCallPart(
-            toolCallId: 'c1',
-            toolName: 'search',
-            input: {'q': 'flutter'},
-          ),
-          LanguageModelV3SourcePart(
-            id: 's1',
-            url: 'https://example.com',
-            title: 'Example',
-          ),
-        ],
-      );
+    testWidgets(
+      'renders text, reasoning, a tool call, and a source from parts',
+      (tester) async {
+        final message = ModelMessage.parts(
+          role: ModelMessageRole.assistant,
+          parts: const [
+            LanguageModelV3ReasoningPart(text: 'thinking hard'),
+            LanguageModelV3TextPart(text: 'Here is the answer'),
+            LanguageModelV3ToolCallPart(
+              toolCallId: 'c1',
+              toolName: 'search',
+              input: {'q': 'flutter'},
+            ),
+            LanguageModelV3SourcePart(
+              id: 's1',
+              url: 'https://example.com',
+              title: 'Example',
+            ),
+          ],
+        );
 
-      await tester.pumpWidget(_wrap(AssistantMessageView(message: message)));
+        await tester.pumpWidget(_wrap(AssistantMessageView(message: message)));
 
-      expect(find.text('Here is the answer'), findsOneWidget);
-      expect(find.byType(ReasoningView), findsOneWidget);
-      expect(find.byType(ToolCallCard), findsOneWidget);
-      expect(find.text('search'), findsOneWidget);
-      expect(find.byType(SourceCitations), findsOneWidget);
-      expect(find.text('Example'), findsOneWidget);
-    });
+        expect(find.text('Here is the answer'), findsOneWidget);
+        expect(find.byType(ReasoningView), findsOneWidget);
+        expect(find.byType(ToolCallCard), findsOneWidget);
+        expect(find.text('search'), findsOneWidget);
+        expect(find.byType(SourceCitations), findsOneWidget);
+        expect(find.text('Example'), findsOneWidget);
+      },
+    );
 
     testWidgets('falls back to message.content when there are no parts', (
       tester,
@@ -65,10 +67,8 @@ void main() {
               role: ModelMessageRole.assistant,
               content: '# Heading',
             ),
-            textBuilder: (context, text) => Text(
-              'custom:$text',
-              key: const ValueKey('custom-text'),
-            ),
+            textBuilder: (context, text) =>
+                Text('custom:$text', key: const ValueKey('custom-text')),
           ),
         ),
       );
@@ -133,7 +133,7 @@ void main() {
           AssistantMessageView(
             message: message,
             onToolApprove: (request, _) => approvedId = request.approvalId,
-            onToolDeny: (_, __) {},
+            onToolDeny: (_, _) {},
           ),
         ),
       );

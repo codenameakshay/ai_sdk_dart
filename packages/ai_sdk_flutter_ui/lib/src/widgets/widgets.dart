@@ -3,6 +3,8 @@
 /// All widgets read only the controllers' public state and theme via
 /// `Theme.of(context)`. None pull in heavy platform dependencies — attachment
 /// and link-opening behavior is exposed via callbacks instead.
+library;
+
 export 'ai_chat_scaffold.dart';
 export 'assistant_message_view.dart';
 export 'chat_composer.dart';

@@ -35,9 +35,7 @@ void main() {
     ) async {
       var retried = false;
       await tester.pumpWidget(
-        _wrap(
-          ChatErrorView(error: 'boom', onRetry: () => retried = true),
-        ),
+        _wrap(ChatErrorView(error: 'boom', onRetry: () => retried = true)),
       );
 
       await tester.tap(find.byKey(const ValueKey('chat-error-retry')));
@@ -49,9 +47,7 @@ void main() {
     ) async {
       var dismissed = false;
       await tester.pumpWidget(
-        _wrap(
-          ChatErrorView(error: 'boom', onDismiss: () => dismissed = true),
-        ),
+        _wrap(ChatErrorView(error: 'boom', onDismiss: () => dismissed = true)),
       );
 
       await tester.tap(find.byKey(const ValueKey('chat-error-dismiss')));

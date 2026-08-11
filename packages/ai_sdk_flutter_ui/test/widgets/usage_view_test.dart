@@ -39,7 +39,9 @@ void main() {
     testWidgets('renders nothing when all token counts are null', (
       tester,
     ) async {
-      await tester.pumpWidget(_wrap(const UsageView(usage: LanguageModelV3Usage())));
+      await tester.pumpWidget(
+        _wrap(const UsageView(usage: LanguageModelV3Usage())),
+      );
 
       expect(find.byType(SizedBox), findsWidgets);
       expect(find.textContaining('Input'), findsNothing);

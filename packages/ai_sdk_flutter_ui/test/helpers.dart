@@ -259,8 +259,9 @@ class RecordedStreamInvocation {
     if (!_usageCompleter.isCompleted) _usageCompleter.complete(usage);
     if (!_totalUsageCompleter.isCompleted) _totalUsageCompleter.complete(usage);
     if (!_sourcesCompleter.isCompleted) _sourcesCompleter.complete(sources);
-    if (!_toolCallsCompleter.isCompleted)
+    if (!_toolCallsCompleter.isCompleted) {
       _toolCallsCompleter.complete(toolCalls);
+    }
     if (!_toolResultsCompleter.isCompleted) {
       _toolResultsCompleter.complete(toolResults);
     }

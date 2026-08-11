@@ -106,7 +106,10 @@ class ChatErrorView extends StatelessWidget {
                     AiHaptics.selection();
                     onDismiss();
                   },
-                  icon: Icon(Icons.close_rounded, color: scheme.onErrorContainer),
+                  icon: Icon(
+                    Icons.close_rounded,
+                    color: scheme.onErrorContainer,
+                  ),
                 ),
               ),
           ],

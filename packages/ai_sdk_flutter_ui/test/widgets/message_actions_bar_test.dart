@@ -1,5 +1,3 @@
-import 'dart:ui' as ui;
-
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';

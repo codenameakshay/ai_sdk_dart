@@ -119,6 +119,8 @@ class _ScrollToBottomButtonState extends State<ScrollToBottomButton> {
     if (!_visible) return const SizedBox.shrink();
 
     final button = Semantics(
+      key: const ValueKey('scroll-to-bottom-semantics'),
+      container: true,
       button: true,
       label: 'Scroll to latest message',
       onTap: _scrollToBottom,

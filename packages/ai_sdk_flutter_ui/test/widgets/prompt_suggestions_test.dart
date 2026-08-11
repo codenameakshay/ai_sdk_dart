@@ -20,7 +20,9 @@ void main() {
       expect(find.text('Write a poem'), findsOneWidget);
     });
 
-    testWidgets('invokes onSelected with the tapped suggestion', (tester) async {
+    testWidgets('invokes onSelected with the tapped suggestion', (
+      tester,
+    ) async {
       String? selected;
       await tester.pumpWidget(
         _wrap(

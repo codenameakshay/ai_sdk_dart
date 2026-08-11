@@ -19,7 +19,11 @@ void main() {
     testWidgets('shows the tool name and pretty-printed input', (tester) async {
       await tester.pumpWidget(
         _wrap(
-          ToolApprovalCard(request: _request, onApprove: (_) {}, onDeny: (_) {}),
+          ToolApprovalCard(
+            request: _request,
+            onApprove: (_) {},
+            onDeny: (_) {},
+          ),
         ),
       );
 

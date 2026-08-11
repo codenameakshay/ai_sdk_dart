@@ -45,9 +45,7 @@ void main() {
       expect(find.byKey(const ValueKey('streaming-cursor')), findsOneWidget);
       // Let the eased blink advance, then settle so no ticker dangles.
       await tester.pump(const Duration(milliseconds: 300));
-      await tester.pumpWidget(
-        _wrap(ChatMessageBubble.text(text: 'partial')),
-      );
+      await tester.pumpWidget(_wrap(ChatMessageBubble.text(text: 'partial')));
     });
 
     testWidgets('empty content renders a placeholder ellipsis', (tester) async {

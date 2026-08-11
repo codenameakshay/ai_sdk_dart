@@ -1,4 +1,4 @@
-## Unreleased
+## 2.0.0
 
 - **Breaking:** replaced the language-model V3 seam with `LanguageModelV4` and
   removed the obsolete V3 language-model paths.

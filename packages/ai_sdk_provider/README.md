@@ -2,7 +2,11 @@
 
 Provider interface specification for the [AI SDK Dart](https://github.com/codenameakshay/ai_sdk_dart) — defines the contracts that all provider packages must implement.
 
-This package is an implementation detail. **You do not need to add it as a direct dependency** — it is a transitive dependency of `ai` and all provider packages.
+This package is an implementation detail for most applications. **You do not need to add it as a direct dependency** unless you are building a custom provider; it is a transitive dependency of `ai_sdk_dart` and the provider packages.
+
+Custom providers upgrading from 1.x should read the
+[2.0 migration guide](https://github.com/codenameakshay/ai_sdk_dart/blob/main/docs/migration-2.0.md)
+before adopting the V4 contract.
 
 ## Interfaces
 

@@ -1,7 +1,9 @@
-## Unreleased
+## 2.0.0
 
 - Migrated language generation and streaming to V4 lifecycle, metadata,
   structured warnings, nested usage, and unified tool contracts.
+- Mapped cache reads and cache writes into the nested input-token usage
+  breakdown for both generated and streamed responses.
 - Cancelling an abort signal now cancels the in-flight Dio request.
 
 ---

@@ -6,8 +6,8 @@ Groq provider for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart). Run Llama
 
 ```yaml
 dependencies:
-  ai_sdk_dart: ^1.2.0
-  ai_sdk_groq: ^1.2.0
+  ai_sdk_dart: ^2.0.0
+  ai_sdk_groq: ^2.0.0
 ```
 
 ## Usage

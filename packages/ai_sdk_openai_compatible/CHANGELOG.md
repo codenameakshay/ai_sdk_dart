@@ -1,8 +1,10 @@
-## Unreleased
+## 2.0.0
 
 - **Breaking:** migrated the shared language model to the V4 provider contract
   with unified tools, typed response formats, nested usage, and full stream
   lifecycle events.
+- Mapped cached prompt tokens into the nested input-token usage breakdown for
+  OpenAI-compatible providers.
 - Abort signals now cancel live Dio requests and surface a typed cancellation
   error; streamed warnings are normalized into structured warning types.
 - Provider-managed authentication headers now take precedence over per-call

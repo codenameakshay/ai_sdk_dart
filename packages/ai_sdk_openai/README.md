@@ -6,8 +6,8 @@ OpenAI provider for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart). Support
 
 ```yaml
 dependencies:
-  ai_sdk_dart: ^1.2.0
-  ai_sdk_openai: ^1.2.0
+  ai_sdk_dart: ^2.0.0
+  ai_sdk_openai: ^2.0.0
 ```
 
 ## Usage

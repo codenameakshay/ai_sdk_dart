@@ -22,7 +22,15 @@
 
 ## What is this?
 
-AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) to Dart and Flutter. Write your AI logic once, swap providers without changing a line of business code, and ship on every platform — mobile, web, and server. Every API mirrors its JavaScript counterpart so the official Vercel docs apply directly to your Dart code.
+AI SDK Dart brings the core concepts of [Vercel AI SDK v6](https://sdk.vercel.ai) to Dart and Flutter. Write your AI logic once, swap providers without changing business code, and ship on mobile, web, and server. The API follows the same provider-agnostic model while using idiomatic Dart types and lifecycle primitives.
+
+## Upgrading to 2.0
+
+Version 2.0 replaces the language-model V3 provider seam with V4 and removes
+the obsolete V3 types. Most apps can upgrade their coordinated `ai_sdk_*`
+dependencies together; custom providers, middleware, and direct provider-type
+consumers need source changes. See the [2.0 migration guide](https://github.com/codenameakshay/ai_sdk_dart/blob/main/docs/migration-2.0.md)
+for the exact renames and contract changes.
 
 ---
 
@@ -122,7 +130,7 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
 - `createProviderRegistry` — map provider aliases to model factories
 - `customProvider()` — lightweight on-the-fly provider construction without a full registry
 - Resolve models by `'provider:modelId'` string at runtime
-- Supports 5 model categories: language, embedding, image, speech, transcription
+- Supports 6 model categories: language, embedding, image, speech, transcription, rerank
 - Mix providers in a single registry for multi-provider apps
 
 ### 📱 Flutter UI Controllers & Widgets
@@ -146,8 +154,8 @@ AI SDK Dart brings the full power of [Vercel AI SDK v6](https://sdk.vercel.ai) t
   consistently across every provider
 
 ### 🧪 Conformance Suite
-- **1,057 tests** (924 Dart + 133 Flutter) covering every public API
-- **99.9% line coverage** overall — 11 of 12 packages at 100%, enforced by a CI coverage gate
+- Comprehensive Dart and Flutter tests across every package and both example apps
+- A repository-wide **99% line-coverage gate** enforced in CI
 - Spec-driven JSON fixtures as the source of truth
 - Provider wire-format conformance tests for every provider (plus a typed-error conformance test per provider)
 - `MockEmbeddingModelV3` testing utility for embedding model conformance
@@ -474,14 +482,14 @@ a conditional import — so the client also runs on Flutter web.
 - ✅ `timeout` parameter on all core functions
 - ✅ `customProvider()` for lightweight on-the-fly provider construction
 - ✅ Middleware system — 5 built-in language-model middlewares, plus embedding & image model middleware
-- ✅ Provider registry (`createProviderRegistry`) — 5 model categories
+- ✅ Provider registry (`createProviderRegistry`) — 6 model categories
 - ✅ Multi-step agentic loops with tool approval
 - ✅ Flutter UI controllers (Chat, Completion, ObjectStream) + 19 prebuilt Material widgets
 - ✅ MCP client (Streamable HTTP + stdio transports, prompts, resources, web-safe)
 - ✅ Typed provider API errors (`AiApiCallError` with status / type / code / body) across all providers
 - ✅ OpenAI (with reasoning options), Anthropic (with thinking options), Google providers
 - ✅ Cohere, Mistral, Groq, Ollama, Azure OpenAI providers — all with tools + multimodal
-- ✅ 1,057 tests, 99.9% line coverage with a CI coverage gate
+- ✅ Comprehensive tests with a repository-wide 99% line-coverage gate
 
 ### 🔜 Planned
 

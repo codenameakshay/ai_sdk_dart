@@ -16,9 +16,9 @@ pulling in `image_picker`/`file_selector`/`url_launcher`. Everything themes via
 
 ```yaml
 dependencies:
-  ai_sdk_dart: ^1.2.0
-  ai_sdk_flutter_ui: ^1.2.0
-  ai_sdk_openai: ^1.2.0   # or another provider
+  ai_sdk_dart: ^2.0.0
+  ai_sdk_flutter_ui: ^2.0.0
+  ai_sdk_openai: ^2.0.0   # or another provider
 ```
 
 ## How it works

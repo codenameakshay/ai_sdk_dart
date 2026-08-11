@@ -6,8 +6,8 @@ Ollama provider for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart). Run ope
 
 ```yaml
 dependencies:
-  ai_sdk_dart: ^1.2.0
-  ai_sdk_ollama: ^1.2.0
+  ai_sdk_dart: ^2.0.0
+  ai_sdk_ollama: ^2.0.0
 ```
 
 ## Prerequisites

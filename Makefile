@@ -161,7 +161,6 @@ format-check:
 ## Dry-run publish for all packages (checks pub.dev readiness)
 dry-run:
 	$(DART) pub publish --dry-run -C packages/ai_sdk_provider
-	$(DART) pub publish --dry-run -C packages/ai_sdk_dart
 	$(DART) pub publish --dry-run -C packages/ai_sdk_openai_compatible
 	$(DART) pub publish --dry-run -C packages/ai_sdk_openai
 	$(DART) pub publish --dry-run -C packages/ai_sdk_anthropic
@@ -171,13 +170,13 @@ dry-run:
 	$(DART) pub publish --dry-run -C packages/ai_sdk_groq
 	$(DART) pub publish --dry-run -C packages/ai_sdk_mistral
 	$(DART) pub publish --dry-run -C packages/ai_sdk_ollama
+	$(DART) pub publish --dry-run -C packages/ai_sdk_dart
 	$(DART) pub publish --dry-run -C packages/ai_sdk_mcp
 	$(FLUTTER) pub publish --dry-run -C packages/ai_sdk_flutter_ui
 
 ## Publish all packages to pub.dev (run dry-run first to verify)
 publish:
 	$(DART) pub publish -C packages/ai_sdk_provider
-	$(DART) pub publish -C packages/ai_sdk_dart
 	$(DART) pub publish -C packages/ai_sdk_openai_compatible
 	$(DART) pub publish -C packages/ai_sdk_openai
 	$(DART) pub publish -C packages/ai_sdk_anthropic
@@ -187,6 +186,7 @@ publish:
 	$(DART) pub publish -C packages/ai_sdk_groq
 	$(DART) pub publish -C packages/ai_sdk_mistral
 	$(DART) pub publish -C packages/ai_sdk_ollama
+	$(DART) pub publish -C packages/ai_sdk_dart
 	$(DART) pub publish -C packages/ai_sdk_mcp
 	$(FLUTTER) pub publish -C packages/ai_sdk_flutter_ui
 

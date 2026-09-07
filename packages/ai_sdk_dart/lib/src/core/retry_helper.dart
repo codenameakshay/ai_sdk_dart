@@ -165,10 +165,12 @@ Duration _retryDelayFor({required int retryAttempt, required Object error}) {
   final retryAfter = _retryAfterDelay(error);
   if (retryAfter != null) return retryAfter;
 
-  final exponentialDelayMs = min(
-    _retryBaseDelay.inMilliseconds * (1 << (retryAttempt - 1)),
-    _retryMaxDelay.inMilliseconds,
-  );
+  final exponentialDelayMs = retryAttempt > 3
+      ? _retryMaxDelay.inMilliseconds
+      : min(
+          _retryBaseDelay.inMilliseconds * (1 << (retryAttempt - 1)),
+          _retryMaxDelay.inMilliseconds,
+        );
   final jitteredDelayMs = (exponentialDelayMs * _retryHooks.randomDouble())
       .round();
   return Duration(milliseconds: jitteredDelayMs);
@@ -191,8 +193,16 @@ Duration? _retryAfterDelay(Object error) {
   if (retryAfterValue == null) return null;
 
   final seconds = num.tryParse(retryAfterValue.trim());
-  if (seconds == null || seconds.isNegative) return null;
-  return Duration(milliseconds: (seconds * 1000).round());
+  if (seconds == null || !seconds.isFinite || seconds.isNegative) return null;
+  // Keep the bound exactly representable on Dart web, where integers use
+  // JavaScript's safe integer range. This is still roughly 285 years.
+  const maxRetryAfterMilliseconds =
+      0x1fffffffffffff ~/ Duration.microsecondsPerMillisecond;
+  final milliseconds = seconds * Duration.millisecondsPerSecond;
+  if (!milliseconds.isFinite || milliseconds > maxRetryAfterMilliseconds) {
+    return null;
+  }
+  return Duration(milliseconds: milliseconds.round());
 }
 
 Duration? _remainingTimeout({

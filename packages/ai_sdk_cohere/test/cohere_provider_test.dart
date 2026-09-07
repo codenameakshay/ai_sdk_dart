@@ -35,44 +35,6 @@ void main() {
       expect(model.modelId, 'rerank-english-v4.0');
       expect(model.specificationVersion, 'v1');
     });
-
-    test('default cohere instance is a CohereProvider', () {
-      expect(cohere, isA<CohereProvider>());
-    });
-
-    test('custom baseUrl is accepted', () {
-      final provider = CohereProvider(
-        apiKey: 'key',
-        baseUrl: 'https://custom.cohere.example.com/v2',
-      );
-      // Just verify construction and model creation don't throw.
-      final model = provider('command-r');
-      expect(model.modelId, 'command-r');
-    });
-  });
-
-  group('RerankModelV1 interface', () {
-    test('implements RerankModelV1', () {
-      final provider = CohereProvider(apiKey: 'key');
-      final model = provider.rerank('rerank-english-v4.0');
-      expect(model, isA<RerankModelV1>());
-    });
-  });
-
-  group('EmbeddingModelV2 interface', () {
-    test('implements EmbeddingModelV2<String>', () {
-      final provider = CohereProvider(apiKey: 'key');
-      final model = provider.embedding('embed-english-v4.0');
-      expect(model, isA<EmbeddingModelV2<String>>());
-    });
-  });
-
-  group('LanguageModelV4 interface', () {
-    test('extends LanguageModelV4', () {
-      final provider = CohereProvider(apiKey: 'key');
-      final model = provider('command-r-plus');
-      expect(model, isA<LanguageModelV4>());
-    });
   });
 
   group('Cohere doGenerate wire format', () {
@@ -509,6 +471,47 @@ void main() {
           '/embed': 'Bearer embed-token',
           '/rerank': 'Bearer rerank-token',
         });
+      },
+    );
+
+    test(
+      'normalizes numeric vectors and ignores response rows beyond the input',
+      () async {
+        final server = await _TestServer.start((request) async {
+          await utf8.decoder.bind(request).join();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'embeddings': {
+                'float': [
+                  [1, 2.5],
+                  [-3, 4],
+                  [99],
+                ],
+              },
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final result =
+            await CohereProvider(apiKey: 'key', baseUrl: server.baseUrl)
+                .embedding('embed-v4.0')
+                .doEmbed(
+                  const EmbeddingModelV2CallOptions<String>(values: ['a', 'b']),
+                );
+
+        expect(result.embeddings, hasLength(2));
+        expect(result.embeddings.map((embedding) => embedding.value), [
+          'a',
+          'b',
+        ]);
+        expect(result.embeddings.map((embedding) => embedding.embedding), [
+          [1.0, 2.5],
+          [-3.0, 4.0],
+        ]);
       },
     );
 

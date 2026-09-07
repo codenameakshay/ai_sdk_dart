@@ -37,7 +37,7 @@ class AnthropicProvider {
   final bool _ownsClient;
 
   Future<Map<String, String>> _headers() async {
-    final key = await Future.value(_credentialProvider());
+    final key = await _credentialProvider();
     return {
       if (key != null && key.isNotEmpty) 'x-api-key': key,
       'anthropic-version': '2023-06-01',
@@ -83,7 +83,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
   Future<LanguageModelV4GenerateResult> doGenerate(
     LanguageModelV4CallOptions options,
   ) async {
-    final resolvedHeaders = await Future.value(headers());
+    final resolvedHeaders = await headers();
     final cancelToken = _cancelTokenFor(options.abortSignal);
     final po = options.providerOptions != null
         ? options.providerOptions![provider]
@@ -203,7 +203,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
   Future<LanguageModelV4StreamResult> doStream(
     LanguageModelV4CallOptions options,
   ) async {
-    final resolvedHeaders = await Future.value(headers());
+    final resolvedHeaders = await headers();
     final cancelToken = _cancelTokenFor(options.abortSignal);
     final po = options.providerOptions != null
         ? options.providerOptions![provider]
@@ -572,15 +572,7 @@ Stream<String> _readSseDataLines(Stream<Uint8List> bytesStream) async* {
 
 Map<String, dynamic>? _safeParseMap(String input) {
   final parsed = _safeParseJson(input);
-  if (parsed is Map<String, dynamic>) return parsed;
-  // Defensive: `jsonDecode` of a JSON object always yields a
-  // `Map<String, dynamic>`, so the first guard above always wins. This cast
-  // path only exists for a hypothetical non-`<String, dynamic>` Map and is
-  // unreachable via the SSE data-line input that calls this.
-  if (parsed is Map) {
-    return parsed.cast<String, dynamic>(); // coverage:ignore-line
-  }
-  return null;
+  return parsed is Map<String, dynamic> ? parsed : null;
 }
 
 Object _safeParseJson(String input) {

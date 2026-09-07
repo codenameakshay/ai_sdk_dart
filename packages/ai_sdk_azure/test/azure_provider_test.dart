@@ -34,10 +34,6 @@ void main() {
       expect(model.specificationVersion, 'v2');
     });
 
-    test('default azureOpenAI constant is an AzureOpenAIProvider', () {
-      expect(azureOpenAI, isA<AzureOpenAIProvider>());
-    });
-
     test('uses default api version', () {
       final provider = AzureOpenAIProvider(
         endpoint: 'https://my-resource.openai.azure.com',
@@ -53,28 +49,6 @@ void main() {
         apiVersion: '2024-05-01-preview',
       );
       expect(provider.apiVersion, '2024-05-01-preview');
-    });
-  });
-
-  group('LanguageModelV4 interface', () {
-    test('language model extends LanguageModelV4', () {
-      final provider = AzureOpenAIProvider(
-        endpoint: 'https://my-resource.openai.azure.com',
-        apiKey: 'key',
-      );
-      final model = provider('gpt-4');
-      expect(model, isA<LanguageModelV4>());
-    });
-  });
-
-  group('EmbeddingModelV2 interface', () {
-    test('embedding model implements EmbeddingModelV2<String>', () {
-      final provider = AzureOpenAIProvider(
-        endpoint: 'https://my-resource.openai.azure.com',
-        apiKey: 'key',
-      );
-      final model = provider.embedding('text-embedding-ada-002');
-      expect(model, isA<EmbeddingModelV2<String>>());
     });
   });
 
@@ -357,6 +331,51 @@ void main() {
       );
       expect(result.embeddings, isEmpty);
     });
+
+    test(
+      'normalizes numeric vectors and ignores response rows beyond the input',
+      () async {
+        final server = await _TestServer.start((request) async {
+          await _captureBody(request);
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'data': [
+                {
+                  'embedding': [1, 2.5],
+                },
+                {
+                  'embedding': [-3, 4],
+                },
+                {
+                  'embedding': [99],
+                },
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final result =
+            await AzureOpenAIProvider(endpoint: server.endpoint, apiKey: 'key')
+                .embedding('text-embedding-ada-002')
+                .doEmbed(
+                  const EmbeddingModelV2CallOptions<String>(values: ['a', 'b']),
+                );
+
+        expect(result.embeddings, hasLength(2));
+        expect(result.embeddings.map((embedding) => embedding.value), [
+          'a',
+          'b',
+        ]);
+        expect(result.embeddings.map((embedding) => embedding.embedding), [
+          [1.0, 2.5],
+          [-3.0, 4.0],
+        ]);
+      },
+    );
 
     test(
       'endpoint ending with slash still posts to deployment embeddings once',

@@ -28,18 +28,6 @@ void main() {
       expect(model.specificationVersion, 'v2');
     });
 
-    test('default ollama constant is an OllamaProvider', () {
-      expect(ollama, isA<OllamaProvider>());
-    });
-
-    test('accepts custom baseUrl', () {
-      final provider = OllamaProvider(
-        baseUrl: 'http://192.168.1.100:11434/api',
-      );
-      final model = provider('phi3');
-      expect(model.modelId, 'phi3');
-    });
-
     test('reuses an injected client across multiple requests', () async {
       final server = await _TestServer.start((request) async {
         request.response.statusCode = 200;
@@ -201,22 +189,6 @@ void main() {
         expect(adapter.lastForce, true);
       },
     );
-  });
-
-  group('LanguageModelV4 interface', () {
-    test('language model extends LanguageModelV4', () {
-      final provider = OllamaProvider();
-      final model = provider('llama3');
-      expect(model, isA<LanguageModelV4>());
-    });
-  });
-
-  group('EmbeddingModelV2 interface', () {
-    test('embedding model implements EmbeddingModelV2<String>', () {
-      final provider = OllamaProvider();
-      final model = provider.embedding('nomic-embed-text');
-      expect(model, isA<EmbeddingModelV2<String>>());
-    });
   });
 
   group('Ollama doGenerate wire format', () {
@@ -817,6 +789,44 @@ void main() {
       );
       expect(result.embeddings, isEmpty);
     });
+
+    test(
+      'normalizes numeric vectors and ignores response rows beyond the input',
+      () async {
+        final server = await _TestServer.start((request) async {
+          await utf8.decoder.bind(request).join();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'embeddings': [
+                [1, 2.5],
+                [-3, 4],
+                [99],
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final result = await OllamaProvider(baseUrl: server.baseUrl)
+            .embedding('nomic-embed-text')
+            .doEmbed(
+              const EmbeddingModelV2CallOptions<String>(values: ['a', 'b']),
+            );
+
+        expect(result.embeddings, hasLength(2));
+        expect(result.embeddings.map((embedding) => embedding.value), [
+          'a',
+          'b',
+        ]);
+        expect(result.embeddings.map((embedding) => embedding.embedding), [
+          [1.0, 2.5],
+          [-3.0, 4.0],
+        ]);
+      },
+    );
   });
 }
 

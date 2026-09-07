@@ -37,7 +37,7 @@ class GoogleGenerativeAIProvider {
   final bool _ownsClient;
 
   Future<String> _apiKey() async {
-    final key = await Future.value(_credentialProvider());
+    final key = await _credentialProvider();
     if (key == null || key.isEmpty) {
       throw StateError('Missing GOOGLE_API_KEY for Google provider.');
     }
@@ -84,7 +84,7 @@ class _GoogleLanguageModel extends LanguageModelV4 {
   Future<LanguageModelV4GenerateResult> doGenerate(
     LanguageModelV4CallOptions options,
   ) async {
-    final resolvedApiKey = await Future.value(apiKey());
+    final resolvedApiKey = await apiKey();
     final cancelToken = _cancelTokenFor(options.abortSignal);
     final modelPath = _modelPath(modelId);
     final providerOptions = options.providerOptions != null
@@ -251,7 +251,7 @@ class _GoogleLanguageModel extends LanguageModelV4 {
   Future<LanguageModelV4StreamResult> doStream(
     LanguageModelV4CallOptions options,
   ) async {
-    final resolvedApiKey = await Future.value(apiKey());
+    final resolvedApiKey = await apiKey();
     final cancelToken = _cancelTokenFor(options.abortSignal);
     final modelPath = _modelPath(modelId);
     final providerOptions = options.providerOptions != null
@@ -558,7 +558,7 @@ class _GoogleEmbeddingModel implements EmbeddingModelV2<String> {
   Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
     EmbeddingModelV2CallOptions<String> options,
   ) async {
-    final resolvedApiKey = await Future.value(apiKey());
+    final resolvedApiKey = await apiKey();
     final modelPath = _modelPath(modelId);
     final providerOptions = options.providerOptions != null
         ? options.providerOptions![provider]
@@ -708,12 +708,7 @@ Stream<String> _readSseDataLines(Stream<Uint8List> bytesStream) async* {
 Map<String, dynamic>? _safeParseMap(String input) {
   try {
     final decoded = jsonDecode(input);
-    if (decoded is Map<String, dynamic>) return decoded;
-    // jsonDecode of a JSON object always yields a Map<String, dynamic>.
-    if (decoded is Map) {
-      return decoded.cast<String, dynamic>(); // coverage:ignore-line
-    }
-    return null;
+    return decoded is Map<String, dynamic> ? decoded : null;
   } catch (_) {
     return null;
   }
@@ -849,17 +844,13 @@ Map<String, dynamic>? _toGoogleInlinePart(
 }
 
 Object _toGoogleToolResultOutput(LanguageModelV4ToolResultOutput output) {
-  if (output is ToolResultOutputText) {
-    return {'type': 'text', 'text': output.text};
-  }
-  if (output is ToolResultOutputContent) {
-    return {
+  return switch (output) {
+    ToolResultOutputText(:final text) => {'type': 'text', 'text': text},
+    ToolResultOutputContent(:final parts) => {
       'type': 'content',
-      'parts': output.parts.map(_toGoogleToolResultPart).toList(),
-    };
-  }
-  // Sealed output type; both concrete subtypes are handled above.
-  return {'type': 'unknown'}; // coverage:ignore-line
+      'parts': parts.map(_toGoogleToolResultPart).toList(),
+    },
+  };
 }
 
 Map<String, dynamic> _toGoogleToolResultPart(LanguageModelV4ContentPart part) {

@@ -38,7 +38,7 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
   String get specificationVersion => 'v4';
 
   Future<Map<String, String>> _resolvedHeaders() async {
-    final headers = await Future.value(config.headers());
+    final headers = await config.headers();
     return Map<String, String>.unmodifiable(headers);
   }
 
@@ -77,28 +77,22 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
         'frequency_penalty': options.frequencyPenalty,
       if (options.stopSequences.isNotEmpty) 'stop': options.stopSequences,
       if (options.seed != null) config.seedKey: options.seed,
-      if (config.supportsResponseFormatJsonSchema &&
-          options.responseFormat is LanguageModelV4JsonResponseFormat)
-        'response_format': {
-          'type': 'json_schema',
-          'json_schema': {
-            'name':
-                (options.responseFormat as LanguageModelV4JsonResponseFormat)
-                    .name ??
-                'response',
-            'schema':
-                (options.responseFormat as LanguageModelV4JsonResponseFormat)
-                    .schema,
-            if ((options.responseFormat as LanguageModelV4JsonResponseFormat)
-                    .description !=
-                null)
-              'description':
-                  (options.responseFormat as LanguageModelV4JsonResponseFormat)
-                      .description,
-            'strict': true,
-          },
-        },
     };
+
+    final responseFormat = options.responseFormat;
+    if (config.supportsResponseFormatJsonSchema &&
+        responseFormat is LanguageModelV4JsonResponseFormat) {
+      body['response_format'] = {
+        'type': 'json_schema',
+        'json_schema': {
+          'name': responseFormat.name ?? 'response',
+          'schema': responseFormat.schema,
+          if (responseFormat.description != null)
+            'description': responseFormat.description,
+          'strict': true,
+        },
+      };
+    }
 
     final extra = config.extraBody?.call(options);
     if (extra != null) {
@@ -469,7 +463,7 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
 
       if (config.supportsMultimodal) {
         final contentParts = _toContentParts(message.content);
-        if (contentParts != null && contentParts.isNotEmpty) {
+        if (contentParts.isNotEmpty) {
           out.add({'role': role, 'content': contentParts});
           continue;
         }
@@ -481,7 +475,7 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
     return out;
   }
 
-  List<Map<String, dynamic>>? _toContentParts(
+  List<Map<String, dynamic>> _toContentParts(
     List<LanguageModelV4ContentPart> parts,
   ) {
     final out = <Map<String, dynamic>>[];
@@ -538,7 +532,7 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
         }
       }
     }
-    return out.isEmpty ? null : out;
+    return out;
   }
 
   // ── tool serialization ────────────────────────────────────────────────
@@ -580,8 +574,9 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
     required void Function(LanguageModelV4SourcePart) onSource,
     required void Function(LanguageModelV4FilePart) onFile,
   }) {
-    for (var i = 0; i < annotations.length; i++) {
-      final annotation = (annotations[i] as Map).cast<String, dynamic>();
+    for (final (i, rawAnnotation) in annotations.indexed) {
+      if (rawAnnotation is! Map) continue;
+      final annotation = rawAnnotation.cast<String, dynamic>();
       final type = annotation['type']?.toString();
       if (type == 'url_citation') {
         final url = annotation['url']?.toString();
@@ -614,8 +609,10 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
   // ── tool result serialization ─────────────────────────────────────────
 
   String _toToolResultText(LanguageModelV4ToolResultPart result) {
-    if (result.output is ToolResultOutputText && !result.isError) {
-      return (result.output as ToolResultOutputText).text;
+    if (result.output case ToolResultOutputText(
+      :final text,
+    ) when !result.isError) {
+      return text;
     }
     return jsonEncode({
       'toolCallId': result.toolCallId,
@@ -626,18 +623,13 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
   }
 
   Object _toToolResultOutputJson(LanguageModelV4ToolResultOutput output) {
-    if (output is ToolResultOutputText) {
-      return {'type': 'text', 'text': output.text};
-    }
-    if (output is ToolResultOutputContent) {
-      return {
+    return switch (output) {
+      ToolResultOutputText(:final text) => {'type': 'text', 'text': text},
+      ToolResultOutputContent(:final parts) => {
         'type': 'content',
-        'parts': output.parts.map(_toGenericContentPartJson).toList(),
-      };
-    }
-    // Unreachable: LanguageModelV4ToolResultOutput is a sealed class with only
-    // ToolResultOutputText and ToolResultOutputContent, both handled above.
-    return {'type': 'unknown'}; // coverage:ignore-line
+        'parts': parts.map(_toGenericContentPartJson).toList(),
+      },
+    };
   }
 
   Map<String, dynamic> _toGenericContentPartJson(
@@ -754,14 +746,7 @@ Stream<String> _readSseDataLines(Stream<Uint8List> bytesStream) async* {
 
 Map<String, dynamic>? _safeParseJsonMap(String input) {
   final parsed = _safeParseJson(input);
-  if (parsed is Map<String, dynamic>) return parsed;
-  // Unreachable: jsonDecode always produces a Map<String, dynamic> for JSON
-  // objects, so the typed check above always matches first; this guards a
-  // hypothetical differently-typed Map without crashing.
-  if (parsed is Map) {
-    return parsed.cast<String, dynamic>(); // coverage:ignore-line
-  }
-  return null;
+  return parsed is Map<String, dynamic> ? parsed : null;
 }
 
 Object _safeParseJson(String input) {

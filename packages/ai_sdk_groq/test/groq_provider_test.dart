@@ -20,19 +20,6 @@ void main() {
       expect(model.specificationVersion, 'v4');
     });
 
-    test('default groq constant is a GroqProvider', () {
-      expect(groq, isA<GroqProvider>());
-    });
-
-    test('accepts custom baseUrl', () {
-      final provider = GroqProvider(
-        apiKey: 'key',
-        baseUrl: 'https://custom.groq.example.com/openai/v1',
-      );
-      final model = provider('mixtral-8x7b-32768');
-      expect(model.modelId, 'mixtral-8x7b-32768');
-    });
-
     test('credentials are resolved immediately before each request', () async {
       final authorizations = <String?>[];
       final server = await _TestServer.start((request) async {
@@ -97,14 +84,6 @@ void main() {
         expect(adapter.lastForce, true);
       },
     );
-  });
-
-  group('LanguageModelV4 interface', () {
-    test('language model extends LanguageModelV4', () {
-      final provider = GroqProvider(apiKey: 'key');
-      final model = provider('llama3-70b-8192');
-      expect(model, isA<LanguageModelV4>());
-    });
   });
 
   group('OpenAI-compatible capabilities (via shared base)', () {

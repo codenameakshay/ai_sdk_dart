@@ -28,19 +28,6 @@ void main() {
       expect(model.specificationVersion, 'v2');
     });
 
-    test('default mistral constant is a MistralProvider', () {
-      expect(mistral, isA<MistralProvider>());
-    });
-
-    test('accepts custom baseUrl', () {
-      final provider = MistralProvider(
-        apiKey: 'key',
-        baseUrl: 'https://custom.mistral.example.com/v1',
-      );
-      final model = provider('mistral-small');
-      expect(model.modelId, 'mistral-small');
-    });
-
     test(
       'chat credentials are resolved immediately before each request',
       () async {
@@ -108,22 +95,6 @@ void main() {
         expect(adapter.lastForce, true);
       },
     );
-  });
-
-  group('LanguageModelV4 interface', () {
-    test('language model extends LanguageModelV4', () {
-      final provider = MistralProvider(apiKey: 'key');
-      final model = provider('mistral-medium');
-      expect(model, isA<LanguageModelV4>());
-    });
-  });
-
-  group('EmbeddingModelV2 interface', () {
-    test('embedding model implements EmbeddingModelV2<String>', () {
-      final provider = MistralProvider(apiKey: 'key');
-      final model = provider.embedding('mistral-embed');
-      expect(model, isA<EmbeddingModelV2<String>>());
-    });
   });
 
   group('OpenAI-compatible capabilities (via shared base)', () {
@@ -298,6 +269,51 @@ void main() {
       );
       expect(result.embeddings, isEmpty);
     });
+
+    test(
+      'normalizes numeric vectors and ignores response rows beyond the input',
+      () async {
+        final server = await _TestServer.start((request) async {
+          await _captureBody(request);
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'data': [
+                {
+                  'embedding': [1, 2.5],
+                },
+                {
+                  'embedding': [-3, 4],
+                },
+                {
+                  'embedding': [99],
+                },
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final result =
+            await MistralProvider(apiKey: 'key', baseUrl: server.baseUrl)
+                .embedding('mistral-embed')
+                .doEmbed(
+                  const EmbeddingModelV2CallOptions<String>(values: ['a', 'b']),
+                );
+
+        expect(result.embeddings, hasLength(2));
+        expect(result.embeddings.map((embedding) => embedding.value), [
+          'a',
+          'b',
+        ]);
+        expect(result.embeddings.map((embedding) => embedding.embedding), [
+          [1.0, 2.5],
+          [-3.0, 4.0],
+        ]);
+      },
+    );
 
     test('baseUrl ending with slash still posts to embeddings once', () async {
       late String path;

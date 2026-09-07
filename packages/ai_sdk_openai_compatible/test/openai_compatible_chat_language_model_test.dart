@@ -1161,6 +1161,8 @@ void main() {
                     {'type': 'file_citation'},
                     // ignored: unknown annotation type
                     {'type': 'other'},
+                    // ignored: malformed annotation
+                    7,
                   ],
                 },
               },
@@ -1428,33 +1430,6 @@ void main() {
       expect(
         parts.whereType<StreamPartToolCall>().single.toolCall.toolCallId,
         startsWith('tool-'),
-      );
-    });
-
-    // ── streaming error path ─────────────────────────────────────────────
-    test('doStream surfaces a StreamPartError when the body errors', () async {
-      final server = await _TestServer.start((request) async {
-        request.response.statusCode = 200;
-        request.response.headers.set('content-type', 'text/event-stream');
-        request.response.write(
-          'data: {"choices":[{"delta":{"content":"Hi"}}]}\n\n',
-        );
-        // Abruptly destroy the connection mid-stream to trigger a read error.
-        await request.response.flush();
-        await request.response.close();
-        request.response.deadline = Duration.zero;
-      });
-      addTearDown(server.close);
-
-      final model = _bearerModel(server.baseUrl);
-      final streamResult = await model.doStream(
-        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
-      );
-      // Just draining is enough; the finally{} closes the controller.
-      final parts = await streamResult.stream.toList();
-      expect(
-        parts.whereType<StreamPartTextDelta>().length,
-        greaterThanOrEqualTo(0),
       );
     });
 

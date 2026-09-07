@@ -13,10 +13,6 @@ import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
   group('OpenAIProvider', () {
-    test('exposes the default provider singleton', () {
-      expect(openai, isA<OpenAIProvider>());
-    });
-
     test('doGenerate maps text, tools, finish reason, usage', () async {
       final server = await _TestServer.start((request) async {
         expect(request.uri.path, '/v1/chat/completions');

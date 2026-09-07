@@ -47,7 +47,7 @@ class AzureOpenAIProvider {
   final bool _ownsClient;
 
   Future<Map<String, String>> _headers() async {
-    final key = await Future.value(_credentialProvider());
+    final key = await _credentialProvider();
     return {if (key != null && key.isNotEmpty) 'api-key': key};
   }
 
@@ -138,7 +138,7 @@ class _AzureEmbeddingModel implements EmbeddingModelV2<String> {
   Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
     EmbeddingModelV2CallOptions<String> options,
   ) async {
-    final resolvedHeaders = await Future.value(headers());
+    final resolvedHeaders = await headers();
     final body = <String, dynamic>{
       'input': options.values,
       'model': deploymentId,
@@ -160,11 +160,15 @@ class _AzureEmbeddingModel implements EmbeddingModelV2<String> {
     }
     final data = response.data!;
     final dataList = (data['data'] as List?) ?? [];
-    final embeddings = dataList.asMap().entries.map((entry) {
-      final item = entry.value as Map<String, dynamic>;
-      final vector = (item['embedding'] as List).cast<double>();
+    final embeddings = dataList.take(options.values.length).indexed.map((
+      entry,
+    ) {
+      final item = entry.$2 as Map<String, dynamic>;
+      final vector = (item['embedding'] as List)
+          .map((value) => (value as num).toDouble())
+          .toList();
       return EmbeddingModelV2Embedding<String>(
-        value: options.values[entry.key],
+        value: options.values[entry.$1],
         embedding: vector,
       );
     }).toList();

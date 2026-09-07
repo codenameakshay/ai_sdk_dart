@@ -474,10 +474,14 @@ class _OllamaEmbeddingModel implements EmbeddingModelV2<String> {
     }
     final data = response.data!;
     final embeddingsList = (data['embeddings'] as List?) ?? [];
-    final embeddings = embeddingsList.asMap().entries.map((entry) {
-      final vector = (entry.value as List).cast<double>();
+    final embeddings = embeddingsList.take(options.values.length).indexed.map((
+      entry,
+    ) {
+      final vector = (entry.$2 as List)
+          .map((value) => (value as num).toDouble())
+          .toList();
       return EmbeddingModelV2Embedding<String>(
-        value: options.values[entry.key],
+        value: options.values[entry.$1],
         embedding: vector,
       );
     }).toList();

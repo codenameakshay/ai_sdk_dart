@@ -46,7 +46,7 @@ class CohereProvider {
   final bool _ownsClient;
 
   Future<Map<String, String>> _headers() async {
-    final key = await Future.value(_credentialProvider());
+    final key = await _credentialProvider();
     return {if (key != null && key.isNotEmpty) 'Authorization': 'Bearer $key'};
   }
 
@@ -293,7 +293,7 @@ class _CohereLanguageModel extends LanguageModelV4 {
   Future<LanguageModelV4GenerateResult> doGenerate(
     LanguageModelV4CallOptions options,
   ) async {
-    final resolvedHeaders = await Future.value(headers());
+    final resolvedHeaders = await headers();
     final body = _buildBody(options);
     final cancelToken = _cancelTokenFor(options.abortSignal);
 
@@ -360,7 +360,7 @@ class _CohereLanguageModel extends LanguageModelV4 {
   Future<LanguageModelV4StreamResult> doStream(
     LanguageModelV4CallOptions options,
   ) async {
-    final resolvedHeaders = await Future.value(headers());
+    final resolvedHeaders = await headers();
     final body = _buildBody(options)..['stream'] = true;
     final cancelToken = _cancelTokenFor(options.abortSignal);
 
@@ -623,7 +623,7 @@ class _CohereEmbeddingModel implements EmbeddingModelV2<String> {
   Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
     EmbeddingModelV2CallOptions<String> options,
   ) async {
-    final resolvedHeaders = await Future.value(headers());
+    final resolvedHeaders = await headers();
 
     final body = <String, dynamic>{
       'model': modelId,
@@ -645,10 +645,12 @@ class _CohereEmbeddingModel implements EmbeddingModelV2<String> {
     final data = response.data!;
     final embeddingsData = data['embeddings'] as Map<String, dynamic>?;
     final floats = (embeddingsData?['float'] as List?) ?? [];
-    final embeddings = floats.asMap().entries.map((entry) {
-      final vector = (entry.value as List).cast<double>();
+    final embeddings = floats.take(options.values.length).indexed.map((entry) {
+      final vector = (entry.$2 as List)
+          .map((value) => (value as num).toDouble())
+          .toList();
       return EmbeddingModelV2Embedding<String>(
-        value: options.values[entry.key],
+        value: options.values[entry.$1],
         embedding: vector,
       );
     }).toList();
@@ -681,7 +683,7 @@ class _CohereRerankModel implements RerankModelV1 {
 
   @override
   Future<RerankModelV1Result> doRerank(RerankModelV1CallOptions options) async {
-    final resolvedHeaders = await Future.value(headers());
+    final resolvedHeaders = await headers();
 
     final body = <String, dynamic>{
       'model': modelId,

@@ -38,7 +38,7 @@ class OpenAIProvider {
   final bool _ownsClient;
 
   Future<Map<String, String>> _headers() async {
-    final key = await Future.value(_credentialProvider());
+    final key = await _credentialProvider();
     return {if (key != null && key.isNotEmpty) 'Authorization': 'Bearer $key'};
   }
 
@@ -139,7 +139,7 @@ class _OpenAIEmbeddingModel implements EmbeddingModelV2<String> {
   Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
     EmbeddingModelV2CallOptions<String> options,
   ) async {
-    final resolvedHeaders = await Future.value(headers());
+    final resolvedHeaders = await headers();
     final providerOptions = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
@@ -205,7 +205,7 @@ class _OpenAIImageModel implements ImageModelV3 {
   Future<ImageModelV3GenerateResult> doGenerate(
     ImageModelV3CallOptions options,
   ) async {
-    final resolvedHeaders = await Future.value(headers());
+    final resolvedHeaders = await headers();
     final providerOptions = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
@@ -296,7 +296,7 @@ class _OpenAISpeechModel implements SpeechModelV1 {
   Future<SpeechModelV1GenerateResult> doGenerate(
     SpeechModelV1CallOptions options,
   ) async {
-    final resolvedHeaders = await Future.value(headers());
+    final resolvedHeaders = await headers();
     final providerOptions = options.providerOptions?['openai'];
     final requestBody = {
       'model': modelId,
@@ -350,7 +350,7 @@ class _OpenAITranscriptionModel implements TranscriptionModelV1 {
   Future<TranscriptionModelV1GenerateResult> doGenerate(
     TranscriptionModelV1CallOptions options,
   ) async {
-    final resolvedHeaders = await Future.value(headers());
+    final resolvedHeaders = await headers();
     final formData = FormData.fromMap({
       'model': modelId,
       'file': MultipartFile.fromBytes(

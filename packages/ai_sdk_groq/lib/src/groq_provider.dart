@@ -38,7 +38,7 @@ class GroqProvider {
   final bool _ownsClient;
 
   Future<Map<String, String>> _headers() async {
-    final key = await Future.value(_credentialProvider());
+    final key = await _credentialProvider();
     return {if (key != null && key.isNotEmpty) 'Authorization': 'Bearer $key'};
   }
 

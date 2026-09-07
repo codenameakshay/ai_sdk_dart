@@ -3,7 +3,6 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
 
 import 'helpers/fake_models.dart';
-import 'helpers/matchers.dart';
 
 void main() {
   group('tools conformance', () {
@@ -199,7 +198,7 @@ void main() {
             prompt: 'hi',
             toolChoice: const ToolChoiceRequired(),
           ),
-          throwsAiError<AiNoSuchToolError>(),
+          throwsA(isA<AiNoSuchToolError>()),
         );
       });
 
@@ -250,7 +249,7 @@ void main() {
               ),
             },
           ),
-          throwsAiError<AiNoSuchToolError>(),
+          throwsA(isA<AiNoSuchToolError>()),
         );
       });
     });
@@ -274,7 +273,7 @@ void main() {
               ),
             },
           ),
-          throwsAiError<AiNoSuchToolError>(),
+          throwsA(isA<AiNoSuchToolError>()),
         );
       });
     });

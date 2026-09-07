@@ -84,7 +84,7 @@ Map<String, dynamic> _toSnapshot(StreamTextEvent event) {
       'stepNumber': step.stepNumber,
     },
     StreamTextFinishEvent() => {'type': 'finish'},
-    _ => {'type': 'ignored'},
+    _ => throw StateError('Unhandled stream event: ${event.runtimeType}'),
   };
 }
 

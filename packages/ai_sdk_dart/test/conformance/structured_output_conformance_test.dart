@@ -3,7 +3,6 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
 
 import 'helpers/fake_models.dart';
-import 'helpers/matchers.dart';
 
 void main() {
   group('structured output conformance', () {
@@ -73,7 +72,7 @@ void main() {
               ),
             ),
           ),
-          throwsAiError<AiNoObjectGeneratedError>(),
+          throwsA(isA<AiNoObjectGeneratedError>()),
         );
       });
 
@@ -142,7 +141,7 @@ void main() {
                 ),
               ),
             ),
-            throwsAiError<AiNoObjectGeneratedError>(),
+            throwsA(isA<AiNoObjectGeneratedError>()),
           );
         },
       );
@@ -169,7 +168,7 @@ void main() {
             prompt: 'weather?',
             output: Output.choice(options: const ['sunny', 'rainy']),
           ),
-          throwsAiError<AiNoObjectGeneratedError>(),
+          throwsA(isA<AiNoObjectGeneratedError>()),
         );
       });
 
@@ -218,7 +217,7 @@ void main() {
             prompt: 'json?',
             output: Output.json(),
           ),
-          throwsAiError<AiNoObjectGeneratedError>(),
+          throwsA(isA<AiNoObjectGeneratedError>()),
         );
       });
     });

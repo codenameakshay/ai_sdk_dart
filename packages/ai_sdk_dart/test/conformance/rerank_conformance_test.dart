@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
@@ -139,7 +141,7 @@ void main() {
           documents: const ['a'],
           timeout: const Duration(milliseconds: 10),
         ),
-        throwsA(isA<Object>()),
+        throwsA(isA<TimeoutException>()),
       );
     });
 

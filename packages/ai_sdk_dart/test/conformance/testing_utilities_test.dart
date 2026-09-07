@@ -77,19 +77,16 @@ void main() {
 
       test('mockText helper creates LanguageModelV4TextPart', () {
         final part = mockText('hello');
-        expect(part, isA<LanguageModelV4TextPart>());
         expect(part.text, 'hello');
       });
 
       test('mockReasoning helper creates LanguageModelV4ReasoningPart', () {
         final part = mockReasoning('think');
-        expect(part, isA<LanguageModelV4ReasoningPart>());
         expect(part.text, 'think');
       });
 
       test('mockToolCall helper creates LanguageModelV4ToolCallPart', () {
         final part = mockToolCall(toolName: 'search', input: {'q': 'test'});
-        expect(part, isA<LanguageModelV4ToolCallPart>());
         expect(part.toolName, 'search');
         expect(part.input, {'q': 'test'});
       });
@@ -318,7 +315,10 @@ void main() {
         // _ConcreteImageMiddleware is a no-op concrete subclass
         final mw = _ConcreteImageMiddleware();
         final wrapped = wrapImageModel(model: inner, middleware: mw);
-        expect(wrapped, isA<ImageModelV3>());
+        final result = await wrapped.doGenerate(
+          const ImageModelV3CallOptions(prompt: 'cat'),
+        );
+        expect(result.images.single.bytes, [1]);
       });
 
       test('throws ArgumentError for invalid middleware type', () {

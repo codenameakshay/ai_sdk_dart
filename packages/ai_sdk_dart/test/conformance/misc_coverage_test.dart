@@ -9,8 +9,8 @@ import 'helpers/fake_models.dart';
 
 /// Sweeps up the remaining one-off uncovered lines across the smaller core
 /// helpers: parallel embedMany usage aggregation, base64 image decoding,
-/// transcribe/speech timeout branches, dynamicTool input parsing, the tool
-/// role in convertToModelMessages, and the model-message content classes.
+/// dynamicTool input parsing, the tool role in convertToModelMessages, and
+/// the model-message content classes.
 void main() {
   group('embedMany usage aggregation across parallel chunks', () {
     test('sums token usage from multiple parallel calls', () async {
@@ -56,43 +56,6 @@ void main() {
       final encoded = base64Encode(original);
       final decoded = decodeBase64Image(encoded);
       expect(decoded, original);
-    });
-  });
-
-  group('transcribe / generateSpeech timeouts', () {
-    test('transcribe completes within a generous timeout', () async {
-      final model = FakeTranscriptionModel('hello world');
-      final result = await transcribe(
-        model: model,
-        audio: Uint8List.fromList([0, 1, 2]),
-        audioMediaType: 'audio/wav',
-        timeout: const Duration(seconds: 5),
-      );
-      expect(result.text, 'hello world');
-    });
-
-    test('generateSpeech completes within a generous timeout', () async {
-      final audio = Uint8List.fromList([9, 8, 7]);
-      final model = FakeSpeechModel(audio: audio, mediaType: 'audio/mpeg');
-      final result = await generateSpeech(
-        model: model,
-        text: 'hi',
-        timeout: const Duration(seconds: 5),
-      );
-      expect(result.audio, audio);
-      expect(result.mediaType, 'audio/mpeg');
-    });
-  });
-
-  group('generateImage timeout path', () {
-    test('completes within a generous timeout', () async {
-      final model = _OneImageModel();
-      final result = await generateImage(
-        model: model,
-        prompt: 'a cat',
-        timeout: const Duration(seconds: 5),
-      );
-      expect(result.images, hasLength(1));
     });
   });
 
@@ -278,27 +241,4 @@ class _UsageEmbeddingModel implements EmbeddingModelV2<String> {
 class _Unencodable {
   @override
   String toString() => 'Unencodable()';
-}
-
-class _OneImageModel implements ImageModelV3 {
-  @override
-  String get provider => 'fake';
-  @override
-  String get modelId => 'one-image';
-  @override
-  String get specificationVersion => 'v3';
-
-  @override
-  Future<ImageModelV3GenerateResult> doGenerate(
-    ImageModelV3CallOptions options,
-  ) async {
-    return ImageModelV3GenerateResult(
-      images: [
-        GeneratedImage(
-          bytes: Uint8List.fromList([1, 2, 3]),
-          mediaType: 'image/png',
-        ),
-      ],
-    );
-  }
 }

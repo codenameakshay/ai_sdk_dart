@@ -155,8 +155,7 @@ for the exact renames and contract changes.
 
 ### 🧪 Conformance Suite
 - Comprehensive Dart and Flutter tests across every package and both example apps
-- A repository-wide **99% line-coverage gate** enforced in CI
-- Spec-driven JSON fixtures as the source of truth
+- A **99% line-coverage gate** for published package libraries enforced in CI
 - Provider wire-format conformance tests for every provider (plus a typed-error conformance test per provider)
 - `MockEmbeddingModelV3` testing utility for embedding model conformance
 
@@ -489,7 +488,7 @@ a conditional import — so the client also runs on Flutter web.
 - ✅ Typed provider API errors (`AiApiCallError` with status / type / code / body) across all providers
 - ✅ OpenAI (with reasoning options), Anthropic (with thinking options), Google providers
 - ✅ Cohere, Mistral, Groq, Ollama, Azure OpenAI providers — all with tools + multimodal
-- ✅ Comprehensive tests with a repository-wide 99% line-coverage gate
+- ✅ Comprehensive tests with a 99% line-coverage gate for published package libraries
 
 ### 🔜 Planned
 
@@ -511,7 +510,7 @@ Contributions are welcome! Please open an issue first to discuss changes before 
 ### Running tests
 
 ```sh
-fvm dart pub get
+fvm flutter pub get
 make test
 make analyze
 ```
@@ -578,10 +577,10 @@ fvm flutter run -C examples/advanced_app \
 
 ## Development
 
-Managed with [Melos](https://melos.invertase.dev) as a monorepo workspace:
+Managed with the Dart pub workspace and the repository Makefile:
 
 ```sh
-fvm dart pub get
+fvm flutter pub get
 make analyze
 make test
 ```

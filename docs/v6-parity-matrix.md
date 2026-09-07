@@ -100,13 +100,13 @@ Legend:
 - [x] initialize handshake (MCP protocol 2024-11-05)
 - [x] real Server-Sent-Events streaming transport (`SseClientTransport`) + server-pushed notifications
 - [x] web-safe (`dart:io` isolated behind conditional imports; stdio is native-only)
-- [~] streaming tool outputs / reconnection (no live tool-output streaming or auto-reconnect yet)
+- [~] streaming tool outputs (transport reconnect and server-pushed notifications are implemented; live tool-output streaming remains pending)
 
 ## Multimodal Model APIs
 
 - [x] `experimental_generateSpeech` (interface + OpenAI provider)
 - [x] `experimental_transcribe` (interface + OpenAI provider)
-- [ ] `experimental_generateVideo` — intentionally not ported (no backing provider; removed in 1.2.0, see `docs/adr/`)
+- [ ] `experimental_generateVideo` — intentionally omitted (no backing provider; see `docs/adr/0003-feature-fates.md`)
 - [x] `rerank` (interface + core + Cohere provider)
 
 ## Middleware System

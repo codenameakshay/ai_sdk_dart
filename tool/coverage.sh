@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# Runs tests with coverage across every package, merges the per-package LCOV
+# Runs tests with coverage across every published package, merges the per-package LCOV
 # into coverage/lcov.info, prints a per-package + total line-coverage summary,
 # and (optionally) enforces a minimum total threshold.
 #
 # Usage:
 #   tool/coverage.sh            # measure + print summary (no gate)
-#   tool/coverage.sh 100        # also fail if total line coverage < 100%
+#   tool/coverage.sh 99         # also fail if total line coverage < 99%
 #
 # `// coverage:ignore-line` / `ignore-start` / `ignore-end` comments are
 # honored via format_coverage --check-ignore. Set DART/FLUTTER to override the

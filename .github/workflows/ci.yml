@@ -36,9 +36,6 @@ jobs:
       - name: Test
         run: make test DART=dart FLUTTER=flutter
 
-      - name: Activate coverage tool
-        run: dart pub global activate coverage
-
       # Ratchet gate: prevents coverage regressions across the published packages.
       - name: Test with coverage (gate)
         run: make coverage-check DART=dart FLUTTER=flutter

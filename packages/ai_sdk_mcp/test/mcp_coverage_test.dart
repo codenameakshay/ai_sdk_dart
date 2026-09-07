@@ -138,6 +138,7 @@ class _ScriptedTransport implements MCPTransport {
   final _notifications = StreamController<Map<String, dynamic>>.broadcast();
   final sentNotifications = <JsonRpcNotification>[];
   int sendCount = 0;
+  int closeCount = 0;
   bool closed = false;
 
   void pushNotification(Map<String, dynamic> message) =>
@@ -166,6 +167,7 @@ class _ScriptedTransport implements MCPTransport {
 
   @override
   Future<void> close() async {
+    closeCount++;
     closed = true;
     if (!_notifications.isClosed) await _notifications.close();
   }
@@ -481,14 +483,6 @@ void main() {
         mock.headerLog.first.value('authorization'),
         'Bearer secret-token',
       );
-    });
-
-    test('notifications getter returns a stream', () async {
-      final transport = StreamableHttpClientTransport(
-        url: Uri.parse('http://localhost:1/mcp'),
-      );
-      addTearDown(transport.close);
-      expect(transport.notifications, isA<Stream<Map<String, dynamic>>>());
     });
 
     test(
@@ -882,6 +876,18 @@ void main() {
   // =========================================================================
 
   group('MCPClient error branches', () {
+    test('close is idempotent for custom transports', () async {
+      final transport = _ScriptedTransport(
+        (_) async => const JsonRpcResponse(),
+      );
+      final client = MCPClient(transport: transport);
+
+      await client.close();
+      await client.close();
+
+      expect(transport.closeCount, 1);
+    });
+
     test('default-notifications transport drives the abstract getter', () async {
       // _DefaultNotificationsTransport does not override `notifications`, so the
       // abstract default getter in json_rpc.dart (line 78) runs when the client

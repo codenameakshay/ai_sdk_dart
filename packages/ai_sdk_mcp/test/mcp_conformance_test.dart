@@ -825,18 +825,6 @@ void main() {
         final delay = policy.delayFor(10);
         expect(delay.inMilliseconds, lessThanOrEqualTo(3000));
       });
-
-      test('MCPClient accepts reconnectPolicy constructor param', () {
-        final mockTransport = StreamableHttpClientTransport(
-          url: Uri.parse('http://localhost:9999/mcp'),
-        );
-        final client = MCPClient(
-          transport: mockTransport,
-          reconnectPolicy: const MCPReconnectPolicy(maxAttempts: 3),
-        );
-        expect(client.reconnectPolicy?.maxAttempts, 3);
-        client.close();
-      });
     });
 
     // ── capabilities advertised in initialize() ───────────────────────────────

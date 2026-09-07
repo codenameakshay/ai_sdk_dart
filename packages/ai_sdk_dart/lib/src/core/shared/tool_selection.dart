@@ -36,40 +36,34 @@ ResolvedToolSelection resolveToolSelection({
   required LanguageModelV4ToolChoice? toolChoice,
 }) {
   final choice = toolChoice;
-  if (choice == null || choice is ToolChoiceAuto) {
-    return ResolvedToolSelection(exposedTools: tools, toolChoice: choice);
-  }
-  if (choice is ToolChoiceNone) {
-    return const ResolvedToolSelection(
-      exposedTools: {},
-      toolChoice: ToolChoiceNone(),
-    );
-  }
-  if (choice is ToolChoiceRequired) {
-    if (tools.isEmpty) {
-      throw const AiNoSuchToolError(
-        'toolChoice "required" cannot be used without tools.',
+  switch (choice) {
+    case null:
+    case ToolChoiceAuto():
+      return ResolvedToolSelection(exposedTools: tools, toolChoice: choice);
+    case ToolChoiceNone():
+      return const ResolvedToolSelection(
+        exposedTools: {},
+        toolChoice: ToolChoiceNone(),
       );
-    }
-    return ResolvedToolSelection(exposedTools: tools, toolChoice: choice);
-  }
-  if (choice is ToolChoiceSpecific) {
-    final tool = tools[choice.toolName];
-    if (tool == null) {
-      throw AiNoSuchToolError(
-        'toolChoice requested unknown tool "${choice.toolName}".',
+    case ToolChoiceRequired():
+      if (tools.isEmpty) {
+        throw const AiNoSuchToolError(
+          'toolChoice "required" cannot be used without tools.',
+        );
+      }
+      return ResolvedToolSelection(exposedTools: tools, toolChoice: choice);
+    case ToolChoiceSpecific(:final toolName):
+      final tool = tools[toolName];
+      if (tool == null) {
+        throw AiNoSuchToolError(
+          'toolChoice requested unknown tool "$toolName".',
+        );
+      }
+      return ResolvedToolSelection(
+        exposedTools: {toolName: tool},
+        toolChoice: choice,
       );
-    }
-    return ResolvedToolSelection(
-      exposedTools: {choice.toolName: tool},
-      toolChoice: choice,
-    );
   }
-  // Defensive: every ToolChoice subtype is handled above.
-  return ResolvedToolSelection(
-    exposedTools: tools,
-    toolChoice: choice,
-  ); // coverage:ignore-line
 }
 
 @internal

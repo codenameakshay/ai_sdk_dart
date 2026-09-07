@@ -93,8 +93,8 @@ class ToolInputExample {
 
 /// A typed schema wrapper for tool inputs/structured outputs.
 ///
-/// This is intentionally codegen-friendly: your input class can be generated
-/// with `json_serializable` and wired using its generated `fromJson`.
+/// Pass any decoder that maps the provider's JSON object to your application
+/// type; code generation is optional.
 class Schema<T> {
   const Schema({required this.jsonSchema, required this.fromJson});
 

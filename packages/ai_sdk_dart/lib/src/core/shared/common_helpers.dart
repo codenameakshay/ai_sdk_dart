@@ -60,58 +60,67 @@ String stringifyToolOutput(Object? output) {
 
 @internal
 LanguageModelV4Usage? sumUsage(Iterable<LanguageModelV4Usage?> usages) {
-  final inputTotals = <int>[];
-  final inputNoCache = <int>[];
-  final inputCacheRead = <int>[];
-  final inputCacheWrite = <int>[];
-  final outputTotals = <int>[];
-  final outputText = <int>[];
-  final outputReasoning = <int>[];
+  int? inputTotal;
+  int? inputNoCache;
+  int? inputCacheRead;
+  int? inputCacheWrite;
+  int? outputTotal;
+  int? outputText;
+  int? outputReasoning;
   var hasReportedUsage = false;
 
   for (final usage in usages) {
     if (usage == null) continue;
     final input = usage.inputTokens;
     final output = usage.outputTokens;
-    final values = [
-      input.total,
-      input.noCache,
-      input.cacheRead,
-      input.cacheWrite,
-      output.total,
-      output.text,
-      output.reasoning,
-    ];
-    if (usage.raw == null && values.every((value) => value == null)) continue;
+    if (usage.raw == null &&
+        input.total == null &&
+        input.noCache == null &&
+        input.cacheRead == null &&
+        input.cacheWrite == null &&
+        output.total == null &&
+        output.text == null &&
+        output.reasoning == null) {
+      continue;
+    }
 
     hasReportedUsage = true;
-    if (input.total case final value?) inputTotals.add(value);
-    if (input.noCache case final value?) inputNoCache.add(value);
-    if (input.cacheRead case final value?) inputCacheRead.add(value);
-    if (input.cacheWrite case final value?) inputCacheWrite.add(value);
-    if (output.total case final value?) outputTotals.add(value);
-    if (output.text case final value?) outputText.add(value);
-    if (output.reasoning case final value?) outputReasoning.add(value);
+    if (input.total case final value?) {
+      inputTotal = (inputTotal ?? 0) + value;
+    }
+    if (input.noCache case final value?) {
+      inputNoCache = (inputNoCache ?? 0) + value;
+    }
+    if (input.cacheRead case final value?) {
+      inputCacheRead = (inputCacheRead ?? 0) + value;
+    }
+    if (input.cacheWrite case final value?) {
+      inputCacheWrite = (inputCacheWrite ?? 0) + value;
+    }
+    if (output.total case final value?) {
+      outputTotal = (outputTotal ?? 0) + value;
+    }
+    if (output.text case final value?) {
+      outputText = (outputText ?? 0) + value;
+    }
+    if (output.reasoning case final value?) {
+      outputReasoning = (outputReasoning ?? 0) + value;
+    }
   }
 
   if (!hasReportedUsage) return null;
 
   return LanguageModelV4Usage(
     inputTokens: LanguageModelV4InputTokenUsage(
-      total: _sumReported(inputTotals),
-      noCache: _sumReported(inputNoCache),
-      cacheRead: _sumReported(inputCacheRead),
-      cacheWrite: _sumReported(inputCacheWrite),
+      total: inputTotal,
+      noCache: inputNoCache,
+      cacheRead: inputCacheRead,
+      cacheWrite: inputCacheWrite,
     ),
     outputTokens: LanguageModelV4OutputTokenUsage(
-      total: _sumReported(outputTotals),
-      text: _sumReported(outputText),
-      reasoning: _sumReported(outputReasoning),
+      total: outputTotal,
+      text: outputText,
+      reasoning: outputReasoning,
     ),
   );
-}
-
-int? _sumReported(List<int> values) {
-  if (values.isEmpty) return null;
-  return values.fold<int>(0, (sum, value) => sum + value);
 }

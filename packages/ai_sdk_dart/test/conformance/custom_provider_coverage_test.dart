@@ -7,8 +7,8 @@ import 'package:test/test.dart';
 import 'helpers/fake_models.dart';
 
 /// Covers the image/speech/transcription fallback paths of [customProvider]
-/// and the corresponding `_FunctionFallback` delegations not hit by the
-/// existing language/embedding tests.
+/// and the direct nullable factory delegations not hit by the existing
+/// language/embedding tests.
 void main() {
   group('customProvider fallback delegations', () {
     test('fallbackImageModel resolves unknown image ids', () {

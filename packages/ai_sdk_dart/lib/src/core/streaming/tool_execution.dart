@@ -259,7 +259,7 @@ Future<bool> _moveNextWithStreamingToolTimeout(
   Duration? timeout,
   Stopwatch? timeoutStopwatch,
 }) {
-  final moveNext = moveNextOrCancellation(iterator, abortSignal);
+  final moveNext = raceWithCancellation(iterator.moveNext(), abortSignal);
   final remaining = timeoutStopwatch == null
       ? timeout
       : _remainingStreamingToolTimeout(timeout, timeoutStopwatch);

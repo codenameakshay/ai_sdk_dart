@@ -52,5 +52,5 @@ Future<GenerateImageResult> generateImage({
 
 /// Decodes a base64-encoded image string to raw bytes.
 Uint8List decodeBase64Image(String base64) {
-  return Uint8List.fromList(const Base64Decoder().convert(base64));
+  return base64Decode(base64);
 }

@@ -218,27 +218,18 @@ class _FakeModel extends LanguageModelV4 {
   );
 }
 
-class _FakeStepModel extends LanguageModelV4 {
-  _FakeStepModel({required this.onStep});
+class _FakeStepModel extends _FakeModel {
+  _FakeStepModel({required this.onStep}) : super('');
   final LanguageModelV4GenerateResult Function(LanguageModelV4CallOptions)
   onStep;
 
   @override
-  String get provider => 'fake';
-  @override
   String get modelId => 'fake-step-model';
-  @override
-  String get specificationVersion => 'v4';
 
   @override
   Future<LanguageModelV4GenerateResult> doGenerate(
     LanguageModelV4CallOptions options,
   ) async => onStep(options);
-
-  @override
-  Future<LanguageModelV4StreamResult> doStream(
-    LanguageModelV4CallOptions options,
-  ) async => throw UnimplementedError();
 }
 
 class _FakeEmbeddingModel implements EmbeddingModelV2<String> {

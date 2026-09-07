@@ -141,25 +141,29 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   StackTrace? terminalStackTrace;
   StreamTextErrorEvent? terminalFullStreamErrorEvent;
 
-  observeFutureError(textCompleter.future);
-  observeFutureError(outputCompleter.future);
-  observeFutureError(contentCompleter.future);
-  observeFutureError(reasoningCompleter.future);
-  observeFutureError(reasoningTextCompleter.future);
-  observeFutureError(filesCompleter.future);
-  observeFutureError(sourcesCompleter.future);
-  observeFutureError(toolCallsCompleter.future);
-  observeFutureError(toolResultsCompleter.future);
-  observeFutureError(finishReasonCompleter.future);
-  observeFutureError(rawFinishReasonCompleter.future);
-  observeFutureError(usageCompleter.future);
-  observeFutureError(totalUsageCompleter.future);
-  observeFutureError(warningsCompleter.future);
-  observeFutureError(stepsCompleter.future);
-  observeFutureError(requestCompleter.future);
-  observeFutureError(responseCompleter.future);
-  observeFutureError(providerMetadataCompleter.future);
-  observeFutureError(finishCompleter.future);
+  for (final future in [
+    textCompleter.future,
+    outputCompleter.future,
+    contentCompleter.future,
+    reasoningCompleter.future,
+    reasoningTextCompleter.future,
+    filesCompleter.future,
+    sourcesCompleter.future,
+    toolCallsCompleter.future,
+    toolResultsCompleter.future,
+    finishReasonCompleter.future,
+    rawFinishReasonCompleter.future,
+    usageCompleter.future,
+    totalUsageCompleter.future,
+    warningsCompleter.future,
+    stepsCompleter.future,
+    requestCompleter.future,
+    responseCompleter.future,
+    providerMetadataCompleter.future,
+    finishCompleter.future,
+  ]) {
+    future.ignore();
+  }
 
   // Wire onAbort: fire when the caller cancels via abortSignal.
   if (abortSignal != null && onAbort != null) {
@@ -349,8 +353,8 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                   transformedStream,
                 );
                 try {
-                  while (await moveNextOrCancellation(
-                    transformedIterator,
+                  while (await raceWithCancellation(
+                    transformedIterator.moveNext(),
                     abortSignal,
                   )) {
                     final transformedDelta = transformedIterator.current;
@@ -870,8 +874,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
       await elementController.close();
     }
   });
-  observeFutureError(runFuture);
-  unawaited(runFuture);
+  runFuture.ignore();
 
   // End the telemetry span when the stream fully finishes.
   finishCompleter.future.then(
@@ -960,7 +963,7 @@ Future<bool> _moveNextWithStreamTimeout(
   Duration? totalTimeout,
   required Stopwatch overallStopwatch,
 }) {
-  final moveNext = moveNextOrCancellation(iterator, abortSignal);
+  final moveNext = raceWithCancellation(iterator.moveNext(), abortSignal);
   final effectiveTimeout = minTimeout(
     remainingTimeout(timeout: totalTimeout, elapsed: overallStopwatch.elapsed),
     timeout,

@@ -17,15 +17,7 @@ int emitTrackedArrayElements({
         partialValues.add(value);
         onElement(value);
         acceptedCount++;
-        // Defensive: jsonDecode always yields Map<String, dynamic> objects.
-        // coverage:ignore-start
-      } else if (item is Map) {
-        final value = output.element.fromJson(item.cast<String, dynamic>());
-        partialValues.add(value);
-        onElement(value);
-        acceptedCount++;
       }
-      // coverage:ignore-end
     } catch (_) {}
   }
   return acceptedCount;
@@ -60,11 +52,6 @@ TOutput parseStreamingOutput<TOutput>(Output<TOutput> output, String text) {
       for (final item in jsonValue) {
         if (item is Map<String, dynamic>) {
           list.add(element.fromJson(item));
-          // Defensive: jsonDecode always yields Map<String, dynamic> objects.
-          // coverage:ignore-start
-        } else if (item is Map) {
-          list.add(element.fromJson(item.cast<String, dynamic>()));
-          // coverage:ignore-end
         } else {
           throw AiInvalidToolInputError(
             'Array element is not a JSON object: $item',
@@ -120,12 +107,6 @@ Map<String, dynamic> extractStreamingJsonObject(String text) {
   if (parsed is Map<String, dynamic>) {
     return parsed;
   }
-  // Defensive: jsonDecode always yields Map<String, dynamic> for objects.
-  // coverage:ignore-start
-  if (parsed is Map) {
-    return parsed.cast<String, dynamic>();
-  }
-  // coverage:ignore-end
   throw AiInvalidToolInputError('Model did not return a JSON object: $text');
 }
 

@@ -954,7 +954,7 @@ Future<bool> _moveNextWithToolTimeout(
   Duration? timeout,
   Stopwatch? timeoutStopwatch,
 }) {
-  final moveNext = moveNextOrCancellation(iterator, abortSignal);
+  final moveNext = raceWithCancellation(iterator.moveNext(), abortSignal);
   final remaining = timeoutStopwatch == null
       ? timeout
       : _remainingToolTimeout(timeout, timeoutStopwatch);
@@ -988,11 +988,6 @@ TOutput _parseOutput<TOutput>(Output<TOutput> output, String text) {
       for (final item in jsonValue) {
         if (item is Map<String, dynamic>) {
           list.add(element.fromJson(item));
-          // Defensive: jsonDecode always yields Map<String, dynamic> objects.
-          // coverage:ignore-start
-        } else if (item is Map) {
-          list.add(element.fromJson(item.cast<String, dynamic>()));
-          // coverage:ignore-end
         } else {
           throw AiInvalidToolInputError(
             'Array element is not a JSON object: $item',
@@ -1043,12 +1038,6 @@ Map<String, dynamic> _extractJsonObject(String text) {
   if (parsed is Map<String, dynamic>) {
     return parsed;
   }
-  // Defensive: jsonDecode always yields Map<String, dynamic> for objects.
-  // coverage:ignore-start
-  if (parsed is Map) {
-    return parsed.cast<String, dynamic>();
-  }
-  // coverage:ignore-end
   throw AiInvalidToolInputError('Model did not return a JSON object: $text');
 }
 

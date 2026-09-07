@@ -111,16 +111,6 @@ class _NoOpSpan implements TelemetrySpan {
   void end({Object? error}) {}
 }
 
-class _NoOpRecorder implements TelemetryRecorder {
-  const _NoOpRecorder();
-
-  @override
-  TelemetrySpan startSpan(
-    String name, {
-    Map<String, TelemetryAttributeValue> attributes = const {},
-  }) => const _NoOpSpan();
-}
-
 // ---------------------------------------------------------------------------
 // Internal helpers used by generateText / streamText
 // ---------------------------------------------------------------------------
@@ -135,7 +125,8 @@ TelemetrySpan startTelemetrySpan(
 }) {
   if (settings == null || !settings.isEnabled) return const _NoOpSpan();
 
-  final recorder = settings.recorder ?? const _NoOpRecorder();
+  final recorder = settings.recorder;
+  if (recorder == null) return const _NoOpSpan();
   final allAttributes = {
     if (settings.functionId != null)
       'ai.telemetry.functionId': settings.functionId,

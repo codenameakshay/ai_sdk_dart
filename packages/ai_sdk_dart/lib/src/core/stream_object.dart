@@ -6,6 +6,7 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import '../messages/model_message.dart';
 import '../tools/tool.dart';
 import 'partial_json.dart';
+import 'shared/common_helpers.dart';
 
 /// A JSON Patch-style operation for incremental object updates.
 ///
@@ -77,17 +78,7 @@ Future<StreamObjectResult<T>> streamObject<T>({
         role: LanguageModelV4Role.user,
         content: [LanguageModelV4TextPart(text: prompt)],
       ),
-    ...?messages?.map(
-      (m) => LanguageModelV4Message(
-        role: switch (m.role) {
-          ModelMessageRole.system => LanguageModelV4Role.system,
-          ModelMessageRole.user => LanguageModelV4Role.user,
-          ModelMessageRole.assistant => LanguageModelV4Role.assistant,
-          ModelMessageRole.tool => LanguageModelV4Role.tool,
-        },
-        content: m.parts ?? [LanguageModelV4TextPart(text: m.content ?? '')],
-      ),
-    ),
+    ...?messages?.map(toLanguageModelMessage),
   ];
 
   final instruction = [
@@ -200,12 +191,6 @@ Map<String, dynamic>? _tryParseObjectJson(String text) {
   if (parsed is Map<String, dynamic>) {
     return parsed;
   }
-  // Defensive: jsonDecode always yields Map<String, dynamic> for objects.
-  // coverage:ignore-start
-  if (parsed is Map) {
-    return parsed.cast<String, dynamic>();
-  }
-  // coverage:ignore-end
   return null;
 }
 
@@ -285,7 +270,7 @@ void _diffJson(
     return;
   }
 
-  if (!_jsonValueEquals(previous, current)) {
+  if (previous != current) {
     out.add(
       StreamObjectPatchOperation(op: 'replace', path: path, value: current),
     );
@@ -294,28 +279,4 @@ void _diffJson(
 
 String _escapeJsonPointerToken(String token) {
   return token.replaceAll('~', '~0').replaceAll('/', '~1');
-}
-
-bool _jsonValueEquals(Object? left, Object? right) {
-  // Defensive: _diffJson recurses structurally into same-type containers and
-  // only calls this on type-mismatched or scalar pairs, so the Map/List
-  // equality branches below are never exercised from the diff path.
-  // coverage:ignore-start
-  if (left is Map && right is Map) {
-    if (left.length != right.length) return false;
-    for (final key in left.keys) {
-      if (!right.containsKey(key)) return false;
-      if (!_jsonValueEquals(left[key], right[key])) return false;
-    }
-    return true;
-  }
-  if (left is List && right is List) {
-    if (left.length != right.length) return false;
-    for (var i = 0; i < left.length; i++) {
-      if (!_jsonValueEquals(left[i], right[i])) return false;
-    }
-    return true;
-  }
-  // coverage:ignore-end
-  return left == right;
 }

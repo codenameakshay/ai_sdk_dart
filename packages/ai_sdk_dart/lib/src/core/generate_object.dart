@@ -4,6 +4,7 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
 import '../messages/model_message.dart';
 import '../tools/tool.dart';
+import 'shared/common_helpers.dart';
 
 /// Result returned by [generateObject].
 ///
@@ -55,17 +56,7 @@ Future<GenerateObjectResult<T>> generateObject<T>({
         role: LanguageModelV4Role.user,
         content: [LanguageModelV4TextPart(text: prompt)],
       ),
-    ...?messages?.map(
-      (m) => LanguageModelV4Message(
-        role: switch (m.role) {
-          ModelMessageRole.system => LanguageModelV4Role.system,
-          ModelMessageRole.user => LanguageModelV4Role.user,
-          ModelMessageRole.assistant => LanguageModelV4Role.assistant,
-          ModelMessageRole.tool => LanguageModelV4Role.tool,
-        },
-        content: m.parts ?? [LanguageModelV4TextPart(text: m.content ?? '')],
-      ),
-    ),
+    ...?messages?.map(toLanguageModelMessage),
   ];
 
   final instruction = [
@@ -134,12 +125,6 @@ Map<String, dynamic> _extractJsonObject(
   if (parsed is Map<String, dynamic>) {
     return parsed;
   }
-  // Defensive: jsonDecode always yields Map<String, dynamic> for objects.
-  // coverage:ignore-start
-  if (parsed is Map) {
-    return parsed.cast<String, dynamic>();
-  }
-  // coverage:ignore-end
 
   throw AiInvalidToolInputError('Model did not return a JSON object: $text');
 }

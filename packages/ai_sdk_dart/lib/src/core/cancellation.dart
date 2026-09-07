@@ -46,14 +46,3 @@ Future<T> raceWithCancellation<T>(
 
   return completer.future;
 }
-
-Future<bool> moveNextOrCancellation<T>(
-  StreamIterator<T> iterator,
-  CancellationToken? abortSignal,
-) {
-  return raceWithCancellation(iterator.moveNext(), abortSignal);
-}
-
-void observeFutureError<T>(Future<T> future) {
-  future.ignore();
-}

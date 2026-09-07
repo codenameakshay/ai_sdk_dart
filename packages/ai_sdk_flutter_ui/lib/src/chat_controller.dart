@@ -170,11 +170,10 @@ class ChatController extends ChangeNotifier {
     }
 
     _rootListenable.notifyInFrame();
-    if (status) _statusListenable.notifyInFrame();
     if (content) _contentListenable.notifyInFrame();
   }
 
-  void _cancelActiveRequestSync({bool commitPartial = false}) {
+  void _cancelActiveRequestSync() {
     _activeRequestId = null;
     _activeAbortSignal?.cancel();
     _activeAbortSignal = null;
@@ -182,14 +181,6 @@ class ChatController extends ChangeNotifier {
     _activeSubscription = null;
     unawaited(_errorSubscription?.cancel());
     _errorSubscription = null;
-    if (commitPartial && _streamBuffer.isNotEmpty) {
-      _messages.add(
-        ModelMessage(
-          role: ModelMessageRole.assistant,
-          content: _streamBuffer.toString(),
-        ),
-      );
-    }
     _streamBuffer.clear();
     _streamingReasoning = '';
   }

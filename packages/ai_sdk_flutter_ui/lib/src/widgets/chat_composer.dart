@@ -58,14 +58,26 @@ class ChatComposer extends StatefulWidget {
 }
 
 class _ChatComposerState extends State<ChatComposer> {
-  late final TextEditingController _controller =
-      widget.controller ?? TextEditingController();
+  late TextEditingController _controller;
   bool _ownsController = false;
 
   @override
   void initState() {
     super.initState();
-    _ownsController = widget.controller == null;
+    _setController(widget.controller);
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatComposer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller == widget.controller) return;
+    if (_ownsController) _controller.dispose();
+    _setController(widget.controller);
+  }
+
+  void _setController(TextEditingController? controller) {
+    _controller = controller ?? TextEditingController();
+    _ownsController = controller == null;
   }
 
   @override

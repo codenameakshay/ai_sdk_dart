@@ -111,7 +111,6 @@ class ObjectStreamController<T> extends ChangeNotifier {
     }
 
     _rootListenable.notifyInFrame();
-    if (status) _statusListenable.notifyInFrame();
     if (content) _contentListenable.notifyInFrame();
   }
 

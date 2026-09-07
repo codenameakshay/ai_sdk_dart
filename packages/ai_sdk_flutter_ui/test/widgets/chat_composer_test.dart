@@ -135,6 +135,35 @@ void main() {
       expect(attached, isTrue);
     });
 
+    testWidgets('tracks controller ownership through widget updates', (
+      tester,
+    ) async {
+      final external = TextEditingController(text: 'external');
+      addTearDown(external.dispose);
+
+      await tester.pumpWidget(_wrap(ChatComposer(onSend: (_) {})));
+      await tester.enterText(
+        find.byKey(const ValueKey('chat-composer-field')),
+        'internal',
+      );
+
+      await tester.pumpWidget(
+        _wrap(ChatComposer(controller: external, onSend: (_) {})),
+      );
+      expect(find.text('external'), findsOneWidget);
+
+      external.text = 'updated';
+      await tester.pump();
+      expect(find.text('updated'), findsOneWidget);
+
+      await tester.pumpWidget(_wrap(ChatComposer(onSend: (_) {})));
+      expect(find.text('updated'), findsNothing);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      external.text = 'still usable';
+      expect(external.text, 'still usable');
+    });
+
     testWidgets('send and stop controls expose accessible labels', (
       tester,
     ) async {

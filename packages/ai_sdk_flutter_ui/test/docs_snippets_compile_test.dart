@@ -213,7 +213,6 @@ void main() {
     );
 
     expect(find.byType(AiChatScaffold), findsOneWidget);
-    expect(compiledExamplePages, hasLength(3));
     expect(find.byType(StreamingTextView), findsOneWidget);
     expect(
       find.byWidgetPredicate(
@@ -221,6 +220,12 @@ void main() {
       ),
       findsOneWidget,
     );
+
+    for (final page in compiledExamplePages) {
+      await tester.pumpWidget(_wrap(page));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+    }
 
     chat.dispose();
     completion.dispose();

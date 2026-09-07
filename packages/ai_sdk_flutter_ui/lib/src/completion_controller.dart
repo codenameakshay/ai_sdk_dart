@@ -91,7 +91,6 @@ class CompletionController extends ChangeNotifier {
     }
 
     _rootListenable.notifyInFrame();
-    if (status) _statusListenable.notifyInFrame();
     if (content) _contentListenable.notifyInFrame();
   }
 

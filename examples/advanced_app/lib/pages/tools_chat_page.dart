@@ -367,8 +367,8 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
             onDeny: (_) => _onFixtureAction('Denied fixture action'),
           ),
         ],
-        composer: const ChatComposer(
-          onSend: _noopSend,
+        composer: ChatComposer(
+          onSend: (_) {},
           enabled: false,
           hintText: 'Approval pending…',
         ),
@@ -646,8 +646,6 @@ class _EmptyState extends StatelessWidget {
     );
   }
 }
-
-void _noopSend(String _) {}
 
 sealed class _FixtureItem {
   const _FixtureItem();

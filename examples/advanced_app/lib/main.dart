@@ -114,7 +114,7 @@ class _ShellState extends State<_Shell> with RestorationMixin {
   @override
   void initState() {
     super.initState();
-    _selectedIndex = RestorableInt(_indexForPage(widget.initialPage));
+    _selectedIndex = RestorableInt(_navItemsIndex(widget.initialPage));
     _initialToolsFixture = widget.initialPage == AdvancedExamplePage.toolsChat
         ? widget.initialToolsFixture
         : null;
@@ -201,8 +201,6 @@ class _NavItem {
   final String label;
   final IconData icon;
 }
-
-int _indexForPage(AdvancedExamplePage page) => _navItemsIndex(page);
 
 int _navItemsIndex(AdvancedExamplePage page) =>
     _ShellState._navItems.indexWhere((item) => item.page == page);

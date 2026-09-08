@@ -45,7 +45,7 @@ void main() {
 
   group('structured output helpers', () {
     test('choice output accepts plain trimmed text', () {
-      final output = parseStreamingOutput<String>(
+      final output = parseOutput<String>(
         Output.choice(options: const ['sunny', 'rainy']),
         '  sunny  ',
       );
@@ -54,7 +54,7 @@ void main() {
 
     test('choice output rejects invalid plain text', () {
       expect(
-        () => parseStreamingOutput<String>(
+        () => parseOutput<String>(
           Output.choice(options: const ['sunny', 'rainy']),
           'cloudy',
         ),
@@ -63,7 +63,7 @@ void main() {
     });
 
     test('object output accepts a typed decoded map', () {
-      final output = parseStreamingOutput<Map<String, dynamic>>(
+      final output = parseOutput<Map<String, dynamic>>(
         Output.object(schema: objectSchema()),
         '{"ok":true}',
       );

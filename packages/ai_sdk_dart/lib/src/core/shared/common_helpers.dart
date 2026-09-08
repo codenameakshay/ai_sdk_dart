@@ -28,7 +28,7 @@ void safeInvoke(void Function() action) {
 }
 
 @internal
-dynamic parseToolInput({
+Object? parseToolInput({
   required Tool<dynamic, dynamic> tool,
   required Object rawInput,
 }) {

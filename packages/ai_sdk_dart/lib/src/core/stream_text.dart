@@ -220,16 +220,14 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
         throwIfCancelled(abortSignal);
         fullController.add(StreamTextStartStepEvent(stepNumber: stepNumber));
 
-        final prepareResult = await Future.value(
-          prepareStep?.call(
-            GenerateTextPrepareStepContext(
-              model: model,
-              stepNumber: stepNumber,
-              steps: List.unmodifiable(steps),
-              messages: List.unmodifiable(normalizedMessages),
-              stopConditions: allStopConditions,
-              runtimeContext: runtimeContext,
-            ),
+        final prepareResult = await prepareStep?.call(
+          GenerateTextPrepareStepContext(
+            model: model,
+            stepNumber: stepNumber,
+            steps: List.unmodifiable(steps),
+            messages: List.unmodifiable(normalizedMessages),
+            stopConditions: allStopConditions,
+            runtimeContext: runtimeContext,
           ),
         );
 
@@ -408,7 +406,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                       final fullText = overallTextBuffer.toString();
 
                       if (cadence.shouldAttemptValue) {
-                        final partial = tryParseStreamingPartialOutput(
+                        final partial = tryParsePartialOutput(
                           outputSpec,
                           fullText,
                         );
@@ -574,7 +572,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
         if (stepToolCalls.isNotEmpty) {
           for (final call in stepToolCalls) {
             throwIfCancelled(abortSignal);
-            final execution = await executeStreamingToolCall(
+            final execution = await executeToolCall(
               tools: toolSelection.exposedTools,
               call: call,
               messages: normalizedMessages,
@@ -713,7 +711,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
           .whereType<LanguageModelV4TextPart>()
           .map((part) => part.text)
           .join();
-      final finalOutput = parseStreamingOutputWithNoObjectError(
+      final finalOutput = parseOutputWithNoObjectError(
         output: outputSpec,
         text: finalText,
         usage: lastFinishPart?.usage,
@@ -876,28 +874,24 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   });
   runFuture.ignore();
 
-  // End the telemetry span when the stream fully finishes.
+  // End the telemetry span when the stream fully finishes or fails. Both
+  // completers are settled together, so once finish succeeds totalUsage has
+  // succeeded as well.
   finishCompleter.future.then(
-    (_) {
-      totalUsageCompleter.future.then((usage) {
-        telemetrySpan
-          ..setAttribute('ai.usage.promptTokens', usage?.inputTokens.total ?? 0)
-          ..setAttribute(
-            'ai.usage.completionTokens',
-            usage?.outputTokens.total ?? 0,
-          )
-          ..end();
-        // Defensive: totalUsageCompleter never completes with an error.
-      }, onError: (_) => telemetrySpan.end()); // coverage:ignore-line
-    },
-    // Defensive: finishCompleter never completes with an error.
-    // coverage:ignore-start
+    (_) => totalUsageCompleter.future.then((usage) {
+      telemetrySpan
+        ..setAttribute('ai.usage.promptTokens', usage?.inputTokens.total ?? 0)
+        ..setAttribute(
+          'ai.usage.completionTokens',
+          usage?.outputTokens.total ?? 0,
+        )
+        ..end();
+    }),
     onError: (Object e, StackTrace st) {
       telemetrySpan
         ..recordException(e, stackTrace: st)
         ..end(error: e);
     },
-    // coverage:ignore-end
   );
 
   return StreamTextResult<TOutput>(

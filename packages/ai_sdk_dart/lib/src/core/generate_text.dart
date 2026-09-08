@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
@@ -13,6 +12,8 @@ import 'retry_helper.dart';
 import 'shared/common_helpers.dart';
 import 'shared/output_instruction.dart';
 import 'shared/tool_selection.dart';
+import 'streaming/structured_output.dart';
+import 'streaming/tool_execution.dart';
 import 'timeout_configuration.dart';
 import 'timeout_helpers.dart';
 
@@ -430,16 +431,14 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
 
     for (var stepNumber = 0; stepNumber < totalSteps; stepNumber++) {
       throwIfCancelled(abortSignal);
-      final prepareResult = await Future.value(
-        prepareStep?.call(
-          GenerateTextPrepareStepContext(
-            model: model,
-            stepNumber: stepNumber,
-            steps: List.unmodifiable(steps),
-            messages: List.unmodifiable(normalizedMessages),
-            stopConditions: allStopConditions,
-            runtimeContext: runtimeContext,
-          ),
+      final prepareResult = await prepareStep?.call(
+        GenerateTextPrepareStepContext(
+          model: model,
+          stepNumber: stepNumber,
+          steps: List.unmodifiable(steps),
+          messages: List.unmodifiable(normalizedMessages),
+          stopConditions: allStopConditions,
+          runtimeContext: runtimeContext,
         ),
       );
 
@@ -543,7 +542,7 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
       if (toolCalls.isNotEmpty) {
         for (final call in toolCalls) {
           throwIfCancelled(abortSignal);
-          final execution = await _executeToolCall(
+          final execution = await executeToolCall(
             tools: toolSelection.exposedTools,
             call: call,
             messages: normalizedMessages,
@@ -625,10 +624,11 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
     }
 
     final text = _contentToText(lastContent);
-    final parsedOutput = _parseOutputWithNoObjectError(
+    final parsedOutput = parseOutputWithNoObjectError(
       output: outputSpec,
       text: text,
-      response: lastResponse,
+      usage: lastResponse?.usage,
+      response: lastResponse?.response,
     );
     final totalUsage = sumUsage(steps.map((step) => step.usage));
     final responseMessages = normalizedMessages
@@ -725,350 +725,6 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
   }
 }
 
-class _ToolExecutionResult {
-  const _ToolExecutionResult({this.toolResult, this.approvalRequest});
-
-  final LanguageModelV4ToolResultPart? toolResult;
-  final LanguageModelV4ToolApprovalRequestPart? approvalRequest;
-}
-
-class _ToolOutputResolution {
-  const _ToolOutputResolution({required this.finalOutput});
-
-  final Object? finalOutput;
-}
-
-Future<_ToolExecutionResult> _executeToolCall({
-  required ToolSet tools,
-  required LanguageModelV4ToolCallPart call,
-  required List<LanguageModelV4Message> messages,
-  required Map<String, LanguageModelV4ToolApprovalResponse> approvalById,
-  CancellationToken? abortSignal,
-  Duration? timeout,
-  Map<String, Object?>? runtimeContext,
-  GenerateTextExperimentalOnToolCallStart? onToolCallStart,
-  GenerateTextExperimentalOnToolCallFinish? onToolCallFinish,
-}) async {
-  final tool = tools[call.toolName];
-  // Defensive: unknown tool names are rejected by tool-choice validation
-  // before any call reaches here.
-  // coverage:ignore-start
-  if (tool == null) {
-    return _ToolExecutionResult(
-      toolResult: LanguageModelV4ToolResultPart(
-        toolCallId: call.toolCallId,
-        toolName: call.toolName,
-        isError: true,
-        output: const ToolResultOutputText('Tool not found.'),
-      ),
-    );
-  }
-  // coverage:ignore-end
-
-  final approvalId = 'approval_${call.toolCallId}';
-  final rawInput = call.input;
-
-  try {
-    final timeoutStopwatch = Stopwatch()..start();
-    final parsedInput = parseToolInput(tool: tool, rawInput: rawInput);
-    final options = ToolExecutionOptions(
-      toolCallId: call.toolCallId,
-      messages: messages,
-      abortSignal: abortSignal,
-      runtimeContext: runtimeContext,
-    );
-
-    final approvalEvaluator = tool.needsApprovalDynamic;
-    final approvalResponse = approvalById[approvalId];
-    throwIfCancelled(abortSignal);
-    final needsApproval = switch (tool.approvalPolicy) {
-      ToolApprovalPolicy.never => false,
-      ToolApprovalPolicy.always => true,
-      ToolApprovalPolicy.conditional =>
-        approvalEvaluator == null
-            ? false
-            : await _awaitToolOperation(
-                () => Future.value(approvalEvaluator(parsedInput, options)),
-                toolName: call.toolName,
-                abortSignal: abortSignal,
-                timeout: _remainingToolTimeout(timeout, timeoutStopwatch),
-              ),
-    };
-    if (needsApproval && approvalResponse == null) {
-      return _ToolExecutionResult(
-        approvalRequest: LanguageModelV4ToolApprovalRequestPart(
-          approvalId: approvalId,
-          toolCall: call,
-        ),
-      );
-    }
-    if (needsApproval &&
-        approvalResponse != null &&
-        !approvalResponse.approved) {
-      return _ToolExecutionResult(
-        toolResult: LanguageModelV4ToolResultPart(
-          toolCallId: call.toolCallId,
-          toolName: call.toolName,
-          isError: true,
-          output: ToolResultOutputText(
-            approvalResponse.reason ?? 'Tool execution denied.',
-          ),
-        ),
-      );
-    }
-
-    final executor = tool.executeDynamic;
-    if (executor == null) {
-      return _ToolExecutionResult(
-        toolResult: LanguageModelV4ToolResultPart(
-          toolCallId: call.toolCallId,
-          toolName: call.toolName,
-          isError: true,
-          output: const ToolResultOutputText('Tool has no executor.'),
-        ),
-      );
-    }
-
-    safeInvoke(
-      () => onToolCallStart?.call(
-        GenerateTextExperimentalToolCallStartEvent(
-          toolCall: call,
-          messages: List.unmodifiable(messages),
-          options: options,
-        ),
-      ),
-    );
-    final stopwatch = Stopwatch()..start();
-    try {
-      final output = await _awaitToolOperation(
-        () => executor(parsedInput, options),
-        toolName: call.toolName,
-        abortSignal: abortSignal,
-        timeout: _remainingToolTimeout(timeout, timeoutStopwatch),
-      );
-      final resolved = await _resolveFinalToolOutput(
-        output,
-        abortSignal: abortSignal,
-        timeout: timeout,
-        timeoutStopwatch: timeoutStopwatch,
-      );
-      stopwatch.stop();
-      safeInvoke(
-        () => onToolCallFinish?.call(
-          GenerateTextExperimentalToolCallFinishEvent(
-            toolCall: call,
-            durationMs: stopwatch.elapsedMilliseconds,
-            success: true,
-            output: resolved.finalOutput,
-          ),
-        ),
-      );
-      return _ToolExecutionResult(
-        toolResult: LanguageModelV4ToolResultPart(
-          toolCallId: call.toolCallId,
-          toolName: call.toolName,
-          output: ToolResultOutputText(
-            stringifyToolOutput(resolved.finalOutput),
-          ),
-        ),
-      );
-    } catch (error) {
-      stopwatch.stop();
-      safeInvoke(
-        () => onToolCallFinish?.call(
-          GenerateTextExperimentalToolCallFinishEvent(
-            toolCall: call,
-            durationMs: stopwatch.elapsedMilliseconds,
-            success: false,
-            error: error,
-          ),
-        ),
-      );
-      rethrow;
-    }
-  } catch (error) {
-    if (error is AiOperationCancelledError || error is TimeoutException) {
-      rethrow;
-    }
-    return _ToolExecutionResult(
-      toolResult: LanguageModelV4ToolResultPart(
-        toolCallId: call.toolCallId,
-        toolName: call.toolName,
-        isError: true,
-        output: ToolResultOutputText(error.toString()),
-      ),
-    );
-  }
-}
-
-Future<_ToolOutputResolution> _resolveFinalToolOutput(
-  Object? output, {
-  CancellationToken? abortSignal,
-  Duration? timeout,
-  Stopwatch? timeoutStopwatch,
-}) async {
-  if (output is Stream) {
-    Object? last;
-    var seenAny = false;
-    final iterator = StreamIterator<Object?>(output.cast<Object?>());
-    try {
-      while (await _moveNextWithToolTimeout(
-        iterator,
-        abortSignal: abortSignal,
-        timeout: timeout,
-        timeoutStopwatch: timeoutStopwatch,
-      )) {
-        seenAny = true;
-        last = iterator.current;
-      }
-    } finally {
-      await iterator.cancel();
-    }
-    return _ToolOutputResolution(finalOutput: seenAny ? last : null);
-  }
-  return _ToolOutputResolution(finalOutput: output);
-}
-
-Future<T> _awaitToolOperation<T>(
-  Future<T> Function() operation, {
-  required String toolName,
-  CancellationToken? abortSignal,
-  Duration? timeout,
-}) {
-  final guarded = raceWithCancellation(operation(), abortSignal);
-  if (timeout == null) return guarded;
-  return guarded.timeout(
-    timeout,
-    onTimeout: () =>
-        throw TimeoutException('Tool "$toolName" timed out.', timeout),
-  );
-}
-
-Duration? _remainingToolTimeout(Duration? timeout, Stopwatch stopwatch) {
-  return remainingTimeout(timeout: timeout, elapsed: stopwatch.elapsed);
-}
-
-Future<bool> _moveNextWithToolTimeout(
-  StreamIterator<Object?> iterator, {
-  CancellationToken? abortSignal,
-  Duration? timeout,
-  Stopwatch? timeoutStopwatch,
-}) {
-  final moveNext = raceWithCancellation(iterator.moveNext(), abortSignal);
-  final remaining = timeoutStopwatch == null
-      ? timeout
-      : _remainingToolTimeout(timeout, timeoutStopwatch);
-  if (remaining == null) return moveNext;
-  return moveNext.timeout(
-    remaining,
-    onTimeout: () =>
-        throw TimeoutException('Tool stream timed out.', remaining),
-  );
-}
-
 String _contentToText(List<LanguageModelV4ContentPart> content) {
   return content.whereType<LanguageModelV4TextPart>().map((p) => p.text).join();
-}
-
-TOutput _parseOutput<TOutput>(Output<TOutput> output, String text) {
-  switch (output) {
-    case TextOutput():
-      return text as TOutput;
-    case ObjectOutput<TOutput>(:final schema):
-      final jsonMap = _extractJsonObject(text);
-      return schema.fromJson(jsonMap);
-    case ArrayOutput(:final element):
-      final jsonValue = _extractJsonValue(text);
-      if (jsonValue is! List) {
-        throw AiInvalidToolInputError(
-          'Model did not return a JSON array: $text',
-        );
-      }
-      final list = <dynamic>[];
-      for (final item in jsonValue) {
-        if (item is Map<String, dynamic>) {
-          list.add(element.fromJson(item));
-        } else {
-          throw AiInvalidToolInputError(
-            'Array element is not a JSON object: $item',
-          );
-        }
-      }
-      return list as TOutput;
-    case ChoiceOutput(:final options):
-      final parsed = _safeParseJson(text.trim());
-      final value = switch (parsed) {
-        String s => s,
-        _ => text.trim(),
-      };
-      if (!options.contains(value)) {
-        throw AiInvalidToolInputError(
-          'Model did not return a valid choice: $value',
-        );
-      }
-      return value as TOutput;
-    case JsonOutput():
-      return _extractJsonValue(text) as TOutput;
-  }
-}
-
-TOutput _parseOutputWithNoObjectError<TOutput>({
-  required Output<TOutput> output,
-  required String text,
-  required LanguageModelV4GenerateResult? response,
-}) {
-  try {
-    return _parseOutput(output, text);
-  } catch (error) {
-    if (output is TextOutput) {
-      rethrow;
-    }
-    throw AiNoObjectGeneratedError(
-      message: 'Failed to generate a valid structured output.',
-      text: text,
-      response: response?.response,
-      usage: response?.usage,
-      cause: error,
-    );
-  }
-}
-
-Map<String, dynamic> _extractJsonObject(String text) {
-  final parsed = _extractJsonValue(text);
-  if (parsed is Map<String, dynamic>) {
-    return parsed;
-  }
-  throw AiInvalidToolInputError('Model did not return a JSON object: $text');
-}
-
-Object _extractJsonValue(String text) {
-  if (text.trim().isEmpty) {
-    throw const AiNoContentGeneratedError('No content was generated.');
-  }
-  final parsed = _safeParseJson(text.trim());
-  if (parsed == null) {
-    throw AiInvalidToolInputError('Model did not return valid JSON: $text');
-  }
-  return parsed;
-}
-
-Object? _safeParseJson(String text) {
-  try {
-    return jsonDecode(text);
-  } catch (_) {
-    final fenceMatch = RegExp(
-      r'```(?:json)?\s*([\s\S]+?)\s*```',
-    ).firstMatch(text);
-    if (fenceMatch != null) {
-      final fenced = fenceMatch.group(1);
-      if (fenced != null) {
-        try {
-          return jsonDecode(fenced);
-        } catch (_) {
-          return null;
-        }
-      }
-    }
-    return null;
-  }
 }

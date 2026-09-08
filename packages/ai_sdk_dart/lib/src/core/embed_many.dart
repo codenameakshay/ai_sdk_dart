@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
+import 'timeout_helpers.dart';
+
 /// Result returned by [embedMany].
 ///
 /// Contains the [embeddings] list — one entry per input value — plus aggregate
@@ -65,7 +67,7 @@ Future<EmbedManyResult<VALUE>> embedMany<VALUE>({
     final call = model.doEmbed(
       EmbeddingModelV2CallOptions<VALUE>(values: chunk),
     );
-    return timeout != null ? call.timeout(timeout) : call;
+    return withOptionalTimeout(call, timeout);
   }
 
   // If maxParallelCalls is null or >= values.length, send all at once.

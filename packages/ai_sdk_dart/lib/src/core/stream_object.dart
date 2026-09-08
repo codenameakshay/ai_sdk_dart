@@ -1,12 +1,14 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
 import '../messages/model_message.dart';
+import '../output/output.dart';
 import '../tools/tool.dart';
 import 'partial_json.dart';
 import 'shared/common_helpers.dart';
+import 'shared/output_instruction.dart';
+import 'timeout_helpers.dart';
 
 /// A JSON Patch-style operation for incremental object updates.
 ///
@@ -81,27 +83,18 @@ Future<StreamObjectResult<T>> streamObject<T>({
     ...?messages?.map(toLanguageModelMessage),
   ];
 
-  final instruction = [
-    if (system != null && system.isNotEmpty) system,
-    'Return a single JSON object that matches this schema exactly:',
-    jsonEncode(schema.jsonSchema),
-    'Do not include markdown fences or extra text.',
-  ].join('\n');
+  final output = Output.object(schema: schema);
 
   final streamCall = model.doStream(
     LanguageModelV4CallOptions(
       prompt: LanguageModelV4Prompt(
-        system: instruction,
+        system: buildOutputSystemInstruction(system, output),
         messages: normalizedMessages,
       ),
-      responseFormat: LanguageModelV4JsonResponseFormat(
-        schema: schema.jsonSchema,
-      ),
+      responseFormat: buildResponseFormat(output),
     ),
   );
-  final response = await (timeout != null
-      ? streamCall.timeout(timeout)
-      : streamCall);
+  final response = await withOptionalTimeout(streamCall, timeout);
   final responseMetadata = response.response;
 
   final broadcast = response.stream.asBroadcastStream();

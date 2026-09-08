@@ -12,3 +12,6 @@ Duration? minTimeout(Duration? left, Duration? right) {
   if (right == null) return left;
   return left <= right ? left : right;
 }
+
+Future<T> withOptionalTimeout<T>(Future<T> future, Duration? timeout) =>
+    timeout == null ? future : future.timeout(timeout);

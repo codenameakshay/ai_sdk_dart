@@ -4,6 +4,8 @@ import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../helpers.dart';
+
 Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
 
 void main() {
@@ -94,15 +96,10 @@ void main() {
 
       unawaited(controller.bind(source.stream));
       await tester.pump();
-      source.add(_Unencodable());
+      source.add(const Unencodable());
       await tester.pump();
 
       expect(find.textContaining('UNENCODABLE'), findsOneWidget);
     });
   });
-}
-
-class _Unencodable {
-  @override
-  String toString() => 'UNENCODABLE';
 }

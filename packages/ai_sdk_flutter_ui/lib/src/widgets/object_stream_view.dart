@@ -1,10 +1,9 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 
 import '../object_stream_controller.dart';
 import '../theme/ai_motion.dart';
 import 'chat_error_view.dart';
+import 'pretty_json.dart';
 
 /// Signature for rendering the current value of an [ObjectStreamController].
 typedef ObjectValueBuilder<T> =
@@ -80,31 +79,9 @@ class _JsonView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
+    return CodeBlock(
+      text: prettyJson(value),
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: SelectableText(
-        _pretty(value),
-        style: TextStyle(
-          fontFamily: 'monospace',
-          fontSize: 12,
-          height: 1.4,
-          color: scheme.onSurface,
-        ),
-      ),
     );
-  }
-
-  static String _pretty(Object? value) {
-    try {
-      return const JsonEncoder.withIndent('  ').convert(value);
-    } catch (_) {
-      return value.toString();
-    }
   }
 }

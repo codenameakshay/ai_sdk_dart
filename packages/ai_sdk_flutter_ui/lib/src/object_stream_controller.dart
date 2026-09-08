@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
-import 'frame_notifier.dart';
+import 'streaming_controller_base.dart';
 
 /// Flutter controller for streaming structured objects — mirrors `useObject` hook.
 ///
@@ -26,7 +26,7 @@ import 'frame_notifier.dart';
 /// - [stop] — cancel the active stream
 /// - [clear] / [reset] — clear current value and error
 /// - [isLoading] — true while loading or streaming
-class ObjectStreamController<T> extends ChangeNotifier {
+class ObjectStreamController<T> extends StreamingControllerBase {
   ObjectStreamController({
     this.id,
     this.model,
@@ -34,11 +34,8 @@ class ObjectStreamController<T> extends ChangeNotifier {
     T? initialValue,
     this.onFinish,
     this.onError,
-    FrameNotificationScheduler? notificationScheduler,
-  }) : _rootListenable = FrameNotifier(scheduler: notificationScheduler),
-       _statusListenable = FrameNotifier(scheduler: notificationScheduler),
-       _contentListenable = FrameNotifier(scheduler: notificationScheduler),
-       _value = initialValue;
+    super.notificationScheduler,
+  }) : _value = initialValue;
 
   /// Optional identifier for this controller.
   final String? id;
@@ -57,15 +54,13 @@ class ObjectStreamController<T> extends ChangeNotifier {
   /// Called when an error occurs.
   final void Function(Object error)? onError;
 
-  final FrameNotifier _rootListenable;
-  final FrameNotifier _statusListenable;
-  final FrameNotifier _contentListenable;
-
   /// Notifies when loading/streaming/error state changes.
-  Listenable get statusListenable => _statusListenable;
+  @override
+  Listenable get statusListenable => super.statusListenable;
 
   /// Notifies when [value] changes.
-  Listenable get contentListenable => _contentListenable;
+  @override
+  Listenable get contentListenable => super.contentListenable;
 
   T? _value;
   T? get value => _value;
@@ -81,41 +76,9 @@ class ObjectStreamController<T> extends ChangeNotifier {
 
   StreamSubscription<T>? _subscription;
   CancellationToken? _activeAbortSignal;
-  int _nextRequestId = 0;
-  int? _activeRequestId;
-  bool _isDisposed = false;
-
-  bool _isCurrentRequest(int requestId) =>
-      !_isDisposed && _activeRequestId == requestId;
-
-  void _notifyTerminalListeners({required bool statusChanged}) {
-    if (_isDisposed) return;
-    _rootListenable.notifyImmediately();
-    if (statusChanged) _statusListenable.notifyImmediately();
-    if (_contentListenable.hasPendingNotification) {
-      _contentListenable.notifyImmediately();
-    }
-  }
-
-  void _notifyListenersSafely({
-    required bool immediate,
-    bool status = false,
-    bool content = false,
-  }) {
-    if (_isDisposed) return;
-    if (immediate) {
-      _rootListenable.notifyImmediately();
-      if (status) _statusListenable.notifyImmediately();
-      if (content) _contentListenable.notifyImmediately();
-      return;
-    }
-
-    _rootListenable.notifyInFrame();
-    if (content) _contentListenable.notifyInFrame();
-  }
 
   void _cancelActiveRequestSync() {
-    _activeRequestId = null;
+    activeRequestId = null;
     _activeAbortSignal?.cancel();
     _activeAbortSignal = null;
     unawaited(_subscription?.cancel());
@@ -123,7 +86,7 @@ class ObjectStreamController<T> extends ChangeNotifier {
   }
 
   Future<void> _cancelActiveRequest() async {
-    _activeRequestId = null;
+    activeRequestId = null;
     _activeAbortSignal?.cancel();
     _activeAbortSignal = null;
     await _subscription?.cancel();
@@ -132,49 +95,49 @@ class ObjectStreamController<T> extends ChangeNotifier {
 
   int _beginRequest({required bool clearValue}) {
     _cancelActiveRequestSync();
-    final requestId = ++_nextRequestId;
-    _activeRequestId = requestId;
+    final requestId = ++nextRequestId;
+    activeRequestId = requestId;
     _activeAbortSignal = CancellationToken();
     if (clearValue) _value = null;
     _error = null;
     _isLoading = true;
     _isStreaming = false;
-    _notifyListenersSafely(immediate: true, status: true, content: clearValue);
+    notifyListenersSafely(immediate: true, status: true, content: clearValue);
     return requestId;
   }
 
   void _listenToStream(Stream<T> stream, int requestId) {
     _subscription = stream.listen(
       (event) {
-        if (!_isCurrentRequest(requestId)) return;
+        if (!isCurrentRequest(requestId)) return;
         final wasStreaming = _isStreaming;
         _value = event;
         _isStreaming = true;
-        _notifyListenersSafely(
+        notifyListenersSafely(
           immediate: wasStreaming ? false : true,
           status: !wasStreaming,
           content: true,
         );
       },
       onDone: () {
-        if (!_isCurrentRequest(requestId)) return;
-        _activeRequestId = null;
+        if (!isCurrentRequest(requestId)) return;
+        activeRequestId = null;
         _activeAbortSignal = null;
         _subscription = null;
         _isLoading = false;
         _isStreaming = false;
-        _notifyListenersSafely(immediate: true, status: true, content: true);
+        notifyListenersSafely(immediate: true, status: true, content: true);
         onFinish?.call(_value);
       },
       onError: (Object err) {
-        if (!_isCurrentRequest(requestId)) return;
-        _activeRequestId = null;
+        if (!isCurrentRequest(requestId)) return;
+        activeRequestId = null;
         _activeAbortSignal = null;
         _subscription = null;
         _error = err;
         _isLoading = false;
         _isStreaming = false;
-        _notifyTerminalListeners(statusChanged: true);
+        notifyTerminalListeners(statusChanged: true);
         onError?.call(err);
       },
       cancelOnError: true,
@@ -212,19 +175,19 @@ class ObjectStreamController<T> extends ChangeNotifier {
         output: Output.object(schema: schema),
         abortSignal: abortSignal,
       );
-      if (!_isCurrentRequest(requestId)) return;
+      if (!isCurrentRequest(requestId)) return;
       _listenToStream(
         result.partialOutputStream.map((value) => value as T),
         requestId,
       );
     } catch (err) {
-      if (!_isCurrentRequest(requestId) || abortSignal.isCancelled) return;
-      _activeRequestId = null;
+      if (!isCurrentRequest(requestId) || abortSignal.isCancelled) return;
+      activeRequestId = null;
       _activeAbortSignal = null;
       _error = err;
       _isLoading = false;
       _isStreaming = false;
-      _notifyTerminalListeners(statusChanged: true);
+      notifyTerminalListeners(statusChanged: true);
       onError?.call(err);
     }
   }
@@ -239,7 +202,7 @@ class ObjectStreamController<T> extends ChangeNotifier {
     await _cancelActiveRequest();
     _isLoading = false;
     _isStreaming = false;
-    _notifyTerminalListeners(statusChanged: true);
+    notifyTerminalListeners(statusChanged: true);
   }
 
   /// Clear the current value and error.
@@ -251,30 +214,16 @@ class ObjectStreamController<T> extends ChangeNotifier {
     _error = null;
     _isLoading = false;
     _isStreaming = false;
-    _notifyListenersSafely(immediate: true, status: true, content: true);
+    notifyListenersSafely(immediate: true, status: true, content: true);
   }
 
   /// Alias for [clear] — kept for backward compatibility.
   void reset() => clear();
 
   @override
-  void addListener(VoidCallback listener) =>
-      _rootListenable.addListener(listener);
-
-  @override
-  void removeListener(VoidCallback listener) =>
-      _rootListenable.removeListener(listener);
-
-  @override
-  bool get hasListeners => _rootListenable.hasListeners;
-
-  @override
   void dispose() {
-    _isDisposed = true;
+    isDisposed = true;
     _cancelActiveRequestSync();
-    _rootListenable.dispose();
-    _statusListenable.dispose();
-    _contentListenable.dispose();
     super.dispose();
   }
 }

@@ -102,11 +102,6 @@ void main() {
       const Duration(milliseconds: 100),
       const Duration(milliseconds: 200),
     ]);
-    expect(
-      slept
-          .skip(3)
-          .every((duration) => duration == const Duration(milliseconds: 250)),
-      isTrue,
-    );
+    expect(slept.skip(3), everyElement(const Duration(milliseconds: 250)));
   });
 }

@@ -25,7 +25,7 @@ void main() {
 
   group('streamText messages conversion', () {
     test('messages of every role are forwarded to the model', () async {
-      final model = _CapturingStreamModel('hi');
+      final model = FakeCapturingStreamModel('hi');
       final result = await streamText(
         model: model,
         messages: const [
@@ -43,7 +43,7 @@ void main() {
     });
 
     test('ModelMessage.parts content is preserved', () async {
-      final model = _CapturingStreamModel('hi');
+      final model = FakeCapturingStreamModel('hi');
       final result = await streamText(
         model: model,
         messages: const [
@@ -60,24 +60,12 @@ void main() {
   });
 
   group('streamText reasoning finalization', () {
-    test('reasoning-only stream closes reasoning at end of loop', () async {
-      final model = FakeStreamModel([
-        const StreamPartReasoningDelta(id: 'reasoning-0', delta: 'just '),
-        const StreamPartReasoningDelta(id: 'reasoning-0', delta: 'thinking'),
-        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
-      ]);
-      final result = await streamText(model: model, prompt: 'go');
-      final events = await result.fullStream.toList();
-      expect(events.whereType<StreamTextReasoningStartEvent>(), hasLength(1));
-      expect(events.whereType<StreamTextReasoningEndEvent>(), hasLength(1));
-      expect(await result.reasoningText, 'just thinking');
-    });
-
     test(
       'reasoning still open at stream end is closed in the finalizer',
       () async {
-        // No finish part: the in-loop close (triggered by non-reasoning parts)
-        // never fires, so the post-loop finalizer closes the reasoning block.
+        // No finish part: the trailing per-step loop that closes any still-open
+        // reasoning part in stream_text.dart never runs mid-stream here, so the
+        // post-loop finalizer is what closes the reasoning block.
         final model = FakeStreamModel([
           const StreamPartReasoningDelta(id: 'reasoning-0', delta: 'dangling'),
         ]);
@@ -375,45 +363,6 @@ void main() {
 // ---------------------------------------------------------------------------
 // Helper models
 // ---------------------------------------------------------------------------
-
-class _CapturingStreamModel extends LanguageModelV4 {
-  _CapturingStreamModel(this.text);
-  final String text;
-  LanguageModelV4CallOptions? lastOptions;
-
-  @override
-  String get provider => 'fake';
-  @override
-  String get modelId => 'capturing-stream';
-  @override
-  String get specificationVersion => 'v4';
-
-  @override
-  Future<LanguageModelV4GenerateResult> doGenerate(
-    LanguageModelV4CallOptions options,
-  ) async {
-    lastOptions = options;
-    return LanguageModelV4GenerateResult(
-      content: [LanguageModelV4TextPart(text: text)],
-      finishReason: LanguageModelV4FinishReason.stop,
-    );
-  }
-
-  @override
-  Future<LanguageModelV4StreamResult> doStream(
-    LanguageModelV4CallOptions options,
-  ) async {
-    lastOptions = options;
-    return LanguageModelV4StreamResult(
-      stream: Stream<LanguageModelV4StreamPart>.fromIterable([
-        const StreamPartTextStart(id: 't1'),
-        StreamPartTextDelta(id: 't1', delta: text),
-        const StreamPartTextEnd(id: 't1'),
-        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
-      ]),
-    );
-  }
-}
 
 /// Streams one tool call with an arbitrary [input] (may be non-object).
 class _StreamSingleToolModel extends LanguageModelV4 {

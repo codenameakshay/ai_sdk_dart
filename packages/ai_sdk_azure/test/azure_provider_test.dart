@@ -1,13 +1,14 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:ai_sdk_azure/ai_sdk_azure.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
+import '../../ai_sdk_provider/test/support/http_helpers.dart';
+import '../../ai_sdk_provider/test/support/prompts.dart';
+import '../../ai_sdk_provider/test/support/test_server.dart';
 import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
@@ -55,19 +56,19 @@ void main() {
   group('OpenAI-compatible capabilities (via shared base)', () {
     test('serializes tools and tool_choice', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
-        captured = await _captureBody(request);
-        _writeOk(request);
+      final server = await TestServer.start((request) async {
+        captured = await captureBody(request);
+        writeOk(request);
       });
       addTearDown(server.close);
 
       final model = AzureOpenAIProvider(
-        endpoint: server.endpoint,
+        endpoint: server.baseUrl,
         apiKey: 'key',
       )('gpt-4-deployment');
       await model.doGenerate(
         LanguageModelV4CallOptions(
-          prompt: _userPrompt('weather'),
+          prompt: userPrompt('weather'),
           tools: const [
             LanguageModelV4FunctionTool(
               name: 'weather',
@@ -85,19 +86,17 @@ void main() {
 
     test('serializes multimodal image content part', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
-        captured = await _captureBody(request);
-        _writeOk(request);
+      final server = await TestServer.start((request) async {
+        captured = await captureBody(request);
+        writeOk(request);
       });
       addTearDown(server.close);
 
       final model = AzureOpenAIProvider(
-        endpoint: server.endpoint,
+        endpoint: server.baseUrl,
         apiKey: 'key',
       )('gpt-4o-deployment');
-      await model.doGenerate(
-        LanguageModelV4CallOptions(prompt: _imagePrompt()),
-      );
+      await model.doGenerate(LanguageModelV4CallOptions(prompt: imagePrompt()));
 
       final messages = (captured['messages'] as List)
           .cast<Map<String, dynamic>>();
@@ -111,21 +110,21 @@ void main() {
       String? authHeader;
       String? apiKeyHeader;
       String? query;
-      final server = await _TestServer.start((request) async {
+      final server = await TestServer.start((request) async {
         authHeader = request.headers.value('authorization');
         apiKeyHeader = request.headers.value('api-key');
         query = request.uri.query;
-        _writeOk(request);
+        writeOk(request);
       });
       addTearDown(server.close);
 
       final model = AzureOpenAIProvider(
-        endpoint: server.endpoint,
+        endpoint: server.baseUrl,
         apiKey: 'secret-key',
         apiVersion: '2024-05-01-preview',
       )('gpt-4-deployment');
       await model.doGenerate(
-        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
       );
 
       expect(apiKeyHeader, 'secret-key');
@@ -137,18 +136,18 @@ void main() {
       'endpoint ending with slash still posts to deployment chat once',
       () async {
         late String path;
-        final server = await _TestServer.start((request) async {
+        final server = await TestServer.start((request) async {
           path = request.uri.path;
-          _writeOk(request);
+          writeOk(request);
         });
         addTearDown(server.close);
 
         final model = AzureOpenAIProvider(
-          endpoint: '${server.endpoint}/',
+          endpoint: '${server.baseUrl}/',
           apiKey: 'secret-key',
         )('gpt-4-deployment');
         await model.doGenerate(
-          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+          LanguageModelV4CallOptions(prompt: userPrompt('hi')),
         );
 
         expect(path, '/openai/deployments/gpt-4-deployment/chat/completions');
@@ -159,25 +158,25 @@ void main() {
       'chat credentials are resolved immediately before each request',
       () async {
         final apiKeys = <String?>[];
-        final server = await _TestServer.start((request) async {
+        final server = await TestServer.start((request) async {
           apiKeys.add(request.headers.value('api-key'));
-          _writeOk(request);
+          writeOk(request);
         });
         addTearDown(server.close);
 
         var token = 'first-key';
         final provider = AzureOpenAIProvider(
-          endpoint: server.endpoint,
+          endpoint: server.baseUrl,
           credentialProvider: () async => token,
         );
 
         await provider(
           'gpt-4-deployment',
-        ).doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('first')));
+        ).doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('first')));
         token = 'second-key';
         await provider(
           'gpt-4-deployment',
-        ).doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('second')));
+        ).doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('second')));
 
         expect(apiKeys, ['first-key', 'second-key']);
       },
@@ -186,34 +185,34 @@ void main() {
     test(
       'dispose closes owned clients and leaves injected clients open',
       () async {
-        final server = await _TestServer.start((request) async {
-          _writeOk(request);
+        final server = await TestServer.start((request) async {
+          writeOk(request);
         });
         addTearDown(server.close);
 
         final ownedProvider = AzureOpenAIProvider(
-          endpoint: server.endpoint,
+          endpoint: server.baseUrl,
           apiKey: 'test',
         );
         ownedProvider.dispose();
         await expectLater(
           ownedProvider('gpt-4-deployment').doGenerate(
-            LanguageModelV4CallOptions(prompt: _userPrompt('after-dispose')),
+            LanguageModelV4CallOptions(prompt: userPrompt('after-dispose')),
           ),
           throwsA(anything),
         );
 
-        final client = Dio(BaseOptions(baseUrl: server.endpoint));
+        final client = Dio(BaseOptions(baseUrl: server.baseUrl));
         final adapter = attachTrackingAdapter(client);
         final injectedProvider = AzureOpenAIProvider(
-          endpoint: server.endpoint,
+          endpoint: server.baseUrl,
           apiKey: 'test',
           client: client,
         );
 
         injectedProvider.dispose(force: false);
         await injectedProvider('gpt-4-deployment').doGenerate(
-          LanguageModelV4CallOptions(prompt: _userPrompt('still-open')),
+          LanguageModelV4CallOptions(prompt: userPrompt('still-open')),
         );
 
         expect(adapter.closeCount, 0);
@@ -227,19 +226,19 @@ void main() {
       'response_format json_schema is serialized from a JSON response format',
       () async {
         late Map<String, dynamic> captured;
-        final server = await _TestServer.start((request) async {
-          captured = await _captureBody(request);
-          _writeOk(request);
+        final server = await TestServer.start((request) async {
+          captured = await captureBody(request);
+          writeOk(request);
         });
         addTearDown(server.close);
 
         final model = AzureOpenAIProvider(
-          endpoint: server.endpoint,
+          endpoint: server.baseUrl,
           apiKey: 'key',
         )('gpt-4o-deployment');
         await model.doGenerate(
           LanguageModelV4CallOptions(
-            prompt: _userPrompt('weather'),
+            prompt: userPrompt('weather'),
             responseFormat: const LanguageModelV4JsonResponseFormat(
               schema: {'type': 'object'},
             ),
@@ -259,11 +258,11 @@ void main() {
       String? path;
       String? apiKeyHeader;
       String? query;
-      final server = await _TestServer.start((request) async {
+      final server = await TestServer.start((request) async {
         path = request.uri.path;
         apiKeyHeader = request.headers.value('api-key');
         query = request.uri.query;
-        captured = await _captureBody(request);
+        captured = await captureBody(request);
 
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
@@ -286,7 +285,7 @@ void main() {
       addTearDown(server.close);
 
       final model = AzureOpenAIProvider(
-        endpoint: server.endpoint,
+        endpoint: server.baseUrl,
         apiKey: 'secret-key',
         apiVersion: '2024-05-01-preview',
       ).embedding('text-embedding-ada-002');
@@ -312,8 +311,8 @@ void main() {
     });
 
     test('tolerates a response with no data list', () async {
-      final server = await _TestServer.start((request) async {
-        await _captureBody(request);
+      final server = await TestServer.start((request) async {
+        await captureBody(request);
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         request.response.write(jsonEncode({'object': 'list'}));
@@ -322,7 +321,7 @@ void main() {
       addTearDown(server.close);
 
       final model = AzureOpenAIProvider(
-        endpoint: server.endpoint,
+        endpoint: server.baseUrl,
         apiKey: 'key',
       ).embedding('text-embedding-ada-002');
 
@@ -335,8 +334,8 @@ void main() {
     test(
       'normalizes numeric vectors and ignores response rows beyond the input',
       () async {
-        final server = await _TestServer.start((request) async {
-          await _captureBody(request);
+        final server = await TestServer.start((request) async {
+          await captureBody(request);
           request.response.statusCode = 200;
           request.response.headers.contentType = ContentType.json;
           request.response.write(
@@ -359,7 +358,7 @@ void main() {
         addTearDown(server.close);
 
         final result =
-            await AzureOpenAIProvider(endpoint: server.endpoint, apiKey: 'key')
+            await AzureOpenAIProvider(endpoint: server.baseUrl, apiKey: 'key')
                 .embedding('text-embedding-ada-002')
                 .doEmbed(
                   const EmbeddingModelV2CallOptions<String>(values: ['a', 'b']),
@@ -381,9 +380,9 @@ void main() {
       'endpoint ending with slash still posts to deployment embeddings once',
       () async {
         late String path;
-        final server = await _TestServer.start((request) async {
+        final server = await TestServer.start((request) async {
           path = request.uri.path;
-          await _captureBody(request);
+          await captureBody(request);
           request.response.statusCode = 200;
           request.response.headers.contentType = ContentType.json;
           request.response.write(
@@ -401,7 +400,7 @@ void main() {
         addTearDown(server.close);
 
         final model = AzureOpenAIProvider(
-          endpoint: '${server.endpoint}/',
+          endpoint: '${server.baseUrl}/',
           apiKey: 'secret-key',
         ).embedding('text-embedding-ada-002');
 
@@ -417,9 +416,9 @@ void main() {
       'embedding credentials are resolved immediately before each request',
       () async {
         final apiKeys = <String?>[];
-        final server = await _TestServer.start((request) async {
+        final server = await TestServer.start((request) async {
           apiKeys.add(request.headers.value('api-key'));
-          await _captureBody(request);
+          await captureBody(request);
           request.response.statusCode = 200;
           request.response.headers.contentType = ContentType.json;
           request.response.write(
@@ -438,7 +437,7 @@ void main() {
 
         var token = 'first-key';
         final model = AzureOpenAIProvider(
-          endpoint: server.endpoint,
+          endpoint: server.baseUrl,
           credentialProvider: () async => token,
         ).embedding('text-embedding-ada-002');
 
@@ -454,74 +453,4 @@ void main() {
       },
     );
   });
-}
-
-LanguageModelV4Prompt _userPrompt(String text) => LanguageModelV4Prompt(
-  messages: [
-    LanguageModelV4Message(
-      role: LanguageModelV4Role.user,
-      content: [LanguageModelV4TextPart(text: text)],
-    ),
-  ],
-);
-
-LanguageModelV4Prompt _imagePrompt() => LanguageModelV4Prompt(
-  messages: [
-    LanguageModelV4Message(
-      role: LanguageModelV4Role.user,
-      content: [
-        LanguageModelV4TextPart(text: 'describe'),
-        LanguageModelV4ImagePart(
-          image: DataContentBytes(Uint8List.fromList(utf8.encode('img'))),
-          mediaType: 'image/png',
-        ),
-      ],
-    ),
-  ],
-);
-
-Future<Map<String, dynamic>> _captureBody(HttpRequest request) async {
-  final body = await utf8.decoder.bind(request).join();
-  return (jsonDecode(body) as Map).cast<String, dynamic>();
-}
-
-void _writeOk(HttpRequest request) {
-  request.response.statusCode = 200;
-  request.response.headers.contentType = ContentType.json;
-  request.response.write(
-    jsonEncode({
-      'choices': [
-        {
-          'finish_reason': 'stop',
-          'message': {'content': 'ok'},
-        },
-      ],
-    }),
-  );
-  request.response.close();
-}
-
-class _TestServer {
-  _TestServer._(this._server);
-
-  final HttpServer _server;
-
-  static Future<_TestServer> start(
-    FutureOr<void> Function(HttpRequest request) handler,
-  ) async {
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    unawaited(() async {
-      await for (final request in server) {
-        await handler(request);
-      }
-    }());
-    return _TestServer._(server);
-  }
-
-  /// Used as the Azure `endpoint`; the base URL becomes
-  /// `<endpoint>/openai/deployments/<deployment>` which all resolves to this
-  /// loopback server.
-  String get endpoint => 'http://${_server.address.host}:${_server.port}';
-
-  Future<void> close() => _server.close(force: true);
 }

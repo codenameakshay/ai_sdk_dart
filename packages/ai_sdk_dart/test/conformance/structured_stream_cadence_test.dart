@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_dart/src/core/partial_json.dart';
-import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
 
 import 'helpers/fake_models.dart';
@@ -13,24 +12,10 @@ void main() {
     fromJson: (json) => json,
   );
 
-  FakeStreamModel characterStream(String text) {
-    return FakeStreamModel([
-      const StreamPartTextStart(id: 't1'),
-      for (final char in text.split(''))
-        StreamPartTextDelta(id: 't1', delta: char),
-      const StreamPartTextEnd(id: 't1'),
-      StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
-    ]);
-  }
+  FakeStreamModel characterStream(String text) =>
+      textDeltaStream(text.split(''));
 
-  FakeStreamModel deltaStream(List<String> deltas) {
-    return FakeStreamModel([
-      const StreamPartTextStart(id: 't1'),
-      for (final delta in deltas) StreamPartTextDelta(id: 't1', delta: delta),
-      const StreamPartTextEnd(id: 't1'),
-      StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
-    ]);
-  }
+  final deltaStream = textDeltaStream;
 
   String largeArrayPayload(int elementCount) {
     final buffer = StringBuffer('[');

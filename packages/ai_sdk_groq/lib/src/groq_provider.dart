@@ -2,6 +2,8 @@ import 'package:ai_sdk_openai_compatible/ai_sdk_openai_compatible.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
 
+const _defaultBaseUrl = 'https://api.groq.com/openai/v1';
+
 /// Groq provider for language models.
 ///
 /// Use [call] to create a language model for a given model ID.
@@ -53,7 +55,7 @@ class GroqProvider {
     modelId: modelId,
     config: OpenAICompatibleConfig(
       provider: 'groq',
-      baseUrl: baseUrl ?? 'https://api.groq.com/openai/v1',
+      baseUrl: baseUrl ?? _defaultBaseUrl,
       headers: _headers,
       client: _client,
       // Groq uses the classic `max_tokens` field.
@@ -65,12 +67,7 @@ class GroqProvider {
 /// Default Groq provider instance.
 final groq = GroqProvider();
 
-Dio _groqDio({String? baseUrl}) {
-  return Dio(
-    BaseOptions(
-      baseUrl: baseUrl ?? 'https://api.groq.com/openai/v1',
-      headers: {'Content-Type': 'application/json'},
-      responseType: ResponseType.json,
-    ),
-  );
-}
+Dio _groqDio({String? baseUrl}) => createProviderDio(
+  baseUrl: baseUrl ?? _defaultBaseUrl,
+  headers: {'Content-Type': 'application/json'},
+);

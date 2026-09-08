@@ -2,6 +2,8 @@ import 'dart:typed_data';
 
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
+import 'timeout_helpers.dart';
+
 /// Result returned by [generateSpeech].
 ///
 /// Contains [audio] bytes and [mediaType] (e.g. `audio/mpeg`).
@@ -38,6 +40,6 @@ Future<GenerateSpeechResult> generateSpeech({
       providerOptions: providerOptions,
     ),
   );
-  final result = await (timeout != null ? call.timeout(timeout) : call);
+  final result = await withOptionalTimeout(call, timeout);
   return GenerateSpeechResult(audio: result.audio, mediaType: result.mediaType);
 }

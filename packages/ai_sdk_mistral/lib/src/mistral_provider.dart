@@ -2,6 +2,8 @@ import 'package:ai_sdk_openai_compatible/ai_sdk_openai_compatible.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
 
+const _defaultBaseUrl = 'https://api.mistral.ai/v1';
+
 /// Mistral AI provider for language models and embeddings.
 ///
 /// Use [call] to create a language model for a given model ID, and [embedding]
@@ -54,7 +56,7 @@ class MistralProvider {
     modelId: modelId,
     config: OpenAICompatibleConfig(
       provider: 'mistral',
-      baseUrl: baseUrl ?? 'https://api.mistral.ai/v1',
+      baseUrl: baseUrl ?? _defaultBaseUrl,
       headers: _headers,
       client: _client,
       // Mistral names the seed field `random_seed` and uses `max_tokens`.
@@ -79,18 +81,10 @@ final mistral = MistralProvider();
 // HTTP helper (embedding model only)
 // ---------------------------------------------------------------------------
 
-Dio _mistralDio({String? baseUrl}) {
-  final resolvedBaseUrl = baseUrl ?? 'https://api.mistral.ai/v1';
-  return Dio(
-    BaseOptions(
-      baseUrl: resolvedBaseUrl.endsWith('/')
-          ? resolvedBaseUrl.substring(0, resolvedBaseUrl.length - 1)
-          : resolvedBaseUrl,
-      headers: {'Content-Type': 'application/json'},
-      responseType: ResponseType.json,
-    ),
-  );
-}
+Dio _mistralDio({String? baseUrl}) => createProviderDio(
+  baseUrl: baseUrl ?? _defaultBaseUrl,
+  headers: {'Content-Type': 'application/json'},
+);
 
 // ---------------------------------------------------------------------------
 // Embedding model
@@ -126,7 +120,7 @@ class _MistralEmbeddingModel implements EmbeddingModelV2<String> {
     final Response<Map<String, dynamic>> response;
     try {
       response = await client.post<Map<String, dynamic>>(
-        providerEndpoint(baseUrl ?? 'https://api.mistral.ai/v1', '/embeddings'),
+        providerEndpoint(baseUrl ?? _defaultBaseUrl, '/embeddings'),
         data: body,
         options: Options(headers: {...?options.headers, ...resolvedHeaders}),
       );
@@ -134,20 +128,6 @@ class _MistralEmbeddingModel implements EmbeddingModelV2<String> {
       throw await apiErrorFromDioException(e, provider: provider);
     }
     final data = response.data!;
-    final dataList = (data['data'] as List?) ?? [];
-    final embeddings = dataList.take(options.values.length).indexed.map((
-      entry,
-    ) {
-      final item = entry.$2 as Map<String, dynamic>;
-      final vector = (item['embedding'] as List)
-          .map((value) => (value as num).toDouble())
-          .toList();
-      return EmbeddingModelV2Embedding<String>(
-        value: options.values[entry.$1],
-        embedding: vector,
-      );
-    }).toList();
-
-    return EmbeddingModelV2GenerateResult<String>(embeddings: embeddings);
+    return parseOpenAiEmbeddings(data, options.values);
   }
 }

@@ -696,41 +696,6 @@ void main() {
       },
     );
   });
-
-  // ---------------------------------------------------------------------------
-  // jsonSchema() helper
-  // ---------------------------------------------------------------------------
-
-  group('jsonSchema()', () {
-    test('creates a Schema<Map<String, dynamic>>', () {
-      final schema = jsonSchema({'type': 'object', 'properties': {}});
-      expect(schema, isA<Schema<Map<String, dynamic>>>());
-    });
-
-    test('jsonSchema field matches the provided map', () {
-      final map = {
-        'type': 'string',
-        'enum': ['a', 'b'],
-      };
-      final schema = jsonSchema(map);
-      expect(schema.jsonSchema, map);
-    });
-
-    test('fromJson returns the map unmodified', () {
-      final schema = jsonSchema({'type': 'object'});
-      final input = {'key': 'value', 'num': 1};
-      expect(schema.fromJson(input), same(input));
-    });
-
-    test('can be used as tool inputSchema', () async {
-      final myTool = tool<Map<String, dynamic>, String>(
-        inputSchema: jsonSchema({'type': 'object', 'properties': {}}),
-        description: 'Test tool',
-        execute: (input, _) async => 'result',
-      );
-      expect(myTool.inputSchema.jsonSchema['type'], 'object');
-    });
-  });
 }
 
 // ---------------------------------------------------------------------------

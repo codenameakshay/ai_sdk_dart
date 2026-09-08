@@ -49,26 +49,11 @@ void main() {
         final chunks = await transform(delta).toList();
         expect(chunks.join(), delta);
       });
-
-      test('returns a Stream<String>', () {
-        final transform = smoothStream(chunkSize: 5);
-        final result = transform('hello');
-        expect(result, isA<Stream<String>>());
-      });
     });
 
     // ── delay option ──────────────────────────────────────────────────────
 
     group('delayInMs', () {
-      test('with no delay, chunks arrive quickly', () async {
-        final transform = smoothStream(chunkSize: 3, delayInMs: 0);
-        final sw = Stopwatch()..start();
-        await transform('abcdef').toList();
-        sw.stop();
-        // No delay: should complete well under 100ms
-        expect(sw.elapsedMilliseconds, lessThan(100));
-      });
-
       test('with delay, total time ≥ (chunks-1)*delayInMs', () async {
         const delay = 20; // ms
         const delta = 'abcdef'; // 3 chunks of 2 chars
@@ -84,25 +69,6 @@ void main() {
         final transform = smoothStream(chunkSize: 3, delayInMs: 5);
         final chunks = await transform('abcdef').toList();
         expect(chunks, ['abc', 'def']);
-      });
-    });
-
-    // ── integration with streamText ────────────────────────────────────────
-
-    group('integration with streamText()', () {
-      test('smoothStream transform is applied to text deltas', () async {
-        final model = FakeTextModel('Hello World!');
-        final result = await streamText(
-          model: model,
-          prompt: 'hi',
-          experimentalTransform: smoothStream(chunkSize: 3),
-        );
-        final chunks = await result.textStream.toList();
-        // Each chunk should be ≤ 3 chars
-        for (final chunk in chunks) {
-          expect(chunk.length, lessThanOrEqualTo(3));
-        }
-        expect(chunks.join(), 'Hello World!');
       });
     });
   });

@@ -2,6 +2,8 @@ import 'dart:typed_data';
 
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
+import 'timeout_helpers.dart';
+
 /// Result returned by [transcribe].
 ///
 /// Contains the transcribed [text].
@@ -35,6 +37,6 @@ Future<TranscribeResult> transcribe({
       providerOptions: providerOptions,
     ),
   );
-  final result = await (timeout != null ? call.timeout(timeout) : call);
+  final result = await withOptionalTimeout(call, timeout);
   return TranscribeResult(text: result.text);
 }

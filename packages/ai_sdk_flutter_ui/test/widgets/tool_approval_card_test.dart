@@ -3,6 +3,8 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../helpers.dart';
+
 Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
 
 const _request = LanguageModelV4ToolApprovalRequestPart(
@@ -97,7 +99,7 @@ void main() {
         toolCall: LanguageModelV4ToolCallPart(
           toolCallId: 'c1',
           toolName: 'weird',
-          input: _Unencodable(),
+          input: const Unencodable(),
         ),
       );
 
@@ -110,9 +112,4 @@ void main() {
       expect(find.textContaining('UNENCODABLE'), findsOneWidget);
     });
   });
-}
-
-class _Unencodable {
-  @override
-  String toString() => 'UNENCODABLE';
 }

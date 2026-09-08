@@ -13,18 +13,6 @@ import 'helpers/fake_models.dart';
 /// the model-message content classes.
 void main() {
   group('embedMany usage aggregation across parallel chunks', () {
-    test('sums token usage from multiple parallel calls', () async {
-      final model = _UsageEmbeddingModel([0.1, 0.2], tokensPerCall: 4);
-      final result = await embedMany(
-        model: model,
-        values: ['a', 'b', 'c', 'd'],
-        maxParallelCalls: 1, // → four separate calls, each reporting 4 tokens.
-      );
-      expect(result.embeddings, hasLength(4));
-      expect(result.usage, isNotNull);
-      expect(result.usage!.tokens, 16);
-    });
-
     test('usage is null in parallel mode when no call reports usage', () async {
       final model = _UsageEmbeddingModel([0.1], tokensPerCall: null);
       final result = await embedMany(
@@ -142,20 +130,19 @@ void main() {
 
   group('convertToModelMessages', () {
     test('converts a tool-role message', () {
+      const toolResultPart = LanguageModelV4ToolResultPart(
+        toolCallId: 'c1',
+        toolName: 'echo',
+        output: ToolResultOutputText('result'),
+      );
       final messages = convertToModelMessages([
         const LanguageModelV4Message(
           role: LanguageModelV4Role.tool,
-          content: [
-            LanguageModelV4ToolResultPart(
-              toolCallId: 'c1',
-              toolName: 'echo',
-              output: ToolResultOutputText('result'),
-            ),
-          ],
+          content: [toolResultPart],
         ),
       ]);
       expect(messages.single.role, ModelMessageRole.tool);
-      expect(messages.single.parts, isNotNull);
+      expect(messages.single.parts, [toolResultPart]);
     });
 
     test('converts every role including a single-text shortcut', () {

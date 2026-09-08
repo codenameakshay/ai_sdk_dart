@@ -13,20 +13,8 @@ void main() {
       fromJson: (json) => json,
     );
 
-    // Streams a JSON object character-by-character so partial parses occur.
-    FakeStreamModel chunked(String json) {
-      final parts = <LanguageModelV4StreamPart>[
-        const StreamPartTextStart(id: 't1'),
-        for (final ch in json.split(''))
-          StreamPartTextDelta(id: 't1', delta: ch),
-        const StreamPartTextEnd(id: 't1'),
-        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
-      ];
-      return FakeStreamModel(parts);
-    }
-
     test('partialObjectStream emits snapshots, object completes', () async {
-      final model = chunked('{"a":1,"b":2}');
+      final model = textDeltaStream('{"a":1,"b":2}'.split(''));
       final result = await streamObject(
         model: model,
         schema: schema,
@@ -40,7 +28,7 @@ void main() {
     });
 
     test('textStream forwards raw deltas', () async {
-      final model = chunked('{"x":true}');
+      final model = textDeltaStream('{"x":true}'.split(''));
       final result = await streamObject(
         model: model,
         schema: schema,
@@ -53,7 +41,7 @@ void main() {
     test(
       'patchStream emits replace ops consistent with the final object',
       () async {
-        final model = chunked('{"a":1,"b":2}');
+        final model = textDeltaStream('{"a":1,"b":2}'.split(''));
         final result = await streamObject(
           model: model,
           schema: schema,

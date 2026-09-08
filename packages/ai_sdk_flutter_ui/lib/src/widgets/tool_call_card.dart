@@ -1,9 +1,8 @@
-import 'dart:convert';
-
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/ai_motion.dart';
+import 'pretty_json.dart';
 
 /// Renders a tool call — the tool name plus its pretty-printed JSON arguments —
 /// and, when supplied, the matching tool result or error.
@@ -72,7 +71,7 @@ class ToolCallCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 8),
-              _CodeBlock(text: _prettyJson(call.input)),
+              CodeBlock(text: prettyJson(call.input)),
               if (result != null) ...[
                 const SizedBox(height: 12),
                 Semantics(
@@ -107,7 +106,7 @@ class ToolCallCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 6),
-                _CodeBlock(
+                CodeBlock(
                   text: _stringifyOutput(result.output),
                   background: isError ? scheme.errorContainer : null,
                   foreground: isError ? scheme.onErrorContainer : null,
@@ -120,49 +119,11 @@ class ToolCallCard extends StatelessWidget {
     );
   }
 
-  static String _prettyJson(Object? value) {
-    try {
-      return const JsonEncoder.withIndent('  ').convert(value);
-    } catch (_) {
-      return value.toString();
-    }
-  }
-
   static String _stringifyOutput(LanguageModelV4ToolResultOutput output) {
     if (output is ToolResultOutputText) return output.text;
     if (output is ToolResultOutputContent) {
       return output.parts.map((p) => p.runtimeType).join(', ');
     }
     return output.toString();
-  }
-}
-
-class _CodeBlock extends StatelessWidget {
-  const _CodeBlock({required this.text, this.background, this.foreground});
-
-  final String text;
-  final Color? background;
-  final Color? foreground;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: background ?? scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: SelectableText(
-        text,
-        style: TextStyle(
-          fontFamily: 'monospace',
-          fontSize: 12,
-          height: 1.4,
-          color: foreground ?? scheme.onSurface,
-        ),
-      ),
-    );
   }
 }

@@ -1,13 +1,13 @@
-import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:ai_sdk_groq/ai_sdk_groq.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
+import '../../ai_sdk_provider/test/support/http_helpers.dart';
+import '../../ai_sdk_provider/test/support/prompts.dart';
+import '../../ai_sdk_provider/test/support/test_server.dart';
 import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
@@ -22,9 +22,9 @@ void main() {
 
     test('credentials are resolved immediately before each request', () async {
       final authorizations = <String?>[];
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         authorizations.add(request.headers.value('authorization'));
-        _writeOk(request);
+        writeOk(request);
       });
       addTearDown(server.close);
 
@@ -36,11 +36,11 @@ void main() {
 
       await provider(
         'llama3-8b-8192',
-      ).doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('first')));
+      ).doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('first')));
       token = 'second-token';
       await provider(
         'llama3-8b-8192',
-      ).doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('second')));
+      ).doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('second')));
 
       expect(authorizations, ['Bearer first-token', 'Bearer second-token']);
     });
@@ -48,8 +48,8 @@ void main() {
     test(
       'dispose closes owned clients and leaves injected clients open',
       () async {
-        final server = await _TestServer.start((request) async {
-          _writeOk(request);
+        final server = await _startServer((request) async {
+          writeOk(request);
         });
         addTearDown(server.close);
 
@@ -60,7 +60,7 @@ void main() {
         ownedProvider.dispose();
         await expectLater(
           ownedProvider('llama3-8b-8192').doGenerate(
-            LanguageModelV4CallOptions(prompt: _userPrompt('after-dispose')),
+            LanguageModelV4CallOptions(prompt: userPrompt('after-dispose')),
           ),
           throwsA(anything),
         );
@@ -75,7 +75,7 @@ void main() {
 
         injectedProvider.dispose(force: false);
         await injectedProvider('llama3-8b-8192').doGenerate(
-          LanguageModelV4CallOptions(prompt: _userPrompt('still-open')),
+          LanguageModelV4CallOptions(prompt: userPrompt('still-open')),
         );
 
         expect(adapter.closeCount, 0);
@@ -89,9 +89,9 @@ void main() {
   group('OpenAI-compatible capabilities (via shared base)', () {
     test('serializes tools and tool_choice', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
-        captured = await _captureBody(request);
-        _writeOk(request);
+      final server = await _startServer((request) async {
+        captured = await captureBody(request);
+        writeOk(request);
       });
       addTearDown(server.close);
 
@@ -100,7 +100,7 @@ void main() {
       );
       await model.doGenerate(
         LanguageModelV4CallOptions(
-          prompt: _userPrompt('weather in Tokyo'),
+          prompt: userPrompt('weather in Tokyo'),
           tools: const [
             LanguageModelV4FunctionTool(
               name: 'weather',
@@ -118,18 +118,16 @@ void main() {
 
     test('serializes multimodal image content part', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
-        captured = await _captureBody(request);
-        _writeOk(request);
+      final server = await _startServer((request) async {
+        captured = await captureBody(request);
+        writeOk(request);
       });
       addTearDown(server.close);
 
       final model = GroqProvider(apiKey: 'key', baseUrl: server.baseUrl)(
         'llama-3.2-90b-vision-preview',
       );
-      await model.doGenerate(
-        LanguageModelV4CallOptions(prompt: _imagePrompt()),
-      );
+      await model.doGenerate(LanguageModelV4CallOptions(prompt: imagePrompt()));
 
       final messages = (captured['messages'] as List)
           .cast<Map<String, dynamic>>();
@@ -141,9 +139,9 @@ void main() {
 
     test('uses max_tokens (not max_completion_tokens)', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
-        captured = await _captureBody(request);
-        _writeOk(request);
+      final server = await _startServer((request) async {
+        captured = await captureBody(request);
+        writeOk(request);
       });
       addTearDown(server.close);
 
@@ -152,7 +150,7 @@ void main() {
       );
       await model.doGenerate(
         LanguageModelV4CallOptions(
-          prompt: _userPrompt('hi'),
+          prompt: userPrompt('hi'),
           maxOutputTokens: 256,
         ),
       );
@@ -162,69 +160,6 @@ void main() {
   });
 }
 
-LanguageModelV4Prompt _userPrompt(String text) => LanguageModelV4Prompt(
-  messages: [
-    LanguageModelV4Message(
-      role: LanguageModelV4Role.user,
-      content: [LanguageModelV4TextPart(text: text)],
-    ),
-  ],
-);
-
-LanguageModelV4Prompt _imagePrompt() => LanguageModelV4Prompt(
-  messages: [
-    LanguageModelV4Message(
-      role: LanguageModelV4Role.user,
-      content: [
-        LanguageModelV4TextPart(text: 'describe'),
-        LanguageModelV4ImagePart(
-          image: DataContentBytes(Uint8List.fromList(utf8.encode('img'))),
-          mediaType: 'image/png',
-        ),
-      ],
-    ),
-  ],
-);
-
-Future<Map<String, dynamic>> _captureBody(HttpRequest request) async {
-  final body = await utf8.decoder.bind(request).join();
-  return (jsonDecode(body) as Map).cast<String, dynamic>();
-}
-
-void _writeOk(HttpRequest request) {
-  request.response.statusCode = 200;
-  request.response.headers.contentType = ContentType.json;
-  request.response.write(
-    jsonEncode({
-      'choices': [
-        {
-          'finish_reason': 'stop',
-          'message': {'content': 'ok'},
-        },
-      ],
-    }),
-  );
-  request.response.close();
-}
-
-class _TestServer {
-  _TestServer._(this._server);
-
-  final HttpServer _server;
-
-  static Future<_TestServer> start(
-    FutureOr<void> Function(HttpRequest request) handler,
-  ) async {
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    unawaited(() async {
-      await for (final request in server) {
-        await handler(request);
-      }
-    }());
-    return _TestServer._(server);
-  }
-
-  String get baseUrl => 'http://${_server.address.host}:${_server.port}/v1';
-
-  Future<void> close() => _server.close(force: true);
-}
+Future<TestServer> _startServer(
+  Future<void> Function(HttpRequest request) handler,
+) => TestServer.start(handler, pathSuffix: '/v1');

@@ -5,6 +5,8 @@ import 'package:ai_sdk_openai_compatible/ai_sdk_openai_compatible.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
 
+const _defaultBaseUrl = 'https://api.openai.com/v1';
+
 /// OpenAI provider for language models, embeddings, images, speech, and transcription.
 ///
 /// Use [call] for language models, [embedding] for embeddings, [image] for image
@@ -57,7 +59,7 @@ class OpenAIProvider {
     modelId: modelId,
     config: OpenAICompatibleConfig(
       provider: 'openai',
-      baseUrl: baseUrl ?? 'https://api.openai.com/v1',
+      baseUrl: baseUrl ?? _defaultBaseUrl,
       headers: _headers,
       client: _client,
       extraBody: _openAiExtraBody,
@@ -178,7 +180,7 @@ class _OpenAIEmbeddingModel implements EmbeddingModelV2<String> {
     final usage = (data['usage'] as Map?)?.cast<String, dynamic>();
     return EmbeddingModelV2GenerateResult<String>(
       embeddings: embeddings,
-      usage: EmbeddingModelV2Usage(tokens: _intOrNull(usage?['total_tokens'])),
+      usage: EmbeddingModelV2Usage(tokens: intOrNull(usage?['total_tokens'])),
     );
   }
 }
@@ -257,22 +259,10 @@ class _OpenAIImageModel implements ImageModelV3 {
   }
 }
 
-Dio _openAiDio({String? baseUrl}) {
-  return Dio(
-    BaseOptions(
-      baseUrl: baseUrl ?? 'https://api.openai.com/v1',
-      headers: {'Content-Type': 'application/json'},
-      responseType: ResponseType.json,
-    ),
-  );
-}
-
-int? _intOrNull(Object? value) => switch (value) {
-  int v => v,
-  num v => v.toInt(),
-  String v => int.tryParse(v),
-  _ => null,
-};
+Dio _openAiDio({String? baseUrl}) => createProviderDio(
+  baseUrl: baseUrl ?? _defaultBaseUrl,
+  headers: {'Content-Type': 'application/json'},
+);
 
 class _OpenAISpeechModel implements SpeechModelV1 {
   _OpenAISpeechModel({

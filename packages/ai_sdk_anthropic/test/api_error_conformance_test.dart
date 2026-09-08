@@ -27,6 +27,7 @@ void main() {
           'message': 'invalid x-api-key',
         },
       },
+      Map<String, String> headers = const {},
     }) async {
       final s = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       server = s;
@@ -35,6 +36,7 @@ void main() {
           await request.drain<void>();
           request.response.statusCode = status;
           request.response.headers.contentType = ContentType.json;
+          headers.forEach(request.response.headers.set);
           request.response.write(jsonEncode(body));
           await request.response.close();
         }
@@ -69,6 +71,36 @@ void main() {
         ),
       );
     });
+
+    test(
+      'doGenerate exposes response headers so Retry-After is honored',
+      () async {
+        final baseUrl = await startErrorServer(
+          status: 429,
+          body: {
+            'type': 'error',
+            'error': {'type': 'rate_limit_error', 'message': 'slow down'},
+          },
+          headers: {'retry-after': '7'},
+        );
+        final model = AnthropicProvider(
+          apiKey: 'k',
+          baseUrl: baseUrl,
+        ).call('claude-3');
+        await expectLater(
+          model.doGenerate(opts()),
+          throwsA(
+            isA<AiApiCallError>()
+                .having((e) => e.statusCode, 'statusCode', 429)
+                .having(
+                  (e) => e.responseHeaders?['retry-after'],
+                  'retry-after',
+                  '7',
+                ),
+          ),
+        );
+      },
+    );
 
     test('doStream surfaces a connection-time provider error', () async {
       final baseUrl = await startErrorServer(

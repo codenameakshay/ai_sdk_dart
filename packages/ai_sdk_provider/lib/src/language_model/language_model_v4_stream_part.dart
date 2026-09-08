@@ -34,11 +34,7 @@ class StreamPartTextEnd extends LanguageModelV4StreamPart {
 }
 
 class StreamPartReasoningStart extends LanguageModelV4StreamPart {
-  const StreamPartReasoningStart({
-    // coverage:ignore-line
-    required this.id,
-    this.providerMetadata,
-  });
+  const StreamPartReasoningStart({required this.id, this.providerMetadata});
   final String id;
   final ProviderMetadata? providerMetadata;
 }
@@ -55,11 +51,7 @@ class StreamPartReasoningDelta extends LanguageModelV4StreamPart {
 }
 
 class StreamPartReasoningEnd extends LanguageModelV4StreamPart {
-  const StreamPartReasoningEnd({
-    // coverage:ignore-line
-    required this.id,
-    this.providerMetadata,
-  });
+  const StreamPartReasoningEnd({required this.id, this.providerMetadata});
   final String id;
   final ProviderMetadata? providerMetadata;
 }
@@ -115,7 +107,6 @@ class StreamPartToolCall extends LanguageModelV4StreamPart {
 
 class StreamPartToolResult extends LanguageModelV4StreamPart {
   const StreamPartToolResult({
-    // coverage:ignore-line
     required this.toolResult,
     this.preliminary = false,
   });
@@ -125,31 +116,25 @@ class StreamPartToolResult extends LanguageModelV4StreamPart {
 }
 
 class StreamPartToolApprovalRequest extends LanguageModelV4StreamPart {
-  const StreamPartToolApprovalRequest({
-    required this.approvalRequest,
-  }); // coverage:ignore-line
+  const StreamPartToolApprovalRequest({required this.approvalRequest});
 
   final LanguageModelV4ToolApprovalRequestPart approvalRequest;
 }
 
 class StreamPartStreamStart extends LanguageModelV4StreamPart {
-  const StreamPartStreamStart({
-    this.warnings = const [],
-  }); // coverage:ignore-line
+  const StreamPartStreamStart({this.warnings = const []});
 
   final List<LanguageModelV4Warning> warnings;
 }
 
 class StreamPartResponseMetadata extends LanguageModelV4StreamPart {
-  const StreamPartResponseMetadata({
-    required this.metadata,
-  }); // coverage:ignore-line
+  const StreamPartResponseMetadata({required this.metadata});
 
   final LanguageModelV4ResponseMetadata metadata;
 }
 
 class StreamPartRaw extends LanguageModelV4StreamPart {
-  const StreamPartRaw({required this.rawValue}); // coverage:ignore-line
+  const StreamPartRaw({required this.rawValue});
 
   final Object? rawValue;
 }

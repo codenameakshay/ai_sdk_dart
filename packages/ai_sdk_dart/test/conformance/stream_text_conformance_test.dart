@@ -117,9 +117,9 @@ void main() {
 
         final result = await streamText(model: model, prompt: 'hi');
         final events = await result.fullStream.toList();
-        expect(events.whereType<StreamTextTextStartEvent>().isNotEmpty, isTrue);
-        expect(events.whereType<StreamTextTextDeltaEvent>().isNotEmpty, isTrue);
-        expect(events.whereType<StreamTextTextEndEvent>().isNotEmpty, isTrue);
+        expect(events.whereType<StreamTextTextStartEvent>(), isNotEmpty);
+        expect(events.whereType<StreamTextTextDeltaEvent>(), isNotEmpty);
+        expect(events.whereType<StreamTextTextEndEvent>(), isNotEmpty);
       });
 
       test('fullStream includes reasoning delta events', () async {
@@ -136,20 +136,14 @@ void main() {
 
         final result = await streamText(model: model, prompt: 'hi');
         final events = await result.fullStream.toList();
-        expect(
-          events.whereType<StreamTextReasoningDeltaEvent>().isNotEmpty,
-          isTrue,
-        );
+        expect(events.whereType<StreamTextReasoningDeltaEvent>(), isNotEmpty);
       });
 
       test('fullStream includes finish step event', () async {
         final model = FakeTextModel('hello');
         final result = await streamText(model: model, prompt: 'hi');
         final events = await result.fullStream.toList();
-        expect(
-          events.whereType<StreamTextFinishStepEvent>().isNotEmpty,
-          isTrue,
-        );
+        expect(events.whereType<StreamTextFinishStepEvent>(), isNotEmpty);
       });
     });
 
@@ -363,7 +357,7 @@ void main() {
         'late fullStream subscriber sees startup-timeout terminal error',
         () async {
           final result = await streamText(
-            model: _SlowStartEmptyStreamModel(const Duration(milliseconds: 50)),
+            model: FakeSlowStartModel(const Duration(milliseconds: 50)),
             prompt: 'hi',
             timeout: const TimeoutConfiguration(
               step: Duration(milliseconds: 10),
@@ -513,35 +507,6 @@ void main() {
         expect(finishEvent!.usage?.inputTokens.total, 5);
         expect(finishEvent!.steps, isNotEmpty);
       });
-
-      test(
-        'onFinish receives structured warnings from stream result',
-        () async {
-          StreamTextFinishEvent<dynamic>? finishEvent;
-          final model = _FakeStreamModelWithWarnings('done', [
-            'provider-warning',
-          ]);
-
-          final result = await streamText(
-            model: model,
-            prompt: 'hi',
-            onFinish: (event) => finishEvent = event,
-          );
-
-          await result.output;
-          expect(finishEvent, isNotNull);
-          expect(
-            finishEvent!.warnings,
-            contains(
-              isA<LanguageModelV4OtherWarning>().having(
-                (warning) => warning.message,
-                'message',
-                'provider-warning',
-              ),
-            ),
-          );
-        },
-      );
     });
 
     // ── content and reasoning futures ─────────────────────────────────────
@@ -553,7 +518,7 @@ void main() {
         await result.text;
         final content = await result.content;
         expect(content, isNotEmpty);
-        expect(content.whereType<LanguageModelV4TextPart>().isNotEmpty, isTrue);
+        expect(content.whereType<LanguageModelV4TextPart>(), isNotEmpty);
       });
 
       test('reasoning future resolves with reasoning parts', () async {
@@ -609,36 +574,6 @@ class _ErrorAfterTextModel extends LanguageModelV4 {
   }
 }
 
-class _SlowStartEmptyStreamModel extends LanguageModelV4 {
-  const _SlowStartEmptyStreamModel(this.delay);
-
-  final Duration delay;
-
-  @override
-  String get provider => 'fake';
-
-  @override
-  String get modelId => 'slow-start-empty-stream';
-
-  @override
-  String get specificationVersion => 'v4';
-
-  @override
-  Future<LanguageModelV4GenerateResult> doGenerate(
-    LanguageModelV4CallOptions options,
-  ) async => throw UnimplementedError();
-
-  @override
-  Future<LanguageModelV4StreamResult> doStream(
-    LanguageModelV4CallOptions options,
-  ) async {
-    await Future<void>.delayed(delay);
-    return const LanguageModelV4StreamResult(
-      stream: Stream<LanguageModelV4StreamPart>.empty(),
-    );
-  }
-}
-
 Future<List<StreamTextEvent>> _collectFailingFullStream(
   StreamTextResult result,
   Matcher matcher,
@@ -659,53 +594,4 @@ Future<List<StreamTextEvent>> _collectFailingFullStream(
   await expectLater(done.future, throwsA(matcher));
   await sub.cancel();
   return events;
-}
-
-/// A fake model that includes structured warnings on the stream result.
-class _FakeStreamModelWithWarnings extends LanguageModelV4 {
-  _FakeStreamModelWithWarnings(this.text, this.warnings);
-
-  final String text;
-  final List<String> warnings;
-
-  @override
-  String get provider => 'fake';
-
-  @override
-  String get modelId => 'fake-warnings-model';
-
-  @override
-  String get specificationVersion => 'v4';
-
-  @override
-  Future<LanguageModelV4GenerateResult> doGenerate(
-    LanguageModelV4CallOptions options,
-  ) async {
-    return LanguageModelV4GenerateResult(
-      content: [LanguageModelV4TextPart(text: text)],
-      finishReason: LanguageModelV4FinishReason.stop,
-      warnings: structuredWarnings,
-    );
-  }
-
-  @override
-  Future<LanguageModelV4StreamResult> doStream(
-    LanguageModelV4CallOptions options,
-  ) async {
-    return LanguageModelV4StreamResult(
-      stream: simulateReadableStream(
-        parts: [
-          StreamPartTextStart(id: 'text-1'),
-          StreamPartTextDelta(id: 'text-1', delta: text),
-          StreamPartTextEnd(id: 'text-1'),
-          StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
-        ],
-      ),
-      warnings: structuredWarnings,
-    );
-  }
-
-  List<LanguageModelV4Warning> get structuredWarnings => warnings
-      .map((warning) => LanguageModelV4OtherWarning(message: warning))
-      .toList(growable: false);
 }

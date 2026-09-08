@@ -67,17 +67,6 @@ Widget _scrollHarness({
   );
 }
 
-Future<void> _pumpUntilStreamingStarts(
-  WidgetTester tester,
-  ChatController controller,
-) async {
-  for (var i = 0; i < 30; i++) {
-    await tester.pump(const Duration(milliseconds: 10));
-    if (controller.streamingContent.isNotEmpty) return;
-  }
-  fail('streaming did not start');
-}
-
 void main() {
   group('ChatMessageList', () {
     testWidgets('renders existing messages', (tester) async {
@@ -273,7 +262,12 @@ void main() {
         agent: ToolLoopAgent(model: model),
         text: 'ask',
       );
-      await _pumpUntilStreamingStarts(tester, controller);
+      await pumpTesterUntil(
+        tester,
+        () => controller.streamingContent.isNotEmpty,
+        maxPumps: 30,
+        step: const Duration(milliseconds: 10),
+      );
       await tester.pumpAndSettle();
 
       expect(
@@ -323,7 +317,12 @@ void main() {
         agent: ToolLoopAgent(model: model),
         text: 'ask',
       );
-      await _pumpUntilStreamingStarts(tester, controller);
+      await pumpTesterUntil(
+        tester,
+        () => controller.streamingContent.isNotEmpty,
+        maxPumps: 30,
+        step: const Duration(milliseconds: 10),
+      );
       await tester.pump();
 
       expect(scrollController.position.pixels, initialOffset);
@@ -365,7 +364,12 @@ void main() {
         agent: ToolLoopAgent(model: firstModel),
         text: 'first ask',
       );
-      await _pumpUntilStreamingStarts(tester, controller);
+      await pumpTesterUntil(
+        tester,
+        () => controller.streamingContent.isNotEmpty,
+        maxPumps: 30,
+        step: const Duration(milliseconds: 10),
+      );
       await tester.pump();
 
       expect(
@@ -384,7 +388,12 @@ void main() {
         agent: ToolLoopAgent(model: secondModel),
         text: 'second ask',
       );
-      await _pumpUntilStreamingStarts(tester, controller);
+      await pumpTesterUntil(
+        tester,
+        () => controller.streamingContent.isNotEmpty,
+        maxPumps: 30,
+        step: const Duration(milliseconds: 10),
+      );
       await tester.pumpAndSettle();
 
       expect(
@@ -565,7 +574,12 @@ void main() {
           agent: ToolLoopAgent(model: model),
           text: 'ask',
         );
-        await _pumpUntilStreamingStarts(tester, controller);
+        await pumpTesterUntil(
+          tester,
+          () => controller.streamingContent.isNotEmpty,
+          maxPumps: 30,
+          step: const Duration(milliseconds: 10),
+        );
         await tester.pumpAndSettle();
 
         expect(scrollController.hasClients, isTrue);

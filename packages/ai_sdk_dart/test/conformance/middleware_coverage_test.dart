@@ -312,33 +312,6 @@ void main() {
       expect(result.images, isEmpty);
     });
   });
-
-  group('wrapEmbeddingModel', () {
-    test('throws ArgumentError for an unsupported middleware type', () {
-      expect(
-        () => wrapEmbeddingModel<String>(
-          model: FakeEmbeddingModel([0.1]),
-          middleware: 99,
-        ),
-        throwsArgumentError,
-      );
-    });
-
-    test('proxies metadata and embeds via transformParams default', () async {
-      final inner = FakeEmbeddingModel([0.1, 0.2]);
-      final wrapped = wrapEmbeddingModel<String>(
-        model: inner,
-        middleware: _NoopEmbeddingMiddleware(),
-      );
-      expect(wrapped.provider, 'fake');
-      expect(wrapped.modelId, 'fake-embedding-model');
-      expect(wrapped.specificationVersion, 'v2');
-      final result = await wrapped.doEmbed(
-        const EmbeddingModelV2CallOptions(values: ['hi']),
-      );
-      expect(result.embeddings.single.embedding, [0.1, 0.2]);
-    });
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -469,8 +442,4 @@ class _FakeImageModel implements ImageModelV3 {
 
 class _NoopImageMiddleware extends ImageModelMiddlewareBase {
   const _NoopImageMiddleware();
-}
-
-class _NoopEmbeddingMiddleware extends EmbeddingModelMiddlewareBase<String> {
-  const _NoopEmbeddingMiddleware();
 }

@@ -23,26 +23,23 @@ int emitTrackedArrayElements({
   return acceptedCount;
 }
 
-TOutput? tryParseStreamingPartialOutput<TOutput>(
-  Output<TOutput> output,
-  String text,
-) {
+TOutput? tryParsePartialOutput<TOutput>(Output<TOutput> output, String text) {
   try {
-    return parseStreamingOutput(output, text);
+    return parseOutput(output, text);
   } catch (_) {
     return null;
   }
 }
 
-TOutput parseStreamingOutput<TOutput>(Output<TOutput> output, String text) {
+TOutput parseOutput<TOutput>(Output<TOutput> output, String text) {
   switch (output) {
     case TextOutput():
       return text as TOutput;
     case ObjectOutput<TOutput>(:final schema):
-      final jsonMap = extractStreamingJsonObject(text);
+      final jsonMap = extractJsonObject(text);
       return schema.fromJson(jsonMap);
     case ArrayOutput(:final element):
-      final jsonValue = extractStreamingJsonValue(text);
+      final jsonValue = extractJsonValue(text);
       if (jsonValue is! List) {
         throw AiInvalidToolInputError(
           'Model did not return a JSON array: $text',
@@ -76,18 +73,18 @@ TOutput parseStreamingOutput<TOutput>(Output<TOutput> output, String text) {
       }
       return value as TOutput;
     case JsonOutput():
-      return extractStreamingJsonValue(text) as TOutput;
+      return extractJsonValue(text) as TOutput;
   }
 }
 
-TOutput parseStreamingOutputWithNoObjectError<TOutput>({
+TOutput parseOutputWithNoObjectError<TOutput>({
   required Output<TOutput> output,
   required String text,
   required LanguageModelV4Usage? usage,
   required LanguageModelV4ResponseMetadata? response,
 }) {
   try {
-    return parseStreamingOutput(output, text);
+    return parseOutput(output, text);
   } catch (error) {
     if (output is TextOutput) {
       rethrow;
@@ -102,15 +99,15 @@ TOutput parseStreamingOutputWithNoObjectError<TOutput>({
   }
 }
 
-Map<String, dynamic> extractStreamingJsonObject(String text) {
-  final parsed = extractStreamingJsonValue(text);
+Map<String, dynamic> extractJsonObject(String text) {
+  final parsed = extractJsonValue(text);
   if (parsed is Map<String, dynamic>) {
     return parsed;
   }
   throw AiInvalidToolInputError('Model did not return a JSON object: $text');
 }
 
-Object extractStreamingJsonValue(String text) {
+Object extractJsonValue(String text) {
   if (text.trim().isEmpty) {
     throw const AiNoContentGeneratedError('No content was generated.');
   }

@@ -320,6 +320,10 @@ void main() {
     });
 
     test('warning variants expose stable types and payloads', () {
+      final unsupported = LanguageModelV4UnsupportedWarning(
+        feature: 'logprobs',
+        details: 'Provider does not support logprobs.',
+      );
       final compatibility = LanguageModelV4CompatibilityWarning(
         feature: 'sources',
         details: 'Provider may omit source URLs.',
@@ -329,6 +333,10 @@ void main() {
         message: 'Use the default mode.',
       );
       final other = LanguageModelV4OtherWarning(message: 'Heads up.');
+
+      expect(unsupported.type, 'unsupported');
+      expect(unsupported.feature, 'logprobs');
+      expect(unsupported.details, 'Provider does not support logprobs.');
 
       expect(compatibility.type, 'compatibility');
       expect(compatibility.feature, 'sources');

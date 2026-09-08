@@ -94,17 +94,10 @@ final azureOpenAI = AzureOpenAIProvider(endpoint: '');
 // HTTP helper
 // ---------------------------------------------------------------------------
 
-Dio _azureDio({required String endpoint}) {
-  return Dio(
-    BaseOptions(
-      baseUrl: endpoint.endsWith('/')
-          ? endpoint.substring(0, endpoint.length - 1)
-          : endpoint,
-      headers: {'Content-Type': 'application/json'},
-      responseType: ResponseType.json,
-    ),
-  );
-}
+Dio _azureDio({required String endpoint}) => createProviderDio(
+  baseUrl: endpoint,
+  headers: {'Content-Type': 'application/json'},
+);
 
 // ---------------------------------------------------------------------------
 // Embedding model
@@ -159,20 +152,6 @@ class _AzureEmbeddingModel implements EmbeddingModelV2<String> {
       throw await apiErrorFromDioException(e, provider: provider);
     }
     final data = response.data!;
-    final dataList = (data['data'] as List?) ?? [];
-    final embeddings = dataList.take(options.values.length).indexed.map((
-      entry,
-    ) {
-      final item = entry.$2 as Map<String, dynamic>;
-      final vector = (item['embedding'] as List)
-          .map((value) => (value as num).toDouble())
-          .toList();
-      return EmbeddingModelV2Embedding<String>(
-        value: options.values[entry.$1],
-        embedding: vector,
-      );
-    }).toList();
-
-    return EmbeddingModelV2GenerateResult<String>(embeddings: embeddings);
+    return parseOpenAiEmbeddings(data, options.values);
   }
 }

@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
-import 'frame_notifier.dart';
+import 'streaming_controller_base.dart';
 
 /// Flutter controller for single-turn completion — mirrors the JS `useCompletion` hook.
 ///
@@ -14,15 +14,13 @@ import 'frame_notifier.dart';
 /// - [stop] — cancel the active stream
 /// - [clear] — reset completion state
 /// - [isStreaming] — true while actively streaming
-class CompletionController extends ChangeNotifier {
+class CompletionController extends StreamingControllerBase {
   CompletionController({
     required this.agent,
     this.onFinish,
     this.onError,
-    FrameNotificationScheduler? notificationScheduler,
-  }) : _rootListenable = FrameNotifier(scheduler: notificationScheduler),
-       _statusListenable = FrameNotifier(scheduler: notificationScheduler),
-       _contentListenable = FrameNotifier(scheduler: notificationScheduler);
+    super.notificationScheduler,
+  });
 
   final ToolLoopAgent agent;
 
@@ -32,15 +30,13 @@ class CompletionController extends ChangeNotifier {
   /// Called when an error occurs.
   final void Function(Object error)? onError;
 
-  final FrameNotifier _rootListenable;
-  final FrameNotifier _statusListenable;
-  final FrameNotifier _contentListenable;
-
   /// Notifies when loading/streaming/error state changes.
-  Listenable get statusListenable => _statusListenable;
+  @override
+  Listenable get statusListenable => super.statusListenable;
 
   /// Notifies when [completion] or [lastUsage] changes.
-  Listenable get contentListenable => _contentListenable;
+  @override
+  Listenable get contentListenable => super.contentListenable;
 
   String _completion = '';
   String get completion => _completion;
@@ -61,41 +57,9 @@ class CompletionController extends ChangeNotifier {
   StreamSubscription<String>? _activeSubscription;
   StreamSubscription<StreamTextEvent>? _errorSubscription;
   CancellationToken? _activeAbortSignal;
-  int _nextRequestId = 0;
-  int? _activeRequestId;
-  bool _isDisposed = false;
-
-  bool _isCurrentRequest(int requestId) =>
-      !_isDisposed && _activeRequestId == requestId;
-
-  void _notifyTerminalListeners({required bool statusChanged}) {
-    if (_isDisposed) return;
-    _rootListenable.notifyImmediately();
-    if (statusChanged) _statusListenable.notifyImmediately();
-    if (_contentListenable.hasPendingNotification) {
-      _contentListenable.notifyImmediately();
-    }
-  }
-
-  void _notifyListenersSafely({
-    required bool immediate,
-    bool status = false,
-    bool content = false,
-  }) {
-    if (_isDisposed) return;
-    if (immediate) {
-      _rootListenable.notifyImmediately();
-      if (status) _statusListenable.notifyImmediately();
-      if (content) _contentListenable.notifyImmediately();
-      return;
-    }
-
-    _rootListenable.notifyInFrame();
-    if (content) _contentListenable.notifyInFrame();
-  }
 
   void _cancelActiveRequestSync() {
-    _activeRequestId = null;
+    activeRequestId = null;
     _activeAbortSignal?.cancel();
     _activeAbortSignal = null;
     unawaited(_activeSubscription?.cancel());
@@ -105,7 +69,7 @@ class CompletionController extends ChangeNotifier {
   }
 
   Future<void> _cancelActiveRequest() async {
-    _activeRequestId = null;
+    activeRequestId = null;
     _activeAbortSignal?.cancel();
     _activeAbortSignal = null;
     await _activeSubscription?.cancel();
@@ -117,25 +81,25 @@ class CompletionController extends ChangeNotifier {
   /// Submit [prompt] and stream the completion.
   Future<void> complete(String prompt) async {
     _cancelActiveRequestSync();
-    final requestId = ++_nextRequestId;
+    final requestId = ++nextRequestId;
     final abortSignal = CancellationToken();
-    _activeRequestId = requestId;
+    activeRequestId = requestId;
     _activeAbortSignal = abortSignal;
     _completion = '';
     _error = null;
     _lastUsage = null;
     _isLoading = true;
     _isStreaming = false;
-    _notifyListenersSafely(immediate: true, status: true, content: true);
+    notifyListenersSafely(immediate: true, status: true, content: true);
 
     try {
       final streamResult = await agent.stream(
         prompt: prompt,
         abortSignal: abortSignal,
       );
-      if (!_isCurrentRequest(requestId)) return;
+      if (!isCurrentRequest(requestId)) return;
       _isStreaming = true;
-      _notifyListenersSafely(immediate: true, status: true);
+      notifyListenersSafely(immediate: true, status: true);
 
       // The result's `text`/`output` futures reject on a streaming error; we
       // surface errors via [fullStream] instead, so swallow those completions
@@ -146,47 +110,47 @@ class CompletionController extends ChangeNotifier {
       // Streaming errors surface on the full event stream (not the text
       // stream), so watch both: text for content, fullStream for errors.
       _errorSubscription = streamResult.fullStream.listen((event) {
-        if (!_isCurrentRequest(requestId)) return;
+        if (!isCurrentRequest(requestId)) return;
         if (event is StreamTextErrorEvent) _handleError(event.error, requestId);
       }, onError: (Object err) => _handleError(err, requestId));
 
       _activeSubscription = streamResult.textStream.listen(
         (delta) {
-          if (!_isCurrentRequest(requestId)) return;
+          if (!isCurrentRequest(requestId)) return;
           _completion += delta;
-          _notifyListenersSafely(immediate: false, content: true);
+          notifyListenersSafely(immediate: false, content: true);
         },
         onDone: () async {
           _activeSubscription = null;
           unawaited(_errorSubscription?.cancel());
           _errorSubscription = null;
-          if (!_isCurrentRequest(requestId) || _error != null) return;
+          if (!isCurrentRequest(requestId) || _error != null) return;
           try {
             _lastUsage =
                 await streamResult.totalUsage ?? await streamResult.usage;
           } catch (_) {
             // Usage is best-effort.
           }
-          if (!_isCurrentRequest(requestId) || _error != null) return;
-          _activeRequestId = null;
+          if (!isCurrentRequest(requestId) || _error != null) return;
+          activeRequestId = null;
           _activeAbortSignal = null;
           _isLoading = false;
           _isStreaming = false;
-          _notifyListenersSafely(immediate: true, status: true, content: true);
+          notifyListenersSafely(immediate: true, status: true, content: true);
           onFinish?.call(_completion);
         },
         onError: (Object err) => _handleError(err, requestId),
         cancelOnError: true,
       );
     } catch (err) {
-      if (!_isCurrentRequest(requestId) || abortSignal.isCancelled) return;
+      if (!isCurrentRequest(requestId) || abortSignal.isCancelled) return;
       _handleError(err, requestId);
     }
   }
 
   void _handleError(Object err, int requestId) {
-    if (!_isCurrentRequest(requestId) || _error != null) return;
-    _activeRequestId = null;
+    if (!isCurrentRequest(requestId) || _error != null) return;
+    activeRequestId = null;
     _activeAbortSignal = null;
     unawaited(_activeSubscription?.cancel());
     _activeSubscription = null;
@@ -195,7 +159,7 @@ class CompletionController extends ChangeNotifier {
     _error = err;
     _isLoading = false;
     _isStreaming = false;
-    _notifyTerminalListeners(statusChanged: true);
+    notifyTerminalListeners(statusChanged: true);
     onError?.call(err);
   }
 
@@ -203,7 +167,7 @@ class CompletionController extends ChangeNotifier {
     await _cancelActiveRequest();
     _isLoading = false;
     _isStreaming = false;
-    _notifyTerminalListeners(statusChanged: true);
+    notifyTerminalListeners(statusChanged: true);
   }
 
   void clear() {
@@ -213,27 +177,13 @@ class CompletionController extends ChangeNotifier {
     _lastUsage = null;
     _isLoading = false;
     _isStreaming = false;
-    _notifyListenersSafely(immediate: true, status: true, content: true);
+    notifyListenersSafely(immediate: true, status: true, content: true);
   }
 
   @override
-  void addListener(VoidCallback listener) =>
-      _rootListenable.addListener(listener);
-
-  @override
-  void removeListener(VoidCallback listener) =>
-      _rootListenable.removeListener(listener);
-
-  @override
-  bool get hasListeners => _rootListenable.hasListeners;
-
-  @override
   void dispose() {
-    _isDisposed = true;
+    isDisposed = true;
     _cancelActiveRequestSync();
-    _rootListenable.dispose();
-    _statusListenable.dispose();
-    _contentListenable.dispose();
     super.dispose();
   }
 }

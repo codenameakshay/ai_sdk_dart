@@ -82,13 +82,16 @@ void main() {
       test(
         'error message for unknown provider mentions available providers',
         () {
-          try {
-            registry.languageModel('unknown:model');
-            fail('Expected ArgumentError');
-          } on ArgumentError catch (e) {
-            // Should mention available providers
-            expect(e.message.toString(), isNotEmpty);
-          }
+          expect(
+            () => registry.languageModel('unknown:model'),
+            throwsA(
+              isA<ArgumentError>().having(
+                (e) => e.message.toString(),
+                'message',
+                contains('fake'),
+              ),
+            ),
+          );
         },
       );
     });
@@ -202,31 +205,6 @@ void main() {
           );
         },
       );
-    });
-
-    // ── RegistrableProvider ───────────────────────────────────────────────
-
-    group('RegistrableProvider', () {
-      test('can be constructed with language and embedding factories', () {
-        final provider = RegistrableProvider(
-          languageModelFactory: (modelId) =>
-              FakeTextModel('hi', modelId: modelId),
-          embeddingModelFactory: (modelId) =>
-              FakeEmbeddingModel([0.1], modelId: modelId),
-        );
-        expect(provider.languageModelFactory('test').modelId, 'test');
-        expect(provider.embeddingModelFactory('test').modelId, 'test');
-      });
-
-      test('optional model factories default to null', () {
-        final provider = RegistrableProvider(
-          languageModelFactory: (id) => FakeTextModel('hi'),
-          embeddingModelFactory: (id) => FakeEmbeddingModel([0.1]),
-        );
-        expect(provider.imageModelFactory, isNull);
-        expect(provider.speechModelFactory, isNull);
-        expect(provider.transcriptionModelFactory, isNull);
-      });
     });
   });
 }

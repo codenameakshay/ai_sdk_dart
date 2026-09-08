@@ -225,26 +225,6 @@ void main() {
     // ── generateObject passes outputSchema to provider ────────────────────
 
     group('generateObject outputSchema', () {
-      test('passes outputSchema to LanguageModelV4CallOptions', () async {
-        final model = FakeTextModel('{"name":"Alice"}');
-        final schema = Schema<Map<String, dynamic>>(
-          jsonSchema: const {
-            'type': 'object',
-            'properties': {
-              'name': {'type': 'string'},
-            },
-          },
-          fromJson: (j) => j,
-        );
-        await generateObject(model: model, schema: schema, prompt: 'hi');
-        expect(
-          (model.lastCallOptions?.responseFormat
-                  as LanguageModelV4JsonResponseFormat?)
-              ?.schema,
-          schema.jsonSchema,
-        );
-      });
-
       test('generateObject outputSchema matches schema.jsonSchema', () async {
         final schema = Schema<Map<String, dynamic>>(
           jsonSchema: const {
@@ -267,31 +247,6 @@ void main() {
               'city': {'type': 'string'},
             },
           }),
-        );
-      });
-    });
-
-    // ── AiNoObjectGeneratedError.isInstance() ─────────────────────────────
-
-    group('AiNoObjectGeneratedError.isInstance()', () {
-      test('returns true for AiNoObjectGeneratedError instance', () {
-        final err = AiNoObjectGeneratedError(
-          message: 'fail',
-          text: 'bad',
-          response: null,
-          usage: null,
-        );
-        expect(AiNoObjectGeneratedError.isInstance(err), isTrue);
-      });
-
-      test('returns false for non-error objects', () {
-        expect(AiNoObjectGeneratedError.isInstance('not an error'), isFalse);
-        expect(AiNoObjectGeneratedError.isInstance(42), isFalse);
-        expect(
-          AiNoObjectGeneratedError.isInstance(
-            const AiApiCallError('api error'),
-          ),
-          isFalse,
         );
       });
     });

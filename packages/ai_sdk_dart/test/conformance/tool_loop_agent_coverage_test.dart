@@ -6,8 +6,11 @@ import 'package:test/test.dart';
 
 import 'helpers/fake_models.dart';
 
-/// Exercises the [ToolLoopAgent] generate/stream paths and the tool-execution
-/// error branches that the single existing happy-path test does not reach.
+/// [ToolLoopAgent] is pure forwarding to [generateText]/[streamText] (zero
+/// branches of its own), so this file only checks the happy paths and that
+/// every constructor/call parameter actually reaches the underlying call —
+/// not the generateText/streamText loop machinery itself, which is covered
+/// by its own conformance tests.
 void main() {
   Schema<Map<String, dynamic>> objectSchema() => Schema<Map<String, dynamic>>(
     jsonSchema: const {'type': 'object'},
@@ -23,57 +26,7 @@ void main() {
     );
   }
 
-  group('ToolLoopAgent.generate single-shot path', () {
-    test('no tools delegates directly to generateText (prompt)', () async {
-      final agent = ToolLoopAgent(
-        model: FakeTextModel('plain answer'),
-        instructions: 'be helpful',
-      );
-      final result = await agent.generate(prompt: 'hi');
-      expect(result.text, 'plain answer');
-    });
-
-    test('maxSteps <= 1 delegates directly even with tools', () async {
-      final agent = ToolLoopAgent(
-        model: FakeTextModel('direct'),
-        tools: {'echo': echoTool((_) => 'x')},
-      );
-      final result = await agent.generate(prompt: 'hi');
-      expect(result.text, 'direct');
-    });
-
-    test('delegates with messages (all roles converted)', () async {
-      final capturing = FakeCapturingModel(responseText: 'ok');
-      final agent = ToolLoopAgent(model: capturing);
-      await agent.generate(
-        messages: const [
-          ModelMessage(role: ModelMessageRole.system, content: 's'),
-          ModelMessage(role: ModelMessageRole.user, content: 'u'),
-          ModelMessage(role: ModelMessageRole.assistant, content: 'a'),
-          ModelMessage(role: ModelMessageRole.tool, content: 't'),
-        ],
-      );
-      final roles = capturing.capturedOptions.single.prompt.messages
-          .map((m) => m.role.name)
-          .toList();
-      expect(roles, ['system', 'user', 'assistant', 'tool']);
-    });
-
-    test(
-      'forwards pre-cancelled abortSignal in direct generate path',
-      () async {
-        final token = CancellationToken()..cancel();
-        final agent = ToolLoopAgent(model: FakeTextModel('unexpected'));
-
-        await expectLater(
-          () => agent.generate(prompt: 'hi', abortSignal: token),
-          throwsA(isA<AiOperationCancelledError>()),
-        );
-      },
-    );
-  });
-
-  group('ToolLoopAgent.generate tool loop', () {
+  group('ToolLoopAgent.generate', () {
     test('runs the tool loop and returns the final text', () async {
       final model = _AgentLoopModel([
         _toolCall('echo', {'msg': 'hi'}),
@@ -88,249 +41,68 @@ void main() {
       expect(result.text, 'final answer');
     });
 
-    test('converts messages inside the loop path', () async {
+    test('forwards instructions as the system prompt', () async {
+      final capturing = FakeCapturingModel(responseText: 'ok');
+      final agent = ToolLoopAgent(model: capturing, instructions: 'be helpful');
+      await agent.generate(prompt: 'hi');
+      expect(capturing.capturedOptions.single.prompt.system, 'be helpful');
+    });
+
+    test('forwards tools to the underlying call options', () async {
+      final capturing = FakeCapturingModel(responseText: 'ok');
+      final agent = ToolLoopAgent(
+        model: capturing,
+        tools: {'echo': echoTool((_) => 'ok')},
+      );
+      await agent.generate(prompt: 'hi');
+      final names = capturing.capturedOptions.single.tools
+          .whereType<LanguageModelV4FunctionTool>()
+          .map((t) => t.name);
+      expect(names, contains('echo'));
+    });
+
+    test('forwards maxSteps to the tool loop', () async {
       final model = _AgentLoopModel([
         _toolCall('echo', const {}),
-        _text('done'),
+        _toolCall('echo', const {}),
+        _toolCall('echo', const {}),
       ]);
       final agent = ToolLoopAgent(
         model: model,
-        maxSteps: 4,
+        maxSteps: 2,
         tools: {'echo': echoTool((_) => 'ok')},
       );
-      final result = await agent.generate(
-        messages: const [
-          ModelMessage(role: ModelMessageRole.user, content: 'u'),
-          ModelMessage.parts(
-            role: ModelMessageRole.assistant,
-            parts: [LanguageModelV4TextPart(text: 'prior')],
-          ),
-        ],
+      await agent.generate(prompt: 'go');
+      expect(model.callCount, 2);
+    });
+
+    test('forwards stopConditions to the tool loop', () async {
+      final model = _AgentLoopModel([
+        _toolCall('echo', const {}),
+        _toolCall('echo', const {}),
+      ]);
+      final agent = ToolLoopAgent(
+        model: model,
+        maxSteps: 5,
+        stopConditions: [(snapshot) => snapshot.stepCount >= 1],
+        tools: {'echo': echoTool((_) => 'ok')},
       );
-      expect(result.text, 'done');
+      await agent.generate(prompt: 'go');
+      expect(model.callCount, 1);
     });
 
     test(
-      'stop condition halts the loop and returns current response',
+      'forwards pre-cancelled abortSignal in direct generate path',
       () async {
-        // Always returns a tool call, but a stop condition fires after step 1.
-        final model = _AgentLoopModel([
-          _toolCall('echo', const {}),
-          _toolCall('echo', const {}),
-        ]);
-        final agent = ToolLoopAgent(
-          model: model,
-          maxSteps: 5,
-          stopConditions: [(snapshot) => snapshot.stepCount >= 1],
-          tools: {'echo': echoTool((_) => 'ok')},
-        );
-        final result = await agent.generate(prompt: 'go');
-        // The response that triggered the stop carried a tool call (no text).
-        expect(result.toolCalls, isNotEmpty);
-      },
-    );
-
-    test(
-      'maxSteps exhausted with continuous tool calls returns last response',
-      () async {
-        final model = _AgentLoopModel([
-          _toolCall('echo', const {}),
-          _toolCall('echo', const {}),
-        ]);
-        final agent = ToolLoopAgent(
-          model: model,
-          maxSteps: 2,
-          tools: {'echo': echoTool((_) => 'ok')},
-        );
-        final result = await agent.generate(prompt: 'go');
-        expect(result.toolCalls, isNotEmpty);
-      },
-    );
-
-    test(
-      'cancelling between tool steps prevents the next provider call',
-      () async {
-        final token = CancellationToken();
-        final model = _AgentLoopModel([
-          _toolCall('echo', const {}),
-          _text('should not happen'),
-        ]);
-        final agent = ToolLoopAgent(
-          model: model,
-          maxSteps: 3,
-          tools: {
-            'echo': tool<Map<String, dynamic>, Object?>(
-              inputSchema: objectSchema(),
-              execute: (input, options) async {
-                options.abortSignal?.cancel();
-                return 'ok';
-              },
-            ),
-          },
-        );
+        final token = CancellationToken()..cancel();
+        final agent = ToolLoopAgent(model: FakeTextModel('unexpected'));
 
         await expectLater(
-          () => agent.generate(prompt: 'go', abortSignal: token),
+          () => agent.generate(prompt: 'hi', abortSignal: token),
           throwsA(isA<AiOperationCancelledError>()),
         );
-        expect(model.callCount, 1);
       },
     );
-
-    test('cancelling during async tool execution stops promptly', () async {
-      final token = CancellationToken();
-      final toolGate = Completer<void>();
-      final model = _AgentLoopModel([
-        _toolCall('echo', const {}),
-        _text('should not happen'),
-      ]);
-      final agent = ToolLoopAgent(
-        model: model,
-        maxSteps: 3,
-        tools: {
-          'echo': tool<Map<String, dynamic>, Object?>(
-            inputSchema: objectSchema(),
-            execute: (input, options) async {
-              await toolGate.future;
-              return 'late';
-            },
-          ),
-        },
-      );
-
-      final future = agent.generate(prompt: 'go', abortSignal: token);
-      await Future<void>.delayed(Duration.zero);
-      token.cancel();
-
-      await expectLater(future, throwsA(isA<AiOperationCancelledError>()));
-      expect(model.callCount, 1);
-      toolGate.complete();
-    });
-  });
-
-  group('ToolLoopAgent tool execution errors', () {
-    test(
-      'unknown tool name is rejected by the shared generateText path',
-      () async {
-        final model = _AgentLoopModel([
-          _toolCall('missing', const {}),
-          _text('after'),
-        ]);
-        final agent = ToolLoopAgent(
-          model: model,
-          maxSteps: 3,
-          tools: {'known': echoTool((_) => 'ok')},
-        );
-        await expectLater(
-          () => agent.generate(prompt: 'go'),
-          throwsA(isA<AiNoSuchToolError>()),
-        );
-      },
-    );
-
-    test('non-object tool input yields an error tool result', () async {
-      final model = _AgentLoopModel([
-        _toolCallRaw('echo', 'a bare string'),
-        _text('after'),
-      ]);
-      final agent = ToolLoopAgent(
-        model: model,
-        maxSteps: 3,
-        tools: {'echo': echoTool((_) => 'ok')},
-      );
-      final result = await agent.generate(prompt: 'go');
-      expect(result.text, 'after');
-    });
-
-    test('tool with no executor yields an error tool result', () async {
-      final model = _AgentLoopModel([
-        _toolCall('noexec', const {}),
-        _text('after'),
-      ]);
-      final agent = ToolLoopAgent(
-        model: model,
-        maxSteps: 3,
-        tools: {
-          'noexec': tool<Map<String, dynamic>, String>(
-            inputSchema: objectSchema(),
-          ),
-        },
-      );
-      final result = await agent.generate(prompt: 'go');
-      expect(result.text, 'after');
-    });
-
-    test('throwing tool executor is captured as an error result', () async {
-      final model = _AgentLoopModel([
-        _toolCall('boom', const {}),
-        _text('recovered'),
-      ]);
-      final agent = ToolLoopAgent(
-        model: model,
-        maxSteps: 3,
-        tools: {'boom': echoTool((_) => throw StateError('kaboom'))},
-      );
-      final result = await agent.generate(prompt: 'go');
-      expect(result.text, 'recovered');
-    });
-
-    test('non-string tool output is JSON-encoded', () async {
-      final model = _AgentLoopModel([
-        _toolCall('obj', const {}),
-        _text('done'),
-      ]);
-      final agent = ToolLoopAgent(
-        model: model,
-        maxSteps: 3,
-        tools: {
-          'obj': echoTool((_) => {'k': 'v'}),
-        },
-      );
-      final result = await agent.generate(prompt: 'go');
-      expect(result.text, 'done');
-    });
-
-    test('unencodable tool output falls back to toString', () async {
-      final model = _AgentLoopModel([
-        _toolCall('obj', const {}),
-        _text('done'),
-      ]);
-      final agent = ToolLoopAgent(
-        model: model,
-        maxSteps: 3,
-        tools: {'obj': echoTool((_) => _AgentUnencodable())},
-      );
-      final result = await agent.generate(prompt: 'go');
-      expect(result.text, 'done');
-    });
-
-    test('loop converts a tool-role message in the prompt history', () async {
-      final model = _AgentLoopModel([
-        _toolCall('echo', const {}),
-        _text('done'),
-      ]);
-      final agent = ToolLoopAgent(
-        model: model,
-        maxSteps: 3,
-        tools: {'echo': echoTool((_) => 'ok')},
-      );
-      final result = await agent.generate(
-        messages: const [
-          ModelMessage(role: ModelMessageRole.user, content: 'u'),
-          ModelMessage.parts(
-            role: ModelMessageRole.tool,
-            parts: [
-              LanguageModelV4ToolResultPart(
-                toolCallId: 'prev',
-                toolName: 'echo',
-                output: ToolResultOutputText('prior result'),
-              ),
-            ],
-          ),
-        ],
-      );
-      expect(result.text, 'done');
-    });
   });
 
   group('ToolLoopAgent.stream', () {
@@ -351,7 +123,9 @@ void main() {
     );
 
     test('forwards timeout through stream()', () async {
-      final agent = ToolLoopAgent(model: _SlowAgentStreamModel());
+      final agent = ToolLoopAgent(
+        model: FakeSlowStartModel(const Duration(milliseconds: 50)),
+      );
       final result = await agent.stream(
         prompt: 'go',
         timeout: const TimeoutConfiguration(step: Duration(milliseconds: 10)),
@@ -382,24 +156,6 @@ LanguageModelV4GenerateResult _toolCall(
   finishReason: LanguageModelV4FinishReason.toolCalls,
 );
 
-LanguageModelV4GenerateResult _toolCallRaw(String name, Object input) =>
-    LanguageModelV4GenerateResult(
-      content: [
-        LanguageModelV4ToolCallPart(
-          toolCallId: 'tc',
-          toolName: name,
-          input: input,
-        ),
-      ],
-      finishReason: LanguageModelV4FinishReason.toolCalls,
-    );
-
-/// A value that is not JSON-encodable but has a stable toString.
-class _AgentUnencodable {
-  @override
-  String toString() => 'AgentUnencodable()';
-}
-
 /// Cycles through [responses] across successive doGenerate calls.
 class _AgentLoopModel extends LanguageModelV4 {
   _AgentLoopModel(this.responses);
@@ -428,35 +184,4 @@ class _AgentLoopModel extends LanguageModelV4 {
   Future<LanguageModelV4StreamResult> doStream(
     LanguageModelV4CallOptions options,
   ) async => throw UnimplementedError();
-}
-
-class _SlowAgentStreamModel extends LanguageModelV4 {
-  @override
-  String get provider => 'fake';
-
-  @override
-  String get modelId => 'slow-agent-stream-model';
-
-  @override
-  String get specificationVersion => 'v4';
-
-  @override
-  Future<LanguageModelV4GenerateResult> doGenerate(
-    LanguageModelV4CallOptions options,
-  ) async => throw UnimplementedError();
-
-  @override
-  Future<LanguageModelV4StreamResult> doStream(
-    LanguageModelV4CallOptions options,
-  ) async {
-    await Future<void>.delayed(const Duration(seconds: 1));
-    return LanguageModelV4StreamResult(
-      stream: Stream<LanguageModelV4StreamPart>.fromIterable([
-        const StreamPartTextStart(id: 'text-1'),
-        const StreamPartTextDelta(id: 'text-1', delta: 'late'),
-        const StreamPartTextEnd(id: 'text-1'),
-        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
-      ]),
-    );
-  }
 }

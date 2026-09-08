@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -8,12 +7,14 @@ import 'package:ai_sdk_google/ai_sdk_google.dart';
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 import 'package:test/test.dart';
 
+import '../../ai_sdk_provider/test/support/test_server.dart';
+
 void main() {
   group('result envelope provider conformance', () {
     test(
       'openai generateText/streamText expose request/response bodies',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await TestServer.start((request) async {
           if (request.uri.path != '/v1/chat/completions') {
             request.response.statusCode = 404;
             await request.response.close();
@@ -68,7 +69,7 @@ void main() {
             request.response.write('data: [DONE]\n\n');
           }
           await request.response.close();
-        });
+        }, pathSuffix: '/v1');
         addTearDown(server.close);
 
         final model = OpenAIProvider(
@@ -92,7 +93,7 @@ void main() {
     test(
       'anthropic generateText/streamText expose request/response bodies',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await TestServer.start((request) async {
           if (request.uri.path != '/v1/messages') {
             request.response.statusCode = 404;
             await request.response.close();
@@ -149,7 +150,7 @@ void main() {
             );
           }
           await request.response.close();
-        });
+        }, pathSuffix: '/v1');
         addTearDown(server.close);
 
         final model = AnthropicProvider(
@@ -173,7 +174,7 @@ void main() {
     test(
       'google generateText/streamText expose request/response bodies',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await TestServer.start((request) async {
           final path = request.uri.path;
           if (path.endsWith(':generateContent')) {
             request.response.statusCode = 200;
@@ -222,7 +223,7 @@ void main() {
 
           request.response.statusCode = 404;
           await request.response.close();
-        });
+        }, pathSuffix: '/v1');
         addTearDown(server.close);
 
         final model = GoogleGenerativeAIProvider(
@@ -243,28 +244,4 @@ void main() {
       },
     );
   });
-}
-
-class _TestServer {
-  _TestServer._(this._server, this.baseUrl);
-
-  final HttpServer _server;
-  final String baseUrl;
-
-  static Future<_TestServer> start(
-    Future<void> Function(HttpRequest request) onRequest,
-  ) async {
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    unawaited(() async {
-      await for (final request in server) {
-        await onRequest(request);
-      }
-    }());
-    return _TestServer._(
-      server,
-      'http://${server.address.address}:${server.port}/v1',
-    );
-  }
-
-  Future<void> close() => _server.close(force: true);
 }

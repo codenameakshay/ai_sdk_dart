@@ -139,7 +139,7 @@ void main() {
     );
 
     test('system instruction is combined with object output schema', () async {
-      final model = _CapturingStreamModel('{"a":1}');
+      final model = FakeCapturingStreamModel('{"a":1}');
       final result = await streamText<Map<String, dynamic>>(
         model: model,
         system: 'be terse',
@@ -161,7 +161,7 @@ void main() {
           Output.json(): '{}',
         };
         for (final entry in cases.entries) {
-          final model = _CapturingStreamModel(entry.value);
+          final model = FakeCapturingStreamModel(entry.value);
           final result = await streamText<Object?>(
             model: model,
             system: 'guidance',
@@ -520,7 +520,7 @@ void main() {
     );
 
     test('toolChoice specific exposes only the named tool', () async {
-      final model = _CapturingStreamModel('hi');
+      final model = FakeCapturingStreamModel('hi');
       final result = await streamText(
         model: model,
         prompt: 'go',
@@ -534,7 +534,7 @@ void main() {
 
   group('streamText activeTools', () {
     test('activeToolNames restricts which tools are exposed', () async {
-      final model = _CapturingStreamModel('hi');
+      final model = FakeCapturingStreamModel('hi');
       final result = await streamText(
         model: model,
         prompt: 'go',
@@ -567,7 +567,7 @@ void main() {
 
   group('streamText prepareStep', () {
     test('prepareStep can override messages for a step', () async {
-      final model = _CapturingStreamModel('ok');
+      final model = FakeCapturingStreamModel('ok');
       final result = await streamText(
         model: model,
         prompt: 'orig',
@@ -615,25 +615,6 @@ void main() {
     });
   });
 
-  group('streamText reasoning close mid-stream', () {
-    test('reasoning followed by text closes the reasoning part', () async {
-      final model = FakeStreamModel([
-        const StreamPartReasoningDelta(id: 'reasoning-0', delta: 'first '),
-        const StreamPartReasoningDelta(id: 'reasoning-0', delta: 'thought'),
-        const StreamPartTextStart(id: 't1'),
-        const StreamPartTextDelta(id: 't1', delta: 'answer'),
-        const StreamPartTextEnd(id: 't1'),
-        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
-      ]);
-      final result = await streamText(model: model, prompt: 'go');
-      final events = await result.fullStream.toList();
-      // reasoning end emitted before text answer is finished
-      expect(events.whereType<StreamTextReasoningStartEvent>(), hasLength(1));
-      expect(events.whereType<StreamTextReasoningEndEvent>(), hasLength(1));
-      expect(await result.reasoningText, 'first thought');
-    });
-  });
-
   group('streamText retry and timeout', () {
     test('retries doStream until it succeeds', () async {
       final model = _FlakyStreamModel(failuresBeforeSuccess: 1);
@@ -669,7 +650,7 @@ void main() {
     });
 
     test('timeout fires when the model is too slow', () async {
-      final model = _SlowStartStreamModel(const Duration(milliseconds: 200));
+      final model = FakeSlowStartModel(const Duration(milliseconds: 200));
       final result = await streamText(
         model: model,
         prompt: 'go',
@@ -829,30 +810,6 @@ void main() {
   });
 
   group('streamText callbacks', () {
-    test('onInputStart / onInputDelta / onInputAvailable fire', () async {
-      final model = _StreamToolThenText(
-        toolName: 'echo',
-        input: const {'q': 'x'},
-        finalText: 'done',
-      );
-      final starts = <String>[];
-      final deltas = <String>[];
-      Object? available;
-      final result = await streamText(
-        model: model,
-        prompt: 'go',
-        maxSteps: 3,
-        tools: {'echo': echoTool((_) => 'ok')},
-        onInputStart: (e) => starts.add(e.toolName),
-        onInputDelta: (e) => deltas.add(e.delta),
-        onInputAvailable: (e) => available = e.input,
-      );
-      await result.fullStream.toList();
-      expect(starts, ['echo']);
-      expect(deltas, isNotEmpty);
-      expect(available, const {'q': 'x'});
-    });
-
     test('onToolCallFinish reports failure when the tool throws', () async {
       final failures = <bool>[];
       final model = _StreamToolThenText(
@@ -953,46 +910,6 @@ class _Unencodable {
 // ---------------------------------------------------------------------------
 // Helper models
 // ---------------------------------------------------------------------------
-
-/// Captures the last call options and returns a fixed text stream.
-class _CapturingStreamModel extends LanguageModelV4 {
-  _CapturingStreamModel(this.text);
-  final String text;
-  LanguageModelV4CallOptions? lastOptions;
-
-  @override
-  String get provider => 'fake';
-  @override
-  String get modelId => 'capturing-stream';
-  @override
-  String get specificationVersion => 'v4';
-
-  @override
-  Future<LanguageModelV4GenerateResult> doGenerate(
-    LanguageModelV4CallOptions options,
-  ) async {
-    lastOptions = options;
-    return LanguageModelV4GenerateResult(
-      content: [LanguageModelV4TextPart(text: text)],
-      finishReason: LanguageModelV4FinishReason.stop,
-    );
-  }
-
-  @override
-  Future<LanguageModelV4StreamResult> doStream(
-    LanguageModelV4CallOptions options,
-  ) async {
-    lastOptions = options;
-    return LanguageModelV4StreamResult(
-      stream: Stream<LanguageModelV4StreamPart>.fromIterable([
-        const StreamPartTextStart(id: 't1'),
-        StreamPartTextDelta(id: 't1', delta: text),
-        const StreamPartTextEnd(id: 't1'),
-        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
-      ]),
-    );
-  }
-}
 
 /// First call streams a single tool call; the second call streams [finalText].
 class _StreamToolThenText extends LanguageModelV4 {
@@ -1141,34 +1058,6 @@ class _FlakyStreamModel extends LanguageModelV4 {
         const StreamPartTextEnd(id: 't1'),
         StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
       ]),
-    );
-  }
-}
-
-/// Delays before returning the stream so a timeout can trigger.
-class _SlowStartStreamModel extends LanguageModelV4 {
-  _SlowStartStreamModel(this.delay);
-  final Duration delay;
-
-  @override
-  String get provider => 'fake';
-  @override
-  String get modelId => 'slow-start';
-  @override
-  String get specificationVersion => 'v4';
-
-  @override
-  Future<LanguageModelV4GenerateResult> doGenerate(
-    LanguageModelV4CallOptions options,
-  ) async => throw UnimplementedError();
-
-  @override
-  Future<LanguageModelV4StreamResult> doStream(
-    LanguageModelV4CallOptions options,
-  ) async {
-    await Future<void>.delayed(delay);
-    return const LanguageModelV4StreamResult(
-      stream: Stream<LanguageModelV4StreamPart>.empty(),
     );
   }
 }

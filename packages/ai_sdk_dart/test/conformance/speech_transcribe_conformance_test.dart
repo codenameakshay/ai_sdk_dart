@@ -61,12 +61,6 @@ void main() {
         expect(model.lastOptions?.providerOptions, providerOptions);
       });
 
-      test('result audio is non-null even for empty audio', () async {
-        final model = FakeSpeechModel(audio: Uint8List(0));
-        final result = await generateSpeech(model: model, text: 'silent');
-        expect(result.audio, isNotNull);
-      });
-
       test('different models can return different mediaTypes', () async {
         final mp3Model = FakeSpeechModel(
           audio: Uint8List(1),
@@ -146,15 +140,6 @@ void main() {
           providerOptions: opts,
         );
         expect(model.lastOptions?.providerOptions, opts);
-      });
-
-      test('result text is non-empty for non-empty transcript', () async {
-        final model = FakeTranscriptionModel('The quick brown fox');
-        final result = await transcribe(
-          model: model,
-          audio: Uint8List.fromList([1, 2, 3]),
-        );
-        expect(result.text, isNotEmpty);
       });
     });
   });

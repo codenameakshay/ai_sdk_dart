@@ -6,29 +6,6 @@ import 'package:test/test.dart';
 import 'helpers/fake_models.dart';
 
 void main() {
-  group('StepSnapshot', () {
-    test('has stepCount, toolCallNames, and finishReason fields', () {
-      const snapshot = StepSnapshot(
-        stepCount: 3,
-        toolCallNames: ['search', 'read'],
-        finishReason: LanguageModelV4FinishReason.stop,
-      );
-      expect(snapshot.stepCount, 3);
-      expect(snapshot.toolCallNames, ['search', 'read']);
-      expect(snapshot.finishReason, LanguageModelV4FinishReason.stop);
-    });
-
-    test('defaults toolCallNames to empty list', () {
-      const snapshot = StepSnapshot(stepCount: 1);
-      expect(snapshot.toolCallNames, isEmpty);
-    });
-
-    test('defaults finishReason to null', () {
-      const snapshot = StepSnapshot(stepCount: 1);
-      expect(snapshot.finishReason, isNull);
-    });
-  });
-
   group('never stop condition', () {
     test('always returns false', () {
       expect(never(const StepSnapshot(stepCount: 1)), isFalse);

@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -8,6 +7,9 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
+import '../../ai_sdk_provider/test/support/cancellation_adapter.dart';
+import '../../ai_sdk_provider/test/support/prompts.dart';
+import '../../ai_sdk_provider/test/support/test_server.dart';
 import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
@@ -44,7 +46,7 @@ void main() {
         final imageB64 = base64Encode(utf8.encode('img'));
         late Map<String, dynamic> captured;
 
-        final server = await _TestServer.start((request) async {
+        final server = await TestServer.start((request) async {
           expect(request.uri.path, '/chat');
           final body = await utf8.decoder.bind(request).join();
           captured = (jsonDecode(body) as Map).cast<String, dynamic>();
@@ -147,7 +149,7 @@ void main() {
 
     test('maps tool choice none and serializes tool-result messages', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await TestServer.start((request) async {
         final body = await utf8.decoder.bind(request).join();
         captured = (jsonDecode(body) as Map).cast<String, dynamic>();
         request.response.statusCode = 200;
@@ -211,7 +213,7 @@ void main() {
 
     test('credentials are resolved immediately before each request', () async {
       final authorizations = <String?>[];
-      final server = await _TestServer.start((request) async {
+      final server = await TestServer.start((request) async {
         authorizations.add(request.headers.value('authorization'));
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
@@ -237,19 +239,17 @@ void main() {
 
       await provider
           .call('command-r-plus')
-          .doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('first')));
+          .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('first')));
       token = 'second-key';
       await provider
           .call('command-r-plus')
-          .doGenerate(
-            LanguageModelV4CallOptions(prompt: _userPrompt('second')),
-          );
+          .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('second')));
 
       expect(authorizations, ['Bearer first-key', 'Bearer second-key']);
     });
 
     test('reuses an injected client across multiple requests', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await TestServer.start((request) async {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         request.response.write(
@@ -286,12 +286,10 @@ void main() {
 
       await provider
           .call('command-r-plus')
-          .doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('first')));
+          .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('first')));
       await provider
           .call('command-r-plus')
-          .doGenerate(
-            LanguageModelV4CallOptions(prompt: _userPrompt('second')),
-          );
+          .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('second')));
 
       expect(interceptedRequests, 2);
     });
@@ -299,10 +297,10 @@ void main() {
     test(
       'doGenerate cancels an in-flight Dio request via abortSignal',
       () async {
-        final adapter = _CancellationHttpClientAdapter();
+        final adapter = CancellationHttpClientAdapter();
         final client = _cancellationClient(adapter, 'http://localhost');
         addTearDown(() => client.close(force: true));
-        final abortSignal = _TestAbortSignal();
+        final abortSignal = TestAbortSignal();
         final model = CohereProvider(
           apiKey: 'test',
           baseUrl: 'http://localhost',
@@ -311,7 +309,7 @@ void main() {
 
         final future = model.doGenerate(
           LanguageModelV4CallOptions(
-            prompt: _userPrompt('hi'),
+            prompt: userPrompt('hi'),
             abortSignal: abortSignal,
           ),
         );
@@ -328,10 +326,10 @@ void main() {
     test(
       'doGenerate surfaces AiOperationCancelledError for a pre-cancelled abortSignal',
       () async {
-        final adapter = _CancellationHttpClientAdapter();
+        final adapter = CancellationHttpClientAdapter();
         final client = _cancellationClient(adapter, 'http://localhost');
         addTearDown(() => client.close(force: true));
-        final abortSignal = _TestAbortSignal()..cancel();
+        final abortSignal = TestAbortSignal()..cancel();
         final model = CohereProvider(
           apiKey: 'test',
           baseUrl: 'http://localhost',
@@ -341,7 +339,7 @@ void main() {
         await expectLater(
           model.doGenerate(
             LanguageModelV4CallOptions(
-              prompt: _userPrompt('hi'),
+              prompt: userPrompt('hi'),
               abortSignal: abortSignal,
             ),
           ),
@@ -352,10 +350,10 @@ void main() {
     );
 
     test('doStream cancels the Dio handshake via abortSignal', () async {
-      final adapter = _CancellationHttpClientAdapter();
+      final adapter = CancellationHttpClientAdapter();
       final client = _cancellationClient(adapter, 'http://localhost');
       addTearDown(() => client.close(force: true));
-      final abortSignal = _TestAbortSignal();
+      final abortSignal = TestAbortSignal();
       final model = CohereProvider(
         apiKey: 'test',
         baseUrl: 'http://localhost',
@@ -364,7 +362,7 @@ void main() {
 
       final future = model.doStream(
         LanguageModelV4CallOptions(
-          prompt: _userPrompt('hi'),
+          prompt: userPrompt('hi'),
           abortSignal: abortSignal,
         ),
       );
@@ -381,7 +379,7 @@ void main() {
       'stream, embedding, and rerank resolve credentials per dispatch',
       () async {
         final authorizations = <String, String?>{};
-        final server = await _TestServer.start((request) async {
+        final server = await TestServer.start((request) async {
           authorizations[request.uri.path] = request.headers.value(
             'authorization',
           );
@@ -449,9 +447,7 @@ void main() {
 
         final stream = await provider
             .call('command-r-plus')
-            .doStream(
-              LanguageModelV4CallOptions(prompt: _userPrompt('stream')),
-            );
+            .doStream(LanguageModelV4CallOptions(prompt: userPrompt('stream')));
         await stream.stream.drain<void>();
 
         token = 'embed-token';
@@ -477,7 +473,7 @@ void main() {
     test(
       'normalizes numeric vectors and ignores response rows beyond the input',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await TestServer.start((request) async {
           await utf8.decoder.bind(request).join();
           request.response.statusCode = 200;
           request.response.headers.contentType = ContentType.json;
@@ -518,7 +514,7 @@ void main() {
     test(
       'dispose closes owned clients and leaves injected clients open',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await TestServer.start((request) async {
           request.response.statusCode = 200;
           request.response.headers.contentType = ContentType.json;
           request.response.write(
@@ -544,9 +540,7 @@ void main() {
           ownedProvider
               .call('command-r-plus')
               .doGenerate(
-                LanguageModelV4CallOptions(
-                  prompt: _userPrompt('after-dispose'),
-                ),
+                LanguageModelV4CallOptions(prompt: userPrompt('after-dispose')),
               ),
           throwsA(anything),
         );
@@ -563,7 +557,7 @@ void main() {
         await injectedProvider
             .call('command-r-plus')
             .doGenerate(
-              LanguageModelV4CallOptions(prompt: _userPrompt('still-open')),
+              LanguageModelV4CallOptions(prompt: userPrompt('still-open')),
             );
 
         expect(adapter.closeCount, 0);
@@ -574,7 +568,7 @@ void main() {
     );
 
     test('parses tool calls from the NDJSON stream', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await TestServer.start((request) async {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         request.response.write(
@@ -657,7 +651,7 @@ void main() {
     });
 
     test('finalizes buffered tool calls once at message end', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await TestServer.start((request) async {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         request.response.write(
@@ -752,7 +746,7 @@ void main() {
     });
 
     test('does not duplicate an explicit tool-call-end at message end', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await TestServer.start((request) async {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         request.response.write(
@@ -826,7 +820,7 @@ void main() {
     test(
       'finalizes interleaved pending tool-call indexes in sorted order before finish',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await TestServer.start((request) async {
           request.response.statusCode = 200;
           request.response.headers.contentType = ContentType.json;
           request.response.write(
@@ -944,17 +938,6 @@ void main() {
   });
 }
 
-LanguageModelV4Prompt _userPrompt(String text) {
-  return LanguageModelV4Prompt(
-    messages: [
-      LanguageModelV4Message(
-        role: LanguageModelV4Role.user,
-        content: [LanguageModelV4TextPart(text: text)],
-      ),
-    ],
-  );
-}
-
 Dio _cancellationClient(HttpClientAdapter adapter, String baseUrl) {
   final client = Dio(
     BaseOptions(
@@ -965,78 +948,4 @@ Dio _cancellationClient(HttpClientAdapter adapter, String baseUrl) {
   );
   client.httpClientAdapter = adapter;
   return client;
-}
-
-class _TestServer {
-  _TestServer._(this._server);
-
-  final HttpServer _server;
-
-  static Future<_TestServer> start(
-    FutureOr<void> Function(HttpRequest request) handler,
-  ) async {
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    unawaited(() async {
-      await for (final request in server) {
-        await handler(request);
-      }
-    }());
-    return _TestServer._(server);
-  }
-
-  String get baseUrl => 'http://${_server.address.host}:${_server.port}';
-
-  Future<void> close() => _server.close(force: true);
-}
-
-class _TestAbortSignal implements LanguageModelV4AbortSignal {
-  final Completer<void> _completer = Completer<void>();
-  bool _isCancelled = false;
-
-  @override
-  bool get isCancelled => _isCancelled;
-
-  @override
-  Future<void> get onCancelled => _completer.future;
-
-  void cancel() {
-    if (_isCancelled) return;
-    _isCancelled = true;
-    _completer.complete();
-  }
-}
-
-class _CancellationHttpClientAdapter implements HttpClientAdapter {
-  int fetchCount = 0;
-  RequestOptions? lastOptions;
-  final Completer<void> fetchStarted = Completer<void>();
-
-  @override
-  Future<ResponseBody> fetch(
-    RequestOptions options,
-    Stream<Uint8List>? requestStream,
-    Future<void>? cancelFuture,
-  ) {
-    fetchCount++;
-    lastOptions = options;
-    if (!fetchStarted.isCompleted) {
-      fetchStarted.complete();
-    }
-
-    final completer = Completer<ResponseBody>();
-    cancelFuture?.then((_) {
-      if (!completer.isCompleted) {
-        completer.completeError(
-          DioException.requestCancelled(
-            requestOptions: options,
-            reason: 'abortSignal',
-          ),
-        );
-      }
-    });
-    return completer.future;
-  }
-
-  @override
-  void close({bool force = false}) {}
 }

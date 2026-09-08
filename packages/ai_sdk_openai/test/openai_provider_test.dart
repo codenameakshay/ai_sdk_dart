@@ -9,12 +9,14 @@ import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
 import '../../ai_sdk_provider/test/contract/language_model_contract.dart';
+import '../../ai_sdk_provider/test/support/prompts.dart';
+import '../../ai_sdk_provider/test/support/test_server.dart';
 import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
   group('OpenAIProvider', () {
     test('doGenerate maps text, tools, finish reason, usage', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         expect(request.uri.path, '/v1/chat/completions');
         final body = await utf8.decoder.bind(request).join();
         final jsonBody = jsonDecode(body) as Map<String, dynamic>;
@@ -96,7 +98,7 @@ void main() {
     });
 
     test('doStream parses text and tool deltas into stream parts', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         expect(request.uri.path, '/v1/chat/completions');
         request.response.statusCode = 200;
         request.response.headers.set('content-type', 'text/event-stream');
@@ -144,10 +146,7 @@ void main() {
         'Hello',
       );
       expect(parts.whereType<StreamPartToolInputStart>().length, 1);
-      expect(
-        parts.whereType<StreamPartToolInputDelta>().length,
-        greaterThanOrEqualTo(1),
-      );
+      expect(parts.whereType<StreamPartToolInputDelta>().length, 2);
       expect(parts.whereType<StreamPartToolInputEnd>().length, 1);
       expect(parts.whereType<StreamPartToolCall>().length, 1);
       expect(
@@ -158,7 +157,7 @@ void main() {
 
     test('credentials are resolved immediately before each request', () async {
       final authorizations = <String?>[];
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         authorizations.add(request.headers.value('authorization'));
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
@@ -185,19 +184,17 @@ void main() {
 
       await provider
           .call('gpt-4.1-mini')
-          .doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('first')));
+          .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('first')));
       token = 'second-token';
       await provider
           .call('gpt-4.1-mini')
-          .doGenerate(
-            LanguageModelV4CallOptions(prompt: _userPrompt('second')),
-          );
+          .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('second')));
 
       expect(authorizations, ['Bearer first-token', 'Bearer second-token']);
     });
 
     test('reuses an injected client across multiple requests', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         request.response.write(
@@ -235,12 +232,10 @@ void main() {
 
       await provider
           .call('gpt-4.1-mini')
-          .doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('first')));
+          .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('first')));
       await provider
           .call('gpt-4.1-mini')
-          .doGenerate(
-            LanguageModelV4CallOptions(prompt: _userPrompt('second')),
-          );
+          .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('second')));
 
       expect(interceptedRequests, 2);
     });
@@ -249,7 +244,7 @@ void main() {
       'stream and auxiliary surfaces resolve credentials immediately before dispatch',
       () async {
         final authorizations = <String, String?>{};
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           authorizations[request.uri.path] = request.headers.value(
             'authorization',
           );
@@ -312,9 +307,7 @@ void main() {
 
         final streamResult = await provider
             .call('gpt-4.1-mini')
-            .doStream(
-              LanguageModelV4CallOptions(prompt: _userPrompt('stream')),
-            );
+            .doStream(LanguageModelV4CallOptions(prompt: userPrompt('stream')));
         await streamResult.stream.drain<void>();
 
         token = 'embed-token';
@@ -353,7 +346,7 @@ void main() {
 
     test('embedding provider auth wins over request headers', () async {
       String? authorization;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         authorization = request.headers.value('authorization');
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
@@ -390,7 +383,7 @@ void main() {
     test(
       'dispose closes owned clients and leaves injected clients open',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           request.response.statusCode = 200;
           request.response.headers.contentType = ContentType.json;
           request.response.write(
@@ -416,9 +409,7 @@ void main() {
           ownedProvider
               .call('gpt-4.1-mini')
               .doGenerate(
-                LanguageModelV4CallOptions(
-                  prompt: _userPrompt('after-dispose'),
-                ),
+                LanguageModelV4CallOptions(prompt: userPrompt('after-dispose')),
               ),
           throwsA(anything),
         );
@@ -435,7 +426,7 @@ void main() {
         await injectedProvider
             .call('gpt-4.1-mini')
             .doGenerate(
-              LanguageModelV4CallOptions(prompt: _userPrompt('still-open')),
+              LanguageModelV4CallOptions(prompt: userPrompt('still-open')),
             );
 
         expect(adapter.closeCount, 0);
@@ -448,7 +439,7 @@ void main() {
     test(
       'doStream emits reasoning deltas from the default OpenAI config',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           request.response.statusCode = 200;
           request.response.headers.set('content-type', 'text/event-stream');
           request.response.write(
@@ -508,7 +499,7 @@ void main() {
 
     test('maps tool choice modes and strict tool schemas', () async {
       final seenBodies = <Map<String, dynamic>>[];
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         final body = await utf8.decoder.bind(request).join();
         seenBodies.add((jsonDecode(body) as Map).cast<String, dynamic>());
 
@@ -580,7 +571,7 @@ void main() {
     test(
       'preserves invalid strict tool arguments for downstream failure handling',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           request.response.statusCode = 200;
           request.response.headers.contentType = ContentType.json;
           request.response.write(
@@ -642,7 +633,7 @@ void main() {
     test(
       'extracts provider-native source and file parts from annotations',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           request.response.statusCode = 200;
           request.response.headers.contentType = ContentType.json;
           request.response.write(
@@ -700,7 +691,7 @@ void main() {
     );
 
     test('embedding endpoint parses vectors', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         expect(request.uri.path, '/v1/embeddings');
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
@@ -736,7 +727,7 @@ void main() {
       final imageBytes = utf8.encode('fakepng');
       final imageB64 = base64Encode(imageBytes);
 
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         expect(request.uri.path, '/v1/images/generations');
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
@@ -763,7 +754,7 @@ void main() {
     });
 
     test('passes providerOptions into request body', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         final body = await utf8.decoder.bind(request).join();
         final jsonBody = jsonDecode(body) as Map<String, dynamic>;
         expect(jsonBody['user'], 'user-123');
@@ -838,7 +829,7 @@ void main() {
         'doGenerate sends reasoning_effort from snake_case providerOptions',
         () async {
           late Map<String, dynamic> captured;
-          final server = await _TestServer.start((request) async {
+          final server = await _startServer((request) async {
             final body = await utf8.decoder.bind(request).join();
             captured = (jsonDecode(body) as Map).cast<String, dynamic>();
             request.response.statusCode = 200;
@@ -885,7 +876,7 @@ void main() {
         'doGenerate sends reasoning_effort from typed options class',
         () async {
           late Map<String, dynamic> captured;
-          final server = await _TestServer.start((request) async {
+          final server = await _startServer((request) async {
             final body = await utf8.decoder.bind(request).join();
             captured = (jsonDecode(body) as Map).cast<String, dynamic>();
             request.response.statusCode = 200;
@@ -938,7 +929,7 @@ void main() {
         'doGenerate converts camelCase reasoningEffort to snake_case',
         () async {
           late Map<String, dynamic> captured;
-          final server = await _TestServer.start((request) async {
+          final server = await _startServer((request) async {
             final body = await utf8.decoder.bind(request).join();
             captured = (jsonDecode(body) as Map).cast<String, dynamic>();
             request.response.statusCode = 200;
@@ -984,7 +975,7 @@ void main() {
 
       test('serializes the provider-neutral reasoning control', () async {
         late Map<String, dynamic> captured;
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           final body = await utf8.decoder.bind(request).join();
           captured = (jsonDecode(body) as Map).cast<String, dynamic>();
           request.response.statusCode = 200;
@@ -1008,7 +999,7 @@ void main() {
         );
         await model.doGenerate(
           LanguageModelV4CallOptions(
-            prompt: _userPrompt('reason'),
+            prompt: userPrompt('reason'),
             reasoning: LanguageModelV4Reasoning.high,
           ),
         );
@@ -1018,7 +1009,7 @@ void main() {
 
       test('serializes the xhigh provider-neutral reasoning control', () async {
         late Map<String, dynamic> captured;
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           final body = await utf8.decoder.bind(request).join();
           captured = (jsonDecode(body) as Map).cast<String, dynamic>();
           request.response.statusCode = 200;
@@ -1042,7 +1033,7 @@ void main() {
         );
         await model.doGenerate(
           LanguageModelV4CallOptions(
-            prompt: _userPrompt('reason'),
+            prompt: userPrompt('reason'),
             reasoning: LanguageModelV4Reasoning.xhigh,
           ),
         );
@@ -1058,7 +1049,7 @@ void main() {
         'doGenerate sends response_format json_schema for JSON output',
         () async {
           late Map<String, dynamic> captured;
-          final server = await _TestServer.start((request) async {
+          final server = await _startServer((request) async {
             final body = await utf8.decoder.bind(request).join();
             captured = (jsonDecode(body) as Map).cast<String, dynamic>();
             request.response.statusCode = 200;
@@ -1123,7 +1114,7 @@ void main() {
         'doGenerate omits response_format when no format is requested',
         () async {
           late Map<String, dynamic> captured;
-          final server = await _TestServer.start((request) async {
+          final server = await _startServer((request) async {
             final body = await utf8.decoder.bind(request).join();
             captured = (jsonDecode(body) as Map).cast<String, dynamic>();
             request.response.statusCode = 200;
@@ -1168,7 +1159,7 @@ void main() {
       final imageB64 = base64Encode(utf8.encode('img'));
       final audioB64 = base64Encode(utf8.encode('audio'));
 
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         final body = await utf8.decoder.bind(request).join();
         final jsonBody = jsonDecode(body) as Map<String, dynamic>;
         final messages = (jsonBody['messages'] as List)
@@ -1260,7 +1251,7 @@ void main() {
     });
 
     test('stream finish includes usage and metadata', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         request.response.statusCode = 200;
         request.response.headers.set('content-type', 'text/event-stream');
         request.response.write(
@@ -1305,7 +1296,7 @@ void main() {
     });
 
     test('stream emits source/file parts from annotations', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         request.response.statusCode = 200;
         request.response.headers.set('content-type', 'text/event-stream');
         request.response.write(
@@ -1355,7 +1346,7 @@ void main() {
       'embedding forwards providerOptions and parses string tokens',
       () async {
         late Map<String, dynamic> captured;
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           expect(request.uri.path, '/v1/embeddings');
           final body = await utf8.decoder.bind(request).join();
           captured = (jsonDecode(body) as Map).cast<String, dynamic>();
@@ -1406,7 +1397,7 @@ void main() {
       () async {
         final imageB64 = base64Encode(utf8.encode('png'));
         late Map<String, dynamic> captured;
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           expect(request.uri.path, '/v1/images/generations');
           final body = await utf8.decoder.bind(request).join();
           captured = (jsonDecode(body) as Map).cast<String, dynamic>();
@@ -1454,7 +1445,7 @@ void main() {
     test('image sends response_format b64_json for dall-e models', () async {
       final imageB64 = base64Encode(utf8.encode('png'));
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         expect(request.uri.path, '/v1/images/generations');
         final body = await utf8.decoder.bind(request).join();
         captured = (jsonDecode(body) as Map).cast<String, dynamic>();
@@ -1491,7 +1482,7 @@ void main() {
       () async {
         final audioBytes = Uint8List.fromList(utf8.encode('mp3-data'));
         late Map<String, dynamic> captured;
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           expect(request.uri.path, '/v1/audio/speech');
           final body = await utf8.decoder.bind(request).join();
           captured = (jsonDecode(body) as Map).cast<String, dynamic>();
@@ -1534,7 +1525,7 @@ void main() {
 
     test('speech omits optional fields and defaults media type', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         final body = await utf8.decoder.bind(request).join();
         captured = (jsonDecode(body) as Map).cast<String, dynamic>();
         request.response.statusCode = 200;
@@ -1565,7 +1556,7 @@ void main() {
     test('transcription posts multipart audio and parses text', () async {
       late String contentTypeHeader;
       late String rawBody;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         expect(request.uri.path, '/v1/audio/transcriptions');
         contentTypeHeader = request.headers.value('content-type') ?? '';
         rawBody = await utf8.decoder.bind(request).join();
@@ -1603,7 +1594,7 @@ void main() {
     test('transcription maps audio media types to file extensions', () async {
       Future<String> filenameFor(String? mediaType) async {
         late String rawBody;
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           rawBody = await utf8.decoder.bind(request).join();
           request.response.statusCode = 200;
           request.response.headers.contentType = ContentType.json;
@@ -1641,7 +1632,7 @@ void main() {
     });
 
     test('transcription defaults to empty text when none returned', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         request.response.write(jsonEncode(<String, dynamic>{}));
@@ -1688,7 +1679,7 @@ Future<Map<String, dynamic>> _captureOpenAiRequestBody(
   LanguageModelV4Prompt prompt,
 ) async {
   late Map<String, dynamic> captured;
-  final server = await _TestServer.start((request) async {
+  final server = await _startServer((request) async {
     final body = await utf8.decoder.bind(request).join();
     captured = (jsonDecode(body) as Map).cast<String, dynamic>();
 
@@ -1716,35 +1707,6 @@ Future<Map<String, dynamic>> _captureOpenAiRequestBody(
   return captured;
 }
 
-LanguageModelV4Prompt _userPrompt(String text) {
-  return LanguageModelV4Prompt(
-    messages: [
-      LanguageModelV4Message(
-        role: LanguageModelV4Role.user,
-        content: [LanguageModelV4TextPart(text: text)],
-      ),
-    ],
-  );
-}
-
-class _TestServer {
-  _TestServer._(this._server);
-
-  final HttpServer _server;
-
-  static Future<_TestServer> start(
-    FutureOr<void> Function(HttpRequest request) handler,
-  ) async {
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    unawaited(() async {
-      await for (final request in server) {
-        await handler(request);
-      }
-    }());
-    return _TestServer._(server);
-  }
-
-  String get baseUrl => 'http://${_server.address.host}:${_server.port}/v1';
-
-  Future<void> close() => _server.close(force: true);
-}
+Future<TestServer> _startServer(
+  Future<void> Function(HttpRequest request) handler,
+) => TestServer.start(handler, pathSuffix: '/v1');

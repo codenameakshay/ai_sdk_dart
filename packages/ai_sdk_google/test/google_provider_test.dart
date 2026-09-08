@@ -9,12 +9,15 @@ import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
 import '../../ai_sdk_provider/test/contract/language_model_contract.dart';
+import '../../ai_sdk_provider/test/support/cancellation_adapter.dart';
+import '../../ai_sdk_provider/test/support/prompts.dart';
+import '../../ai_sdk_provider/test/support/test_server.dart';
 import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
   group('GoogleGenerativeAIProvider', () {
     test('doGenerate parses text/functionCall and usage', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         expect(
           request.uri.path,
           '/v1beta/models/gemini-2.0-flash:generateContent',
@@ -86,7 +89,7 @@ void main() {
     test(
       'doGenerate maps cachedContentTokenCount into nested inputTokens',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           request.response.statusCode = 200;
           request.response.headers.contentType = ContentType.json;
           request.response.write(
@@ -119,7 +122,7 @@ void main() {
         ).call('gemini-2.0-flash');
 
         final result = await model.doGenerate(
-          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+          LanguageModelV4CallOptions(prompt: userPrompt('hi')),
         );
 
         expect(result.usage.inputTokens.total, 100);
@@ -132,7 +135,7 @@ void main() {
 
     test('credentials are resolved immediately before each request', () async {
       final apiKeys = <String?>[];
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         apiKeys.add(request.uri.queryParameters['key']);
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
@@ -162,19 +165,17 @@ void main() {
 
       await provider
           .call('gemini-2.0-flash')
-          .doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('first')));
+          .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('first')));
       token = 'second-key';
       await provider
           .call('gemini-2.0-flash')
-          .doGenerate(
-            LanguageModelV4CallOptions(prompt: _userPrompt('second')),
-          );
+          .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('second')));
 
       expect(apiKeys, ['first-key', 'second-key']);
     });
 
     test('reuses an injected client across multiple requests', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         request.response.write(
@@ -215,12 +216,10 @@ void main() {
 
       await provider
           .call('gemini-2.0-flash')
-          .doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('first')));
+          .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('first')));
       await provider
           .call('gemini-2.0-flash')
-          .doGenerate(
-            LanguageModelV4CallOptions(prompt: _userPrompt('second')),
-          );
+          .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('second')));
 
       expect(interceptedRequests, 2);
     });
@@ -228,10 +227,10 @@ void main() {
     test(
       'doGenerate cancels an in-flight Dio request via abortSignal',
       () async {
-        final adapter = _CancellationHttpClientAdapter();
+        final adapter = CancellationHttpClientAdapter();
         final client = _cancellationClient(adapter, 'http://localhost/v1beta');
         addTearDown(() => client.close(force: true));
-        final abortSignal = _TestAbortSignal();
+        final abortSignal = TestAbortSignal();
         final model = GoogleGenerativeAIProvider(
           apiKey: 'test',
           baseUrl: 'http://localhost/v1beta',
@@ -240,7 +239,7 @@ void main() {
 
         final future = model.doGenerate(
           LanguageModelV4CallOptions(
-            prompt: _userPrompt('hi'),
+            prompt: userPrompt('hi'),
             abortSignal: abortSignal,
           ),
         );
@@ -257,10 +256,10 @@ void main() {
     test(
       'doGenerate surfaces AiOperationCancelledError for a pre-cancelled abortSignal',
       () async {
-        final adapter = _CancellationHttpClientAdapter();
+        final adapter = CancellationHttpClientAdapter();
         final client = _cancellationClient(adapter, 'http://localhost/v1beta');
         addTearDown(() => client.close(force: true));
-        final abortSignal = _TestAbortSignal()..cancel();
+        final abortSignal = TestAbortSignal()..cancel();
         final model = GoogleGenerativeAIProvider(
           apiKey: 'test',
           baseUrl: 'http://localhost/v1beta',
@@ -270,7 +269,7 @@ void main() {
         await expectLater(
           model.doGenerate(
             LanguageModelV4CallOptions(
-              prompt: _userPrompt('hi'),
+              prompt: userPrompt('hi'),
               abortSignal: abortSignal,
             ),
           ),
@@ -281,10 +280,10 @@ void main() {
     );
 
     test('doStream cancels the Dio handshake via abortSignal', () async {
-      final adapter = _CancellationHttpClientAdapter();
+      final adapter = CancellationHttpClientAdapter();
       final client = _cancellationClient(adapter, 'http://localhost/v1beta');
       addTearDown(() => client.close(force: true));
-      final abortSignal = _TestAbortSignal();
+      final abortSignal = TestAbortSignal();
       final model = GoogleGenerativeAIProvider(
         apiKey: 'test',
         baseUrl: 'http://localhost/v1beta',
@@ -293,7 +292,7 @@ void main() {
 
       final future = model.doStream(
         LanguageModelV4CallOptions(
-          prompt: _userPrompt('hi'),
+          prompt: userPrompt('hi'),
           abortSignal: abortSignal,
         ),
       );
@@ -310,7 +309,7 @@ void main() {
       'stream and embedding resolve api keys immediately before dispatch',
       () async {
         final apiKeys = <String, String?>{};
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           apiKeys[request.uri.path] = request.uri.queryParameters['key'];
           switch (request.uri.path) {
             case '/v1beta/models/gemini-2.0-flash:streamGenerateContent':
@@ -351,9 +350,7 @@ void main() {
 
         final stream = await provider
             .call('gemini-2.0-flash')
-            .doStream(
-              LanguageModelV4CallOptions(prompt: _userPrompt('stream')),
-            );
+            .doStream(LanguageModelV4CallOptions(prompt: userPrompt('stream')));
         await stream.stream.drain<void>();
 
         token = 'embed-key';
@@ -371,7 +368,7 @@ void main() {
     test(
       'dispose closes owned clients and leaves injected clients open',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           request.response.statusCode = 200;
           request.response.headers.contentType = ContentType.json;
           request.response.write(
@@ -401,9 +398,7 @@ void main() {
           ownedProvider
               .call('gemini-2.0-flash')
               .doGenerate(
-                LanguageModelV4CallOptions(
-                  prompt: _userPrompt('after-dispose'),
-                ),
+                LanguageModelV4CallOptions(prompt: userPrompt('after-dispose')),
               ),
           throwsA(anything),
         );
@@ -420,7 +415,7 @@ void main() {
         await injectedProvider
             .call('gemini-2.0-flash')
             .doGenerate(
-              LanguageModelV4CallOptions(prompt: _userPrompt('still-open')),
+              LanguageModelV4CallOptions(prompt: userPrompt('still-open')),
             );
 
         expect(adapter.closeCount, 0);
@@ -431,7 +426,7 @@ void main() {
     );
 
     test('doGenerate extracts provider-native source and file parts', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         request.response.write(
@@ -500,7 +495,7 @@ void main() {
     });
 
     test('doStream parses SSE chunks and finish', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         expect(
           request.uri.path,
           '/v1beta/models/gemini-2.0-flash:streamGenerateContent',
@@ -549,7 +544,7 @@ void main() {
     });
 
     test('doStream emits provider-native source and file parts', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         request.response.statusCode = 200;
         request.response.headers.set('content-type', 'text/event-stream');
         request.response.write(
@@ -589,7 +584,7 @@ void main() {
 
     test('maps tool choice modes and tool declarations', () async {
       final seenBodies = <Map<String, dynamic>>[];
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         final body = await utf8.decoder.bind(request).join();
         seenBodies.add((jsonDecode(body) as Map).cast<String, dynamic>());
 
@@ -675,7 +670,7 @@ void main() {
     test(
       'preserves invalid strict tool arguments for downstream failure handling',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           request.response.statusCode = 200;
           request.response.headers.contentType = ContentType.json;
           request.response.write(
@@ -733,7 +728,7 @@ void main() {
     );
 
     test('embedding parses vectors', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         expect(
           request.uri.path,
           '/v1beta/models/text-embedding-004:batchEmbedContents',
@@ -772,7 +767,7 @@ void main() {
     });
 
     test('passes providerOptions into request body', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         final body = await utf8.decoder.bind(request).join();
         final jsonBody = jsonDecode(body) as Map<String, dynamic>;
         expect(jsonBody['cachedContent'], 'cachedContents/123');
@@ -829,7 +824,7 @@ void main() {
       () async {
         final imageB64 = base64Encode(utf8.encode('img'));
 
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           final body = await utf8.decoder.bind(request).join();
           final jsonBody = jsonDecode(body) as Map<String, dynamic>;
           final contents = (jsonBody['contents'] as List)
@@ -922,7 +917,7 @@ void main() {
     );
 
     test('stream finish includes usage and metadata', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         request.response.statusCode = 200;
         request.response.headers.set('content-type', 'text/event-stream');
         request.response.write(
@@ -984,7 +979,7 @@ void main() {
       'doGenerate serializes system, generation config, and stops',
       () async {
         late Map<String, dynamic> captured;
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           final body = await utf8.decoder.bind(request).join();
           captured = (jsonDecode(body) as Map).cast<String, dynamic>();
           request.response.statusCode = 200;
@@ -1046,7 +1041,7 @@ void main() {
     );
 
     test('doGenerate tolerates empty candidates and content', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         request.response.write(jsonEncode({'candidates': <dynamic>[]}));
@@ -1080,7 +1075,7 @@ void main() {
 
     test('doGenerate maps each finish reason to the AI SDK value', () async {
       Future<LanguageModelV4FinishReason> resolve(String? reason) async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           request.response.statusCode = 200;
           request.response.headers.contentType = ContentType.json;
           request.response.write(
@@ -1134,7 +1129,7 @@ void main() {
     });
 
     test('doGenerate parses string and num usage token counts', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         request.response.write(
@@ -1184,7 +1179,7 @@ void main() {
 
     test('serializes assistant tool calls into function calls', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         final body = await utf8.decoder.bind(request).join();
         captured = (jsonDecode(body) as Map).cast<String, dynamic>();
         request.response.statusCode = 200;
@@ -1244,7 +1239,7 @@ void main() {
 
     test('falls back to joined text when no wire parts emitted', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         final body = await utf8.decoder.bind(request).join();
         captured = (jsonDecode(body) as Map).cast<String, dynamic>();
         request.response.statusCode = 200;
@@ -1295,7 +1290,7 @@ void main() {
     test('serializes content tool result output with media parts', () async {
       late Map<String, dynamic> captured;
       final imageB64 = base64Encode(utf8.encode('img'));
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         final body = await utf8.decoder.bind(request).join();
         captured = (jsonDecode(body) as Map).cast<String, dynamic>();
         request.response.statusCode = 200;
@@ -1381,7 +1376,7 @@ void main() {
 
     test('doStream serializes system, config, tools, and tool choice', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         final body = await utf8.decoder.bind(request).join();
         captured = (jsonDecode(body) as Map).cast<String, dynamic>();
         request.response.statusCode = 200;
@@ -1447,7 +1442,7 @@ void main() {
     });
 
     test('doStream emits tool call stream parts for Gemini functionCall', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         request.response.statusCode = 200;
         request.response.headers.set('content-type', 'text/event-stream');
         request.response.write(
@@ -1526,7 +1521,7 @@ void main() {
     test(
       'doStream reuses one tool call ID for cumulative functionCall args and ends once',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           request.response.statusCode = 200;
           request.response.headers.set('content-type', 'text/event-stream');
           request.response.write(
@@ -1590,7 +1585,7 @@ void main() {
     test(
       'doStream emits raw chunks and closes the previous tool call when Gemini switches tools',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           request.response.statusCode = 200;
           request.response.headers.set('content-type', 'text/event-stream');
           request.response.write(
@@ -1610,7 +1605,7 @@ void main() {
 
         final stream = await model.doStream(
           LanguageModelV4CallOptions(
-            prompt: _userPrompt('hi'),
+            prompt: userPrompt('hi'),
             includeRawChunks: true,
           ),
         );
@@ -1629,7 +1624,7 @@ void main() {
     test(
       'doStream preserves raw non-object functionCall args verbatim',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           request.response.statusCode = 200;
           request.response.headers.set('content-type', 'text/event-stream');
           request.response.write(
@@ -1672,7 +1667,7 @@ void main() {
 
     test('doStream sends stopSequences in generationConfig', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         captured = (jsonDecode(await utf8.decoder.bind(request).join()) as Map)
             .cast<String, dynamic>();
         request.response.statusCode = 200;
@@ -1711,7 +1706,7 @@ void main() {
     });
 
     test('doStream ignores malformed JSON and missing content', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         request.response.statusCode = 200;
         request.response.headers.set('content-type', 'text/event-stream');
         // Malformed JSON -> safely parsed to null and skipped.
@@ -1753,7 +1748,7 @@ void main() {
     test(
       'doStream emits StreamPartError when reading the body fails',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           // Detach the raw socket and promise more bytes than we deliver, then
           // destroy the connection so the client read fails mid-stream.
           final socket = await request.response.detachSocket(
@@ -1797,7 +1792,7 @@ void main() {
     test(
       'doStream emits stream start before error when the body fails before any valid chunk',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           final socket = await request.response.detachSocket(
             writeHeaders: false,
           );
@@ -1840,7 +1835,7 @@ void main() {
       'embedding sends provider options and keeps request metadata',
       () async {
         late Map<String, dynamic> captured;
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           final body = await utf8.decoder.bind(request).join();
           captured = (jsonDecode(body) as Map).cast<String, dynamic>();
           request.response.statusCode = 200;
@@ -1885,7 +1880,7 @@ void main() {
     );
 
     test('reads promptFeedback and warnings list into warnings', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         request.response.write(
@@ -1955,7 +1950,7 @@ void main() {
     });
 
     test('reads structured and fallback warning variants', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         request.response.write(
@@ -1996,7 +1991,7 @@ void main() {
       ).call('gemini-2.0-flash');
 
       final result = await model.doGenerate(
-        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
       );
 
       expect(result.warnings, hasLength(6));
@@ -2058,6 +2053,10 @@ void main() {
         final parts = (user['parts'] as List).cast<Map<String, dynamic>>();
         expect(parts[0]['text'], isNotEmpty);
         expect(parts[1]['inlineData'], isA<Map>());
+        expect(parts[2]['inlineData'], {
+          'mimeType': 'audio/wav',
+          'data': base64Encode(utf8.encode('audio')),
+        });
       },
       expectToolResultBody: (body) {
         final contents = (body['contents'] as List)
@@ -2076,7 +2075,7 @@ Future<Map<String, dynamic>> _captureGoogleRequestBody(
   LanguageModelV4Prompt prompt,
 ) async {
   late Map<String, dynamic> captured;
-  final server = await _TestServer.start((request) async {
+  final server = await _startServer((request) async {
     final body = await utf8.decoder.bind(request).join();
     captured = (jsonDecode(body) as Map).cast<String, dynamic>();
 
@@ -2120,87 +2119,6 @@ Dio _cancellationClient(HttpClientAdapter adapter, String baseUrl) {
   return client;
 }
 
-LanguageModelV4Prompt _userPrompt(String text) {
-  return LanguageModelV4Prompt(
-    messages: [
-      LanguageModelV4Message(
-        role: LanguageModelV4Role.user,
-        content: [LanguageModelV4TextPart(text: text)],
-      ),
-    ],
-  );
-}
-
-class _TestServer {
-  _TestServer._(this._server);
-
-  final HttpServer _server;
-
-  static Future<_TestServer> start(
-    FutureOr<void> Function(HttpRequest request) handler,
-  ) async {
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    unawaited(() async {
-      await for (final request in server) {
-        await handler(request);
-      }
-    }());
-    return _TestServer._(server);
-  }
-
-  String get baseUrl => 'http://${_server.address.host}:${_server.port}/v1beta';
-
-  Future<void> close() => _server.close(force: true);
-}
-
-class _TestAbortSignal implements LanguageModelV4AbortSignal {
-  final Completer<void> _completer = Completer<void>();
-  bool _isCancelled = false;
-
-  @override
-  bool get isCancelled => _isCancelled;
-
-  @override
-  Future<void> get onCancelled => _completer.future;
-
-  void cancel() {
-    if (_isCancelled) return;
-    _isCancelled = true;
-    _completer.complete();
-  }
-}
-
-class _CancellationHttpClientAdapter implements HttpClientAdapter {
-  int fetchCount = 0;
-  RequestOptions? lastOptions;
-  final Completer<void> fetchStarted = Completer<void>();
-
-  @override
-  Future<ResponseBody> fetch(
-    RequestOptions options,
-    Stream<Uint8List>? requestStream,
-    Future<void>? cancelFuture,
-  ) {
-    fetchCount++;
-    lastOptions = options;
-    if (!fetchStarted.isCompleted) {
-      fetchStarted.complete();
-    }
-
-    final completer = Completer<ResponseBody>();
-    cancelFuture?.then((_) {
-      if (!completer.isCompleted) {
-        completer.completeError(
-          DioException.requestCancelled(
-            requestOptions: options,
-            reason: 'abortSignal',
-          ),
-        );
-      }
-    });
-    return completer.future;
-  }
-
-  @override
-  void close({bool force = false}) {}
-}
+Future<TestServer> _startServer(
+  Future<void> Function(HttpRequest request) handler,
+) => TestServer.start(handler, pathSuffix: '/v1beta');

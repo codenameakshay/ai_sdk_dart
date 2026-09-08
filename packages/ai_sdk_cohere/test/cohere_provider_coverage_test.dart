@@ -7,13 +7,15 @@ import 'package:ai_sdk_cohere/ai_sdk_cohere.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
 
+import '../../ai_sdk_provider/test/support/test_server.dart';
+
 void main() {
   group('Cohere embedding model', () {
     test('serializes /embed request and parses float embeddings', () async {
       late String capturedPath;
       late Map<String, dynamic> captured;
 
-      final server = await _TestServer.start((request) async {
+      final server = await TestServer.start((request) async {
         capturedPath = request.uri.path;
         final body = await utf8.decoder.bind(request).join();
         captured = (jsonDecode(body) as Map).cast<String, dynamic>();
@@ -61,7 +63,7 @@ void main() {
     });
 
     test('handles a missing embeddings field as an empty result', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await TestServer.start((request) async {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         request.response.write(jsonEncode({'id': 'x'}));
@@ -87,7 +89,7 @@ void main() {
       late String capturedPath;
       late Map<String, dynamic> captured;
 
-      final server = await _TestServer.start((request) async {
+      final server = await TestServer.start((request) async {
         capturedPath = request.uri.path;
         final body = await utf8.decoder.bind(request).join();
         captured = (jsonDecode(body) as Map).cast<String, dynamic>();
@@ -142,7 +144,7 @@ void main() {
     test('omits top_n when not provided and handles empty results', () async {
       late Map<String, dynamic> captured;
 
-      final server = await _TestServer.start((request) async {
+      final server = await TestServer.start((request) async {
         final body = await utf8.decoder.bind(request).join();
         captured = (jsonDecode(body) as Map).cast<String, dynamic>();
         request.response.statusCode = 200;
@@ -171,7 +173,7 @@ void main() {
       final imageB64 = base64Encode(utf8.encode('file-bytes'));
       late Map<String, dynamic> captured;
 
-      final server = await _TestServer.start((request) async {
+      final server = await TestServer.start((request) async {
         final body = await utf8.decoder.bind(request).join();
         captured = (jsonDecode(body) as Map).cast<String, dynamic>();
         request.response.statusCode = 200;
@@ -283,7 +285,7 @@ void main() {
     test('serializes assistant tool calls with a tool_plan', () async {
       late Map<String, dynamic> captured;
 
-      final server = await _TestServer.start((request) async {
+      final server = await TestServer.start((request) async {
         final body = await utf8.decoder.bind(request).join();
         captured = (jsonDecode(body) as Map).cast<String, dynamic>();
         request.response.statusCode = 200;
@@ -349,7 +351,7 @@ void main() {
     test('maps specific tool choice to REQUIRED', () async {
       late Map<String, dynamic> captured;
 
-      final server = await _TestServer.start((request) async {
+      final server = await TestServer.start((request) async {
         final body = await utf8.decoder.bind(request).join();
         captured = (jsonDecode(body) as Map).cast<String, dynamic>();
         request.response.statusCode = 200;
@@ -401,7 +403,7 @@ void main() {
     });
 
     test('generates a tool call id when the response omits one', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await TestServer.start((request) async {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         request.response.write(
@@ -461,7 +463,7 @@ void main() {
     test('serializes a base64 image part as a data URI', () async {
       late Map<String, dynamic> captured;
 
-      final server = await _TestServer.start((request) async {
+      final server = await TestServer.start((request) async {
         final body = await utf8.decoder.bind(request).join();
         captured = (jsonDecode(body) as Map).cast<String, dynamic>();
         request.response.statusCode = 200;
@@ -522,7 +524,7 @@ void main() {
     test('serializes a URL image part as the raw url', () async {
       late Map<String, dynamic> captured;
 
-      final server = await _TestServer.start((request) async {
+      final server = await TestServer.start((request) async {
         final body = await utf8.decoder.bind(request).join();
         captured = (jsonDecode(body) as Map).cast<String, dynamic>();
         request.response.statusCode = 200;
@@ -583,7 +585,7 @@ void main() {
 
   group('Cohere doStream', () {
     test('emits text deltas from content-delta events', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await TestServer.start((request) async {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         request.response.write(
@@ -653,7 +655,7 @@ void main() {
     });
 
     test('emits tool-call-start args delta when start carries args', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await TestServer.start((request) async {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         // tool-call-start with non-empty arguments -> lines 386-388.
@@ -715,9 +717,9 @@ void main() {
       });
     });
 
-    test('emits StreamPartError when the stream fails', () async {
+    test('connection failure surfaces as AiApiCallError', () async {
       // Bind a server, capture its port, then close it so the connection is
-      // refused / aborted and dio throws inside _processStream's pipeline.
+      // refused before doStream's request even completes.
       final probe = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       final deadBaseUrl = 'http://${probe.address.host}:${probe.port}';
       await probe.close(force: true);
@@ -727,11 +729,8 @@ void main() {
         baseUrl: deadBaseUrl,
       ).call('command-r-plus');
 
-      // doStream itself may throw (connection refused before the stream
-      // starts) or the stream may emit a StreamPartError. Accept either as
-      // proof the error path is exercised.
-      try {
-        final streamResult = await model.doStream(
+      await expectLater(
+        model.doStream(
           LanguageModelV4CallOptions(
             prompt: LanguageModelV4Prompt(
               messages: [
@@ -742,13 +741,15 @@ void main() {
               ],
             ),
           ),
-        );
-        final parts = await streamResult.stream.toList();
-        expect(parts.whereType<StreamPartError>(), isNotEmpty);
-      } catch (_) {
-        // Connection refused surfaced directly from doStream — acceptable
-        // proof the failure path is reachable.
-      }
+        ),
+        throwsA(
+          isA<AiApiCallError>().having(
+            (e) => e.statusCode,
+            'statusCode',
+            isNull,
+          ),
+        ),
+      );
     });
 
     test(
@@ -792,48 +793,21 @@ void main() {
           baseUrl: baseUrl,
         ).call('command-r-plus');
 
-        try {
-          final streamResult = await model.doStream(
-            LanguageModelV4CallOptions(
-              prompt: LanguageModelV4Prompt(
-                messages: [
-                  LanguageModelV4Message(
-                    role: LanguageModelV4Role.user,
-                    content: [LanguageModelV4TextPart(text: 'hi')],
-                  ),
-                ],
-              ),
+        final streamResult = await model.doStream(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [LanguageModelV4TextPart(text: 'hi')],
+                ),
+              ],
             ),
-          );
-          final parts = await streamResult.stream.toList();
-          expect(parts.whereType<StreamPartError>(), isNotEmpty);
-        } catch (_) {
-          // Some platforms surface the broken body before the stream starts;
-          // either way the error path is exercised.
-        }
+          ),
+        );
+        final parts = await streamResult.stream.toList();
+        expect(parts.whereType<StreamPartError>(), isNotEmpty);
       },
     );
   });
-}
-
-class _TestServer {
-  _TestServer._(this._server);
-
-  final HttpServer _server;
-
-  static Future<_TestServer> start(
-    FutureOr<void> Function(HttpRequest request) handler,
-  ) async {
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    unawaited(() async {
-      await for (final request in server) {
-        await handler(request);
-      }
-    }());
-    return _TestServer._(server);
-  }
-
-  String get baseUrl => 'http://${_server.address.host}:${_server.port}';
-
-  Future<void> close() => _server.close(force: true);
 }

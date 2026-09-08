@@ -82,14 +82,10 @@ final cohere = CohereProvider();
 // HTTP helper
 // ---------------------------------------------------------------------------
 
-Dio _cohereDio({String? baseUrl}) {
-  return Dio(
-    BaseOptions(
-      baseUrl: baseUrl ?? 'https://api.cohere.com/v2',
-      headers: {'Content-Type': 'application/json'},
-    ),
-  );
-}
+Dio _cohereDio({String? baseUrl}) => createProviderDio(
+  baseUrl: baseUrl ?? 'https://api.cohere.com/v2',
+  headers: {'Content-Type': 'application/json'},
+);
 
 // ---------------------------------------------------------------------------
 // Language model
@@ -306,7 +302,7 @@ class _CohereLanguageModel extends LanguageModelV4 {
         cancelToken: cancelToken,
       );
     } on DioException catch (e) {
-      throw await _apiCallError(e, provider);
+      throw await apiErrorFromDioException(e, provider: provider);
     }
     final data = response.data!;
 
@@ -331,9 +327,9 @@ class _CohereLanguageModel extends LanguageModelV4 {
       final function = raw['function'] as Map<String, dynamic>?;
       content.add(
         LanguageModelV4ToolCallPart(
-          toolCallId: raw['id']?.toString() ?? _generateId(),
+          toolCallId: raw['id']?.toString() ?? prefixedId('cohere-tool'),
           toolName: function?['name']?.toString() ?? 'unknown_tool',
-          input: _safeParseJson(function?['arguments']?.toString() ?? '{}'),
+          input: safeParseJson(function?['arguments']?.toString() ?? '{}'),
         ),
       );
     }
@@ -376,7 +372,7 @@ class _CohereLanguageModel extends LanguageModelV4 {
         cancelToken: cancelToken,
       );
     } on DioException catch (e) {
-      throw await _apiCallError(e, provider);
+      throw await apiErrorFromDioException(e, provider: provider);
     }
 
     final controller = StreamController<LanguageModelV4StreamPart>();
@@ -455,7 +451,7 @@ class _CohereLanguageModel extends LanguageModelV4 {
             final index = (event['index'] as num?)?.toInt() ?? 0;
             final toolCall = message?['tool_calls'] as Map<String, dynamic>?;
             final function = toolCall?['function'] as Map<String, dynamic>?;
-            final id = toolCall?['id']?.toString() ?? _generateId();
+            final id = toolCall?['id']?.toString() ?? prefixedId('cohere-tool');
             final name = function?['name']?.toString() ?? 'unknown_tool';
             final state = _CohereToolState(id: id, name: name);
             toolStates[index] = state;
@@ -547,7 +543,7 @@ class _CohereLanguageModel extends LanguageModelV4 {
         toolCall: LanguageModelV4ToolCallPart(
           toolCallId: state.id,
           toolName: state.name,
-          input: _safeParseJson(state.args.toString()),
+          input: safeParseJson(state.args.toString()),
         ),
       ),
     );
@@ -586,16 +582,6 @@ String? _imageUrl(LanguageModelV4DataContent data, String? mediaType) {
   if (b64 == null) return null;
   return 'data:${mediaType ?? 'image/png'};base64,$b64';
 }
-
-Object _safeParseJson(String input) {
-  try {
-    return jsonDecode(input);
-  } catch (_) {
-    return input;
-  }
-}
-
-String _generateId() => 'cohere-tool-${DateTime.now().microsecondsSinceEpoch}';
 
 // ---------------------------------------------------------------------------
 // Embedding model
@@ -640,7 +626,7 @@ class _CohereEmbeddingModel implements EmbeddingModelV2<String> {
         options: Options(headers: {...?options.headers, ...resolvedHeaders}),
       );
     } on DioException catch (e) {
-      throw await _apiCallError(e, provider);
+      throw await apiErrorFromDioException(e, provider: provider);
     }
     final data = response.data!;
     final embeddingsData = data['embeddings'] as Map<String, dynamic>?;
@@ -700,7 +686,7 @@ class _CohereRerankModel implements RerankModelV1 {
         options: Options(headers: {...?options.headers, ...resolvedHeaders}),
       );
     } on DioException catch (e) {
-      throw await _apiCallError(e, provider);
+      throw await apiErrorFromDioException(e, provider: provider);
     }
     final data = response.data!;
     final results = (data['results'] as List?) ?? [];
@@ -741,26 +727,4 @@ CancelToken? _cancelTokenFor(LanguageModelV4AbortSignal? abortSignal) {
     }),
   );
   return cancelToken;
-}
-
-Future<AiSdkError> _apiCallError(DioException error, String provider) async {
-  if (error.type == DioExceptionType.cancel || CancelToken.isCancel(error)) {
-    return const AiOperationCancelledError();
-  }
-  final data = error.response?.data;
-  Object? body = data;
-  if (data is ResponseBody) {
-    final bytes = <int>[];
-    await for (final chunk in data.stream) {
-      bytes.addAll(chunk);
-    }
-    body = bytes;
-  }
-  return AiApiCallError.fromResponse(
-    statusCode: error.response?.statusCode,
-    url: error.requestOptions.uri.toString(),
-    body: body ?? error.message,
-    provider: provider,
-    cause: error,
-  );
 }

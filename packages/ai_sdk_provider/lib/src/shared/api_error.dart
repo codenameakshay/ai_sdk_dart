@@ -1,5 +1,6 @@
-import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
+
+import '../errors/ai_errors.dart';
 
 /// Maps a [DioException] from a non-2xx provider response to a typed
 /// [AiApiCallError] carrying the provider's parsed message, status code, and

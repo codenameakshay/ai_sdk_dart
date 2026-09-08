@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
@@ -26,7 +25,7 @@ class GoogleGenerativeAIProvider {
        _client = client ?? _googleDio(baseUrl: baseUrl),
        _ownsClient = client == null;
 
-  /// API key (defaults to `GOOGLE_GENERATIVE_AI_API_KEY` environment variable).
+  /// API key (defaults to `GOOGLE_API_KEY` environment variable).
   final String? apiKey;
 
   /// Base URL for the API.
@@ -137,7 +136,7 @@ class _GoogleLanguageModel extends LanguageModelV4 {
         cancelToken: cancelToken,
       );
     } on DioException catch (e) {
-      throw await _apiCallError(e, provider);
+      throw await apiErrorFromDioException(e, provider: provider);
     }
 
     final data = response.data ?? <String, dynamic>{};
@@ -165,7 +164,7 @@ class _GoogleLanguageModel extends LanguageModelV4 {
         final toolCall = _parseGoogleFunctionCall(functionCall);
         content.add(
           LanguageModelV4ToolCallPart(
-            toolCallId: _generateId('tool'),
+            toolCallId: prefixedId('tool'),
             toolName: toolCall.toolName,
             input: toolCall.input,
           ),
@@ -306,7 +305,7 @@ class _GoogleLanguageModel extends LanguageModelV4 {
         cancelToken: cancelToken,
       );
     } on DioException catch (e) {
-      throw await _apiCallError(e, provider);
+      throw await apiErrorFromDioException(e, provider: provider);
     }
 
     final body = response.data;
@@ -331,7 +330,7 @@ class _GoogleLanguageModel extends LanguageModelV4 {
 
     unawaited(() async {
       try {
-        await for (final payload in _readSseDataLines(body.stream)) {
+        await for (final payload in sseDataLines(body.stream)) {
           final json = _safeParseMap(payload);
           if (json == null) continue;
           lastChunk = json;
@@ -379,7 +378,7 @@ class _GoogleLanguageModel extends LanguageModelV4 {
                   _emitGoogleToolCall(controller, state);
                 }
                 state = _GoogleStreamFunctionCallState(
-                  toolCallId: _generateId('tool'),
+                  toolCallId: prefixedId('tool'),
                   toolName: toolCall.toolName,
                   input: toolCall.input,
                 );
@@ -587,7 +586,7 @@ class _GoogleEmbeddingModel implements EmbeddingModelV2<String> {
         options: Options(headers: options.headers),
       );
     } on DioException catch (e) {
-      throw await _apiCallError(e, provider);
+      throw await apiErrorFromDioException(e, provider: provider);
     }
 
     final data = response.data ?? <String, dynamic>{};
@@ -611,14 +610,10 @@ class _GoogleEmbeddingModel implements EmbeddingModelV2<String> {
   }
 }
 
-Dio _googleDio({String? baseUrl}) {
-  return Dio(
-    BaseOptions(
-      baseUrl: baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta',
-      headers: {'content-type': 'application/json'},
-    ),
-  );
-}
+Dio _googleDio({String? baseUrl}) => createProviderDio(
+  baseUrl: baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta',
+  headers: {'content-type': 'application/json'},
+);
 
 String _modelPath(String modelId) {
   if (modelId.startsWith('models/')) return modelId;
@@ -692,19 +687,6 @@ LanguageModelV4FinishReason _mapGoogleFinishReason(String? reason) {
   };
 }
 
-Stream<String> _readSseDataLines(Stream<Uint8List> bytesStream) async* {
-  final lines = bytesStream
-      .map<List<int>>((chunk) => chunk)
-      .transform(utf8.decoder)
-      .transform(const LineSplitter());
-  await for (final line in lines) {
-    if (!line.startsWith('data:')) continue;
-    final payload = line.substring(5).trim();
-    if (payload.isEmpty) continue;
-    yield payload;
-  }
-}
-
 Map<String, dynamic>? _safeParseMap(String input) {
   try {
     final decoded = jsonDecode(input);
@@ -713,13 +695,6 @@ Map<String, dynamic>? _safeParseMap(String input) {
     return null;
   }
 }
-
-int? _intOrNull(Object? value) => switch (value) {
-  int v => v,
-  num v => v.toInt(),
-  String v => int.tryParse(v),
-  _ => null,
-};
 
 _GoogleFunctionCall _parseGoogleFunctionCall(
   Map<String, dynamic> functionCall,
@@ -773,8 +748,8 @@ void _emitGoogleToolCall(
 /// remains the reported prompt total and the uncached remainder is surfaced via
 /// `noCache`.
 LanguageModelV4Usage _googleUsageFrom(Map<String, dynamic> usage) {
-  final inputTokens = _intOrNull(usage['promptTokenCount']);
-  final cacheRead = _intOrNull(usage['cachedContentTokenCount']);
+  final inputTokens = intOrNull(usage['promptTokenCount']);
+  final cacheRead = intOrNull(usage['cachedContentTokenCount']);
   return LanguageModelV4Usage(
     inputTokens: LanguageModelV4InputTokenUsage(
       total: inputTokens,
@@ -784,15 +759,10 @@ LanguageModelV4Usage _googleUsageFrom(Map<String, dynamic> usage) {
       cacheRead: cacheRead,
     ),
     outputTokens: LanguageModelV4OutputTokenUsage(
-      total: _intOrNull(usage['candidatesTokenCount']),
+      total: intOrNull(usage['candidatesTokenCount']),
     ),
     raw: usage,
   );
-}
-
-String _generateId(String prefix) {
-  final micros = DateTime.now().microsecondsSinceEpoch;
-  return '$prefix-$micros';
 }
 
 class _GoogleFunctionCall {
@@ -833,7 +803,7 @@ Map<String, dynamic>? _toGoogleInlinePart(
     };
   }
 
-  final b64 = _toBase64(data);
+  final b64 = dataContentToBase64(data);
   if (b64 == null) return null;
   return {
     'inlineData': {
@@ -872,15 +842,6 @@ Map<String, dynamic> _toGoogleToolResultPart(LanguageModelV4ContentPart part) {
     };
   }
   return {'type': 'unsupported'};
-}
-
-String? _toBase64(LanguageModelV4DataContent data) {
-  return switch (data) {
-    DataContentBytes(:final bytes) => base64Encode(bytes),
-    DataContentBase64(:final base64) => base64,
-    // Callers resolve DataContentUrl to fileData before reaching _toBase64.
-    DataContentUrl() => null, // coverage:ignore-line
-  };
 }
 
 List<LanguageModelV4Warning> _readGoogleWarnings(Map<String, dynamic> payload) {
@@ -977,26 +938,4 @@ CancelToken? _cancelTokenFor(LanguageModelV4AbortSignal? abortSignal) {
     }),
   );
   return cancelToken;
-}
-
-Future<AiSdkError> _apiCallError(DioException error, String provider) async {
-  if (error.type == DioExceptionType.cancel || CancelToken.isCancel(error)) {
-    return const AiOperationCancelledError();
-  }
-  final data = error.response?.data;
-  Object? body = data;
-  if (data is ResponseBody) {
-    final bytes = <int>[];
-    await for (final chunk in data.stream) {
-      bytes.addAll(chunk);
-    }
-    body = bytes;
-  }
-  return AiApiCallError.fromResponse(
-    statusCode: error.response?.statusCode,
-    url: error.requestOptions.uri.toString(),
-    body: body ?? error.message,
-    provider: provider,
-    cause: error,
-  );
 }

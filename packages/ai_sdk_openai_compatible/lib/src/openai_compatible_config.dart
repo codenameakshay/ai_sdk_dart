@@ -113,3 +113,25 @@ class OpenAICompatibleConfig {
   final Map<String, dynamic>? Function(LanguageModelV4CallOptions options)?
   extraBody;
 }
+
+/// Parses an OpenAI-shaped `data: [{ embedding: [...] }]` embeddings
+/// response body, pairing each returned embedding with the input [values] it
+/// corresponds to.
+EmbeddingModelV2GenerateResult<String> parseOpenAiEmbeddings(
+  Map<String, dynamic> data,
+  List<String> values,
+) {
+  final dataList = (data['data'] as List?) ?? [];
+  final embeddings = dataList.take(values.length).indexed.map((entry) {
+    final item = entry.$2 as Map<String, dynamic>;
+    final vector = (item['embedding'] as List)
+        .map((value) => (value as num).toDouble())
+        .toList();
+    return EmbeddingModelV2Embedding<String>(
+      value: values[entry.$1],
+      embedding: vector,
+    );
+  }).toList();
+
+  return EmbeddingModelV2GenerateResult<String>(embeddings: embeddings);
+}

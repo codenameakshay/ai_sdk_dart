@@ -19,6 +19,7 @@
 #   make analyze           # dart analyze across all packages
 #   make format            # dart format across all packages
 #   make dry-run           # pub publish --dry-run for all packages
+#   make benchmark         # run the structured-stream benchmark
 # ──────────────────────────────────────────────────────────────────────────────
 
 FLUTTER   ?= fvm flutter
@@ -27,6 +28,16 @@ DART      ?= fvm dart
 FLUTTER_APP  := examples/flutter_chat
 ADVANCED_APP := examples/advanced_app
 DART_APP     := examples/basic
+
+# Pure-Dart packages (test/analyze order). Publish order is separate below
+# since publish order matters (dependencies before dependents).
+DART_PKGS    := ai_sdk_dart ai_sdk_provider ai_sdk_openai_compatible ai_sdk_openai \
+                ai_sdk_anthropic ai_sdk_google ai_sdk_azure ai_sdk_cohere ai_sdk_groq \
+                ai_sdk_mistral ai_sdk_ollama ai_sdk_mcp
+FLUTTER_PKGS := ai_sdk_flutter_ui
+PUBLISH_PKGS := ai_sdk_provider ai_sdk_openai_compatible ai_sdk_openai ai_sdk_anthropic \
+                ai_sdk_google ai_sdk_azure ai_sdk_cohere ai_sdk_groq ai_sdk_mistral \
+                ai_sdk_ollama ai_sdk_dart ai_sdk_mcp
 
 # Build --dart-define flags from env vars (only included when the var is set)
 DART_DEFINES :=
@@ -56,7 +67,7 @@ endif
 
 .PHONY: all get run run-web run-advanced run-advanced-web run-basic run-mcp \
         test analyze format format-check dry-run publish help \
-        coverage coverage-check
+        coverage coverage-check benchmark
 
 all: help
 
@@ -103,40 +114,22 @@ run-mcp:
 
 ## Run tests across all packages
 test:
-	$(DART) test packages/ai_sdk_dart/test/
-	$(DART) test packages/ai_sdk_provider/test/
-	$(DART) test packages/ai_sdk_openai_compatible/test/
-	$(DART) test packages/ai_sdk_openai/test/
-	$(DART) test packages/ai_sdk_anthropic/test/
-	$(DART) test packages/ai_sdk_google/test/
-	$(DART) test packages/ai_sdk_azure/test/
-	$(DART) test packages/ai_sdk_cohere/test/
-	$(DART) test packages/ai_sdk_groq/test/
-	$(DART) test packages/ai_sdk_mistral/test/
-	$(DART) test packages/ai_sdk_ollama/test/
-	$(DART) test packages/ai_sdk_mcp/test/
-	$(FLUTTER) test packages/ai_sdk_flutter_ui/
+	$(foreach p,$(DART_PKGS),$(DART) test packages/$(p)/test/ &&) true
+	$(foreach p,$(FLUTTER_PKGS),$(FLUTTER) test packages/$(p)/ &&) true
 	$(FLUTTER) test $(FLUTTER_APP)/
 	$(FLUTTER) test $(ADVANCED_APP)/
 
 ## Run dart analyze across all packages
 analyze:
 	$(DART) analyze $(DART_APP)/
-	$(DART) analyze packages/ai_sdk_dart/
-	$(DART) analyze packages/ai_sdk_provider/
-	$(DART) analyze packages/ai_sdk_openai_compatible/
-	$(DART) analyze packages/ai_sdk_openai/
-	$(DART) analyze packages/ai_sdk_anthropic/
-	$(DART) analyze packages/ai_sdk_google/
-	$(DART) analyze packages/ai_sdk_azure/
-	$(DART) analyze packages/ai_sdk_cohere/
-	$(DART) analyze packages/ai_sdk_groq/
-	$(DART) analyze packages/ai_sdk_mistral/
-	$(DART) analyze packages/ai_sdk_ollama/
-	$(DART) analyze packages/ai_sdk_mcp/
-	$(FLUTTER) analyze packages/ai_sdk_flutter_ui/
+	$(foreach p,$(DART_PKGS),$(DART) analyze packages/$(p)/ &&) true
+	$(foreach p,$(FLUTTER_PKGS),$(FLUTTER) analyze packages/$(p)/ &&) true
 	$(FLUTTER) analyze $(FLUTTER_APP)/
 	$(FLUTTER) analyze $(ADVANCED_APP)/
+
+## Run the structured-stream benchmark and print JSON results
+benchmark:
+	$(DART) run packages/ai_sdk_dart/benchmark/structured_stream_benchmark.dart --json
 
 ## Run tests with coverage across all packages and print a summary
 coverage:
@@ -160,35 +153,13 @@ format-check:
 
 ## Dry-run publish for all packages (checks pub.dev readiness)
 dry-run:
-	$(DART) pub publish --dry-run -C packages/ai_sdk_provider
-	$(DART) pub publish --dry-run -C packages/ai_sdk_openai_compatible
-	$(DART) pub publish --dry-run -C packages/ai_sdk_openai
-	$(DART) pub publish --dry-run -C packages/ai_sdk_anthropic
-	$(DART) pub publish --dry-run -C packages/ai_sdk_google
-	$(DART) pub publish --dry-run -C packages/ai_sdk_azure
-	$(DART) pub publish --dry-run -C packages/ai_sdk_cohere
-	$(DART) pub publish --dry-run -C packages/ai_sdk_groq
-	$(DART) pub publish --dry-run -C packages/ai_sdk_mistral
-	$(DART) pub publish --dry-run -C packages/ai_sdk_ollama
-	$(DART) pub publish --dry-run -C packages/ai_sdk_dart
-	$(DART) pub publish --dry-run -C packages/ai_sdk_mcp
-	$(FLUTTER) pub publish --dry-run -C packages/ai_sdk_flutter_ui
+	$(foreach p,$(PUBLISH_PKGS),$(DART) pub publish --dry-run -C packages/$(p) &&) true
+	$(foreach p,$(FLUTTER_PKGS),$(FLUTTER) pub publish --dry-run -C packages/$(p) &&) true
 
 ## Publish all packages to pub.dev (run dry-run first to verify)
 publish:
-	$(DART) pub publish -C packages/ai_sdk_provider
-	$(DART) pub publish -C packages/ai_sdk_openai_compatible
-	$(DART) pub publish -C packages/ai_sdk_openai
-	$(DART) pub publish -C packages/ai_sdk_anthropic
-	$(DART) pub publish -C packages/ai_sdk_google
-	$(DART) pub publish -C packages/ai_sdk_azure
-	$(DART) pub publish -C packages/ai_sdk_cohere
-	$(DART) pub publish -C packages/ai_sdk_groq
-	$(DART) pub publish -C packages/ai_sdk_mistral
-	$(DART) pub publish -C packages/ai_sdk_ollama
-	$(DART) pub publish -C packages/ai_sdk_dart
-	$(DART) pub publish -C packages/ai_sdk_mcp
-	$(FLUTTER) pub publish -C packages/ai_sdk_flutter_ui
+	$(foreach p,$(PUBLISH_PKGS),$(DART) pub publish -C packages/$(p) &&) true
+	$(foreach p,$(FLUTTER_PKGS),$(FLUTTER) pub publish -C packages/$(p) &&) true
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 
@@ -209,6 +180,7 @@ help:
 	@echo "  make format-check      Verify Dart formatting without writing changes"
 	@echo "  make dry-run           pub publish --dry-run for all packages"
 	@echo "  make publish           pub publish for all packages (run dry-run first)"
+	@echo "  make benchmark         Run the structured-stream benchmark"
 	@echo ""
 	@echo "  Required env vars (set before running):"
 	@echo "    OPENAI_API_KEY       OpenAI API key"

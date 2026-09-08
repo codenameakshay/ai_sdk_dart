@@ -515,6 +515,8 @@ make test
 make analyze
 ```
 
+Run `make benchmark` for the structured-stream throughput benchmark.
+
 Or run a smaller set of pinned toolchain smoke checks directly:
 
 ```sh
@@ -551,10 +553,10 @@ Flutter example apps are different: they read compile-time defines from
 `String.fromEnvironment`, so pass keys with `--dart-define`:
 
 ```sh
-fvm flutter run -C examples/flutter_chat \
+cd examples/flutter_chat && fvm flutter run \
   --dart-define=OPENAI_API_KEY=sk-...
 
-fvm flutter run -C examples/advanced_app \
+cd examples/advanced_app && fvm flutter run \
   --dart-define=OPENAI_API_KEY=sk-... \
   --dart-define=ANTHROPIC_API_KEY=sk-ant-... \
   --dart-define=GOOGLE_API_KEY=AIza...

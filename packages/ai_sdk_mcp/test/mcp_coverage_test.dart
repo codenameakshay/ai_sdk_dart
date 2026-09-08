@@ -890,8 +890,8 @@ void main() {
 
     test('default-notifications transport drives the abstract getter', () async {
       // _DefaultNotificationsTransport does not override `notifications`, so the
-      // abstract default getter in json_rpc.dart (line 78) runs when the client
-      // wires up its notification subscription.
+      // abstract default getter in json_rpc.dart runs when the client wires up
+      // its notification subscription.
       final transport = _DefaultNotificationsTransport();
       final client = MCPClient(transport: transport);
       addTearDown(client.close);
@@ -972,7 +972,7 @@ void main() {
       final toolSet = await client.tools();
       expect(toolSet.keys, ['echo']);
 
-      // Exercise the dynamicTool execute closure (line 343).
+      // Exercise the dynamicTool execute closure.
       final tool = toolSet['echo']!;
       final result = await tool.execute!({
         'value': 'hi',
@@ -1099,7 +1099,7 @@ void main() {
 
     test('readResource returns octet-stream fallback when result has no '
         'usable contents', () async {
-      // result is a Map but `contents` is missing/empty → fallback (line 510).
+      // result is a Map but `contents` is missing/empty → fallback.
       final transport = _ScriptedTransport((req) {
         if (req.method == 'initialize') return _initResult(req);
         if (req.method == 'notifications/initialized') return _ok(req, {});
@@ -1118,7 +1118,7 @@ void main() {
     test('readResource returns octet-stream fallback when first content is '
         'not a Map', () async {
       // contents is a non-empty list whose first element is not a Map → the
-      // `first is! Map` fallback (line 514).
+      // `first is! Map` fallback.
       final transport = _ScriptedTransport((req) {
         if (req.method == 'initialize') return _initResult(req);
         if (req.method == 'notifications/initialized') return _ok(req, {});
@@ -1149,13 +1149,11 @@ void main() {
         final client = MCPClient(transport: transport);
         addTearDown(client.close);
 
-        final s1 = client.subscribeResource('file:///dup');
+        client.subscribeResource('file:///dup');
         // Let the first subscribe round-trip settle.
         await Future<void>.delayed(const Duration(milliseconds: 30));
-        final s2 = client.subscribeResource('file:///dup'); // existing path
+        client.subscribeResource('file:///dup'); // existing path
 
-        expect(s1, isA<Stream<MCPResourceContent>>());
-        expect(s2, isA<Stream<MCPResourceContent>>());
         await Future<void>.delayed(const Duration(milliseconds: 30));
         // The existing-controller branch must NOT issue a second subscribe.
         expect(subscribeRequests, 1);
@@ -1166,8 +1164,8 @@ void main() {
       'subscribeResource swallows a resources/subscribe server error',
       () async {
         // The server returns an error for resources/subscribe; the client must
-        // surface it through _subscribeResourceOnServer (lines 564/565) but
-        // swallow it via the .catchError so subscribeResource itself succeeds.
+        // surface it through _subscribeResourceOnServer but swallow it via the
+        // .catchError so subscribeResource itself succeeds.
         var subscribeErrored = false;
         final transport = _ScriptedTransport((req) {
           if (req.method == 'initialize') return _initResult(req);
@@ -1194,7 +1192,7 @@ void main() {
 
     test('transport notification error is swallowed by the client', () async {
       // Pushing an error onto the transport notifications stream must be caught
-      // by the onError handler in _listenToTransport (line 211).
+      // by the onError handler in _listenToTransport.
       final transport = _ScriptedTransport((req) {
         if (req.method == 'initialize') return _initResult(req);
         return _ok(req, {});
@@ -1485,7 +1483,7 @@ void main() {
   });
 
   // =========================================================================
-  // Reconnect loop (mcp_client.dart lines 286-300)
+  // Reconnect loop (mcp_client.dart)
   // =========================================================================
 
   group('MCPClient reconnect', () {
@@ -1728,7 +1726,7 @@ void main() {
         expect(initResp.isError, isFalse);
         expect((initResp.result as Map)['protocolVersion'], '2025-06-18');
 
-        // A second send reuses the already-started process (line 29 early return).
+        // A second send reuses the already-started process (early return).
         final toolsResp = await transport
             .send(JsonRpcRequest(method: 'tools/list', id: 2))
             .timeout(const Duration(seconds: 20));

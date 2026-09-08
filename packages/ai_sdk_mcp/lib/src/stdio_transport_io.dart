@@ -43,7 +43,6 @@ class StdioMCPTransport implements MCPTransport {
   Future<void>? _startFuture;
   Future<void> _writeBarrier = Future<void>.value();
   Future<void>? _closeFuture;
-  bool _closed = false;
   MCPException? _terminalError;
 
   @override
@@ -62,10 +61,11 @@ class StdioMCPTransport implements MCPTransport {
   Future<void> _startProcess() async {
     try {
       final process = await _processStarter(command, args);
-      if (_closed || _terminalError != null) {
+      final terminalError = _terminalError;
+      if (terminalError != null) {
         _safeCloseStdin(process);
         _safeKill(process);
-        throw _terminalError ?? const MCPException('Stdio transport closed');
+        throw terminalError;
       }
 
       _process = process;
@@ -91,19 +91,14 @@ class StdioMCPTransport implements MCPTransport {
     if (line.trim().isEmpty) return;
     _buffer.write(line);
     if (_buffer.length > _maxBufferedFrameChars) {
-      _terminateImmediately(
-        MCPException(
-          'Stdio MCP stdout frame exceeded $_maxBufferedFrameChars '
-          'characters without forming valid JSON',
-        ),
-        killProcess: true,
-      );
       unawaited(
-        _cancelSubscriptions().then((_) async {
-          if (!_notifications.isClosed) {
-            await _notifications.close();
-          }
-        }),
+        _terminate(
+          MCPException(
+            'Stdio MCP stdout frame exceeded $_maxBufferedFrameChars '
+            'characters without forming valid JSON',
+          ),
+          killProcess: true,
+        ),
       );
       return;
     }
@@ -146,7 +141,7 @@ class StdioMCPTransport implements MCPTransport {
   }
 
   Future<void> _handleProcessExit(int exitCode) async {
-    if (_closed) {
+    if (_terminalError != null) {
       _process = null;
       return;
     }
@@ -166,7 +161,6 @@ class StdioMCPTransport implements MCPTransport {
   void _throwIfClosedOrExited() {
     final error = _terminalError;
     if (error != null) throw error;
-    if (_closed) throw const MCPException('Stdio transport closed');
   }
 
   void _failAllPending(MCPException error) {
@@ -199,7 +193,6 @@ class StdioMCPTransport implements MCPTransport {
 
   void _terminateImmediately(MCPException error, {bool killProcess = false}) {
     _terminalError ??= error;
-    _closed = true;
     _failAllPending(_terminalError!);
     final process = _process;
     _process = null;

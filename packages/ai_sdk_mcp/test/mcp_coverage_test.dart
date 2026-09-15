@@ -563,6 +563,34 @@ void main() {
       );
     });
 
+    test('joins all SSE data lines before decoding a response', () async {
+      final responseBody = [
+        'data: {"jsonrpc":"2.0",',
+        'data: "id":1,',
+        'data: "result":{"ok":true}}',
+        '',
+      ].join('\n');
+      final client = _StreamedResponseClient(
+        (_) async => http.StreamedResponse(
+          Stream<List<int>>.value(utf8.encode(responseBody)),
+          200,
+          headers: const {'content-type': 'text/event-stream'},
+        ),
+      );
+      final transport = StreamableHttpClientTransport(
+        url: Uri.parse('http://example.com/mcp'),
+        client: client,
+      );
+      addTearDown(transport.close);
+
+      final response = await transport.send(
+        JsonRpcRequest(method: 'ping', id: 1),
+      );
+
+      expect(response.result, {'ok': true});
+      expect(response.id, 1);
+    });
+
     test('sends custom headers with every request', () async {
       final mock = await _MockHttpServer.start();
       addTearDown(mock.close);

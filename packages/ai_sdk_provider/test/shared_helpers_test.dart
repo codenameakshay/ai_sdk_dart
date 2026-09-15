@@ -9,10 +9,21 @@ void main() {
   group('sseDataLines', () {
     test('yields only non-empty data payloads', () async {
       final bytes = Stream<Uint8List>.fromIterable([
-        Uint8List.fromList(utf8.encode('event: ping\ndata: {"a":1}\n')),
-        Uint8List.fromList(utf8.encode('data:\n\ndata: [DONE]\n')),
+        Uint8List.fromList(utf8.encode('event: ping\ndata: {"a":1}\n\n')),
+        Uint8List.fromList(utf8.encode('data:\n\ndata: [DONE]\n\n')),
       ]);
       expect(await sseDataLines(bytes).toList(), ['{"a":1}', '[DONE]']);
+    });
+
+    test('joins data lines within each event across chunks and CRLF', () async {
+      final bytes = Stream<Uint8List>.fromIterable([
+        Uint8List.fromList(utf8.encode('event: message\r')),
+        Uint8List.fromList(utf8.encode('\ndata: {"a":')),
+        Uint8List.fromList(utf8.encode('1,\r\ndata: "b":2}\r')),
+        Uint8List.fromList(utf8.encode('\n\r\ndata: [DONE]\r\n\r\n')),
+      ]);
+
+      expect(await sseDataLines(bytes).toList(), ['{"a":1,\n"b":2}', '[DONE]']);
     });
   });
 

@@ -929,6 +929,39 @@ void main() {
       expect(finish.usage.inputTokens.cacheWrite, 0);
     });
 
+    test('stream resets stale cache fields on an input-only delta', () async {
+      final server = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.set('content-type', 'text/event-stream');
+        request.response.write(
+          'data: {"type":"message_start","message":{"id":"msg_c2","model":"claude-sonnet-4-5","usage":{"input_tokens":8,"output_tokens":1,"cache_read_input_tokens":40,"cache_creation_input_tokens":2}}}\n\n',
+        );
+        request.response.write(
+          'data: {"type":"message_delta","usage":{"input_tokens":9},"delta":{"stop_reason":"end_turn"}}\n\n',
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = AnthropicProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).call('claude-sonnet-4-5');
+
+      final streamResult = await model.doStream(
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
+      );
+
+      final finish = (await streamResult.stream.toList())
+          .whereType<StreamPartFinish>()
+          .single;
+      expect(finish.usage.inputTokens.total, 9);
+      expect(finish.usage.inputTokens.noCache, 9);
+      expect(finish.usage.inputTokens.cacheRead, isNull);
+      expect(finish.usage.inputTokens.cacheWrite, isNull);
+      expect(finish.usage.outputTokens.total, 1);
+    });
+
     // ── AnthropicThinkingOptions / speed ─────────────────────────────────
 
     group('AnthropicThinkingOptions', () {
@@ -965,6 +998,17 @@ void main() {
         );
         final map = langOpts.toMap();
         expect(map['thinking'], {'type': 'enabled', 'budget_tokens': 2000});
+      });
+
+      test('serializes typed cache control options', () {
+        const cache = AnthropicCacheControlOptions(ttl: '1h');
+        expect(cache.toMap(), {
+          'cache_control': {'type': 'ephemeral', 'ttl': '1h'},
+        });
+        expect(
+          const AnthropicLanguageModelOptions(cacheControl: cache).toMap(),
+          cache.toMap(),
+        );
       });
 
       test(
@@ -1058,6 +1102,65 @@ void main() {
 
         expect(captured['thinking'], {'type': 'disabled'});
         expect(captured.containsKey('speed'), isFalse);
+      });
+
+      test('sends typed cache control on requests and content parts', () async {
+        late Map<String, dynamic> captured;
+        final server = await _startServer((request) async {
+          final body = await utf8.decoder.bind(request).join();
+          captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'stop_reason': 'end_turn',
+              'content': [
+                {'type': 'text', 'text': 'ok'},
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = AnthropicProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('claude-sonnet-4-5');
+
+        await model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [
+                    LanguageModelV4TextPart(
+                      text: 'cached',
+                      providerOptions: const {
+                        'anthropic': {
+                          'cacheControl': {'type': 'ephemeral'},
+                        },
+                      },
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            providerOptions: const {
+              'anthropic': {
+                'cache_control': {'type': 'ephemeral', 'ttl': '1h'},
+              },
+            },
+          ),
+        );
+
+        expect(captured['cache_control'], {'type': 'ephemeral', 'ttl': '1h'});
+        final messages = (captured['messages'] as List)
+            .cast<Map<String, dynamic>>();
+        final content = (messages.single['content'] as List)
+            .cast<Map<String, dynamic>>();
+        expect(content.single['cache_control'], {'type': 'ephemeral'});
       });
     });
 
@@ -1251,7 +1354,10 @@ void main() {
       final parts = await streamResult.stream.toList();
       final start = parts.whereType<StreamPartReasoningStart>().single;
 
-      expect(start.providerMetadata?['anthropic']?['redactedData'], 'REDACTED-PAYLOAD');
+      expect(
+        start.providerMetadata?['anthropic']?['redactedData'],
+        'REDACTED-PAYLOAD',
+      );
       expect(parts.whereType<StreamPartReasoningEnd>().single.id, start.id);
     });
 

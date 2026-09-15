@@ -57,6 +57,19 @@ class AnthropicThinkingOptions {
   }
 }
 
+/// Typed prompt cache control for Anthropic messages and content parts.
+class AnthropicCacheControlOptions {
+  const AnthropicCacheControlOptions({this.ttl});
+
+  /// Cache lifetime. Anthropic supports `'5m'` and `'1h'`.
+  final String? ttl;
+
+  /// Serialises this object to the Anthropic `cache_control` map.
+  Map<String, dynamic> toMap() => {
+    'cache_control': {'type': 'ephemeral', if (ttl != null) 'ttl': ttl},
+  };
+}
+
 /// Typed provider options for Anthropic language models — general purpose.
 ///
 /// Wraps common Anthropic-specific request parameters.
@@ -73,11 +86,17 @@ class AnthropicThinkingOptions {
 /// );
 /// ```
 class AnthropicLanguageModelOptions {
-  const AnthropicLanguageModelOptions({this.thinking});
+  const AnthropicLanguageModelOptions({this.thinking, this.cacheControl});
 
   /// Extended thinking configuration.
   final AnthropicThinkingOptions? thinking;
 
+  /// Prompt cache breakpoint configuration.
+  final AnthropicCacheControlOptions? cacheControl;
+
   /// Serialises this object to a map for use in [providerOptions].
-  Map<String, dynamic> toMap() => {if (thinking != null) ...thinking!.toMap()};
+  Map<String, dynamic> toMap() => {
+    if (thinking != null) ...thinking!.toMap(),
+    if (cacheControl != null) ...cacheControl!.toMap(),
+  };
 }

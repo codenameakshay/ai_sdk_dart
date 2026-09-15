@@ -291,6 +291,44 @@ void main() {
       },
     );
 
+    test('serializes provider-defined tools', () async {
+      late Map<String, dynamic> captured;
+      final server = await _startServer((request) async {
+        final body = await utf8.decoder.bind(request).join();
+        captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'message': {'content': 'ok'},
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      await OllamaProvider(baseUrl: server.baseUrl)
+          .call('llama3')
+          .doGenerate(
+            LanguageModelV4CallOptions(
+              prompt: userPrompt('search'),
+              tools: const [
+                LanguageModelV4ProviderDefinedTool(
+                  id: 'ollama.search',
+                  name: 'search',
+                  args: {'max_results': 5},
+                ),
+              ],
+            ),
+          );
+
+      expect((captured['tools'] as List).single, {
+        'type': 'ollama.search',
+        'name': 'search',
+        'max_results': 5,
+      });
+    });
+
     test(
       'serializes tool-result messages back into the conversation',
       () async {

@@ -165,17 +165,23 @@ class _OllamaLanguageModel extends LanguageModelV4 {
   }
 
   /// Serialize function tools into Ollama's OpenAI-style `tools` field.
-  List<Map<String, dynamic>> _buildTools(
-    List<LanguageModelV4FunctionTool> tools,
-  ) {
+  List<Map<String, dynamic>> _buildTools(List<LanguageModelV4Tool> tools) {
     return tools
         .map(
-          (tool) => {
-            'type': 'function',
-            'function': {
+          (tool) => switch (tool) {
+            LanguageModelV4FunctionTool() => {
+              'type': 'function',
+              'function': {
+                'name': tool.name,
+                if (tool.description != null) 'description': tool.description,
+                'parameters': tool.inputSchema,
+              },
+            },
+            LanguageModelV4ProviderDefinedTool() => {
+              'type': tool.id,
               'name': tool.name,
               if (tool.description != null) 'description': tool.description,
-              'parameters': tool.inputSchema,
+              ...tool.args,
             },
           },
         )
@@ -196,8 +202,7 @@ class _OllamaLanguageModel extends LanguageModelV4 {
     return <String, dynamic>{
       'model': model,
       'messages': _buildMessages(options.prompt),
-      if (options.functionTools.isNotEmpty)
-        'tools': _buildTools(options.functionTools.toList()),
+      if (options.tools.isNotEmpty) 'tools': _buildTools(options.tools),
       if (ollamaOptions.isNotEmpty) 'options': ollamaOptions,
       'stream': false,
     };

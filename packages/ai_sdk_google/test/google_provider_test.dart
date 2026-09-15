@@ -667,6 +667,112 @@ void main() {
       expect((declarations.first as Map)['parameters'], {'type': 'object'});
     });
 
+    test('serializes provider-defined tools', () async {
+      late Map<String, dynamic> captured;
+      final server = await _startServer((request) async {
+        final body = await utf8.decoder.bind(request).join();
+        captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'candidates': [
+              {
+                'finishReason': 'STOP',
+                'content': {
+                  'parts': [
+                    {'text': 'ok'},
+                  ],
+                },
+              },
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      await GoogleGenerativeAIProvider(apiKey: 'test', baseUrl: server.baseUrl)
+          .call('gemini-2.0-flash')
+          .doGenerate(
+            LanguageModelV4CallOptions(
+              prompt: userPrompt('search'),
+              tools: const [
+                LanguageModelV4ProviderDefinedTool(
+                  id: 'google.google_search',
+                  name: 'search',
+                  args: {
+                    'dynamicRetrievalConfig': {'mode': 'MODE_DYNAMIC'},
+                  },
+                ),
+              ],
+            ),
+          );
+
+      final googleSearch =
+          ((captured['tools'] as List).single as Map)['googleSearch'];
+      expect(googleSearch, {
+        'dynamicRetrievalConfig': {'mode': 'MODE_DYNAMIC'},
+      });
+    });
+
+    test(
+      'keeps function and provider-defined tools in separate entries',
+      () async {
+        late Map<String, dynamic> captured;
+        final server = await _startServer((request) async {
+          final body = await utf8.decoder.bind(request).join();
+          captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'candidates': [
+                {
+                  'finishReason': 'STOP',
+                  'content': {
+                    'parts': [
+                      {'text': 'ok'},
+                    ],
+                  },
+                },
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        await GoogleGenerativeAIProvider(
+              apiKey: 'test',
+              baseUrl: server.baseUrl,
+            )
+            .call('gemini-2.0-flash')
+            .doGenerate(
+              LanguageModelV4CallOptions(
+                prompt: userPrompt('search and weather'),
+                tools: const [
+                  LanguageModelV4FunctionTool(
+                    name: 'weather',
+                    inputSchema: {'type': 'object'},
+                  ),
+                  LanguageModelV4ProviderDefinedTool(
+                    id: 'google.google_search',
+                    name: 'search',
+                    args: {},
+                  ),
+                ],
+              ),
+            );
+
+        final tools = (captured['tools'] as List).cast<Map<String, dynamic>>();
+        expect(tools, hasLength(2));
+        expect(tools[0].containsKey('functionDeclarations'), isTrue);
+        expect(tools[0].containsKey('googleSearch'), isFalse);
+        expect(tools[1], {'googleSearch': {}});
+      },
+    );
+
     test(
       'preserves invalid strict tool arguments for downstream failure handling',
       () async {

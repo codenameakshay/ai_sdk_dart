@@ -147,6 +147,44 @@ void main() {
       },
     );
 
+    test('serializes provider-defined tools', () async {
+      late Map<String, dynamic> captured;
+      final server = await TestServer.start((request) async {
+        final body = await utf8.decoder.bind(request).join();
+        captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'message': {'content': []},
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      await CohereProvider(apiKey: 'test', baseUrl: server.baseUrl)
+          .call('command-r-plus')
+          .doGenerate(
+            LanguageModelV4CallOptions(
+              prompt: userPrompt('search'),
+              tools: const [
+                LanguageModelV4ProviderDefinedTool(
+                  id: 'cohere.search',
+                  name: 'search',
+                  args: {'max_results': 5},
+                ),
+              ],
+            ),
+          );
+
+      expect((captured['tools'] as List).single, {
+        'type': 'cohere.search',
+        'name': 'search',
+        'max_results': 5,
+      });
+    });
+
     test('maps tool choice none and serializes tool-result messages', () async {
       late Map<String, dynamic> captured;
       final server = await TestServer.start((request) async {

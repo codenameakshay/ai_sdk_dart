@@ -107,20 +107,7 @@ class _GoogleLanguageModel extends LanguageModelV4 {
           'stopSequences': options.stopSequences,
       },
       if (options.tools.isNotEmpty) ...{
-        'tools': [
-          {
-            'functionDeclarations': options.functionTools
-                .map(
-                  (tool) => {
-                    'name': tool.name,
-                    if (tool.description != null)
-                      'description': tool.description,
-                    'parameters': tool.inputSchema,
-                  },
-                )
-                .toList(),
-          },
-        ],
+        'tools': _buildGoogleTools(options.tools),
       },
       ..._googleToolChoicePayload(options.toolChoice),
       ...?providerOptions,
@@ -274,20 +261,7 @@ class _GoogleLanguageModel extends LanguageModelV4 {
           'stopSequences': options.stopSequences,
       },
       if (options.tools.isNotEmpty) ...{
-        'tools': [
-          {
-            'functionDeclarations': options.functionTools
-                .map(
-                  (tool) => {
-                    'name': tool.name,
-                    if (tool.description != null)
-                      'description': tool.description,
-                    'parameters': tool.inputSchema,
-                  },
-                )
-                .toList(),
-          },
-        ],
+        'tools': _buildGoogleTools(options.tools),
       },
       ..._googleToolChoicePayload(options.toolChoice),
       ...?providerOptions,
@@ -618,6 +592,42 @@ Dio _googleDio({String? baseUrl}) => createProviderDio(
 String _modelPath(String modelId) {
   if (modelId.startsWith('models/')) return modelId;
   return 'models/$modelId';
+}
+
+List<Map<String, dynamic>> _buildGoogleTools(List<LanguageModelV4Tool> tools) {
+  final entries = <Map<String, dynamic>>[];
+  final declarations = <Map<String, dynamic>>[];
+
+  void flushDeclarations() {
+    if (declarations.isNotEmpty) {
+      entries.add({'functionDeclarations': List.of(declarations)});
+      declarations.clear();
+    }
+  }
+
+  for (final tool in tools) {
+    switch (tool) {
+      case LanguageModelV4FunctionTool():
+        declarations.add({
+          'name': tool.name,
+          if (tool.description != null) 'description': tool.description,
+          'parameters': tool.inputSchema,
+        });
+      case LanguageModelV4ProviderDefinedTool():
+        flushDeclarations();
+        entries.add({_googleToolKey(tool.id): tool.args});
+    }
+  }
+  flushDeclarations();
+  return entries;
+}
+
+String _googleToolKey(String id) {
+  final raw = id.split('.').last;
+  return raw.replaceAllMapped(
+    RegExp(r'_([a-z])'),
+    (match) => match.group(1)!.toUpperCase(),
+  );
 }
 
 List<Map<String, dynamic>> _toGoogleContents(

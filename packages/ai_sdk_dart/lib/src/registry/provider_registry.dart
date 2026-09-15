@@ -2,8 +2,9 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
 /// A registry mapping `'provider:modelId'` strings to model factories.
 ///
-/// Supports five model types: language, embedding, image, speech, and
-/// transcription. Modeled after the JS SDK's `createProviderRegistry()`.
+/// Supports six model types: language, embedding, image, speech,
+/// transcription, and rerank. Modeled after the JS SDK's
+/// `createProviderRegistry()`.
 ///
 /// ```dart
 /// final registry = createProviderRegistry({
@@ -33,6 +34,12 @@ class ProviderRegistry {
   EmbeddingModelV2<String> textEmbeddingModel(String id) {
     final (provider, modelId) = _splitId(id);
     return _resolve(provider).textEmbeddingModel(modelId);
+  }
+
+  /// Resolve a rerank model by `'provider:modelId'`.
+  RerankModelV1 rerankModel(String id) {
+    final (provider, modelId) = _splitId(id);
+    return _resolve(provider).rerankModel(modelId);
   }
 
   /// Resolve an image model by `'provider:modelId'`.
@@ -79,6 +86,7 @@ class ProviderRegistry {
 abstract interface class _ProviderLike {
   LanguageModelV4 languageModel(String modelId);
   EmbeddingModelV2<String> textEmbeddingModel(String modelId);
+  RerankModelV1 rerankModel(String modelId);
   ImageModelV3 imageModel(String modelId);
   SpeechModelV1 speechModel(String modelId);
   TranscriptionModelV1 transcriptionModel(String modelId);
@@ -87,14 +95,16 @@ abstract interface class _ProviderLike {
 class _CallableProvider implements _ProviderLike {
   const _CallableProvider({
     required this.languageModelFactory,
-    required this.embeddingModelFactory,
+    this.embeddingModelFactory,
+    this.rerankModelFactory,
     this.imageModelFactory,
     this.speechModelFactory,
     this.transcriptionModelFactory,
   });
 
   final LanguageModelV4 Function(String) languageModelFactory;
-  final EmbeddingModelV2<String> Function(String) embeddingModelFactory;
+  final EmbeddingModelV2<String> Function(String)? embeddingModelFactory;
+  final RerankModelV1 Function(String)? rerankModelFactory;
   final ImageModelV3 Function(String)? imageModelFactory;
   final SpeechModelV1 Function(String)? speechModelFactory;
   final TranscriptionModelV1 Function(String)? transcriptionModelFactory;
@@ -104,8 +114,24 @@ class _CallableProvider implements _ProviderLike {
       languageModelFactory(modelId);
 
   @override
-  EmbeddingModelV2<String> textEmbeddingModel(String modelId) =>
-      embeddingModelFactory(modelId);
+  EmbeddingModelV2<String> textEmbeddingModel(String modelId) {
+    if (embeddingModelFactory == null) {
+      throw UnsupportedError(
+        'This provider does not expose an embeddingModelFactory.',
+      );
+    }
+    return embeddingModelFactory!(modelId);
+  }
+
+  @override
+  RerankModelV1 rerankModel(String modelId) {
+    if (rerankModelFactory == null) {
+      throw UnsupportedError(
+        'This provider does not expose a rerankModelFactory.',
+      );
+    }
+    return rerankModelFactory!(modelId);
+  }
 
   @override
   ImageModelV3 imageModel(String modelId) {
@@ -140,9 +166,9 @@ class _CallableProvider implements _ProviderLike {
 
 /// Creates a [ProviderRegistry] from a map of provider name → [RegistrableProvider].
 ///
-/// Supports five model types: language, embedding, image, speech, and
-/// transcription. Only [languageModelFactory] and [embeddingModelFactory]
-/// are required; the rest are optional.
+/// Supports six model types: language, embedding, image, speech,
+/// transcription, and rerank. Only [languageModelFactory] is required; all
+/// other factories are optional.
 ///
 /// Example:
 /// ```dart
@@ -166,6 +192,7 @@ ProviderRegistry createProviderRegistry(
         _CallableProvider(
           languageModelFactory: provider.languageModelFactory,
           embeddingModelFactory: provider.embeddingModelFactory,
+          rerankModelFactory: provider.rerankModelFactory,
           imageModelFactory: provider.imageModelFactory,
           speechModelFactory: provider.speechModelFactory,
           transcriptionModelFactory: provider.transcriptionModelFactory,
@@ -177,21 +204,24 @@ ProviderRegistry createProviderRegistry(
 
 /// Describes a provider that can be registered in a [ProviderRegistry].
 ///
-/// [languageModelFactory] and [embeddingModelFactory] are required.
-/// Image, speech, and transcription factories are optional; calling
-/// the corresponding [ProviderRegistry] method on a provider that lacks
-/// the factory throws [UnsupportedError].
+/// [languageModelFactory] is required. Embedding, image, speech,
+/// transcription, and rerank factories are optional; calling the
+/// corresponding [ProviderRegistry] method on a provider that lacks the
+/// factory throws [UnsupportedError].
 class RegistrableProvider {
   const RegistrableProvider({
     required this.languageModelFactory,
-    required this.embeddingModelFactory,
+    this.embeddingModelFactory,
+    this.rerankModelFactory,
     this.imageModelFactory,
     this.speechModelFactory,
     this.transcriptionModelFactory,
   });
 
   final LanguageModelV4 Function(String modelId) languageModelFactory;
-  final EmbeddingModelV2<String> Function(String modelId) embeddingModelFactory;
+  final EmbeddingModelV2<String> Function(String modelId)?
+  embeddingModelFactory;
+  final RerankModelV1 Function(String modelId)? rerankModelFactory;
   final ImageModelV3 Function(String modelId)? imageModelFactory;
   final SpeechModelV1 Function(String modelId)? speechModelFactory;
   final TranscriptionModelV1 Function(String modelId)?

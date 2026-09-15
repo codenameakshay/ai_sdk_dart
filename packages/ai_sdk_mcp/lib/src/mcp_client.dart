@@ -82,10 +82,19 @@ class MCPPromptResult {
 
 /// A single message in a rendered MCP prompt.
 class MCPPromptMessage {
-  const MCPPromptMessage({required this.role, required this.content});
+  const MCPPromptMessage({
+    required this.role,
+    required this.content,
+    this.contentData,
+  });
 
   final String role;
+
+  /// Text projection retained for compatibility with existing callers.
   final String content;
+
+  /// The original MCP content block, including non-text content.
+  final Object? contentData;
 }
 
 /// An MCP resource descriptor returned by [MCPClient.listResources].
@@ -110,6 +119,7 @@ class MCPResourceContent {
     required this.mimeType,
     this.text,
     this.blob,
+    this.allContents = const [],
   });
 
   final String uri;
@@ -120,6 +130,24 @@ class MCPResourceContent {
 
   /// Base64-encoded binary content (for binary MIME types).
   final String? blob;
+
+  /// All content items returned by the same `resources/read` response.
+  ///
+  /// This is populated on the value returned by [MCPClient.readResource] so
+  /// callers can retain the old first-item fields while accessing the full
+  /// response. Values created directly or emitted by subscriptions leave it
+  /// empty.
+  final List<MCPResourceContent> allContents;
+
+  MCPResourceContent _withAllContents(List<MCPResourceContent> contents) {
+    return MCPResourceContent(
+      uri: uri,
+      mimeType: mimeType,
+      text: text,
+      blob: blob,
+      allContents: contents,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -506,24 +534,42 @@ class MCPClient {
   // Tools
   // ---------------------------------------------------------------------------
 
+  Future<List<Map>> _paginate(String method, String key) async {
+    await initialize();
+    final entries = <Map>[];
+    final seenCursors = <String>{};
+    String? cursor;
+
+    while (true) {
+      final response = await _send(
+        JsonRpcRequest(method: method, id: _id, params: {'cursor': ?cursor}),
+      );
+      if (response.isError) {
+        throw MCPException('$method failed: ${response.error}');
+      }
+      final result = response.result;
+      if (result is! Map) return entries;
+
+      final page = result[key];
+      if (page is List) entries.addAll(page.whereType<Map>());
+
+      final nextCursor = result['nextCursor'];
+      if (nextCursor is! String || nextCursor.isEmpty) return entries;
+      if (!seenCursors.add(nextCursor)) {
+        throw MCPException('$method returned a repeated cursor');
+      }
+      cursor = nextCursor;
+    }
+  }
+
   /// Discover all tools available on the MCP server.
   ///
   /// Returns a [ToolSet] compatible with `generateText`/`streamText`.
   Future<ToolSet> tools() async {
-    await initialize();
-    final response = await _send(JsonRpcRequest(method: 'tools/list', id: _id));
-    if (response.isError) {
-      throw MCPException('tools/list failed: ${response.error}');
-    }
-    final result = response.result;
-    if (result is! Map) return {};
-
-    final toolsList = result['tools'];
-    if (toolsList is! List) return {};
+    final toolsList = await _paginate('tools/list', 'tools');
 
     final toolSet = <String, Tool<dynamic, dynamic>>{};
     for (final toolData in toolsList) {
-      if (toolData is! Map) continue;
       final info = MCPToolInfo(
         name: toolData['name']?.toString() ?? '',
         description: toolData['description']?.toString(),
@@ -563,14 +609,22 @@ class MCPClient {
     final content = result['content'];
     final isError = result['isError'] == true;
     if (content is List && content.isNotEmpty) {
-      final parts = content
+      final textParts = content
           .whereType<Map>()
           .where((p) => p['type'] == 'text')
           .map((p) => p['text']?.toString() ?? '')
-          .join('\n');
-      if (isError) throw MCPException('Tool "$name" returned error: $parts');
-      return parts;
+          .toList();
+      if (isError) {
+        throw MCPException(
+          'Tool "$name" returned error: ${content.join('\n')}',
+        );
+      }
+      final hasOnlyText = content.every(
+        (part) => part is Map && part['type'] == 'text',
+      );
+      return hasOnlyText ? textParts.join('\n') : List<Object?>.from(content);
     }
+    if (isError) throw MCPException('Tool "$name" returned error');
     return result;
   }
 
@@ -580,19 +634,9 @@ class MCPClient {
 
   /// List all prompts available on the MCP server.
   Future<List<MCPPromptInfo>> listPrompts() async {
-    await initialize();
-    final response = await _send(
-      JsonRpcRequest(method: 'prompts/list', id: _id),
-    );
-    if (response.isError) {
-      throw MCPException('prompts/list failed: ${response.error}');
-    }
-    final result = response.result;
-    if (result is! Map) return [];
-    final prompts = result['prompts'];
-    if (prompts is! List) return [];
+    final prompts = await _paginate('prompts/list', 'prompts');
 
-    return prompts.whereType<Map>().map((p) {
+    return prompts.map((p) {
       final args =
           (p['arguments'] as List?)
               ?.whereType<Map>()
@@ -650,6 +694,7 @@ class MCPClient {
       return MCPPromptMessage(
         role: m['role']?.toString() ?? 'user',
         content: text,
+        contentData: contentData,
       );
     }).toList();
 
@@ -665,19 +710,9 @@ class MCPClient {
 
   /// List all resources available on the MCP server.
   Future<List<MCPResourceInfo>> listResources() async {
-    await initialize();
-    final response = await _send(
-      JsonRpcRequest(method: 'resources/list', id: _id),
-    );
-    if (response.isError) {
-      throw MCPException('resources/list failed: ${response.error}');
-    }
-    final result = response.result;
-    if (result is! Map) return [];
-    final resources = result['resources'];
-    if (resources is! List) return [];
+    final resources = await _paginate('resources/list', 'resources');
 
-    return resources.whereType<Map>().map((r) {
+    return resources.map((r) {
       return MCPResourceInfo(
         uri: r['uri']?.toString() ?? '',
         name: r['name']?.toString() ?? '',
@@ -688,7 +723,23 @@ class MCPClient {
   }
 
   /// Read the current content of a resource at [uri].
+  ///
+  /// The legacy singular fields expose the first item. Use [allContents] or
+  /// [readResourceContents] when the server returns multiple items.
   Future<MCPResourceContent> readResource(String uri) async {
+    final contents = await readResourceContents(uri);
+    if (contents.isEmpty) {
+      return MCPResourceContent(
+        uri: uri,
+        mimeType: 'application/octet-stream',
+        allContents: const [],
+      );
+    }
+    return contents.first._withAllContents(contents);
+  }
+
+  /// Read all content items returned for a resource at [uri].
+  Future<List<MCPResourceContent>> readResourceContents(String uri) async {
     await initialize();
     final response = await _send(
       JsonRpcRequest(method: 'resources/read', id: _id, params: {'uri': uri}),
@@ -698,22 +749,20 @@ class MCPClient {
     }
     final result = response.result;
     if (result is! Map) {
-      return MCPResourceContent(uri: uri, mimeType: 'application/octet-stream');
+      return const [];
     }
     final contents = result['contents'];
     if (contents is! List || contents.isEmpty) {
-      return MCPResourceContent(uri: uri, mimeType: 'application/octet-stream');
+      return const [];
     }
-    final first = contents.first;
-    if (first is! Map) {
-      return MCPResourceContent(uri: uri, mimeType: 'application/octet-stream');
-    }
-    return MCPResourceContent(
-      uri: first['uri']?.toString() ?? uri,
-      mimeType: first['mimeType']?.toString() ?? 'text/plain',
-      text: first['text']?.toString(),
-      blob: first['blob']?.toString(),
-    );
+    return contents.whereType<Map>().map((content) {
+      return MCPResourceContent(
+        uri: content['uri']?.toString() ?? uri,
+        mimeType: content['mimeType']?.toString() ?? 'text/plain',
+        text: content['text']?.toString(),
+        blob: content['blob']?.toString(),
+      );
+    }).toList();
   }
 
   /// Subscribe to live updates for a resource at [uri].

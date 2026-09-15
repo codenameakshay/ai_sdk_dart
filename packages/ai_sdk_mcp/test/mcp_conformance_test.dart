@@ -284,6 +284,83 @@ void main() {
         expect(toolSet.keys, containsAll(['get_weather', 'calculate']));
       });
 
+      test('follows nextCursor across pages', () async {
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse();
+        server.queueJsonResponse({
+          'jsonrpc': '2.0',
+          'result': {
+            'tools': [
+              {
+                'name': 'first',
+                'inputSchema': {'type': 'object'},
+              },
+            ],
+            'nextCursor': 'page-2',
+          },
+        });
+        server.queueJsonResponse({
+          'jsonrpc': '2.0',
+          'result': {
+            'tools': [
+              {
+                'name': 'second',
+                'inputSchema': {'type': 'object'},
+              },
+            ],
+          },
+        });
+
+        final client = _client(server);
+        addTearDown(client.close);
+
+        final toolSet = await client.tools();
+        expect(toolSet.keys, containsAll(['first', 'second']));
+        final secondRequest = server.requestLog.lastWhere(
+          (request) => request.body?['method'] == 'tools/list',
+        );
+        expect((secondRequest.body?['params'] as Map)['cursor'], 'page-2');
+      });
+
+      test('rejects non-adjacent cursor cycles', () async {
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse();
+        server.queueJsonResponse({
+          'jsonrpc': '2.0',
+          'result': {'tools': [], 'nextCursor': 'A'},
+        });
+        server.queueJsonResponse({
+          'jsonrpc': '2.0',
+          'result': {'tools': [], 'nextCursor': 'B'},
+        });
+        server.queueJsonResponse({
+          'jsonrpc': '2.0',
+          'result': {'tools': [], 'nextCursor': 'A'},
+        });
+
+        final client = _client(server);
+        addTearDown(client.close);
+
+        await expectLater(
+          client.tools(),
+          throwsA(
+            isA<MCPException>().having(
+              (error) => error.message,
+              'message',
+              contains('repeated cursor'),
+            ),
+          ),
+        );
+        expect(
+          server.requestLog.where(
+            (request) => request.body?['method'] == 'tools/list',
+          ),
+          hasLength(3),
+        );
+      });
+
       test('returns empty ToolSet when server returns no tools', () async {
         final server = await FakeStreamableHttpServer.start();
         addTearDown(server.close);
@@ -323,6 +400,30 @@ void main() {
 
         final result = await client.callTool('get_weather', {'city': 'Paris'});
         expect(result, 'Sunny, 18°C');
+      });
+
+      test('preserves mixed content blocks', () async {
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse();
+        server.queueJsonResponse({
+          'jsonrpc': '2.0',
+          'result': {
+            'content': [
+              {'type': 'text', 'text': 'see image'},
+              {'type': 'image', 'data': 'aGVsbG8=', 'mimeType': 'image/png'},
+            ],
+            'isError': false,
+          },
+        });
+
+        final client = _client(server);
+        addTearDown(client.close);
+
+        final result = await client.callTool('inspect', {});
+        expect(result, isA<List<Object?>>());
+        expect((result as List).length, 2);
+        expect((result[1] as Map)['type'], 'image');
       });
 
       test('throws MCPException when isError is true', () async {
@@ -421,6 +522,39 @@ void main() {
         expect(prompts[1].name, 'translate');
       });
 
+      test('follows nextCursor across pages', () async {
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse();
+        server.queueJsonResponse({
+          'jsonrpc': '2.0',
+          'result': {
+            'prompts': [
+              {'name': 'first'},
+            ],
+            'nextCursor': 'page-2',
+          },
+        });
+        server.queueJsonResponse({
+          'jsonrpc': '2.0',
+          'result': {
+            'prompts': [
+              {'name': 'second'},
+            ],
+          },
+        });
+
+        final client = _client(server);
+        addTearDown(client.close);
+
+        final prompts = await client.listPrompts();
+        expect(prompts.map((prompt) => prompt.name), ['first', 'second']);
+        final secondRequest = server.requestLog.lastWhere(
+          (request) => request.body?['method'] == 'prompts/list',
+        );
+        expect((secondRequest.body?['params'] as Map)['cursor'], 'page-2');
+      });
+
       test('returns empty list when server has no prompts', () async {
         final server = await FakeStreamableHttpServer.start();
         addTearDown(server.close);
@@ -489,6 +623,33 @@ void main() {
         expect(result.messages.length, 1);
         expect(result.messages.first.role, 'user');
         expect(result.messages.first.content, 'Summarize: Hello world');
+      });
+
+      test('preserves non-text content blocks', () async {
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse();
+        server.queueJsonResponse({
+          'jsonrpc': '2.0',
+          'result': {
+            'messages': [
+              {
+                'role': 'user',
+                'content': {
+                  'type': 'resource',
+                  'resource': {'uri': 'file:///data.txt', 'text': 'hello'},
+                },
+              },
+            ],
+          },
+        });
+
+        final client = _client(server);
+        addTearDown(client.close);
+
+        final result = await client.getPrompt('attach-resource');
+        expect(result.messages.single.content, isEmpty);
+        expect((result.messages.single.contentData as Map)['type'], 'resource');
       });
 
       test('sends prompts/get with name and arguments', () async {
@@ -564,6 +725,39 @@ void main() {
         expect(resources[1].description, isNull);
       });
 
+      test('follows nextCursor across pages', () async {
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse();
+        server.queueJsonResponse({
+          'jsonrpc': '2.0',
+          'result': {
+            'resources': [
+              {'uri': 'file:///first', 'name': 'first'},
+            ],
+            'nextCursor': 'page-2',
+          },
+        });
+        server.queueJsonResponse({
+          'jsonrpc': '2.0',
+          'result': {
+            'resources': [
+              {'uri': 'file:///second', 'name': 'second'},
+            ],
+          },
+        });
+
+        final client = _client(server);
+        addTearDown(client.close);
+
+        final resources = await client.listResources();
+        expect(resources.map((resource) => resource.name), ['first', 'second']);
+        final secondRequest = server.requestLog.lastWhere(
+          (request) => request.body?['method'] == 'resources/list',
+        );
+        expect((secondRequest.body?['params'] as Map)['cursor'], 'page-2');
+      });
+
       test('returns empty list when server has no resources', () async {
         final server = await FakeStreamableHttpServer.start();
         addTearDown(server.close);
@@ -608,6 +802,43 @@ void main() {
         expect(content.uri, 'file:///data/config.json');
         expect(content.mimeType, 'application/json');
         expect(content.text, '{"debug": true}');
+      });
+
+      test('preserves all resource contents', () async {
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse();
+        server.queueJsonResponse({
+          'jsonrpc': '2.0',
+          'result': {
+            'contents': [
+              {'uri': 'file:///one', 'mimeType': 'text/plain', 'text': 'one'},
+              {'uri': 'file:///two', 'mimeType': 'text/plain', 'text': 'two'},
+            ],
+          },
+        });
+
+        final client = _client(server);
+        addTearDown(client.close);
+
+        final contents = await client.readResourceContents('file:///data');
+        expect(contents.map((content) => content.text), ['one', 'two']);
+
+        server.queueJsonResponse({
+          'jsonrpc': '2.0',
+          'result': {
+            'contents': [
+              {'uri': 'file:///one', 'mimeType': 'text/plain', 'text': 'one'},
+              {'uri': 'file:///two', 'mimeType': 'text/plain', 'text': 'two'},
+            ],
+          },
+        });
+        final legacyResult = await client.readResource('file:///data');
+        expect(legacyResult.text, 'one');
+        expect(legacyResult.allContents.map((content) => content.text), [
+          'one',
+          'two',
+        ]);
       });
 
       test('sends resources/read with correct uri', () async {

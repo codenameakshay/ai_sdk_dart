@@ -62,6 +62,47 @@ void main() {
       expect(result.embeddings[1].embedding, [0.4, 0.5, 0.6]);
     });
 
+    test(
+      'forwards providerOptions and defaults input_type when omitted',
+      () async {
+        late Map<String, dynamic> captured;
+        final server = await TestServer.start((request) async {
+          final body = await utf8.decoder.bind(request).join();
+          captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'embeddings': {
+                'float': [
+                  [0.1],
+                ],
+              },
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = CohereProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).embedding('embed-english-v4.0');
+
+        await model.doEmbed(
+          const EmbeddingModelV2CallOptions<String>(
+            values: ['query'],
+            providerOptions: {
+              'cohere': {'input_type': 'search_query', 'truncate': 'END'},
+            },
+          ),
+        );
+
+        expect(captured['input_type'], 'search_query');
+        expect(captured['truncate'], 'END');
+      },
+    );
+
     test('handles a missing embeddings field as an empty result', () async {
       final server = await TestServer.start((request) async {
         request.response.statusCode = 200;

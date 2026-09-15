@@ -617,12 +617,14 @@ class _CohereEmbeddingModel implements EmbeddingModelV2<String> {
     EmbeddingModelV2CallOptions<String> options,
   ) async {
     final resolvedHeaders = await headers();
+    final providerOptions = options.providerOptions?['cohere'];
 
     final body = <String, dynamic>{
       'model': modelId,
       'texts': options.values,
-      'input_type': 'search_document',
-      'embedding_types': ['float'],
+      ...?providerOptions,
+      'input_type': providerOptions?['input_type'] ?? 'search_document',
+      'embedding_types': providerOptions?['embedding_types'] ?? ['float'],
     };
 
     final Response<Map<String, dynamic>> response;

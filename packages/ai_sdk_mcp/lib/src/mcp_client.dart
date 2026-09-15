@@ -416,7 +416,7 @@ class MCPClient {
             'prompts': {},
             'resources': {'subscribe': true},
           },
-          'clientInfo': {'name': 'ai_sdk_dart', 'version': '0.1.0'},
+          'clientInfo': {'name': 'ai_sdk_dart', 'version': '2.0.0'},
         },
       ),
     );

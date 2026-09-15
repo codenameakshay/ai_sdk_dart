@@ -38,6 +38,10 @@ void main() {
           expect(initReq.body?['method'], 'initialize');
           final params = initReq.body?['params'] as Map<String, dynamic>;
           expect(params['protocolVersion'], '2025-06-18');
+          expect(
+            (params['clientInfo'] as Map<String, dynamic>)['version'],
+            '2.0.0',
+          );
           final caps = params['capabilities'] as Map<String, dynamic>;
           expect(caps.keys, contains('tools'));
         },

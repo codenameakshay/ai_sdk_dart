@@ -421,6 +421,18 @@ void main() {
 
         expect(capturingModel.capturedOptions.first.topP, 0.95);
       });
+
+      test('generateText forwards topK through to call options', () async {
+        final capturingModel = FakeCapturingModel();
+        final wrapped = wrapLanguageModel(
+          model: capturingModel,
+          middleware: defaultSettingsMiddleware(),
+        );
+
+        await generateText(model: wrapped, prompt: 'hi', topK: 7);
+
+        expect(capturingModel.capturedOptions.single.topK, 7);
+      });
     });
 
     // ── addToolInputExamplesMiddleware ────────────────────────────────────

@@ -3,6 +3,8 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../helpers.dart';
+
 Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
 
 void main() {
@@ -77,7 +79,7 @@ void main() {
     ) async {
       // A non-JSON value makes JsonEncoder.convert throw, exercising the
       // _prettyJson catch branch that falls back to value.toString().
-      final input = <String, dynamic>{'fn': const _Unencodable()};
+      final input = <String, dynamic>{'fn': const Unencodable()};
       await tester.pumpWidget(
         _wrap(
           ToolCallCard(
@@ -122,15 +124,4 @@ void main() {
       expect(find.textContaining('LanguageModelV4TextPart'), findsOneWidget);
     });
   });
-}
-
-/// A value that always throws when JSON-encoded, to drive the _prettyJson
-/// fallback, but has a recognizable toString().
-class _Unencodable {
-  const _Unencodable();
-
-  @override
-  String toString() => 'UNENCODABLE';
-
-  Map<String, dynamic> toJson() => throw StateError('not encodable');
 }

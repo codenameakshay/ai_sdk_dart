@@ -37,7 +37,7 @@ class AnthropicProvider {
   final bool _ownsClient;
 
   Future<Map<String, String>> _headers() async {
-    final key = await Future.value(_credentialProvider());
+    final key = await _credentialProvider();
     return {
       if (key != null && key.isNotEmpty) 'x-api-key': key,
       'anthropic-version': '2023-06-01',
@@ -83,7 +83,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
   Future<LanguageModelV4GenerateResult> doGenerate(
     LanguageModelV4CallOptions options,
   ) async {
-    final resolvedHeaders = await Future.value(headers());
+    final resolvedHeaders = await headers();
     final cancelToken = _cancelTokenFor(options.abortSignal);
     final po = options.providerOptions != null
         ? options.providerOptions![provider]
@@ -114,7 +114,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
         cancelToken: cancelToken,
       );
     } on DioException catch (e) {
-      throw await _apiCallError(e, provider);
+      throw await apiErrorFromDioException(e, provider: provider);
     }
 
     final data = response.data ?? <String, dynamic>{};
@@ -149,7 +149,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
         final rawInput = map['input'];
         content.add(
           LanguageModelV4ToolCallPart(
-            toolCallId: map['id']?.toString() ?? _generateId('tool'),
+            toolCallId: map['id']?.toString() ?? prefixedId('tool'),
             toolName: map['name']?.toString() ?? 'unknown_tool',
             input: rawInput is Map
                 ? rawInput.cast<String, dynamic>()
@@ -203,7 +203,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
   Future<LanguageModelV4StreamResult> doStream(
     LanguageModelV4CallOptions options,
   ) async {
-    final resolvedHeaders = await Future.value(headers());
+    final resolvedHeaders = await headers();
     final cancelToken = _cancelTokenFor(options.abortSignal);
     final po = options.providerOptions != null
         ? options.providerOptions![provider]
@@ -236,7 +236,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
         cancelToken: cancelToken,
       );
     } on DioException catch (e) {
-      throw await _apiCallError(e, provider);
+      throw await apiErrorFromDioException(e, provider: provider);
     }
 
     final body = response.data;
@@ -265,7 +265,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
 
     unawaited(() async {
       try {
-        await for (final dataLine in _readSseDataLines(body.stream)) {
+        await for (final dataLine in sseDataLines(body.stream)) {
           final json = _safeParseMap(dataLine);
           if (json == null) continue;
           lastChunk = json;
@@ -296,7 +296,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
               streamUsage = _anthropicUsageFrom(usage, previous: streamUsage);
               break;
             case 'content_block_start':
-              final index = _intOrNull(json['index']) ?? 0;
+              final index = intOrNull(json['index']) ?? 0;
               final block =
                   (json['content_block'] as Map?)?.cast<String, dynamic>() ??
                   <String, dynamic>{};
@@ -307,7 +307,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
                   controller.add(const StreamPartTextStart(id: 'text-0'));
                 }
               } else if (blockType == 'tool_use') {
-                final id = block['id']?.toString() ?? _generateId('tool');
+                final id = block['id']?.toString() ?? prefixedId('tool');
                 final name = block['name']?.toString() ?? 'unknown_tool';
                 toolState[index] = _ToolState(id: id, name: name);
                 controller.add(
@@ -320,7 +320,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
               }
               break;
             case 'content_block_delta':
-              final index = _intOrNull(json['index']) ?? 0;
+              final index = intOrNull(json['index']) ?? 0;
               final delta =
                   (json['delta'] as Map?)?.cast<String, dynamic>() ??
                   <String, dynamic>{};
@@ -360,7 +360,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
               }
               break;
             case 'content_block_stop':
-              final index = _intOrNull(json['index']) ?? 0;
+              final index = intOrNull(json['index']) ?? 0;
               final state = toolState.remove(index);
               if (state != null) {
                 controller.add(StreamPartToolInputEnd(id: state.id));
@@ -369,7 +369,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
                     toolCall: LanguageModelV4ToolCallPart(
                       toolCallId: state.id,
                       toolName: state.name,
-                      input: _safeParseJson(state.argumentsBuffer.toString()),
+                      input: safeParseJson(state.argumentsBuffer.toString()),
                     ),
                   ),
                 );
@@ -401,7 +401,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
                       toolCall: LanguageModelV4ToolCallPart(
                         toolCallId: state.id,
                         toolName: state.name,
-                        input: _safeParseJson(state.argumentsBuffer.toString()),
+                        input: safeParseJson(state.argumentsBuffer.toString()),
                       ),
                     ),
                   );
@@ -476,17 +476,13 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
   }
 }
 
-Dio _anthropicDio({String? baseUrl}) {
-  return Dio(
-    BaseOptions(
-      baseUrl: baseUrl ?? 'https://api.anthropic.com/v1',
-      headers: {
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-    ),
-  );
-}
+Dio _anthropicDio({String? baseUrl}) => createProviderDio(
+  baseUrl: baseUrl ?? 'https://api.anthropic.com/v1',
+  headers: {
+    'anthropic-version': '2023-06-01',
+    'content-type': 'application/json',
+  },
+);
 
 List<Map<String, dynamic>> _toAnthropicMessages(LanguageModelV4Prompt prompt) {
   final out = <Map<String, dynamic>>[];
@@ -557,46 +553,10 @@ LanguageModelV4FinishReason _mapAnthropicFinishReason(String? reason) {
   };
 }
 
-Stream<String> _readSseDataLines(Stream<Uint8List> bytesStream) async* {
-  final lines = bytesStream
-      .map<List<int>>((chunk) => chunk)
-      .transform(utf8.decoder)
-      .transform(const LineSplitter());
-  await for (final line in lines) {
-    if (!line.startsWith('data:')) continue;
-    final payload = line.substring(5).trim();
-    if (payload.isEmpty) continue;
-    yield payload;
-  }
-}
-
 Map<String, dynamic>? _safeParseMap(String input) {
-  final parsed = _safeParseJson(input);
-  if (parsed is Map<String, dynamic>) return parsed;
-  // Defensive: `jsonDecode` of a JSON object always yields a
-  // `Map<String, dynamic>`, so the first guard above always wins. This cast
-  // path only exists for a hypothetical non-`<String, dynamic>` Map and is
-  // unreachable via the SSE data-line input that calls this.
-  if (parsed is Map) {
-    return parsed.cast<String, dynamic>(); // coverage:ignore-line
-  }
-  return null;
+  final parsed = safeParseJson(input);
+  return parsed is Map<String, dynamic> ? parsed : null;
 }
-
-Object _safeParseJson(String input) {
-  try {
-    return jsonDecode(input);
-  } catch (_) {
-    return input;
-  }
-}
-
-int? _intOrNull(Object? value) => switch (value) {
-  int v => v,
-  num v => v.toInt(),
-  String v => int.tryParse(v),
-  _ => null,
-};
 
 /// Builds a [LanguageModelV4Usage] from an Anthropic `usage` object, mapping
 /// the prompt-cache token fields into nested V4 input token usage fields.
@@ -615,10 +575,10 @@ LanguageModelV4Usage _anthropicUsageFrom(
   Map<String, dynamic> usage, {
   LanguageModelV4Usage? previous,
 }) {
-  final inputTokens = _intOrNull(usage['input_tokens']);
-  final outputTokens = _intOrNull(usage['output_tokens']);
-  final cacheRead = _intOrNull(usage['cache_read_input_tokens']);
-  final cacheWrite = _intOrNull(usage['cache_creation_input_tokens']);
+  final inputTokens = intOrNull(usage['input_tokens']);
+  final outputTokens = intOrNull(usage['output_tokens']);
+  final cacheRead = intOrNull(usage['cache_read_input_tokens']);
+  final cacheWrite = intOrNull(usage['cache_creation_input_tokens']);
   final hasCache = cacheRead != null || cacheWrite != null;
 
   final int? totalInput;
@@ -642,11 +602,6 @@ LanguageModelV4Usage _anthropicUsageFrom(
   );
 }
 
-String _generateId(String prefix) {
-  final micros = DateTime.now().microsecondsSinceEpoch;
-  return '$prefix-$micros';
-}
-
 Map<String, dynamic>? _toAnthropicImagePart(LanguageModelV4ImagePart part) {
   if (part.image is DataContentUrl) {
     return {
@@ -658,7 +613,7 @@ Map<String, dynamic>? _toAnthropicImagePart(LanguageModelV4ImagePart part) {
     };
   }
 
-  final b64 = _toBase64(part.image);
+  final b64 = dataContentToBase64(part.image);
   if (b64 == null) return null;
   return {
     'type': 'image',
@@ -688,7 +643,7 @@ Map<String, dynamic>? _toAnthropicFilePart(LanguageModelV4FilePart part) {
     };
   }
 
-  final b64 = _toBase64(part.data);
+  final b64 = dataContentToBase64(part.data);
   if (b64 == null) return null;
   return {
     'type': 'document',
@@ -721,17 +676,6 @@ Map<String, dynamic> _toAnthropicToolResultPart(
   }
 
   return {'type': 'text', 'text': '[unsupported tool result content]'};
-}
-
-String? _toBase64(LanguageModelV4DataContent data) {
-  return switch (data) {
-    DataContentBytes(:final bytes) => base64Encode(bytes),
-    DataContentBase64(:final base64) => base64,
-    // Required for switch exhaustiveness over the sealed data-content type, but
-    // unreachable in practice: both call sites (`_toAnthropicImagePart` and
-    // `_toAnthropicFilePart`) handle `DataContentUrl` before reaching here.
-    DataContentUrl() => null, // coverage:ignore-line
-  };
 }
 
 Map<String, dynamic> _toAnthropicTool(LanguageModelV4Tool tool) =>
@@ -857,26 +801,4 @@ CancelToken? _cancelTokenFor(LanguageModelV4AbortSignal? abortSignal) {
     }),
   );
   return cancelToken;
-}
-
-Future<AiSdkError> _apiCallError(DioException error, String provider) async {
-  if (error.type == DioExceptionType.cancel || CancelToken.isCancel(error)) {
-    return const AiOperationCancelledError();
-  }
-  final data = error.response?.data;
-  Object? body = data;
-  if (data is ResponseBody) {
-    final bytes = <int>[];
-    await for (final chunk in data.stream) {
-      bytes.addAll(chunk);
-    }
-    body = bytes;
-  }
-  return AiApiCallError.fromResponse(
-    statusCode: error.response?.statusCode,
-    url: error.requestOptions.uri.toString(),
-    body: body ?? error.message,
-    provider: provider,
-    cause: error,
-  );
 }

@@ -1,5 +1,4 @@
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
-import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
 
 import 'helpers/fake_models.dart';
@@ -13,18 +12,10 @@ void main() {
     fromJson: (json) => json,
   );
 
-  /// Emits a sequence of complete JSON object snapshots. Because
-  /// `_extractLastJsonObject` keeps the last complete top-level `{...}`, each
-  /// snapshot becomes a successful parse and is diffed against the previous.
-  FakeStreamModel snapshots(List<String> jsonSnapshots) {
-    return FakeStreamModel([
-      const StreamPartTextStart(id: 't1'),
-      for (final snap in jsonSnapshots)
-        StreamPartTextDelta(id: 't1', delta: snap),
-      const StreamPartTextEnd(id: 't1'),
-      StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
-    ]);
-  }
+  // Emits a sequence of complete JSON object snapshots. Because
+  // `_extractLastJsonObject` keeps the last complete top-level `{...}`, each
+  // snapshot becomes a successful parse and is diffed against the previous.
+  final snapshots = textDeltaStream;
 
   group('streamObject patch diffing', () {
     test('adds a new key between snapshots', () async {

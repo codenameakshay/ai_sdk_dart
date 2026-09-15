@@ -1,9 +1,10 @@
+import 'dart:async';
+
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
 
 import 'helpers/fake_models.dart';
-import 'helpers/matchers.dart';
 
 /// A language model that delays before returning text — used to test timeouts.
 class _SlowTextModel extends LanguageModelV4 {
@@ -86,7 +87,7 @@ void main() {
       final model = FakeTextModel('');
       expect(
         () => generateObject(model: model, schema: schema, prompt: 'x'),
-        throwsAiError<AiNoObjectGeneratedError>(),
+        throwsA(isA<AiNoObjectGeneratedError>()),
       );
     });
 
@@ -94,7 +95,7 @@ void main() {
       final model = FakeTextModel('not json at all');
       expect(
         () => generateObject(model: model, schema: schema, prompt: 'x'),
-        throwsAiError<AiNoObjectGeneratedError>(),
+        throwsA(isA<AiNoObjectGeneratedError>()),
       );
     });
 
@@ -177,7 +178,7 @@ void main() {
           prompt: 'x',
           timeout: const Duration(milliseconds: 10),
         ),
-        throwsA(isA<Object>()),
+        throwsA(isA<TimeoutException>()),
       );
     });
   });

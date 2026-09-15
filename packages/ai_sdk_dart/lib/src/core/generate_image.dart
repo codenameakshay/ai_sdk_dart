@@ -3,6 +3,8 @@ import 'dart:typed_data';
 
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
+import 'timeout_helpers.dart';
+
 /// Result returned by [generateImage].
 ///
 /// Contains [images] and optional [usage]. Use [image] for the first result.
@@ -45,12 +47,12 @@ Future<GenerateImageResult> generateImage({
       seed: seed,
     ),
   );
-  final result = await (timeout != null ? call.timeout(timeout) : call);
+  final result = await withOptionalTimeout(call, timeout);
 
   return GenerateImageResult(images: result.images, usage: result.usage);
 }
 
 /// Decodes a base64-encoded image string to raw bytes.
 Uint8List decodeBase64Image(String base64) {
-  return Uint8List.fromList(const Base64Decoder().convert(base64));
+  return base64Decode(base64);
 }

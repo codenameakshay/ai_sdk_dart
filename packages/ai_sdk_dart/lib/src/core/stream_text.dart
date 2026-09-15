@@ -141,25 +141,29 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   StackTrace? terminalStackTrace;
   StreamTextErrorEvent? terminalFullStreamErrorEvent;
 
-  observeFutureError(textCompleter.future);
-  observeFutureError(outputCompleter.future);
-  observeFutureError(contentCompleter.future);
-  observeFutureError(reasoningCompleter.future);
-  observeFutureError(reasoningTextCompleter.future);
-  observeFutureError(filesCompleter.future);
-  observeFutureError(sourcesCompleter.future);
-  observeFutureError(toolCallsCompleter.future);
-  observeFutureError(toolResultsCompleter.future);
-  observeFutureError(finishReasonCompleter.future);
-  observeFutureError(rawFinishReasonCompleter.future);
-  observeFutureError(usageCompleter.future);
-  observeFutureError(totalUsageCompleter.future);
-  observeFutureError(warningsCompleter.future);
-  observeFutureError(stepsCompleter.future);
-  observeFutureError(requestCompleter.future);
-  observeFutureError(responseCompleter.future);
-  observeFutureError(providerMetadataCompleter.future);
-  observeFutureError(finishCompleter.future);
+  for (final future in [
+    textCompleter.future,
+    outputCompleter.future,
+    contentCompleter.future,
+    reasoningCompleter.future,
+    reasoningTextCompleter.future,
+    filesCompleter.future,
+    sourcesCompleter.future,
+    toolCallsCompleter.future,
+    toolResultsCompleter.future,
+    finishReasonCompleter.future,
+    rawFinishReasonCompleter.future,
+    usageCompleter.future,
+    totalUsageCompleter.future,
+    warningsCompleter.future,
+    stepsCompleter.future,
+    requestCompleter.future,
+    responseCompleter.future,
+    providerMetadataCompleter.future,
+    finishCompleter.future,
+  ]) {
+    future.ignore();
+  }
 
   // Wire onAbort: fire when the caller cancels via abortSignal.
   if (abortSignal != null && onAbort != null) {
@@ -216,16 +220,14 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
         throwIfCancelled(abortSignal);
         fullController.add(StreamTextStartStepEvent(stepNumber: stepNumber));
 
-        final prepareResult = await Future.value(
-          prepareStep?.call(
-            GenerateTextPrepareStepContext(
-              model: model,
-              stepNumber: stepNumber,
-              steps: List.unmodifiable(steps),
-              messages: List.unmodifiable(normalizedMessages),
-              stopConditions: allStopConditions,
-              runtimeContext: runtimeContext,
-            ),
+        final prepareResult = await prepareStep?.call(
+          GenerateTextPrepareStepContext(
+            model: model,
+            stepNumber: stepNumber,
+            steps: List.unmodifiable(steps),
+            messages: List.unmodifiable(normalizedMessages),
+            stopConditions: allStopConditions,
+            runtimeContext: runtimeContext,
           ),
         );
 
@@ -349,8 +351,8 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                   transformedStream,
                 );
                 try {
-                  while (await moveNextOrCancellation(
-                    transformedIterator,
+                  while (await raceWithCancellation(
+                    transformedIterator.moveNext(),
                     abortSignal,
                   )) {
                     final transformedDelta = transformedIterator.current;
@@ -404,7 +406,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                       final fullText = overallTextBuffer.toString();
 
                       if (cadence.shouldAttemptValue) {
-                        final partial = tryParseStreamingPartialOutput(
+                        final partial = tryParsePartialOutput(
                           outputSpec,
                           fullText,
                         );
@@ -570,7 +572,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
         if (stepToolCalls.isNotEmpty) {
           for (final call in stepToolCalls) {
             throwIfCancelled(abortSignal);
-            final execution = await executeStreamingToolCall(
+            final execution = await executeToolCall(
               tools: toolSelection.exposedTools,
               call: call,
               messages: normalizedMessages,
@@ -709,7 +711,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
           .whereType<LanguageModelV4TextPart>()
           .map((part) => part.text)
           .join();
-      final finalOutput = parseStreamingOutputWithNoObjectError(
+      final finalOutput = parseOutputWithNoObjectError(
         output: outputSpec,
         text: finalText,
         usage: lastFinishPart?.usage,
@@ -870,31 +872,26 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
       await elementController.close();
     }
   });
-  observeFutureError(runFuture);
-  unawaited(runFuture);
+  runFuture.ignore();
 
-  // End the telemetry span when the stream fully finishes.
+  // End the telemetry span when the stream fully finishes or fails. Both
+  // completers are settled together, so once finish succeeds totalUsage has
+  // succeeded as well.
   finishCompleter.future.then(
-    (_) {
-      totalUsageCompleter.future.then((usage) {
-        telemetrySpan
-          ..setAttribute('ai.usage.promptTokens', usage?.inputTokens.total ?? 0)
-          ..setAttribute(
-            'ai.usage.completionTokens',
-            usage?.outputTokens.total ?? 0,
-          )
-          ..end();
-        // Defensive: totalUsageCompleter never completes with an error.
-      }, onError: (_) => telemetrySpan.end()); // coverage:ignore-line
-    },
-    // Defensive: finishCompleter never completes with an error.
-    // coverage:ignore-start
+    (_) => totalUsageCompleter.future.then((usage) {
+      telemetrySpan
+        ..setAttribute('ai.usage.promptTokens', usage?.inputTokens.total ?? 0)
+        ..setAttribute(
+          'ai.usage.completionTokens',
+          usage?.outputTokens.total ?? 0,
+        )
+        ..end();
+    }),
     onError: (Object e, StackTrace st) {
       telemetrySpan
         ..recordException(e, stackTrace: st)
         ..end(error: e);
     },
-    // coverage:ignore-end
   );
 
   return StreamTextResult<TOutput>(
@@ -960,7 +957,7 @@ Future<bool> _moveNextWithStreamTimeout(
   Duration? totalTimeout,
   required Stopwatch overallStopwatch,
 }) {
-  final moveNext = moveNextOrCancellation(iterator, abortSignal);
+  final moveNext = raceWithCancellation(iterator.moveNext(), abortSignal);
   final effectiveTimeout = minTimeout(
     remainingTimeout(timeout: totalTimeout, elapsed: overallStopwatch.elapsed),
     timeout,

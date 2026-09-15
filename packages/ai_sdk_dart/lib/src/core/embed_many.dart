@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
+import 'timeout_helpers.dart';
+
 /// Result returned by [embedMany].
 ///
 /// Contains the [embeddings] list — one entry per input value — plus aggregate
@@ -50,6 +52,13 @@ Future<EmbedManyResult<VALUE>> embedMany<VALUE>({
   int? maxParallelCalls,
   Duration? timeout,
 }) async {
+  if (maxParallelCalls != null && maxParallelCalls < 1) {
+    throw ArgumentError.value(
+      maxParallelCalls,
+      'maxParallelCalls',
+      'must be greater than zero.',
+    );
+  }
   if (values.isEmpty) {
     return const EmbedManyResult(embeddings: [], usage: null);
   }
@@ -58,7 +67,7 @@ Future<EmbedManyResult<VALUE>> embedMany<VALUE>({
     final call = model.doEmbed(
       EmbeddingModelV2CallOptions<VALUE>(values: chunk),
     );
-    return timeout != null ? call.timeout(timeout) : call;
+    return withOptionalTimeout(call, timeout);
   }
 
   // If maxParallelCalls is null or >= values.length, send all at once.
@@ -90,7 +99,7 @@ Future<EmbedManyResult<VALUE>> embedMany<VALUE>({
 
   // Process chunks with maxParallelCalls concurrency.
   final allEntries = <EmbedManyEntry<VALUE>>[];
-  var totalInputTokens = 0;
+  int? totalInputTokens;
   var hasUsage = false;
 
   for (var chunkStart = 0; chunkStart < chunks.length; chunkStart += parallel) {
@@ -107,19 +116,17 @@ Future<EmbedManyResult<VALUE>> embedMany<VALUE>({
           EmbedManyEntry<VALUE>(value: e.value, embedding: e.embedding),
         );
       }
-      if (result.usage != null) {
+      if (result.usage case final usage?) {
         hasUsage = true;
-        totalInputTokens += result.usage!.tokens ?? 0;
+        if (usage.tokens case final tokens?) {
+          totalInputTokens = (totalInputTokens ?? 0) + tokens;
+        }
       }
     }
   }
 
   return EmbedManyResult<VALUE>(
     embeddings: allEntries,
-    usage: hasUsage
-        ? EmbeddingModelV2Usage(
-            tokens: totalInputTokens > 0 ? totalInputTokens : null,
-          )
-        : null,
+    usage: hasUsage ? EmbeddingModelV2Usage(tokens: totalInputTokens) : null,
   );
 }

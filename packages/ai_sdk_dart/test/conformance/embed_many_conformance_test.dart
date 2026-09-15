@@ -63,6 +63,55 @@ void main() {
         final result = await embedMany(model: model, values: ['a', 'b']);
         expect(result.usage, isNull);
       });
+
+      test(
+        'preserves usage when the provider reports unknown tokens',
+        () async {
+          final model = _UsageEmbeddingModel(const [
+            EmbeddingModelV2Usage(),
+            EmbeddingModelV2Usage(),
+          ]);
+          final result = await embedMany(
+            model: model,
+            values: ['a', 'b'],
+            maxParallelCalls: 1,
+          );
+          expect(result.usage, isNotNull);
+          expect(result.usage!.tokens, isNull);
+        },
+      );
+
+      test('preserves explicitly reported zero token usage', () async {
+        final model = _UsageEmbeddingModel(const [
+          EmbeddingModelV2Usage(tokens: 0),
+          EmbeddingModelV2Usage(tokens: 0),
+        ]);
+        final result = await embedMany(
+          model: model,
+          values: ['a', 'b'],
+          maxParallelCalls: 1,
+        );
+        expect(result.usage, isNotNull);
+        expect(result.usage!.tokens, 0);
+      });
+
+      test(
+        'aggregates known tokens while preserving mixed usage reports',
+        () async {
+          final model = _UsageEmbeddingModel([
+            const EmbeddingModelV2Usage(tokens: 0),
+            const EmbeddingModelV2Usage(),
+            const EmbeddingModelV2Usage(tokens: 4),
+          ]);
+          final result = await embedMany(
+            model: model,
+            values: ['a', 'b', 'c'],
+            maxParallelCalls: 1,
+          );
+          expect(result.usage, isNotNull);
+          expect(result.usage!.tokens, 4);
+        },
+      );
     });
 
     // ── maxParallelCalls ──────────────────────────────────────────────────
@@ -151,6 +200,38 @@ class _CountingEmbeddingModel implements EmbeddingModelV2<String> {
       embeddings: options.values
           .map((v) => EmbeddingModelV2Embedding(value: v, embedding: embedding))
           .toList(),
+    );
+  }
+}
+
+class _UsageEmbeddingModel implements EmbeddingModelV2<String> {
+  _UsageEmbeddingModel(this.usages);
+
+  final List<EmbeddingModelV2Usage> usages;
+  var _callIndex = 0;
+
+  @override
+  String get provider => 'fake';
+
+  @override
+  String get modelId => 'fake-usage-embedding-model';
+
+  @override
+  String get specificationVersion => 'v2';
+
+  @override
+  Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
+    EmbeddingModelV2CallOptions<String> options,
+  ) async {
+    final usage = usages[_callIndex++];
+    return EmbeddingModelV2GenerateResult(
+      embeddings: options.values
+          .map(
+            (value) =>
+                EmbeddingModelV2Embedding(value: value, embedding: const [1.0]),
+          )
+          .toList(),
+      usage: usage,
     );
   }
 }

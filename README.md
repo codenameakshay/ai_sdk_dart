@@ -155,8 +155,7 @@ for the exact renames and contract changes.
 
 ### 🧪 Conformance Suite
 - Comprehensive Dart and Flutter tests across every package and both example apps
-- A repository-wide **99% line-coverage gate** enforced in CI
-- Spec-driven JSON fixtures as the source of truth
+- A **99% line-coverage gate** for published package libraries enforced in CI
 - Provider wire-format conformance tests for every provider (plus a typed-error conformance test per provider)
 - `MockEmbeddingModelV3` testing utility for embedding model conformance
 
@@ -489,7 +488,7 @@ a conditional import — so the client also runs on Flutter web.
 - ✅ Typed provider API errors (`AiApiCallError` with status / type / code / body) across all providers
 - ✅ OpenAI (with reasoning options), Anthropic (with thinking options), Google providers
 - ✅ Cohere, Mistral, Groq, Ollama, Azure OpenAI providers — all with tools + multimodal
-- ✅ Comprehensive tests with a repository-wide 99% line-coverage gate
+- ✅ Comprehensive tests with a 99% line-coverage gate for published package libraries
 
 ### 🔜 Planned
 
@@ -511,10 +510,12 @@ Contributions are welcome! Please open an issue first to discuss changes before 
 ### Running tests
 
 ```sh
-fvm dart pub get
+fvm flutter pub get
 make test
 make analyze
 ```
+
+Run `make benchmark` for the structured-stream throughput benchmark.
 
 Or run a smaller set of pinned toolchain smoke checks directly:
 
@@ -552,10 +553,10 @@ Flutter example apps are different: they read compile-time defines from
 `String.fromEnvironment`, so pass keys with `--dart-define`:
 
 ```sh
-fvm flutter run -C examples/flutter_chat \
+cd examples/flutter_chat && fvm flutter run \
   --dart-define=OPENAI_API_KEY=sk-...
 
-fvm flutter run -C examples/advanced_app \
+cd examples/advanced_app && fvm flutter run \
   --dart-define=OPENAI_API_KEY=sk-... \
   --dart-define=ANTHROPIC_API_KEY=sk-ant-... \
   --dart-define=GOOGLE_API_KEY=AIza...
@@ -578,10 +579,10 @@ fvm flutter run -C examples/advanced_app \
 
 ## Development
 
-Managed with [Melos](https://melos.invertase.dev) as a monorepo workspace:
+Managed with the Dart pub workspace and the repository Makefile:
 
 ```sh
-fvm dart pub get
+fvm flutter pub get
 make analyze
 make test
 ```

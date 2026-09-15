@@ -1,9 +1,12 @@
-import 'dart:convert';
-
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
 import '../messages/model_message.dart';
+import '../output/output.dart';
 import '../tools/tool.dart';
+import 'shared/common_helpers.dart';
+import 'shared/output_instruction.dart';
+import 'streaming/structured_output.dart';
+import 'timeout_helpers.dart';
 
 /// Result returned by [generateObject].
 ///
@@ -55,43 +58,24 @@ Future<GenerateObjectResult<T>> generateObject<T>({
         role: LanguageModelV4Role.user,
         content: [LanguageModelV4TextPart(text: prompt)],
       ),
-    ...?messages?.map(
-      (m) => LanguageModelV4Message(
-        role: switch (m.role) {
-          ModelMessageRole.system => LanguageModelV4Role.system,
-          ModelMessageRole.user => LanguageModelV4Role.user,
-          ModelMessageRole.assistant => LanguageModelV4Role.assistant,
-          ModelMessageRole.tool => LanguageModelV4Role.tool,
-        },
-        content: m.parts ?? [LanguageModelV4TextPart(text: m.content ?? '')],
-      ),
-    ),
+    ...?messages?.map(toLanguageModelMessage),
   ];
 
-  final instruction = [
-    if (system != null && system.isNotEmpty) system,
-    'Return a single JSON object that matches this schema exactly:',
-    jsonEncode(schema.jsonSchema),
-    'Do not include markdown fences or extra text.',
-  ].join('\n');
+  final output = Output.object(schema: schema);
 
   final generateCall = model.doGenerate(
     LanguageModelV4CallOptions(
       prompt: LanguageModelV4Prompt(
-        system: instruction,
+        system: buildOutputSystemInstruction(system, output),
         messages: normalizedMessages,
       ),
       maxOutputTokens: maxOutputTokens,
       temperature: temperature,
       topP: topP,
-      responseFormat: LanguageModelV4JsonResponseFormat(
-        schema: schema.jsonSchema,
-      ),
+      responseFormat: buildResponseFormat(output),
     ),
   );
-  final response = await (timeout != null
-      ? generateCall.timeout(timeout)
-      : generateCall);
+  final response = await withOptionalTimeout(generateCall, timeout);
 
   final text = response.content
       .whereType<LanguageModelV4TextPart>()
@@ -101,7 +85,7 @@ Future<GenerateObjectResult<T>> generateObject<T>({
   late final Map<String, dynamic> jsonMap;
   late final T object;
   try {
-    jsonMap = _extractJsonObject(response.content);
+    jsonMap = extractJsonObject(text);
     object = schema.fromJson(jsonMap);
   } catch (error) {
     throw AiNoObjectGeneratedError(
@@ -117,50 +101,4 @@ Future<GenerateObjectResult<T>> generateObject<T>({
     response: response,
     rawJson: jsonMap,
   );
-}
-
-Map<String, dynamic> _extractJsonObject(
-  List<LanguageModelV4ContentPart> parts,
-) {
-  final text = parts
-      .whereType<LanguageModelV4TextPart>()
-      .map((part) => part.text)
-      .join();
-  if (text.isEmpty) {
-    throw const AiNoContentGeneratedError('No JSON content was generated.');
-  }
-
-  final parsed = _safeParseJson(text.trim());
-  if (parsed is Map<String, dynamic>) {
-    return parsed;
-  }
-  // Defensive: jsonDecode always yields Map<String, dynamic> for objects.
-  // coverage:ignore-start
-  if (parsed is Map) {
-    return parsed.cast<String, dynamic>();
-  }
-  // coverage:ignore-end
-
-  throw AiInvalidToolInputError('Model did not return a JSON object: $text');
-}
-
-Object? _safeParseJson(String text) {
-  try {
-    return jsonDecode(text);
-  } catch (_) {
-    final fenceMatch = RegExp(
-      r'```(?:json)?\s*([\s\S]+?)\s*```',
-    ).firstMatch(text);
-    if (fenceMatch != null) {
-      final fenced = fenceMatch.group(1);
-      if (fenced != null) {
-        try {
-          return jsonDecode(fenced);
-        } catch (_) {
-          return null;
-        }
-      }
-    }
-    return null;
-  }
 }

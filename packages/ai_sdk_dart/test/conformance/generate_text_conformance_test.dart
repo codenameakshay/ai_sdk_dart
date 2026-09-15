@@ -3,7 +3,6 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
 
 import 'helpers/fake_models.dart';
-import 'helpers/matchers.dart';
 
 void main() {
   group('generateText conformance', () {
@@ -448,7 +447,7 @@ void main() {
               ),
             },
           ),
-          throwsAiError<AiApiCallError>(),
+          throwsA(isA<AiApiCallError>()),
         );
       });
     });

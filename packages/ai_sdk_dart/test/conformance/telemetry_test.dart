@@ -315,7 +315,7 @@ void main() {
         // Drain everything and let the nested finish→usage .then() chain run.
         await result.fullStream.toList();
         await result.totalUsage;
-        await Future<void>.delayed(const Duration(milliseconds: 5));
+        await Future<void>.delayed(Duration.zero);
 
         final span = recorder.spans.first;
         expect(span.setAttributes['ai.usage.promptTokens'], 7);
@@ -323,5 +323,24 @@ void main() {
         expect(span.ended, isTrue);
       },
     );
+
+    test('records error when doStream throws', () async {
+      final recorder = _TestRecorder();
+      final model = MockLanguageModelV4(
+        response: [],
+        doStreamError: Exception('stream error'),
+      );
+
+      final result = await streamText(
+        model: model,
+        prompt: 'Hi',
+        telemetry: TelemetrySettings(isEnabled: true, recorder: recorder),
+      );
+      await expectLater(result.text, throwsA(isA<Exception>()));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(recorder.spans.first.ended, isTrue);
+      expect(recorder.spans.first.endError, isNotNull);
+    });
   });
 }

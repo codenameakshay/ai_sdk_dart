@@ -143,6 +143,89 @@ class FakeStreamModel extends LanguageModelV4 {
   }
 }
 
+/// Builds a [FakeStreamModel] that emits [deltas] as successive text-delta
+/// parts on a single text block, then finishes.
+///
+/// For a per-character stream, pass `text.split('')`.
+FakeStreamModel textDeltaStream(List<String> deltas) {
+  return FakeStreamModel([
+    const StreamPartTextStart(id: 't1'),
+    for (final delta in deltas) StreamPartTextDelta(id: 't1', delta: delta),
+    const StreamPartTextEnd(id: 't1'),
+    StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
+  ]);
+}
+
+/// A fake language model that streams static [text] and records the last
+/// call options it received, for asserting what streamText/generateText sent.
+class FakeCapturingStreamModel extends LanguageModelV4 {
+  FakeCapturingStreamModel(this.text);
+  final String text;
+  LanguageModelV4CallOptions? lastOptions;
+
+  @override
+  String get provider => 'fake';
+  @override
+  String get modelId => 'capturing-stream';
+  @override
+  String get specificationVersion => 'v4';
+
+  @override
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
+  ) async {
+    lastOptions = options;
+    return LanguageModelV4GenerateResult(
+      content: [LanguageModelV4TextPart(text: text)],
+      finishReason: LanguageModelV4FinishReason.stop,
+    );
+  }
+
+  @override
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
+  ) async {
+    lastOptions = options;
+    return LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.fromIterable([
+        const StreamPartTextStart(id: 't1'),
+        StreamPartTextDelta(id: 't1', delta: text),
+        const StreamPartTextEnd(id: 't1'),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
+      ]),
+    );
+  }
+}
+
+/// A fake language model whose [doStream] waits [delay] before returning an
+/// empty stream — exercises timeout-while-starting-to-stream code paths.
+class FakeSlowStartModel extends LanguageModelV4 {
+  FakeSlowStartModel(this.delay);
+  final Duration delay;
+
+  @override
+  String get provider => 'fake';
+  @override
+  String get modelId => 'slow-start';
+  @override
+  String get specificationVersion => 'v4';
+
+  @override
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
+  ) async => throw UnimplementedError();
+
+  @override
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
+  ) async {
+    await Future<void>.delayed(delay);
+    return const LanguageModelV4StreamResult(
+      stream: Stream<LanguageModelV4StreamPart>.empty(),
+    );
+  }
+}
+
 /// A fake language model that emits a stream error.
 class FakeErrorStreamModel extends LanguageModelV4 {
   FakeErrorStreamModel(

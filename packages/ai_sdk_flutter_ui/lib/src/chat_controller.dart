@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
-import 'frame_notifier.dart';
+import 'streaming_controller_base.dart';
 
 /// Status of the chat controller.
 enum ChatStatus {
@@ -38,17 +38,14 @@ enum ChatStatus {
 /// - [addToolApprovalResponse] — inject a tool approval decision mid-stream
 /// - Optimistic assistant message during streaming via [streamingContent]
 /// - [isLoading] — true while submitted or streaming
-class ChatController extends ChangeNotifier {
+class ChatController extends StreamingControllerBase {
   ChatController({
     this.id,
     this.initialMessages = const [],
     this.onFinish,
     this.onError,
-    FrameNotificationScheduler? notificationScheduler,
-  }) : _rootListenable = FrameNotifier(scheduler: notificationScheduler),
-       _statusListenable = FrameNotifier(scheduler: notificationScheduler),
-       _contentListenable = FrameNotifier(scheduler: notificationScheduler),
-       _messages = List<ModelMessage>.from(initialMessages);
+    super.notificationScheduler,
+  }) : _messages = List<ModelMessage>.from(initialMessages);
 
   /// Optional identifier for this chat session.
   final String? id;
@@ -61,22 +58,20 @@ class ChatController extends ChangeNotifier {
   /// Called when a generation errors.
   final void Function(Object error)? onError;
 
-  final FrameNotifier _rootListenable;
-  final FrameNotifier _statusListenable;
-  final FrameNotifier _contentListenable;
-
   /// Notifies when generation/composer-facing state changes.
   ///
   /// This covers [status], [isLoading], [error], and
   /// [pendingApprovalRequests].
-  Listenable get statusListenable => _statusListenable;
+  @override
+  Listenable get statusListenable => super.statusListenable;
 
   /// Notifies when transcript/content state changes.
   ///
   /// This covers [messages], [streamingContent], [streamingReasoning],
   /// [reasoningText], [lastUsage], [lastSources], [lastToolCalls], and
   /// [lastToolResults].
-  Listenable get contentListenable => _contentListenable;
+  @override
+  Listenable get contentListenable => super.contentListenable;
 
   final List<ModelMessage> _messages;
 
@@ -146,56 +141,24 @@ class ChatController extends ChangeNotifier {
   StreamSubscription<StreamTextEvent>? _errorSubscription;
   CancellationToken? _activeAbortSignal;
   ToolLoopAgent? _lastAgent;
-  int _nextRequestId = 0;
-  int? _activeRequestId;
-  bool _isDisposed = false;
 
   // Pending tool-approval responses indexed by approvalId.
   final Map<String, LanguageModelV4ToolApprovalResponse> _pendingApprovals = {};
 
-  bool _isCurrentRequest(int requestId) =>
-      !_isDisposed && _activeRequestId == requestId;
-
-  void _notifyListenersSafely({
-    required bool immediate,
-    bool status = false,
-    bool content = false,
-  }) {
-    if (_isDisposed) return;
-    if (immediate) {
-      _rootListenable.notifyImmediately();
-      if (status) _statusListenable.notifyImmediately();
-      if (content) _contentListenable.notifyImmediately();
-      return;
-    }
-
-    _rootListenable.notifyInFrame();
-    if (status) _statusListenable.notifyInFrame();
-    if (content) _contentListenable.notifyInFrame();
-  }
-
-  void _cancelActiveRequestSync({bool commitPartial = false}) {
-    _activeRequestId = null;
+  void _cancelActiveRequestSync() {
+    activeRequestId = null;
     _activeAbortSignal?.cancel();
     _activeAbortSignal = null;
     unawaited(_activeSubscription?.cancel());
     _activeSubscription = null;
     unawaited(_errorSubscription?.cancel());
     _errorSubscription = null;
-    if (commitPartial && _streamBuffer.isNotEmpty) {
-      _messages.add(
-        ModelMessage(
-          role: ModelMessageRole.assistant,
-          content: _streamBuffer.toString(),
-        ),
-      );
-    }
     _streamBuffer.clear();
     _streamingReasoning = '';
   }
 
   Future<void> _cancelActiveRequest({bool commitPartial = false}) async {
-    _activeRequestId = null;
+    activeRequestId = null;
     _activeAbortSignal?.cancel();
     _activeAbortSignal = null;
     await _activeSubscription?.cancel();
@@ -233,7 +196,7 @@ class ChatController extends ChangeNotifier {
   /// Add a [message] to the list without triggering generation.
   void append(ModelMessage message) {
     _messages.add(message);
-    _notifyListenersSafely(immediate: true, content: true);
+    notifyListenersSafely(immediate: true, content: true);
   }
 
   /// Re-run generation using the current message list.
@@ -250,7 +213,7 @@ class ChatController extends ChangeNotifier {
     if (_messages.isNotEmpty &&
         _messages.last.role == ModelMessageRole.assistant) {
       _messages.removeLast();
-      _notifyListenersSafely(immediate: true, content: true);
+      notifyListenersSafely(immediate: true, content: true);
     }
 
     await _runGeneration(effectiveAgent);
@@ -266,7 +229,7 @@ class ChatController extends ChangeNotifier {
     if (_status == ChatStatus.error) {
       _error = null;
       _status = ChatStatus.ready;
-      _notifyListenersSafely(immediate: true, status: true);
+      notifyListenersSafely(immediate: true, status: true);
     }
   }
 
@@ -290,7 +253,7 @@ class ChatController extends ChangeNotifier {
     _pendingApprovalRequests = _pendingApprovalRequests
         .where((request) => request.approvalId != approvalId)
         .toList();
-    _notifyListenersSafely(immediate: true, status: true);
+    notifyListenersSafely(immediate: true, status: true);
 
     // Once every paused request has a decision, replay the turn with the
     // collected responses so the agent can execute (or skip) the tools.
@@ -314,9 +277,9 @@ class ChatController extends ChangeNotifier {
     bool consumeApprovals = false,
   }) async {
     _cancelActiveRequestSync();
-    final requestId = ++_nextRequestId;
+    final requestId = ++nextRequestId;
     final abortSignal = CancellationToken();
-    _activeRequestId = requestId;
+    activeRequestId = requestId;
     _activeAbortSignal = abortSignal;
     _streamBuffer.clear();
     _streamingReasoning = '';
@@ -330,7 +293,7 @@ class ChatController extends ChangeNotifier {
     }
     _status = ChatStatus.submitted;
     _error = null;
-    _notifyListenersSafely(immediate: true, status: true, content: true);
+    notifyListenersSafely(immediate: true, status: true, content: true);
 
     try {
       final streamResult = await agent.stream(
@@ -340,9 +303,9 @@ class ChatController extends ChangeNotifier {
             : const [],
         abortSignal: abortSignal,
       );
-      if (!_isCurrentRequest(requestId)) return;
+      if (!isCurrentRequest(requestId)) return;
       _status = ChatStatus.streaming;
-      _notifyListenersSafely(immediate: true, status: true);
+      notifyListenersSafely(immediate: true, status: true);
 
       // The result's `text`/`output` futures reject on a streaming error; we
       // surface errors via [fullStream] instead, so swallow those completions
@@ -354,20 +317,20 @@ class ChatController extends ChangeNotifier {
       // stream), so watch both: text for content, fullStream for errors and
       // live reasoning deltas.
       _errorSubscription = streamResult.fullStream.listen((event) {
-        if (!_isCurrentRequest(requestId)) return;
+        if (!isCurrentRequest(requestId)) return;
         if (event is StreamTextErrorEvent) {
           _handleError(event.error, requestId);
         } else if (event is StreamTextReasoningDeltaEvent) {
           _streamingReasoning += event.delta;
-          _notifyListenersSafely(immediate: false, content: true);
+          notifyListenersSafely(immediate: false, content: true);
         }
       }, onError: (Object err) => _handleError(err, requestId));
 
       _activeSubscription = streamResult.textStream.listen(
         (delta) {
-          if (!_isCurrentRequest(requestId)) return;
+          if (!isCurrentRequest(requestId)) return;
           _streamBuffer.write(delta);
-          _notifyListenersSafely(immediate: false, content: true);
+          notifyListenersSafely(immediate: false, content: true);
         },
         onDone: () => unawaited(
           _finalizeTurn(
@@ -380,7 +343,7 @@ class ChatController extends ChangeNotifier {
         cancelOnError: true,
       );
     } catch (err) {
-      if (!_isCurrentRequest(requestId) || abortSignal.isCancelled) return;
+      if (!isCurrentRequest(requestId) || abortSignal.isCancelled) return;
       _handleError(err, requestId);
     }
   }
@@ -398,7 +361,7 @@ class ChatController extends ChangeNotifier {
     _errorSubscription = null;
 
     // An error event may already have moved us out of streaming.
-    if (!_isCurrentRequest(requestId) || _status != ChatStatus.streaming) {
+    if (!isCurrentRequest(requestId) || _status != ChatStatus.streaming) {
       return;
     }
 
@@ -421,21 +384,21 @@ class ChatController extends ChangeNotifier {
     }
 
     // A late error may have arrived while awaiting the result futures.
-    if (!_isCurrentRequest(requestId) || _status != ChatStatus.streaming) {
+    if (!isCurrentRequest(requestId) || _status != ChatStatus.streaming) {
       return;
     }
 
-    _activeRequestId = null;
+    activeRequestId = null;
     _activeAbortSignal = null;
     _lastUsage = usage ?? _lastUsage;
     _lastSources = mergeMetadata
-        ? _mergeSources(_lastSources, sources)
+        ? _mergeById(_lastSources, sources, (s) => '${s.id}|${s.url}')
         : sources;
     _lastToolCalls = mergeMetadata
-        ? _mergeToolCalls(_lastToolCalls, toolCalls)
+        ? _mergeById(_lastToolCalls, toolCalls, (c) => c.toolCallId)
         : toolCalls;
     _lastToolResults = mergeMetadata
-        ? _mergeToolResults(_lastToolResults, toolResults)
+        ? _mergeById(_lastToolResults, toolResults, (r) => r.toolCallId)
         : toolResults;
     if (reasoningText.isNotEmpty || !mergeMetadata) {
       _reasoningText = reasoningText;
@@ -446,7 +409,7 @@ class ChatController extends ChangeNotifier {
       _streamBuffer.clear();
       _streamingReasoning = '';
       _status = ChatStatus.awaitingApproval;
-      _notifyListenersSafely(immediate: true, status: true, content: true);
+      notifyListenersSafely(immediate: true, status: true, content: true);
       return;
     }
 
@@ -458,64 +421,33 @@ class ChatController extends ChangeNotifier {
     _streamBuffer.clear();
     _streamingReasoning = '';
     _status = ChatStatus.ready;
-    _notifyListenersSafely(immediate: true, status: true, content: true);
+    notifyListenersSafely(immediate: true, status: true, content: true);
     onFinish?.call(assistantMessage);
   }
 
-  List<LanguageModelV4SourcePart> _mergeSources(
-    List<LanguageModelV4SourcePart> previous,
-    List<LanguageModelV4SourcePart> current,
+  /// Merges [previous] and [current] by the key returned from [keyOf],
+  /// preferring the [current] entry for any id present in both.
+  List<T> _mergeById<T>(
+    List<T> previous,
+    List<T> current,
+    Object Function(T) keyOf,
   ) {
     if (previous.isEmpty) return current;
     if (current.isEmpty) return previous;
 
-    final merged = <String, LanguageModelV4SourcePart>{};
-    for (final source in previous) {
-      merged['${source.id}|${source.url}'] = source;
+    final merged = <Object, T>{};
+    for (final item in previous) {
+      merged[keyOf(item)] = item;
     }
-    for (final source in current) {
-      merged['${source.id}|${source.url}'] = source;
-    }
-    return merged.values.toList(growable: false);
-  }
-
-  List<LanguageModelV4ToolCallPart> _mergeToolCalls(
-    List<LanguageModelV4ToolCallPart> previous,
-    List<LanguageModelV4ToolCallPart> current,
-  ) {
-    if (previous.isEmpty) return current;
-    if (current.isEmpty) return previous;
-
-    final merged = <String, LanguageModelV4ToolCallPart>{};
-    for (final call in previous) {
-      merged[call.toolCallId] = call;
-    }
-    for (final call in current) {
-      merged[call.toolCallId] = call;
-    }
-    return merged.values.toList(growable: false);
-  }
-
-  List<LanguageModelV4ToolResultPart> _mergeToolResults(
-    List<LanguageModelV4ToolResultPart> previous,
-    List<LanguageModelV4ToolResultPart> current,
-  ) {
-    if (previous.isEmpty) return current;
-    if (current.isEmpty) return previous;
-
-    final merged = <String, LanguageModelV4ToolResultPart>{};
-    for (final result in previous) {
-      merged[result.toolCallId] = result;
-    }
-    for (final result in current) {
-      merged[result.toolCallId] = result;
+    for (final item in current) {
+      merged[keyOf(item)] = item;
     }
     return merged.values.toList(growable: false);
   }
 
   void _handleError(Object err, int requestId) {
-    if (!_isCurrentRequest(requestId) || _status == ChatStatus.error) return;
-    _activeRequestId = null;
+    if (!isCurrentRequest(requestId) || _status == ChatStatus.error) return;
+    activeRequestId = null;
     _activeAbortSignal = null;
     unawaited(_activeSubscription?.cancel());
     _activeSubscription = null;
@@ -525,7 +457,7 @@ class ChatController extends ChangeNotifier {
     _streamBuffer.clear();
     _streamingReasoning = '';
     _status = ChatStatus.error;
-    _notifyListenersSafely(immediate: true, status: true, content: true);
+    notifyListenersSafely(immediate: true, status: true, content: true);
     onError?.call(err);
   }
 
@@ -534,7 +466,7 @@ class ChatController extends ChangeNotifier {
     await _cancelActiveRequest(commitPartial: true);
     _discardApprovalState();
     _status = ChatStatus.ready;
-    _notifyListenersSafely(immediate: true, status: true, content: true);
+    notifyListenersSafely(immediate: true, status: true, content: true);
   }
 
   /// Remove all messages and reset to initial state.
@@ -551,27 +483,13 @@ class ChatController extends ChangeNotifier {
     _discardApprovalState();
     _status = ChatStatus.ready;
     _error = null;
-    _notifyListenersSafely(immediate: true, status: true, content: true);
+    notifyListenersSafely(immediate: true, status: true, content: true);
   }
 
   @override
-  void addListener(VoidCallback listener) =>
-      _rootListenable.addListener(listener);
-
-  @override
-  void removeListener(VoidCallback listener) =>
-      _rootListenable.removeListener(listener);
-
-  @override
-  bool get hasListeners => _rootListenable.hasListeners;
-
-  @override
   void dispose() {
-    _isDisposed = true;
+    isDisposed = true;
     _cancelActiveRequestSync();
-    _rootListenable.dispose();
-    _statusListenable.dispose();
-    _contentListenable.dispose();
     super.dispose();
   }
 }

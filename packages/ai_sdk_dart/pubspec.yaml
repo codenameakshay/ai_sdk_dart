@@ -10,18 +10,11 @@ environment:
 
 dependencies:
   ai_sdk_provider: ^2.0.0
-  collection: ^1.19.1
-  dio: ^5.9.0
   meta: ^1.16.0
-  json_annotation: ^4.9.0
-  freezed_annotation: ^3.1.0
 
 dev_dependencies:
   ai_sdk_anthropic: ^2.0.0
   ai_sdk_google: ^2.0.0
   ai_sdk_openai: ^2.0.0
-  build_runner: ^2.5.4
-  freezed: ^3.2.3
-  json_serializable: ^6.11.1
   lints: ^6.1.0
   test: ^1.25.0

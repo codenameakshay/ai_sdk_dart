@@ -6,6 +6,18 @@ import 'package:ai_sdk_dart/test.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+/// A value that always throws when JSON-encoded, to drive a `prettyJson`
+/// fallback, but has a recognizable [toString].
+class Unencodable {
+  const Unencodable();
+
+  @override
+  String toString() => 'UNENCODABLE';
+
+  Map<String, dynamic> toJson() => throw StateError('not encodable');
+}
 
 /// Builds a [ToolLoopAgent] whose model streams [text] as a single text part.
 ToolLoopAgent textAgent(String text) {
@@ -75,6 +87,23 @@ Future<void> pumpUntil(bool Function() condition, {int tries = 200}) async {
     if (condition()) return;
     await Future<void>.delayed(Duration.zero);
   }
+}
+
+/// Pumps [tester] until [condition] is true or [maxPumps] is exhausted.
+///
+/// Use this (rather than [pumpUntil]) in widget tests, where advancing time
+/// requires pumping the tester rather than just the event loop.
+Future<void> pumpTesterUntil(
+  WidgetTester tester,
+  bool Function() condition, {
+  int maxPumps = 200,
+  Duration step = const Duration(milliseconds: 1),
+}) async {
+  for (var i = 0; i < maxPumps; i++) {
+    if (condition()) return;
+    await tester.pump(step);
+  }
+  throw TestFailure('Condition not met after $maxPumps pumps.');
 }
 
 /// Builds a [ToolLoopAgent] whose model throws on stream, to exercise error

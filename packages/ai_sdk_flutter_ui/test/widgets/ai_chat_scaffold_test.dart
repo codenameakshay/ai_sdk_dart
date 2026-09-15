@@ -20,19 +20,6 @@ const _approvalRequest = LanguageModelV4ToolApprovalRequestPart(
   ),
 );
 
-Future<void> _pumpUntil(
-  WidgetTester tester,
-  bool Function() condition, {
-  int maxPumps = 200,
-  Duration step = const Duration(milliseconds: 1),
-}) async {
-  for (var i = 0; i < maxPumps; i++) {
-    if (condition()) return;
-    await tester.pump(step);
-  }
-  throw TestFailure('Condition not met after $maxPumps pumps.');
-}
-
 class _ComposerProbeController extends ChatController {
   @override
   Future<void> sendMessage({
@@ -43,20 +30,19 @@ class _ComposerProbeController extends ChatController {
   }
 }
 
-class _ErrorProbeController extends ChatController {
-  _ErrorProbeController()
+/// Base for the fixtures below: a [ChatController] that fakes its own
+/// [statusListenable]/[contentListenable] (so tests can trigger notifications
+/// without going through real generation) and backs [messages] with a plain
+/// list the fixture can mutate directly.
+abstract class _ProbeChatController extends ChatController {
+  _ProbeChatController({List<ModelMessage> messages = const <ModelMessage>[]})
     : _statusNotifier = ChangeNotifier(),
       _contentNotifier = ChangeNotifier(),
-      super();
+      _probeMessages = List<ModelMessage>.from(messages);
 
   final ChangeNotifier _statusNotifier;
   final ChangeNotifier _contentNotifier;
-  final List<ModelMessage> _probeMessages = <ModelMessage>[];
-
-  ChatStatus _probeStatus = ChatStatus.ready;
-  Object? _probeError;
-  ToolLoopAgent? reloadAgent;
-  int reloadCalls = 0;
+  final List<ModelMessage> _probeMessages;
 
   @override
   Listenable get statusListenable => _statusNotifier;
@@ -66,6 +52,20 @@ class _ErrorProbeController extends ChatController {
 
   @override
   List<ModelMessage> get messages => List.unmodifiable(_probeMessages);
+
+  @override
+  void dispose() {
+    _statusNotifier.dispose();
+    _contentNotifier.dispose();
+    super.dispose();
+  }
+}
+
+class _ErrorProbeController extends _ProbeChatController {
+  ChatStatus _probeStatus = ChatStatus.ready;
+  Object? _probeError;
+  ToolLoopAgent? reloadAgent;
+  int reloadCalls = 0;
 
   @override
   ChatStatus get status => _probeStatus;
@@ -91,24 +91,11 @@ class _ErrorProbeController extends ChatController {
     _probeStatus = ChatStatus.ready;
     _statusNotifier.notifyListeners();
   }
-
-  @override
-  void dispose() {
-    _statusNotifier.dispose();
-    _contentNotifier.dispose();
-    super.dispose();
-  }
 }
 
-class _ApprovalProbeController extends ChatController {
-  _ApprovalProbeController({super.initialMessages = const <ModelMessage>[]})
-    : _statusNotifier = ChangeNotifier(),
-      _contentNotifier = ChangeNotifier(),
-      _probeMessages = List<ModelMessage>.from(initialMessages);
-
-  final ChangeNotifier _statusNotifier;
-  final ChangeNotifier _contentNotifier;
-  final List<ModelMessage> _probeMessages;
+class _ApprovalProbeController extends _ProbeChatController {
+  _ApprovalProbeController({List<ModelMessage> initialMessages = const []})
+    : super(messages: initialMessages);
 
   ChatStatus _probeStatus = ChatStatus.ready;
   List<LanguageModelV4ToolApprovalRequestPart> _pendingRequests =
@@ -116,15 +103,6 @@ class _ApprovalProbeController extends ChatController {
   String? lastApprovalId;
   bool? lastApproved;
   String? lastReason;
-
-  @override
-  Listenable get statusListenable => _statusNotifier;
-
-  @override
-  Listenable get contentListenable => _contentNotifier;
-
-  @override
-  List<ModelMessage> get messages => List.unmodifiable(_probeMessages);
 
   @override
   ChatStatus get status => _probeStatus;
@@ -160,40 +138,19 @@ class _ApprovalProbeController extends ChatController {
     _probeStatus = ChatStatus.ready;
     _statusNotifier.notifyListeners();
   }
-
-  @override
-  void dispose() {
-    _statusNotifier.dispose();
-    _contentNotifier.dispose();
-    super.dispose();
-  }
 }
 
-class _MetadataProbeController extends ChatController {
+class _MetadataProbeController extends _ProbeChatController {
   _MetadataProbeController({
-    required List<ModelMessage> messages,
+    required super.messages,
     required this.probeToolCalls,
     required this.probeSources,
     this.probeToolResults = const <LanguageModelV4ToolResultPart>[],
-  }) : _statusNotifier = ChangeNotifier(),
-       _contentNotifier = ChangeNotifier(),
-       _probeMessages = List<ModelMessage>.from(messages);
+  });
 
-  final ChangeNotifier _statusNotifier;
-  final ChangeNotifier _contentNotifier;
-  final List<ModelMessage> _probeMessages;
   final List<LanguageModelV4ToolCallPart> probeToolCalls;
   final List<LanguageModelV4SourcePart> probeSources;
   final List<LanguageModelV4ToolResultPart> probeToolResults;
-
-  @override
-  Listenable get statusListenable => _statusNotifier;
-
-  @override
-  Listenable get contentListenable => _contentNotifier;
-
-  @override
-  List<ModelMessage> get messages => List.unmodifiable(_probeMessages);
 
   @override
   ChatStatus get status => ChatStatus.ready;
@@ -209,13 +166,6 @@ class _MetadataProbeController extends ChatController {
   @override
   List<LanguageModelV4ToolResultPart> get lastToolResults =>
       List.unmodifiable(probeToolResults);
-
-  @override
-  void dispose() {
-    _statusNotifier.dispose();
-    _contentNotifier.dispose();
-    super.dispose();
-  }
 }
 
 void main() {
@@ -435,7 +385,7 @@ void main() {
         );
 
         unawaited(controller.sendMessage(agent: agent, text: 'Need approval'));
-        await _pumpUntil(tester, () => agent.invocations.length == 1);
+        await pumpTesterUntil(tester, () => agent.invocations.length == 1);
         await agent.invocations.first.finish(
           finalText: '',
           steps: const [
@@ -457,7 +407,7 @@ void main() {
           toolCalls: const [call],
           toolResults: const [result],
         );
-        await _pumpUntil(
+        await pumpTesterUntil(
           tester,
           () => controller.status == ChatStatus.awaitingApproval,
         );
@@ -465,10 +415,13 @@ void main() {
 
         await tester.tap(find.byKey(const ValueKey('tool-approval-approve')));
         await tester.pump();
-        await _pumpUntil(tester, () => agent.invocations.length == 2);
+        await pumpTesterUntil(tester, () => agent.invocations.length == 2);
         agent.invocations.last.emitText('final answer');
         await agent.invocations.last.finish(finalText: 'final answer');
-        await _pumpUntil(tester, () => controller.status == ChatStatus.ready);
+        await pumpTesterUntil(
+          tester,
+          () => controller.status == ChatStatus.ready,
+        );
         await tester.pump();
 
         expect(find.text('final answer'), findsOneWidget);
@@ -505,7 +458,7 @@ void main() {
         );
 
         unawaited(controller.sendMessage(agent: agent, text: 'First'));
-        await _pumpUntil(tester, () => agent.invocations.length == 1);
+        await pumpTesterUntil(tester, () => agent.invocations.length == 1);
         agent.invocations.single.emitText('Answer');
         await agent.invocations.single.finish(
           finalText: 'Answer',
@@ -513,7 +466,10 @@ void main() {
           toolCalls: const [call],
           toolResults: const [result],
         );
-        await _pumpUntil(tester, () => controller.status == ChatStatus.ready);
+        await pumpTesterUntil(
+          tester,
+          () => controller.status == ChatStatus.ready,
+        );
         await tester.pump();
 
         expect(find.text('lookupWeather'), findsOneWidget);
@@ -521,7 +477,7 @@ void main() {
         expect(find.text('Weather source'), findsOneWidget);
 
         unawaited(controller.sendMessage(agent: agent, text: 'Second'));
-        await _pumpUntil(tester, () => agent.invocations.length == 2);
+        await pumpTesterUntil(tester, () => agent.invocations.length == 2);
         await tester.pump();
 
         expect(find.text('lookupWeather'), findsNothing);
@@ -530,7 +486,10 @@ void main() {
 
         agent.invocations.last.emitText('Second answer');
         await agent.invocations.last.finish(finalText: 'Second answer');
-        await _pumpUntil(tester, () => controller.status == ChatStatus.ready);
+        await pumpTesterUntil(
+          tester,
+          () => controller.status == ChatStatus.ready,
+        );
         await tester.pump();
 
         expect(find.text('lookupWeather'), findsNothing);

@@ -8,6 +8,9 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
+import '../../ai_sdk_provider/test/support/cancellation_adapter.dart';
+import '../../ai_sdk_provider/test/support/prompts.dart';
+import '../../ai_sdk_provider/test/support/test_server.dart';
 import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
@@ -28,20 +31,8 @@ void main() {
       expect(model.specificationVersion, 'v2');
     });
 
-    test('default ollama constant is an OllamaProvider', () {
-      expect(ollama, isA<OllamaProvider>());
-    });
-
-    test('accepts custom baseUrl', () {
-      final provider = OllamaProvider(
-        baseUrl: 'http://192.168.1.100:11434/api',
-      );
-      final model = provider('phi3');
-      expect(model.modelId, 'phi3');
-    });
-
     test('reuses an injected client across multiple requests', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         request.response.write(
@@ -71,10 +62,10 @@ void main() {
 
       await provider(
         'llama3',
-      ).doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('first')));
+      ).doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('first')));
       await provider(
         'llama3',
-      ).doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('second')));
+      ).doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('second')));
 
       expect(interceptedRequests, 2);
     });
@@ -82,10 +73,10 @@ void main() {
     test(
       'doGenerate cancels an in-flight Dio request via abortSignal',
       () async {
-        final adapter = _CancellationHttpClientAdapter();
+        final adapter = CancellationHttpClientAdapter();
         final client = _cancellationClient(adapter, 'http://localhost/api');
         addTearDown(() => client.close(force: true));
-        final abortSignal = _TestAbortSignal();
+        final abortSignal = TestAbortSignal();
         final model = OllamaProvider(
           baseUrl: 'http://localhost/api',
           client: client,
@@ -93,7 +84,7 @@ void main() {
 
         final future = model.doGenerate(
           LanguageModelV4CallOptions(
-            prompt: _userPrompt('hi'),
+            prompt: userPrompt('hi'),
             abortSignal: abortSignal,
           ),
         );
@@ -110,10 +101,10 @@ void main() {
     test(
       'doGenerate surfaces AiOperationCancelledError for a pre-cancelled abortSignal',
       () async {
-        final adapter = _CancellationHttpClientAdapter();
+        final adapter = CancellationHttpClientAdapter();
         final client = _cancellationClient(adapter, 'http://localhost/api');
         addTearDown(() => client.close(force: true));
-        final abortSignal = _TestAbortSignal()..cancel();
+        final abortSignal = TestAbortSignal()..cancel();
         final model = OllamaProvider(
           baseUrl: 'http://localhost/api',
           client: client,
@@ -122,7 +113,7 @@ void main() {
         await expectLater(
           model.doGenerate(
             LanguageModelV4CallOptions(
-              prompt: _userPrompt('hi'),
+              prompt: userPrompt('hi'),
               abortSignal: abortSignal,
             ),
           ),
@@ -133,10 +124,10 @@ void main() {
     );
 
     test('doStream cancels the Dio handshake via abortSignal', () async {
-      final adapter = _CancellationHttpClientAdapter();
+      final adapter = CancellationHttpClientAdapter();
       final client = _cancellationClient(adapter, 'http://localhost/api');
       addTearDown(() => client.close(force: true));
-      final abortSignal = _TestAbortSignal();
+      final abortSignal = TestAbortSignal();
       final model = OllamaProvider(
         baseUrl: 'http://localhost/api',
         client: client,
@@ -144,7 +135,7 @@ void main() {
 
       final future = model.doStream(
         LanguageModelV4CallOptions(
-          prompt: _userPrompt('hi'),
+          prompt: userPrompt('hi'),
           abortSignal: abortSignal,
         ),
       );
@@ -160,7 +151,7 @@ void main() {
     test(
       'dispose closes owned clients and leaves injected clients open',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           request.response.statusCode = 200;
           request.response.headers.contentType = ContentType.json;
           request.response.write(
@@ -178,7 +169,7 @@ void main() {
         ownedProvider.dispose();
         await expectLater(
           ownedProvider('llama3').doGenerate(
-            LanguageModelV4CallOptions(prompt: _userPrompt('after-dispose')),
+            LanguageModelV4CallOptions(prompt: userPrompt('after-dispose')),
           ),
           throwsA(anything),
         );
@@ -192,7 +183,7 @@ void main() {
 
         injectedProvider.dispose(force: false);
         await injectedProvider('llama3').doGenerate(
-          LanguageModelV4CallOptions(prompt: _userPrompt('still-open')),
+          LanguageModelV4CallOptions(prompt: userPrompt('still-open')),
         );
 
         expect(adapter.closeCount, 0);
@@ -203,22 +194,6 @@ void main() {
     );
   });
 
-  group('LanguageModelV4 interface', () {
-    test('language model extends LanguageModelV4', () {
-      final provider = OllamaProvider();
-      final model = provider('llama3');
-      expect(model, isA<LanguageModelV4>());
-    });
-  });
-
-  group('EmbeddingModelV2 interface', () {
-    test('embedding model implements EmbeddingModelV2<String>', () {
-      final provider = OllamaProvider();
-      final model = provider.embedding('nomic-embed-text');
-      expect(model, isA<EmbeddingModelV2<String>>());
-    });
-  });
-
   group('Ollama doGenerate wire format', () {
     test(
       'serializes tools and image content; parses tool calls and real usage',
@@ -226,7 +201,7 @@ void main() {
         final imageB64 = base64Encode(utf8.encode('img'));
         late Map<String, dynamic> captured;
 
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           expect(request.uri.path, '/api/chat');
           final body = await utf8.decoder.bind(request).join();
           captured = (jsonDecode(body) as Map).cast<String, dynamic>();
@@ -320,7 +295,7 @@ void main() {
       'serializes tool-result messages back into the conversation',
       () async {
         late Map<String, dynamic> captured;
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           final body = await utf8.decoder.bind(request).join();
           captured = (jsonDecode(body) as Map).cast<String, dynamic>();
           request.response.statusCode = 200;
@@ -371,7 +346,7 @@ void main() {
     test('serializes system prompt, system message, assistant tool calls, '
         'and generation options', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         final body = await utf8.decoder.bind(request).join();
         captured = (jsonDecode(body) as Map).cast<String, dynamic>();
         request.response.statusCode = 200;
@@ -452,7 +427,7 @@ void main() {
       () async {
         final rawB64 = base64Encode(utf8.encode('filebytes'));
         late Map<String, dynamic> captured;
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           final body = await utf8.decoder.bind(request).join();
           captured = (jsonDecode(body) as Map).cast<String, dynamic>();
           request.response.statusCode = 200;
@@ -519,7 +494,7 @@ void main() {
 
     test('drops remote URL images (Ollama embeds inline only)', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         final body = await utf8.decoder.bind(request).join();
         captured = (jsonDecode(body) as Map).cast<String, dynamic>();
         request.response.statusCode = 200;
@@ -565,7 +540,7 @@ void main() {
     test(
       'parses a tool call with no arguments as an empty input map',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           await utf8.decoder.bind(request).join();
           request.response.statusCode = 200;
           request.response.headers.contentType = ContentType.json;
@@ -611,7 +586,7 @@ void main() {
     );
 
     test('parses tool calls and usage from the NDJSON stream', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         request.response.write(
@@ -680,7 +655,7 @@ void main() {
     test(
       'plain text stream maps the length finish reason (no tool calls)',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           request.response.statusCode = 200;
           request.response.headers.contentType = ContentType.json;
           request.response.write(
@@ -729,7 +704,7 @@ void main() {
     );
 
     test('emits a StreamPartError when stream processing throws', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         // 200 response whose body is invalid UTF-8, so utf8.decode throws
         // inside _processStream and is routed to a StreamPartError.
         request.response.statusCode = 200;
@@ -762,7 +737,7 @@ void main() {
     test('posts to /api/embed and parses embeddings in order', () async {
       late Map<String, dynamic> captured;
       String? path;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         path = request.uri.path;
         final body = await utf8.decoder.bind(request).join();
         captured = (jsonDecode(body) as Map).cast<String, dynamic>();
@@ -799,7 +774,7 @@ void main() {
     });
 
     test('tolerates a response without an embeddings list', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         await utf8.decoder.bind(request).join();
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
@@ -817,18 +792,45 @@ void main() {
       );
       expect(result.embeddings, isEmpty);
     });
-  });
-}
 
-LanguageModelV4Prompt _userPrompt(String text) {
-  return LanguageModelV4Prompt(
-    messages: [
-      LanguageModelV4Message(
-        role: LanguageModelV4Role.user,
-        content: [LanguageModelV4TextPart(text: text)],
-      ),
-    ],
-  );
+    test(
+      'normalizes numeric vectors and ignores response rows beyond the input',
+      () async {
+        final server = await _startServer((request) async {
+          await utf8.decoder.bind(request).join();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'embeddings': [
+                [1, 2.5],
+                [-3, 4],
+                [99],
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final result = await OllamaProvider(baseUrl: server.baseUrl)
+            .embedding('nomic-embed-text')
+            .doEmbed(
+              const EmbeddingModelV2CallOptions<String>(values: ['a', 'b']),
+            );
+
+        expect(result.embeddings, hasLength(2));
+        expect(result.embeddings.map((embedding) => embedding.value), [
+          'a',
+          'b',
+        ]);
+        expect(result.embeddings.map((embedding) => embedding.embedding), [
+          [1.0, 2.5],
+          [-3.0, 4.0],
+        ]);
+      },
+    );
+  });
 }
 
 Dio _cancellationClient(HttpClientAdapter adapter, String baseUrl) {
@@ -843,76 +845,6 @@ Dio _cancellationClient(HttpClientAdapter adapter, String baseUrl) {
   return client;
 }
 
-class _TestServer {
-  _TestServer._(this._server);
-
-  final HttpServer _server;
-
-  static Future<_TestServer> start(
-    FutureOr<void> Function(HttpRequest request) handler,
-  ) async {
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    unawaited(() async {
-      await for (final request in server) {
-        await handler(request);
-      }
-    }());
-    return _TestServer._(server);
-  }
-
-  String get baseUrl => 'http://${_server.address.host}:${_server.port}/api';
-
-  Future<void> close() => _server.close(force: true);
-}
-
-class _TestAbortSignal implements LanguageModelV4AbortSignal {
-  final Completer<void> _completer = Completer<void>();
-  bool _isCancelled = false;
-
-  @override
-  bool get isCancelled => _isCancelled;
-
-  @override
-  Future<void> get onCancelled => _completer.future;
-
-  void cancel() {
-    if (_isCancelled) return;
-    _isCancelled = true;
-    _completer.complete();
-  }
-}
-
-class _CancellationHttpClientAdapter implements HttpClientAdapter {
-  int fetchCount = 0;
-  RequestOptions? lastOptions;
-  final Completer<void> fetchStarted = Completer<void>();
-
-  @override
-  Future<ResponseBody> fetch(
-    RequestOptions options,
-    Stream<Uint8List>? requestStream,
-    Future<void>? cancelFuture,
-  ) {
-    fetchCount++;
-    lastOptions = options;
-    if (!fetchStarted.isCompleted) {
-      fetchStarted.complete();
-    }
-
-    final completer = Completer<ResponseBody>();
-    cancelFuture?.then((_) {
-      if (!completer.isCompleted) {
-        completer.completeError(
-          DioException.requestCancelled(
-            requestOptions: options,
-            reason: 'abortSignal',
-          ),
-        );
-      }
-    });
-    return completer.future;
-  }
-
-  @override
-  void close({bool force = false}) {}
-}
+Future<TestServer> _startServer(
+  Future<void> Function(HttpRequest request) handler,
+) => TestServer.start(handler, pathSuffix: '/api');

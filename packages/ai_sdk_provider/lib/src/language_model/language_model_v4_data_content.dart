@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 /// Binary data content that can be sent to a model.
@@ -26,4 +27,14 @@ class DataContentUrl extends LanguageModelV4DataContent {
   const DataContentUrl(this.url);
 
   final Uri url;
+}
+
+/// Base64-encodes [data], or `null` for [DataContentUrl] (which has no bytes
+/// to encode locally).
+String? dataContentToBase64(LanguageModelV4DataContent data) {
+  return switch (data) {
+    DataContentBytes(:final bytes) => base64Encode(bytes),
+    DataContentBase64(:final base64) => base64,
+    DataContentUrl() => null,
+  };
 }

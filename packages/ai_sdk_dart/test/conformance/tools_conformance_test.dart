@@ -3,7 +3,6 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
 
 import 'helpers/fake_models.dart';
-import 'helpers/matchers.dart';
 
 void main() {
   group('tools conformance', () {
@@ -122,7 +121,7 @@ void main() {
           },
         );
 
-        expect(receivedInput, isNotNull);
+        expect(receivedInput, {'raw': 'data'});
       });
     });
 
@@ -188,7 +187,7 @@ void main() {
           },
         );
 
-        expect(result.toolCalls.length, greaterThanOrEqualTo(1));
+        expect(result.toolCalls.length, 1);
       });
 
       test('ToolChoiceRequired throws when no tools provided', () {
@@ -199,7 +198,7 @@ void main() {
             prompt: 'hi',
             toolChoice: const ToolChoiceRequired(),
           ),
-          throwsAiError<AiNoSuchToolError>(),
+          throwsA(isA<AiNoSuchToolError>()),
         );
       });
 
@@ -250,7 +249,7 @@ void main() {
               ),
             },
           ),
-          throwsAiError<AiNoSuchToolError>(),
+          throwsA(isA<AiNoSuchToolError>()),
         );
       });
     });
@@ -274,7 +273,7 @@ void main() {
               ),
             },
           ),
-          throwsAiError<AiNoSuchToolError>(),
+          throwsA(isA<AiNoSuchToolError>()),
         );
       });
     });
@@ -461,6 +460,36 @@ void main() {
           expect(result.toolResults, isEmpty);
         },
       );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // jsonSchema() helper
+  // ---------------------------------------------------------------------------
+
+  group('jsonSchema()', () {
+    test('jsonSchema field matches the provided map', () {
+      final map = {
+        'type': 'string',
+        'enum': ['a', 'b'],
+      };
+      final schema = jsonSchema(map);
+      expect(schema.jsonSchema, map);
+    });
+
+    test('fromJson returns the map unmodified', () {
+      final schema = jsonSchema({'type': 'object'});
+      final input = {'key': 'value', 'num': 1};
+      expect(schema.fromJson(input), same(input));
+    });
+
+    test('can be used as tool inputSchema', () async {
+      final myTool = tool<Map<String, dynamic>, String>(
+        inputSchema: jsonSchema({'type': 'object', 'properties': {}}),
+        description: 'Test tool',
+        execute: (input, _) async => 'result',
+      );
+      expect(myTool.inputSchema.jsonSchema['type'], 'object');
     });
   });
 }

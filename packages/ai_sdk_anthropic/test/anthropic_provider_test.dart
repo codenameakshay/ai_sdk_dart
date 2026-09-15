@@ -9,12 +9,15 @@ import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
 import '../../ai_sdk_provider/test/contract/language_model_contract.dart';
+import '../../ai_sdk_provider/test/support/cancellation_adapter.dart';
+import '../../ai_sdk_provider/test/support/prompts.dart';
+import '../../ai_sdk_provider/test/support/test_server.dart';
 import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
   group('AnthropicProvider', () {
     test('doGenerate maps text/tool_use/reasoning and usage', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         expect(request.uri.path, '/v1/messages');
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
@@ -79,7 +82,7 @@ void main() {
     });
 
     test('doStream parses content and message delta events', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         expect(request.uri.path, '/v1/messages');
         request.response.statusCode = 200;
         request.response.headers.set('content-type', 'text/event-stream');
@@ -143,7 +146,7 @@ void main() {
 
     test('credentials are resolved immediately before each request', () async {
       final apiKeys = <String?>[];
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         apiKeys.add(request.headers.value('x-api-key'));
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
@@ -167,19 +170,17 @@ void main() {
 
       await provider
           .call('claude-sonnet-4-5')
-          .doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('first')));
+          .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('first')));
       token = 'second-key';
       await provider
           .call('claude-sonnet-4-5')
-          .doGenerate(
-            LanguageModelV4CallOptions(prompt: _userPrompt('second')),
-          );
+          .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('second')));
 
       expect(apiKeys, ['first-key', 'second-key']);
     });
 
     test('reuses an injected client across multiple requests', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         request.response.write(
@@ -214,12 +215,10 @@ void main() {
 
       await provider
           .call('claude-sonnet-4-5')
-          .doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('first')));
+          .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('first')));
       await provider
           .call('claude-sonnet-4-5')
-          .doGenerate(
-            LanguageModelV4CallOptions(prompt: _userPrompt('second')),
-          );
+          .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('second')));
 
       expect(interceptedRequests, 2);
     });
@@ -227,10 +226,10 @@ void main() {
     test(
       'doGenerate cancels an in-flight Dio request via abortSignal',
       () async {
-        final adapter = _CancellationHttpClientAdapter();
+        final adapter = CancellationHttpClientAdapter();
         final client = _cancellationClient(adapter, 'http://localhost/v1');
         addTearDown(() => client.close(force: true));
-        final abortSignal = _TestAbortSignal();
+        final abortSignal = TestAbortSignal();
         final model = AnthropicProvider(
           apiKey: 'test',
           baseUrl: 'http://localhost/v1',
@@ -239,7 +238,7 @@ void main() {
 
         final future = model.doGenerate(
           LanguageModelV4CallOptions(
-            prompt: _userPrompt('hi'),
+            prompt: userPrompt('hi'),
             abortSignal: abortSignal,
           ),
         );
@@ -256,10 +255,10 @@ void main() {
     test(
       'doGenerate surfaces AiOperationCancelledError for a pre-cancelled abortSignal',
       () async {
-        final adapter = _CancellationHttpClientAdapter();
+        final adapter = CancellationHttpClientAdapter();
         final client = _cancellationClient(adapter, 'http://localhost/v1');
         addTearDown(() => client.close(force: true));
-        final abortSignal = _TestAbortSignal()..cancel();
+        final abortSignal = TestAbortSignal()..cancel();
         final model = AnthropicProvider(
           apiKey: 'test',
           baseUrl: 'http://localhost/v1',
@@ -269,7 +268,7 @@ void main() {
         await expectLater(
           model.doGenerate(
             LanguageModelV4CallOptions(
-              prompt: _userPrompt('hi'),
+              prompt: userPrompt('hi'),
               abortSignal: abortSignal,
             ),
           ),
@@ -280,10 +279,10 @@ void main() {
     );
 
     test('doStream cancels the Dio handshake via abortSignal', () async {
-      final adapter = _CancellationHttpClientAdapter();
+      final adapter = CancellationHttpClientAdapter();
       final client = _cancellationClient(adapter, 'http://localhost/v1');
       addTearDown(() => client.close(force: true));
-      final abortSignal = _TestAbortSignal();
+      final abortSignal = TestAbortSignal();
       final model = AnthropicProvider(
         apiKey: 'test',
         baseUrl: 'http://localhost/v1',
@@ -292,7 +291,7 @@ void main() {
 
       final future = model.doStream(
         LanguageModelV4CallOptions(
-          prompt: _userPrompt('hi'),
+          prompt: userPrompt('hi'),
           abortSignal: abortSignal,
         ),
       );
@@ -308,7 +307,7 @@ void main() {
     test(
       'dispose closes owned clients and leaves injected clients open',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           request.response.statusCode = 200;
           request.response.headers.contentType = ContentType.json;
           request.response.write(
@@ -332,9 +331,7 @@ void main() {
           ownedProvider
               .call('claude-sonnet-4-5')
               .doGenerate(
-                LanguageModelV4CallOptions(
-                  prompt: _userPrompt('after-dispose'),
-                ),
+                LanguageModelV4CallOptions(prompt: userPrompt('after-dispose')),
               ),
           throwsA(anything),
         );
@@ -351,7 +348,7 @@ void main() {
         await injectedProvider
             .call('claude-sonnet-4-5')
             .doGenerate(
-              LanguageModelV4CallOptions(prompt: _userPrompt('still-open')),
+              LanguageModelV4CallOptions(prompt: userPrompt('still-open')),
             );
 
         expect(adapter.closeCount, 0);
@@ -363,7 +360,7 @@ void main() {
 
     test('maps tool choice modes to anthropic wire format', () async {
       final seenBodies = <Map<String, dynamic>>[];
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         final body = await utf8.decoder.bind(request).join();
         seenBodies.add((jsonDecode(body) as Map).cast<String, dynamic>());
 
@@ -420,7 +417,7 @@ void main() {
     });
 
     test('forwards tool input examples to anthropic input_examples', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         final body = await utf8.decoder.bind(request).join();
         final jsonBody = (jsonDecode(body) as Map).cast<String, dynamic>();
         final tools = (jsonBody['tools'] as List).cast<Map<String, dynamic>>();
@@ -473,7 +470,7 @@ void main() {
     });
 
     test('extracts provider-native source parts from text citations', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         request.response.write(
@@ -523,7 +520,7 @@ void main() {
     test(
       'preserves invalid strict tool arguments for downstream failure handling',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           request.response.statusCode = 200;
           request.response.headers.contentType = ContentType.json;
           request.response.write(
@@ -577,7 +574,7 @@ void main() {
     );
 
     test('passes providerOptions into request body', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         final body = await utf8.decoder.bind(request).join();
         final jsonBody = jsonDecode(body) as Map<String, dynamic>;
         expect(jsonBody['metadata'], {'trace_id': 'abc'});
@@ -631,7 +628,7 @@ void main() {
         final imageB64 = base64Encode(utf8.encode('img'));
         final fileB64 = base64Encode(utf8.encode('pdf'));
 
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           final body = await utf8.decoder.bind(request).join();
           final jsonBody = jsonDecode(body) as Map<String, dynamic>;
           final messages = (jsonBody['messages'] as List)
@@ -722,7 +719,7 @@ void main() {
     );
 
     test('stream finish includes usage and metadata', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         request.response.statusCode = 200;
         request.response.headers.set('content-type', 'text/event-stream');
         request.response.write(
@@ -773,7 +770,7 @@ void main() {
     test(
       'stream emits raw chunks and closes explicit thinking and tool blocks',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           request.response.statusCode = 200;
           request.response.headers.set('content-type', 'text/event-stream');
           request.response.write(
@@ -805,7 +802,7 @@ void main() {
 
         final streamResult = await model.doStream(
           LanguageModelV4CallOptions(
-            prompt: _userPrompt('hi'),
+            prompt: userPrompt('hi'),
             includeRawChunks: true,
           ),
         );
@@ -829,7 +826,7 @@ void main() {
     test(
       'doGenerate maps cache_read/creation into V4 input token fields',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           request.response.statusCode = 200;
           request.response.headers.contentType = ContentType.json;
           request.response.write(
@@ -881,7 +878,7 @@ void main() {
     );
 
     test('stream carries cache token fields from message_start to finish', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         request.response.statusCode = 200;
         request.response.headers.set('content-type', 'text/event-stream');
         // message_start carries the input/cache breakdown; the trailing
@@ -974,7 +971,7 @@ void main() {
         'doGenerate sends thinking object when passed via providerOptions',
         () async {
           late Map<String, dynamic> captured;
-          final server = await _TestServer.start((request) async {
+          final server = await _startServer((request) async {
             final body = await utf8.decoder.bind(request).join();
             captured = (jsonDecode(body) as Map).cast<String, dynamic>();
             request.response.statusCode = 200;
@@ -1022,7 +1019,7 @@ void main() {
 
       test('doGenerate sends disabled thinking when speed=fast', () async {
         late Map<String, dynamic> captured;
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           final body = await utf8.decoder.bind(request).join();
           captured = (jsonDecode(body) as Map).cast<String, dynamic>();
           request.response.statusCode = 200;
@@ -1075,7 +1072,7 @@ void main() {
 
     test('sends stop_sequences when provided', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         final body = await utf8.decoder.bind(request).join();
         captured = (jsonDecode(body) as Map).cast<String, dynamic>();
         request.response.statusCode = 200;
@@ -1117,7 +1114,7 @@ void main() {
     });
 
     test('maps unknown stop_reason to other', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         request.response.write(
@@ -1154,7 +1151,7 @@ void main() {
     });
 
     test('decodes redacted_thinking content part', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         request.response.write(
@@ -1198,7 +1195,7 @@ void main() {
 
     test('serializes assistant tool calls and image url parts', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         final body = await utf8.decoder.bind(request).join();
         captured = (jsonDecode(body) as Map).cast<String, dynamic>();
         request.response.statusCode = 200;
@@ -1284,7 +1281,7 @@ void main() {
       late Map<String, dynamic> captured;
       final imageB64 = base64Encode(utf8.encode('img'));
       final fileB64 = base64Encode(utf8.encode('pdf'));
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         final body = await utf8.decoder.bind(request).join();
         captured = (jsonDecode(body) as Map).cast<String, dynamic>();
         request.response.statusCode = 200;
@@ -1360,7 +1357,7 @@ void main() {
 
     test('uses text tool result output directly', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         final body = await utf8.decoder.bind(request).join();
         captured = (jsonDecode(body) as Map).cast<String, dynamic>();
         request.response.statusCode = 200;
@@ -1414,7 +1411,7 @@ void main() {
       // non-image media type goes through the document/base64 branch and is
       // dropped when no base64 is available — exercised via _toBase64 url path.
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         final body = await utf8.decoder.bind(request).join();
         captured = (jsonDecode(body) as Map).cast<String, dynamic>();
         request.response.statusCode = 200;
@@ -1477,7 +1474,7 @@ void main() {
 
     test('stream handles message_start, thinking_delta, tools and errors', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         final body = await utf8.decoder.bind(request).join();
         captured = (jsonDecode(body) as Map).cast<String, dynamic>();
         request.response.statusCode = 200;
@@ -1579,7 +1576,7 @@ void main() {
       // still sending its request body would surface a "broken pipe" write
       // error instead of the intended mid-stream read error, which made this
       // test flaky under different socket timing.
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         await request.drain<void>();
         final socket = await request.response.detachSocket(writeHeaders: false);
         socket.write(
@@ -1624,7 +1621,7 @@ void main() {
     test(
       'stream emits stream start before error when the body fails before any valid chunk',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           await request.drain<void>();
           final socket = await request.response.detachSocket(
             writeHeaders: false,
@@ -1668,7 +1665,7 @@ void main() {
       // providerOptions carrying a key beyond thinking/speed leaves a non-null
       // cleaned map, which the stream request body spreads via `...?cleanedPo`.
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         final body = await utf8.decoder.bind(request).join();
         captured = (jsonDecode(body) as Map).cast<String, dynamic>();
         request.response.statusCode = 200;
@@ -1710,7 +1707,7 @@ void main() {
     test('doStream tolerates content_block_delta with no delta field', () async {
       // A content_block_delta event missing its `delta` falls back to the empty
       // map, so the unknown delta type is simply ignored.
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         request.response.statusCode = 200;
         request.response.headers.set('content-type', 'text/event-stream');
         request.response.write(
@@ -1765,7 +1762,7 @@ void main() {
       () async {
         // A message_delta carrying usage but no `delta` exercises the empty-map
         // fallback for `delta`; a later message_delta supplies the stop reason.
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           request.response.statusCode = 200;
           request.response.headers.set('content-type', 'text/event-stream');
           request.response.write(
@@ -1816,7 +1813,7 @@ void main() {
 
     test('doGenerate synthesizes a tool call id when none is provided', () async {
       // A tool_use content block with no `id` forces the `_generateId` fallback.
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         request.response.write(
@@ -1868,7 +1865,7 @@ void main() {
       'serializes provider-defined tools and parses structured warnings',
       () async {
         late Map<String, dynamic> captured;
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           final body = await utf8.decoder.bind(request).join();
           captured = (jsonDecode(body) as Map).cast<String, dynamic>();
           request.response.statusCode = 200;
@@ -1910,7 +1907,7 @@ void main() {
 
         final result = await model.doGenerate(
           LanguageModelV4CallOptions(
-            prompt: _userPrompt('hi'),
+            prompt: userPrompt('hi'),
             tools: const [
               LanguageModelV4ProviderDefinedTool(
                 id: 'anthropic.web_search_20250305',
@@ -1969,7 +1966,7 @@ void main() {
         final content = (user['content'] as List).cast<Map<String, dynamic>>();
         expect(content[0]['type'], 'text');
         expect(content[1]['type'], 'image');
-        expect(content[2]['type'], anyOf('document', 'image'));
+        expect(content[2]['type'], 'document');
       },
       expectToolResultBody: (body) {
         final messages = (body['messages'] as List)
@@ -1988,7 +1985,7 @@ Future<Map<String, dynamic>> _captureAnthropicRequestBody(
   LanguageModelV4Prompt prompt,
 ) async {
   late Map<String, dynamic> captured;
-  final server = await _TestServer.start((request) async {
+  final server = await _startServer((request) async {
     final body = await utf8.decoder.bind(request).join();
     captured = (jsonDecode(body) as Map).cast<String, dynamic>();
 
@@ -2026,87 +2023,6 @@ Dio _cancellationClient(HttpClientAdapter adapter, String baseUrl) {
   return client;
 }
 
-LanguageModelV4Prompt _userPrompt(String text) {
-  return LanguageModelV4Prompt(
-    messages: [
-      LanguageModelV4Message(
-        role: LanguageModelV4Role.user,
-        content: [LanguageModelV4TextPart(text: text)],
-      ),
-    ],
-  );
-}
-
-class _TestServer {
-  _TestServer._(this._server);
-
-  final HttpServer _server;
-
-  static Future<_TestServer> start(
-    FutureOr<void> Function(HttpRequest request) handler,
-  ) async {
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    unawaited(() async {
-      await for (final request in server) {
-        await handler(request);
-      }
-    }());
-    return _TestServer._(server);
-  }
-
-  String get baseUrl => 'http://${_server.address.host}:${_server.port}/v1';
-
-  Future<void> close() => _server.close(force: true);
-}
-
-class _TestAbortSignal implements LanguageModelV4AbortSignal {
-  final Completer<void> _completer = Completer<void>();
-  bool _isCancelled = false;
-
-  @override
-  bool get isCancelled => _isCancelled;
-
-  @override
-  Future<void> get onCancelled => _completer.future;
-
-  void cancel() {
-    if (_isCancelled) return;
-    _isCancelled = true;
-    _completer.complete();
-  }
-}
-
-class _CancellationHttpClientAdapter implements HttpClientAdapter {
-  int fetchCount = 0;
-  RequestOptions? lastOptions;
-  final Completer<void> fetchStarted = Completer<void>();
-
-  @override
-  Future<ResponseBody> fetch(
-    RequestOptions options,
-    Stream<Uint8List>? requestStream,
-    Future<void>? cancelFuture,
-  ) {
-    fetchCount++;
-    lastOptions = options;
-    if (!fetchStarted.isCompleted) {
-      fetchStarted.complete();
-    }
-
-    final completer = Completer<ResponseBody>();
-    cancelFuture?.then((_) {
-      if (!completer.isCompleted) {
-        completer.completeError(
-          DioException.requestCancelled(
-            requestOptions: options,
-            reason: 'abortSignal',
-          ),
-        );
-      }
-    });
-    return completer.future;
-  }
-
-  @override
-  void close({bool force = false}) {}
-}
+Future<TestServer> _startServer(
+  Future<void> Function(HttpRequest request) handler,
+) => TestServer.start(handler, pathSuffix: '/v1');

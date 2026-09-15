@@ -9,35 +9,7 @@ import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
 
-// ---------------------------------------------------------------------------
-// Local test HTTP server (mirrors result_envelope_provider_conformance_test)
-// ---------------------------------------------------------------------------
-
-class _TestServer {
-  _TestServer._(this._server, this.baseUrl);
-
-  final HttpServer _server;
-  final String baseUrl;
-  final List<Map<String, dynamic>> requestLog = [];
-
-  static Future<_TestServer> start(
-    Future<void> Function(HttpRequest request) onRequest,
-  ) async {
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    final ts = _TestServer._(
-      server,
-      'http://${server.address.address}:${server.port}/v1',
-    );
-    unawaited(() async {
-      await for (final request in server) {
-        await onRequest(request);
-      }
-    }());
-    return ts;
-  }
-
-  Future<void> close() => _server.close(force: true);
-}
+import '../../../ai_sdk_provider/test/support/test_server.dart';
 
 /// Read, parse, and return the request body JSON.
 Future<Map<String, dynamic>> _readJson(HttpRequest req) async {
@@ -59,7 +31,7 @@ void main() {
         () async {
           Map<String, dynamic>? capturedBody;
 
-          final server = await _TestServer.start((req) async {
+          final server = await TestServer.start((req) async {
             if (req.method != 'POST' ||
                 req.uri.path != '/v1/chat/completions') {
               req.response.statusCode = 404;
@@ -87,7 +59,7 @@ void main() {
               }),
             );
             await req.response.close();
-          });
+          }, pathSuffix: '/v1');
           addTearDown(server.close);
 
           final model = OpenAIProvider(
@@ -112,7 +84,7 @@ void main() {
         () async {
           Map<String, dynamic>? capturedBody;
 
-          final server = await _TestServer.start((req) async {
+          final server = await TestServer.start((req) async {
             if (req.method != 'POST' ||
                 req.uri.path != '/v1/chat/completions') {
               req.response.statusCode = 404;
@@ -149,7 +121,7 @@ void main() {
             );
             req.response.write('data: [DONE]\n\n');
             await req.response.close();
-          });
+          }, pathSuffix: '/v1');
           addTearDown(server.close);
 
           final model = OpenAIProvider(
@@ -170,7 +142,7 @@ void main() {
       );
 
       test('generateText exposes usage from non-streaming response', () async {
-        final server = await _TestServer.start((req) async {
+        final server = await TestServer.start((req) async {
           req.response.statusCode = 200;
           req.response.headers.contentType = ContentType.json;
           req.response.write(
@@ -191,7 +163,7 @@ void main() {
             }),
           );
           await req.response.close();
-        });
+        }, pathSuffix: '/v1');
         addTearDown(server.close);
 
         final model = OpenAIProvider(
@@ -207,7 +179,7 @@ void main() {
       test('tools are sent as tools array with type:function', () async {
         Map<String, dynamic>? capturedBody;
 
-        final server = await _TestServer.start((req) async {
+        final server = await TestServer.start((req) async {
           capturedBody = await _readJson(req);
           req.response.statusCode = 200;
           req.response.headers.contentType = ContentType.json;
@@ -224,7 +196,7 @@ void main() {
             }),
           );
           await req.response.close();
-        });
+        }, pathSuffix: '/v1');
         addTearDown(server.close);
 
         final model = OpenAIProvider(
@@ -268,7 +240,7 @@ void main() {
       test('generateText sends POST /v1/messages with stream:false', () async {
         Map<String, dynamic>? capturedBody;
 
-        final server = await _TestServer.start((req) async {
+        final server = await TestServer.start((req) async {
           if (req.method != 'POST' || req.uri.path != '/v1/messages') {
             req.response.statusCode = 404;
             await req.response.close();
@@ -289,7 +261,7 @@ void main() {
             }),
           );
           await req.response.close();
-        });
+        }, pathSuffix: '/v1');
         addTearDown(server.close);
 
         final model = AnthropicProvider(
@@ -309,7 +281,7 @@ void main() {
       });
 
       test('thinking content block maps to ReasoningPart', () async {
-        final server = await _TestServer.start((req) async {
+        final server = await TestServer.start((req) async {
           if (req.uri.path != '/v1/messages') {
             req.response.statusCode = 404;
             await req.response.close();
@@ -333,7 +305,7 @@ void main() {
             }),
           );
           await req.response.close();
-        });
+        }, pathSuffix: '/v1');
         addTearDown(server.close);
 
         final model = AnthropicProvider(
@@ -349,7 +321,7 @@ void main() {
       });
 
       test('tool_use content block maps to ToolCallPart', () async {
-        final server = await _TestServer.start((req) async {
+        final server = await TestServer.start((req) async {
           if (req.uri.path != '/v1/messages') {
             req.response.statusCode = 404;
             await req.response.close();
@@ -374,7 +346,7 @@ void main() {
             }),
           );
           await req.response.close();
-        });
+        }, pathSuffix: '/v1');
         addTearDown(server.close);
 
         final model = AnthropicProvider(
@@ -400,7 +372,7 @@ void main() {
       });
 
       test('streamText sends stream:true and emits text', () async {
-        final server = await _TestServer.start((req) async {
+        final server = await TestServer.start((req) async {
           if (req.uri.path != '/v1/messages') {
             req.response.statusCode = 404;
             await req.response.close();
@@ -444,7 +416,7 @@ void main() {
             })}\n\n',
           );
           await req.response.close();
-        });
+        }, pathSuffix: '/v1');
         addTearDown(server.close);
 
         final model = AnthropicProvider(
@@ -466,7 +438,7 @@ void main() {
         () async {
           Map<String, dynamic>? capturedBody;
 
-          final server = await _TestServer.start((req) async {
+          final server = await TestServer.start((req) async {
             if (!req.uri.path.endsWith(':generateContent')) {
               req.response.statusCode = 404;
               await req.response.close();
@@ -494,7 +466,7 @@ void main() {
               }),
             );
             await req.response.close();
-          });
+          }, pathSuffix: '/v1');
           addTearDown(server.close);
 
           final model = GoogleGenerativeAIProvider(
@@ -514,7 +486,7 @@ void main() {
       );
 
       test('streamText sends POST to :streamGenerateContent', () async {
-        final server = await _TestServer.start((req) async {
+        final server = await TestServer.start((req) async {
           if (req.uri.path.endsWith(':generateContent')) {
             req.response.statusCode = 200;
             req.response.headers.contentType = ContentType.json;
@@ -561,7 +533,7 @@ void main() {
           }
           req.response.statusCode = 404;
           await req.response.close();
-        });
+        }, pathSuffix: '/v1');
         addTearDown(server.close);
 
         final model = GoogleGenerativeAIProvider(
@@ -575,7 +547,7 @@ void main() {
       });
 
       test('functionCall parts map to ToolCallPart', () async {
-        final server = await _TestServer.start((req) async {
+        final server = await TestServer.start((req) async {
           if (!req.uri.path.endsWith(':generateContent')) {
             req.response.statusCode = 404;
             await req.response.close();
@@ -604,7 +576,7 @@ void main() {
             }),
           );
           await req.response.close();
-        });
+        }, pathSuffix: '/v1');
         addTearDown(server.close);
 
         final model = GoogleGenerativeAIProvider(
@@ -631,7 +603,7 @@ void main() {
       test(
         'STOP finish reason maps to LanguageModelV4FinishReason.stop',
         () async {
-          final server = await _TestServer.start((req) async {
+          final server = await TestServer.start((req) async {
             req.response.statusCode = 200;
             req.response.headers.contentType = ContentType.json;
             req.response.write(
@@ -649,7 +621,7 @@ void main() {
               }),
             );
             await req.response.close();
-          });
+          }, pathSuffix: '/v1');
           addTearDown(server.close);
 
           final model = GoogleGenerativeAIProvider(

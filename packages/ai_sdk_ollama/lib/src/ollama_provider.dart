@@ -47,14 +47,10 @@ final ollama = OllamaProvider();
 // HTTP helper
 // ---------------------------------------------------------------------------
 
-Dio _ollamaDio({String? baseUrl}) {
-  return Dio(
-    BaseOptions(
-      baseUrl: baseUrl ?? 'http://localhost:11434/api',
-      headers: {'Content-Type': 'application/json'},
-    ),
-  );
-}
+Dio _ollamaDio({String? baseUrl}) => createProviderDio(
+  baseUrl: baseUrl ?? 'http://localhost:11434/api',
+  headers: {'Content-Type': 'application/json'},
+);
 
 // ---------------------------------------------------------------------------
 // Language model
@@ -222,7 +218,7 @@ class _OllamaLanguageModel extends LanguageModelV4 {
         cancelToken: cancelToken,
       );
     } on DioException catch (e) {
-      throw await _apiCallError(e, provider);
+      throw await apiErrorFromDioException(e, provider: provider);
     }
     final data = response.data!;
 
@@ -264,7 +260,7 @@ class _OllamaLanguageModel extends LanguageModelV4 {
         cancelToken: cancelToken,
       );
     } on DioException catch (e) {
-      throw await _apiCallError(e, provider);
+      throw await apiErrorFromDioException(e, provider: provider);
     }
 
     final controller = StreamController<LanguageModelV4StreamPart>();
@@ -406,7 +402,7 @@ class _OllamaLanguageModel extends LanguageModelV4 {
       final args = function['arguments'];
       out.add(
         LanguageModelV4ToolCallPart(
-          toolCallId: raw['id']?.toString() ?? _generateId(),
+          toolCallId: raw['id']?.toString() ?? prefixedId('ollama-tool'),
           toolName: function['name']?.toString() ?? 'unknown_tool',
           input: args ?? <String, dynamic>{},
         ),
@@ -426,9 +422,6 @@ class _OllamaLanguageModel extends LanguageModelV4 {
       outputTokens: LanguageModelV4OutputTokenUsage(total: output),
     );
   }
-
-  String _generateId() =>
-      'ollama-tool-${DateTime.now().microsecondsSinceEpoch}';
 
   /// Resolve raw base64 image data (no `data:` prefix) from data content.
   String? _imageBase64(LanguageModelV4DataContent data) {
@@ -470,14 +463,18 @@ class _OllamaEmbeddingModel implements EmbeddingModelV2<String> {
     try {
       response = await client.post<Map<String, dynamic>>('/embed', data: body);
     } on DioException catch (e) {
-      throw await _apiCallError(e, provider);
+      throw await apiErrorFromDioException(e, provider: provider);
     }
     final data = response.data!;
     final embeddingsList = (data['embeddings'] as List?) ?? [];
-    final embeddings = embeddingsList.asMap().entries.map((entry) {
-      final vector = (entry.value as List).cast<double>();
+    final embeddings = embeddingsList.take(options.values.length).indexed.map((
+      entry,
+    ) {
+      final vector = (entry.$2 as List)
+          .map((value) => (value as num).toDouble())
+          .toList();
       return EmbeddingModelV2Embedding<String>(
-        value: options.values[entry.key],
+        value: options.values[entry.$1],
         embedding: vector,
       );
     }).toList();
@@ -508,26 +505,4 @@ CancelToken? _cancelTokenFor(LanguageModelV4AbortSignal? abortSignal) {
     }),
   );
   return cancelToken;
-}
-
-Future<AiSdkError> _apiCallError(DioException error, String provider) async {
-  if (error.type == DioExceptionType.cancel || CancelToken.isCancel(error)) {
-    return const AiOperationCancelledError();
-  }
-  final data = error.response?.data;
-  Object? body = data;
-  if (data is ResponseBody) {
-    final bytes = <int>[];
-    await for (final chunk in data.stream) {
-      bytes.addAll(chunk);
-    }
-    body = bytes;
-  }
-  return AiApiCallError.fromResponse(
-    statusCode: error.response?.statusCode,
-    url: error.requestOptions.uri.toString(),
-    body: body ?? error.message,
-    provider: provider,
-    cause: error,
-  );
 }

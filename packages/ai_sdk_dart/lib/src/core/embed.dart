@@ -1,5 +1,7 @@
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
+import 'timeout_helpers.dart';
+
 /// Result returned by [embed].
 ///
 /// Contains [value], [embedding] vector, and optional [usage].
@@ -31,7 +33,7 @@ Future<EmbedResult<VALUE>> embed<VALUE>({
   Duration? timeout,
 }) async {
   final call = model.doEmbed(EmbeddingModelV2CallOptions(values: [value]));
-  final result = await (timeout != null ? call.timeout(timeout) : call);
+  final result = await withOptionalTimeout(call, timeout);
 
   final first = result.embeddings.first;
   return EmbedResult<VALUE>(

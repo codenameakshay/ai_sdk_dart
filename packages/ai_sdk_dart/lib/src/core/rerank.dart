@@ -1,5 +1,7 @@
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
+import 'timeout_helpers.dart';
+
 /// Result returned by [rerank].
 ///
 /// [documents] are in ranked order (highest relevance first).
@@ -65,7 +67,7 @@ Future<RerankResult> rerank({
       providerOptions: providerOptions,
     ),
   );
-  final result = await (timeout != null ? call.timeout(timeout) : call);
+  final result = await withOptionalTimeout(call, timeout);
 
   return RerankResult(
     documents: result.documents

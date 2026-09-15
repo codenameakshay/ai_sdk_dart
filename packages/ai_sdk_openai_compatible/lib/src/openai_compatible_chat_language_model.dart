@@ -1,11 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
 
-import 'api_error.dart';
 import 'openai_compatible_config.dart';
 
 /// A [LanguageModelV4] implementing the full OpenAI Chat Completions wire
@@ -38,7 +36,7 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
   String get specificationVersion => 'v4';
 
   Future<Map<String, String>> _resolvedHeaders() async {
-    final headers = await Future.value(config.headers());
+    final headers = await config.headers();
     return Map<String, String>.unmodifiable(headers);
   }
 
@@ -77,28 +75,22 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
         'frequency_penalty': options.frequencyPenalty,
       if (options.stopSequences.isNotEmpty) 'stop': options.stopSequences,
       if (options.seed != null) config.seedKey: options.seed,
-      if (config.supportsResponseFormatJsonSchema &&
-          options.responseFormat is LanguageModelV4JsonResponseFormat)
-        'response_format': {
-          'type': 'json_schema',
-          'json_schema': {
-            'name':
-                (options.responseFormat as LanguageModelV4JsonResponseFormat)
-                    .name ??
-                'response',
-            'schema':
-                (options.responseFormat as LanguageModelV4JsonResponseFormat)
-                    .schema,
-            if ((options.responseFormat as LanguageModelV4JsonResponseFormat)
-                    .description !=
-                null)
-              'description':
-                  (options.responseFormat as LanguageModelV4JsonResponseFormat)
-                      .description,
-            'strict': true,
-          },
-        },
     };
+
+    final responseFormat = options.responseFormat;
+    if (config.supportsResponseFormatJsonSchema &&
+        responseFormat is LanguageModelV4JsonResponseFormat) {
+      body['response_format'] = {
+        'type': 'json_schema',
+        'json_schema': {
+          'name': responseFormat.name ?? 'response',
+          'schema': responseFormat.schema,
+          if (responseFormat.description != null)
+            'description': responseFormat.description,
+          'strict': true,
+        },
+      };
+    }
 
     final extra = config.extraBody?.call(options);
     if (extra != null) {
@@ -156,9 +148,9 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
       final rawInput = function['arguments']?.toString() ?? '{}';
       content.add(
         LanguageModelV4ToolCallPart(
-          toolCallId: callMap['id']?.toString() ?? _generateId('call'),
+          toolCallId: callMap['id']?.toString() ?? prefixedId('call'),
           toolName: function['name']?.toString() ?? 'unknown_tool',
-          input: _safeParseJson(rawInput),
+          input: safeParseJson(rawInput),
         ),
       );
     }
@@ -236,7 +228,7 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
 
     unawaited(() async {
       try {
-        await for (final dataLine in _readSseDataLines(body.stream)) {
+        await for (final dataLine in sseDataLines(body.stream)) {
           if (dataLine == '[DONE]') {
             break;
           }
@@ -307,13 +299,13 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
           final toolCalls = (delta['tool_calls'] as List?) ?? const [];
           for (final rawToolCall in toolCalls) {
             final call = (rawToolCall as Map).cast<String, dynamic>();
-            final index = _intOrNull(call['index']) ?? 0;
+            final index = intOrNull(call['index']) ?? 0;
             final function =
                 (call['function'] as Map?)?.cast<String, dynamic>() ??
                 <String, dynamic>{};
 
             final state = toolState.putIfAbsent(index, () {
-              final id = call['id']?.toString() ?? _generateId('tool');
+              final id = call['id']?.toString() ?? prefixedId('tool');
               final name = function['name']?.toString() ?? 'unknown_tool';
               controller.add(StreamPartToolInputStart(id: id, toolName: name));
               return _ToolStreamState(id: id, name: name);
@@ -346,7 +338,7 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
                   toolCall: LanguageModelV4ToolCallPart(
                     toolCallId: state.id,
                     toolName: state.name,
-                    input: _safeParseJson(state.argumentsBuffer.toString()),
+                    input: safeParseJson(state.argumentsBuffer.toString()),
                   ),
                 ),
               );
@@ -469,7 +461,7 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
 
       if (config.supportsMultimodal) {
         final contentParts = _toContentParts(message.content);
-        if (contentParts != null && contentParts.isNotEmpty) {
+        if (contentParts.isNotEmpty) {
           out.add({'role': role, 'content': contentParts});
           continue;
         }
@@ -481,7 +473,7 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
     return out;
   }
 
-  List<Map<String, dynamic>>? _toContentParts(
+  List<Map<String, dynamic>> _toContentParts(
     List<LanguageModelV4ContentPart> parts,
   ) {
     final out = <Map<String, dynamic>>[];
@@ -502,7 +494,7 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
       }
       if (part is LanguageModelV4FilePart &&
           part.mediaType.startsWith('audio/')) {
-        final audioData = _toBase64(part.data);
+        final audioData = dataContentToBase64(part.data);
         if (audioData != null) {
           out.add({
             'type': 'input_audio',
@@ -526,7 +518,7 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
         continue;
       }
       if (part is LanguageModelV4FilePart) {
-        final fileData = _toBase64(part.data);
+        final fileData = dataContentToBase64(part.data);
         if (fileData != null) {
           out.add({
             'type': 'file',
@@ -538,7 +530,7 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
         }
       }
     }
-    return out.isEmpty ? null : out;
+    return out;
   }
 
   // ── tool serialization ────────────────────────────────────────────────
@@ -580,8 +572,9 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
     required void Function(LanguageModelV4SourcePart) onSource,
     required void Function(LanguageModelV4FilePart) onFile,
   }) {
-    for (var i = 0; i < annotations.length; i++) {
-      final annotation = (annotations[i] as Map).cast<String, dynamic>();
+    for (final (i, rawAnnotation) in annotations.indexed) {
+      if (rawAnnotation is! Map) continue;
+      final annotation = rawAnnotation.cast<String, dynamic>();
       final type = annotation['type']?.toString();
       if (type == 'url_citation') {
         final url = annotation['url']?.toString();
@@ -614,8 +607,10 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
   // ── tool result serialization ─────────────────────────────────────────
 
   String _toToolResultText(LanguageModelV4ToolResultPart result) {
-    if (result.output is ToolResultOutputText && !result.isError) {
-      return (result.output as ToolResultOutputText).text;
+    if (result.output case ToolResultOutputText(
+      :final text,
+    ) when !result.isError) {
+      return text;
     }
     return jsonEncode({
       'toolCallId': result.toolCallId,
@@ -626,18 +621,13 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
   }
 
   Object _toToolResultOutputJson(LanguageModelV4ToolResultOutput output) {
-    if (output is ToolResultOutputText) {
-      return {'type': 'text', 'text': output.text};
-    }
-    if (output is ToolResultOutputContent) {
-      return {
+    return switch (output) {
+      ToolResultOutputText(:final text) => {'type': 'text', 'text': text},
+      ToolResultOutputContent(:final parts) => {
         'type': 'content',
-        'parts': output.parts.map(_toGenericContentPartJson).toList(),
-      };
-    }
-    // Unreachable: LanguageModelV4ToolResultOutput is a sealed class with only
-    // ToolResultOutputText and ToolResultOutputContent, both handled above.
-    return {'type': 'unknown'}; // coverage:ignore-line
+        'parts': parts.map(_toGenericContentPartJson).toList(),
+      },
+    };
   }
 
   Map<String, dynamic> _toGenericContentPartJson(
@@ -647,7 +637,7 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
       return {'type': 'text', 'text': part.text};
     }
     if (part is LanguageModelV4ImagePart) {
-      final data = _toBase64(part.image);
+      final data = dataContentToBase64(part.image);
       return {
         'type': 'image',
         'mediaType': ?part.mediaType,
@@ -663,7 +653,7 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
         if (part.filename != null) 'filename': part.filename,
         if (part.data is DataContentUrl)
           'url': (part.data as DataContentUrl).url.toString(),
-        'base64': ?_toBase64(part.data),
+        'base64': ?dataContentToBase64(part.data),
       };
     }
     return {'type': 'unsupported'};
@@ -702,13 +692,13 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
 // ── shared helpers ────────────────────────────────────────────────────────
 
 LanguageModelV4Usage _usageFrom(Map<String, dynamic> usage) {
-  final inputTokens = _intOrNull(usage['prompt_tokens']);
+  final inputTokens = intOrNull(usage['prompt_tokens']);
   // OpenAI's `prompt_tokens` already includes cache hits; `cached_tokens` is a
   // subset of it, so `total` stays as reported and the uncached remainder is
   // surfaced via `noCache`.
   final promptDetails = (usage['prompt_tokens_details'] as Map?)
       ?.cast<String, dynamic>();
-  final cacheRead = _intOrNull(promptDetails?['cached_tokens']);
+  final cacheRead = intOrNull(promptDetails?['cached_tokens']);
   return LanguageModelV4Usage(
     inputTokens: LanguageModelV4InputTokenUsage(
       total: inputTokens,
@@ -718,70 +708,22 @@ LanguageModelV4Usage _usageFrom(Map<String, dynamic> usage) {
       cacheRead: cacheRead,
     ),
     outputTokens: LanguageModelV4OutputTokenUsage(
-      total: _intOrNull(usage['completion_tokens']),
+      total: intOrNull(usage['completion_tokens']),
     ),
   );
 }
 
 String? _toImageUrl(LanguageModelV4DataContent data, String? mediaType) {
   if (data is DataContentUrl) return data.url.toString();
-  final b64 = _toBase64(data);
+  final b64 = dataContentToBase64(data);
   if (b64 == null) return null;
   final resolvedMediaType = mediaType ?? 'image/png';
   return 'data:$resolvedMediaType;base64,$b64';
 }
 
-String? _toBase64(LanguageModelV4DataContent data) {
-  return switch (data) {
-    DataContentBytes(:final bytes) => base64Encode(bytes),
-    DataContentBase64(:final base64) => base64,
-    DataContentUrl() => null,
-  };
-}
-
-Stream<String> _readSseDataLines(Stream<Uint8List> bytesStream) async* {
-  final lines = bytesStream
-      .map<List<int>>((chunk) => chunk)
-      .transform(utf8.decoder)
-      .transform(const LineSplitter());
-  await for (final line in lines) {
-    if (!line.startsWith('data:')) continue;
-    final payload = line.substring(5).trim();
-    if (payload.isEmpty) continue;
-    yield payload;
-  }
-}
-
 Map<String, dynamic>? _safeParseJsonMap(String input) {
-  final parsed = _safeParseJson(input);
-  if (parsed is Map<String, dynamic>) return parsed;
-  // Unreachable: jsonDecode always produces a Map<String, dynamic> for JSON
-  // objects, so the typed check above always matches first; this guards a
-  // hypothetical differently-typed Map without crashing.
-  if (parsed is Map) {
-    return parsed.cast<String, dynamic>(); // coverage:ignore-line
-  }
-  return null;
-}
-
-Object _safeParseJson(String input) {
-  try {
-    return jsonDecode(input);
-  } catch (_) {
-    return input;
-  }
-}
-
-int? _intOrNull(Object? value) => switch (value) {
-  int v => v,
-  num v => v.toInt(),
-  String v => int.tryParse(v),
-  _ => null,
-};
-
-String _generateId(String prefix) {
-  final micros = DateTime.now().microsecondsSinceEpoch;
-  return '$prefix-$micros';
+  final parsed = safeParseJson(input);
+  return parsed is Map<String, dynamic> ? parsed : null;
 }
 
 List<LanguageModelV4Warning> _readWarnings(Object? warningsRaw) {

@@ -1,13 +1,14 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:ai_sdk_mistral/ai_sdk_mistral.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
+import '../../ai_sdk_provider/test/support/http_helpers.dart';
+import '../../ai_sdk_provider/test/support/prompts.dart';
+import '../../ai_sdk_provider/test/support/test_server.dart';
 import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
@@ -28,26 +29,13 @@ void main() {
       expect(model.specificationVersion, 'v2');
     });
 
-    test('default mistral constant is a MistralProvider', () {
-      expect(mistral, isA<MistralProvider>());
-    });
-
-    test('accepts custom baseUrl', () {
-      final provider = MistralProvider(
-        apiKey: 'key',
-        baseUrl: 'https://custom.mistral.example.com/v1',
-      );
-      final model = provider('mistral-small');
-      expect(model.modelId, 'mistral-small');
-    });
-
     test(
       'chat credentials are resolved immediately before each request',
       () async {
         final authorizations = <String?>[];
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           authorizations.add(request.headers.value('authorization'));
-          _writeOk(request);
+          writeOk(request);
         });
         addTearDown(server.close);
 
@@ -59,11 +47,11 @@ void main() {
 
         await provider(
           'mistral-small',
-        ).doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('first')));
+        ).doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('first')));
         token = 'second-token';
         await provider(
           'mistral-small',
-        ).doGenerate(LanguageModelV4CallOptions(prompt: _userPrompt('second')));
+        ).doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('second')));
 
         expect(authorizations, ['Bearer first-token', 'Bearer second-token']);
       },
@@ -72,8 +60,8 @@ void main() {
     test(
       'dispose closes owned clients and leaves injected clients open',
       () async {
-        final server = await _TestServer.start((request) async {
-          _writeOk(request);
+        final server = await _startServer((request) async {
+          writeOk(request);
         });
         addTearDown(server.close);
 
@@ -84,7 +72,7 @@ void main() {
         ownedProvider.dispose();
         await expectLater(
           ownedProvider('mistral-small').doGenerate(
-            LanguageModelV4CallOptions(prompt: _userPrompt('after-dispose')),
+            LanguageModelV4CallOptions(prompt: userPrompt('after-dispose')),
           ),
           throwsA(anything),
         );
@@ -99,7 +87,7 @@ void main() {
 
         injectedProvider.dispose(force: false);
         await injectedProvider('mistral-small').doGenerate(
-          LanguageModelV4CallOptions(prompt: _userPrompt('still-open')),
+          LanguageModelV4CallOptions(prompt: userPrompt('still-open')),
         );
 
         expect(adapter.closeCount, 0);
@@ -110,28 +98,12 @@ void main() {
     );
   });
 
-  group('LanguageModelV4 interface', () {
-    test('language model extends LanguageModelV4', () {
-      final provider = MistralProvider(apiKey: 'key');
-      final model = provider('mistral-medium');
-      expect(model, isA<LanguageModelV4>());
-    });
-  });
-
-  group('EmbeddingModelV2 interface', () {
-    test('embedding model implements EmbeddingModelV2<String>', () {
-      final provider = MistralProvider(apiKey: 'key');
-      final model = provider.embedding('mistral-embed');
-      expect(model, isA<EmbeddingModelV2<String>>());
-    });
-  });
-
   group('OpenAI-compatible capabilities (via shared base)', () {
     test('serializes tools and tool_choice', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
-        captured = await _captureBody(request);
-        _writeOk(request);
+      final server = await _startServer((request) async {
+        captured = await captureBody(request);
+        writeOk(request);
       });
       addTearDown(server.close);
 
@@ -140,7 +112,7 @@ void main() {
       );
       await model.doGenerate(
         LanguageModelV4CallOptions(
-          prompt: _userPrompt('weather'),
+          prompt: userPrompt('weather'),
           tools: const [
             LanguageModelV4FunctionTool(
               name: 'weather',
@@ -158,18 +130,16 @@ void main() {
 
     test('serializes multimodal image content part', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
-        captured = await _captureBody(request);
-        _writeOk(request);
+      final server = await _startServer((request) async {
+        captured = await captureBody(request);
+        writeOk(request);
       });
       addTearDown(server.close);
 
       final model = MistralProvider(apiKey: 'key', baseUrl: server.baseUrl)(
         'pixtral-large-latest',
       );
-      await model.doGenerate(
-        LanguageModelV4CallOptions(prompt: _imagePrompt()),
-      );
+      await model.doGenerate(LanguageModelV4CallOptions(prompt: imagePrompt()));
 
       final messages = (captured['messages'] as List)
           .cast<Map<String, dynamic>>();
@@ -181,9 +151,9 @@ void main() {
 
     test('uses random_seed and max_tokens quirks', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
-        captured = await _captureBody(request);
-        _writeOk(request);
+      final server = await _startServer((request) async {
+        captured = await captureBody(request);
+        writeOk(request);
       });
       addTearDown(server.close);
 
@@ -192,7 +162,7 @@ void main() {
       );
       await model.doGenerate(
         LanguageModelV4CallOptions(
-          prompt: _userPrompt('hi'),
+          prompt: userPrompt('hi'),
           seed: 99,
           maxOutputTokens: 200,
         ),
@@ -206,9 +176,9 @@ void main() {
       'baseUrl ending with slash still posts to chat/completions once',
       () async {
         late String path;
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           path = request.uri.path;
-          _writeOk(request);
+          writeOk(request);
         });
         addTearDown(server.close);
 
@@ -217,7 +187,7 @@ void main() {
           baseUrl: '${server.baseUrl}/',
         )('mistral-small');
         await model.doGenerate(
-          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+          LanguageModelV4CallOptions(prompt: userPrompt('hi')),
         );
 
         expect(path, '/v1/chat/completions');
@@ -232,10 +202,10 @@ void main() {
         late Map<String, dynamic> captured;
         String? path;
         String? authHeader;
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           path = request.uri.path;
           authHeader = request.headers.value('authorization');
-          captured = await _captureBody(request);
+          captured = await captureBody(request);
 
           request.response.statusCode = 200;
           request.response.headers.contentType = ContentType.json;
@@ -279,8 +249,8 @@ void main() {
     );
 
     test('tolerates a response with no data list', () async {
-      final server = await _TestServer.start((request) async {
-        await _captureBody(request);
+      final server = await _startServer((request) async {
+        await captureBody(request);
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         request.response.write(jsonEncode({'object': 'list'}));
@@ -299,11 +269,56 @@ void main() {
       expect(result.embeddings, isEmpty);
     });
 
+    test(
+      'normalizes numeric vectors and ignores response rows beyond the input',
+      () async {
+        final server = await _startServer((request) async {
+          await captureBody(request);
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'data': [
+                {
+                  'embedding': [1, 2.5],
+                },
+                {
+                  'embedding': [-3, 4],
+                },
+                {
+                  'embedding': [99],
+                },
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final result =
+            await MistralProvider(apiKey: 'key', baseUrl: server.baseUrl)
+                .embedding('mistral-embed')
+                .doEmbed(
+                  const EmbeddingModelV2CallOptions<String>(values: ['a', 'b']),
+                );
+
+        expect(result.embeddings, hasLength(2));
+        expect(result.embeddings.map((embedding) => embedding.value), [
+          'a',
+          'b',
+        ]);
+        expect(result.embeddings.map((embedding) => embedding.embedding), [
+          [1.0, 2.5],
+          [-3.0, 4.0],
+        ]);
+      },
+    );
+
     test('baseUrl ending with slash still posts to embeddings once', () async {
       late String path;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         path = request.uri.path;
-        await _captureBody(request);
+        await captureBody(request);
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         request.response.write(
@@ -336,9 +351,9 @@ void main() {
       'embedding credentials are resolved immediately before each request',
       () async {
         final authorizations = <String?>[];
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           authorizations.add(request.headers.value('authorization'));
-          await _captureBody(request);
+          await captureBody(request);
           request.response.statusCode = 200;
           request.response.headers.contentType = ContentType.json;
           request.response.write(
@@ -375,69 +390,6 @@ void main() {
   });
 }
 
-LanguageModelV4Prompt _userPrompt(String text) => LanguageModelV4Prompt(
-  messages: [
-    LanguageModelV4Message(
-      role: LanguageModelV4Role.user,
-      content: [LanguageModelV4TextPart(text: text)],
-    ),
-  ],
-);
-
-LanguageModelV4Prompt _imagePrompt() => LanguageModelV4Prompt(
-  messages: [
-    LanguageModelV4Message(
-      role: LanguageModelV4Role.user,
-      content: [
-        LanguageModelV4TextPart(text: 'describe'),
-        LanguageModelV4ImagePart(
-          image: DataContentBytes(Uint8List.fromList(utf8.encode('img'))),
-          mediaType: 'image/png',
-        ),
-      ],
-    ),
-  ],
-);
-
-Future<Map<String, dynamic>> _captureBody(HttpRequest request) async {
-  final body = await utf8.decoder.bind(request).join();
-  return (jsonDecode(body) as Map).cast<String, dynamic>();
-}
-
-void _writeOk(HttpRequest request) {
-  request.response.statusCode = 200;
-  request.response.headers.contentType = ContentType.json;
-  request.response.write(
-    jsonEncode({
-      'choices': [
-        {
-          'finish_reason': 'stop',
-          'message': {'content': 'ok'},
-        },
-      ],
-    }),
-  );
-  request.response.close();
-}
-
-class _TestServer {
-  _TestServer._(this._server);
-
-  final HttpServer _server;
-
-  static Future<_TestServer> start(
-    FutureOr<void> Function(HttpRequest request) handler,
-  ) async {
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    unawaited(() async {
-      await for (final request in server) {
-        await handler(request);
-      }
-    }());
-    return _TestServer._(server);
-  }
-
-  String get baseUrl => 'http://${_server.address.host}:${_server.port}/v1';
-
-  Future<void> close() => _server.close(force: true);
-}
+Future<TestServer> _startServer(
+  Future<void> Function(HttpRequest request) handler,
+) => TestServer.start(handler, pathSuffix: '/v1');

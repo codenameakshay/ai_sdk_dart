@@ -43,9 +43,12 @@ export 'src/rerank_model/rerank_model_v1.dart';
 export 'src/rerank_model/rerank_model_v1_call_options.dart';
 
 // Shared types
+export 'src/shared/api_error.dart';
+export 'src/shared/json_helpers.dart';
 export 'src/shared/json_value.dart';
 export 'src/shared/provider_options.dart';
 export 'src/shared/provider_metadata.dart';
+export 'src/shared/sse.dart';
 
 // Error hierarchy (shared across all provider packages)
 export 'src/errors/ai_errors.dart';

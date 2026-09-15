@@ -9,10 +9,10 @@ import 'language_model_v4_stream_result.dart';
 /// Provider packages (OpenAI, Anthropic, Google, etc.) implement this
 /// interface so the `ai` core package can operate provider-agnostically.
 abstract class LanguageModelV4 {
-  const LanguageModelV4(); // coverage:ignore-line
+  const LanguageModelV4();
 
   /// Specification version this model implements.
-  String get specificationVersion => 'v4'; // coverage:ignore-line
+  String get specificationVersion => 'v4';
 
   /// Provider identifier (e.g., 'openai', 'anthropic').
   String get provider;
@@ -21,8 +21,7 @@ abstract class LanguageModelV4 {
   String get modelId;
 
   /// URL patterns this model can consume without the SDK downloading them.
-  FutureOr<Map<String, List<RegExp>>> get supportedUrls =>
-      const {}; // coverage:ignore-line
+  FutureOr<Map<String, List<RegExp>>> get supportedUrls => const {};
 
   /// Generate a complete, non-streaming response.
   Future<LanguageModelV4GenerateResult> doGenerate(

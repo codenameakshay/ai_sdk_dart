@@ -374,7 +374,7 @@ String partialJsonFingerprint(Object? value) {
 
 List<T> createTrackedImmutableSnapshot<T>(List<T> values) {
   partialJsonDebugCounters?.recordSnapshotCopy(values.length);
-  return List<T>.unmodifiable(List<T>.of(values));
+  return List<T>.unmodifiable(values);
 }
 
 Object? _tryParsePartialJsonValue(String text, {String? fallbackCandidate}) {

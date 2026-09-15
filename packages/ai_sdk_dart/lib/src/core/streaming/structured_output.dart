@@ -17,40 +17,29 @@ int emitTrackedArrayElements({
         partialValues.add(value);
         onElement(value);
         acceptedCount++;
-        // Defensive: jsonDecode always yields Map<String, dynamic> objects.
-        // coverage:ignore-start
-      } else if (item is Map) {
-        final value = output.element.fromJson(item.cast<String, dynamic>());
-        partialValues.add(value);
-        onElement(value);
-        acceptedCount++;
       }
-      // coverage:ignore-end
     } catch (_) {}
   }
   return acceptedCount;
 }
 
-TOutput? tryParseStreamingPartialOutput<TOutput>(
-  Output<TOutput> output,
-  String text,
-) {
+TOutput? tryParsePartialOutput<TOutput>(Output<TOutput> output, String text) {
   try {
-    return parseStreamingOutput(output, text);
+    return parseOutput(output, text);
   } catch (_) {
     return null;
   }
 }
 
-TOutput parseStreamingOutput<TOutput>(Output<TOutput> output, String text) {
+TOutput parseOutput<TOutput>(Output<TOutput> output, String text) {
   switch (output) {
     case TextOutput():
       return text as TOutput;
     case ObjectOutput<TOutput>(:final schema):
-      final jsonMap = extractStreamingJsonObject(text);
+      final jsonMap = extractJsonObject(text);
       return schema.fromJson(jsonMap);
     case ArrayOutput(:final element):
-      final jsonValue = extractStreamingJsonValue(text);
+      final jsonValue = extractJsonValue(text);
       if (jsonValue is! List) {
         throw AiInvalidToolInputError(
           'Model did not return a JSON array: $text',
@@ -60,11 +49,6 @@ TOutput parseStreamingOutput<TOutput>(Output<TOutput> output, String text) {
       for (final item in jsonValue) {
         if (item is Map<String, dynamic>) {
           list.add(element.fromJson(item));
-          // Defensive: jsonDecode always yields Map<String, dynamic> objects.
-          // coverage:ignore-start
-        } else if (item is Map) {
-          list.add(element.fromJson(item.cast<String, dynamic>()));
-          // coverage:ignore-end
         } else {
           throw AiInvalidToolInputError(
             'Array element is not a JSON object: $item',
@@ -89,18 +73,18 @@ TOutput parseStreamingOutput<TOutput>(Output<TOutput> output, String text) {
       }
       return value as TOutput;
     case JsonOutput():
-      return extractStreamingJsonValue(text) as TOutput;
+      return extractJsonValue(text) as TOutput;
   }
 }
 
-TOutput parseStreamingOutputWithNoObjectError<TOutput>({
+TOutput parseOutputWithNoObjectError<TOutput>({
   required Output<TOutput> output,
   required String text,
   required LanguageModelV4Usage? usage,
   required LanguageModelV4ResponseMetadata? response,
 }) {
   try {
-    return parseStreamingOutput(output, text);
+    return parseOutput(output, text);
   } catch (error) {
     if (output is TextOutput) {
       rethrow;
@@ -115,21 +99,15 @@ TOutput parseStreamingOutputWithNoObjectError<TOutput>({
   }
 }
 
-Map<String, dynamic> extractStreamingJsonObject(String text) {
-  final parsed = extractStreamingJsonValue(text);
+Map<String, dynamic> extractJsonObject(String text) {
+  final parsed = extractJsonValue(text);
   if (parsed is Map<String, dynamic>) {
     return parsed;
   }
-  // Defensive: jsonDecode always yields Map<String, dynamic> for objects.
-  // coverage:ignore-start
-  if (parsed is Map) {
-    return parsed.cast<String, dynamic>();
-  }
-  // coverage:ignore-end
   throw AiInvalidToolInputError('Model did not return a JSON object: $text');
 }
 
-Object extractStreamingJsonValue(String text) {
+Object extractJsonValue(String text) {
   if (text.trim().isEmpty) {
     throw const AiNoContentGeneratedError('No content was generated.');
   }

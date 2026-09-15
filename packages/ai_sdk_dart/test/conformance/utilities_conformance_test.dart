@@ -29,7 +29,7 @@ void main() {
         for (var i = 0; i < 200; i++) {
           final id = generateId();
           for (final char in id.split('')) {
-            expect(alphabet.contains(char), isTrue, reason: 'char "$char"');
+            expect(alphabet, contains(char));
           }
         }
       });
@@ -43,11 +43,6 @@ void main() {
     // ── createIdGenerator() ───────────────────────────────────────────────
 
     group('createIdGenerator()', () {
-      test('returns a function', () {
-        final gen = createIdGenerator();
-        expect(gen, isA<Function>());
-      });
-
       test('default size produces 7-char IDs', () {
         final gen = createIdGenerator();
         expect(gen().length, 7);

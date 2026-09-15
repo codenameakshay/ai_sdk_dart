@@ -5,6 +5,8 @@ import 'package:ai_sdk_openai_compatible/ai_sdk_openai_compatible.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
 
+const _defaultBaseUrl = 'https://api.openai.com/v1';
+
 /// OpenAI provider for language models, embeddings, images, speech, and transcription.
 ///
 /// Use [call] for language models, [embedding] for embeddings, [image] for image
@@ -38,7 +40,7 @@ class OpenAIProvider {
   final bool _ownsClient;
 
   Future<Map<String, String>> _headers() async {
-    final key = await Future.value(_credentialProvider());
+    final key = await _credentialProvider();
     return {if (key != null && key.isNotEmpty) 'Authorization': 'Bearer $key'};
   }
 
@@ -57,7 +59,7 @@ class OpenAIProvider {
     modelId: modelId,
     config: OpenAICompatibleConfig(
       provider: 'openai',
-      baseUrl: baseUrl ?? 'https://api.openai.com/v1',
+      baseUrl: baseUrl ?? _defaultBaseUrl,
       headers: _headers,
       client: _client,
       extraBody: _openAiExtraBody,
@@ -139,7 +141,7 @@ class _OpenAIEmbeddingModel implements EmbeddingModelV2<String> {
   Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
     EmbeddingModelV2CallOptions<String> options,
   ) async {
-    final resolvedHeaders = await Future.value(headers());
+    final resolvedHeaders = await headers();
     final providerOptions = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
@@ -178,7 +180,7 @@ class _OpenAIEmbeddingModel implements EmbeddingModelV2<String> {
     final usage = (data['usage'] as Map?)?.cast<String, dynamic>();
     return EmbeddingModelV2GenerateResult<String>(
       embeddings: embeddings,
-      usage: EmbeddingModelV2Usage(tokens: _intOrNull(usage?['total_tokens'])),
+      usage: EmbeddingModelV2Usage(tokens: intOrNull(usage?['total_tokens'])),
     );
   }
 }
@@ -205,7 +207,7 @@ class _OpenAIImageModel implements ImageModelV3 {
   Future<ImageModelV3GenerateResult> doGenerate(
     ImageModelV3CallOptions options,
   ) async {
-    final resolvedHeaders = await Future.value(headers());
+    final resolvedHeaders = await headers();
     final providerOptions = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
@@ -257,22 +259,10 @@ class _OpenAIImageModel implements ImageModelV3 {
   }
 }
 
-Dio _openAiDio({String? baseUrl}) {
-  return Dio(
-    BaseOptions(
-      baseUrl: baseUrl ?? 'https://api.openai.com/v1',
-      headers: {'Content-Type': 'application/json'},
-      responseType: ResponseType.json,
-    ),
-  );
-}
-
-int? _intOrNull(Object? value) => switch (value) {
-  int v => v,
-  num v => v.toInt(),
-  String v => int.tryParse(v),
-  _ => null,
-};
+Dio _openAiDio({String? baseUrl}) => createProviderDio(
+  baseUrl: baseUrl ?? _defaultBaseUrl,
+  headers: {'Content-Type': 'application/json'},
+);
 
 class _OpenAISpeechModel implements SpeechModelV1 {
   _OpenAISpeechModel({
@@ -296,7 +286,7 @@ class _OpenAISpeechModel implements SpeechModelV1 {
   Future<SpeechModelV1GenerateResult> doGenerate(
     SpeechModelV1CallOptions options,
   ) async {
-    final resolvedHeaders = await Future.value(headers());
+    final resolvedHeaders = await headers();
     final providerOptions = options.providerOptions?['openai'];
     final requestBody = {
       'model': modelId,
@@ -350,7 +340,7 @@ class _OpenAITranscriptionModel implements TranscriptionModelV1 {
   Future<TranscriptionModelV1GenerateResult> doGenerate(
     TranscriptionModelV1CallOptions options,
   ) async {
-    final resolvedHeaders = await Future.value(headers());
+    final resolvedHeaders = await headers();
     final formData = FormData.fromMap({
       'model': modelId,
       'file': MultipartFile.fromBytes(

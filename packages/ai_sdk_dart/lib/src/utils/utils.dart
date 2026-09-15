@@ -49,10 +49,11 @@ const _nanoidAlphabet =
 /// SDK v6 default output format.  Optionally a [size] can be specified.
 /// Mirrors `generateId` from the JS AI SDK v6.
 String generateId({int size = 7}) {
-  final bytes = List<int>.generate(size, (_) => _random.nextInt(256));
-  return String.fromCharCodes(
-    bytes.map((b) => _nanoidAlphabet.codeUnitAt(b % _nanoidAlphabet.length)),
+  final bytes = List<int>.generate(
+    size,
+    (_) => _nanoidAlphabet.codeUnitAt(_random.nextInt(_nanoidAlphabet.length)),
   );
+  return String.fromCharCodes(bytes);
 }
 
 /// Creates an ID generator function with a fixed [size].
@@ -71,21 +72,6 @@ String Function() createIdGenerator({int size = 7}) {
 // Stream simulation
 // ---------------------------------------------------------------------------
 
-/// Simulates a [Stream] from a list of [parts], optionally with [delay].
-///
-/// Useful for testing streaming logic without a real provider.
-/// Mirrors `simulateReadableStream` from the JS AI SDK v6.
-///
-/// ```dart
-/// final stream = simulateReadableStream(
-///   parts: [
-///     StreamPartTextStart(id: '1'),
-///     StreamPartTextDelta(id: '1', delta: 'Hello'),
-///     StreamPartTextEnd(id: '1'),
-///     StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
-///   ],
-/// );
-/// ```
 /// Simulates a [Stream] from a list of [parts].
 ///
 /// Useful for testing streaming logic without a real provider.

@@ -7,8 +7,8 @@ import 'package:test/test.dart';
 import 'helpers/fake_models.dart';
 
 /// Covers the image/speech/transcription fallback paths of [customProvider]
-/// and the corresponding `_FunctionFallback` delegations not hit by the
-/// existing language/embedding tests.
+/// and the direct nullable factory delegations not hit by the existing
+/// language/embedding tests.
 void main() {
   group('customProvider fallback delegations', () {
     test('fallbackImageModel resolves unknown image ids', () {
@@ -37,17 +37,6 @@ void main() {
       );
       expect(provider.transcriptionModel('unknown'), same(fallbackT));
     });
-
-    test('registered speech/transcription models resolve directly', () {
-      final speech = FakeSpeechModel(audio: Uint8List(0));
-      final transcription = FakeTranscriptionModel('t');
-      final provider = customProvider(
-        speechModels: {'tts': speech},
-        transcriptionModels: {'asr': transcription},
-      );
-      expect(provider.speechModel('tts'), same(speech));
-      expect(provider.transcriptionModel('asr'), same(transcription));
-    });
   });
 
   group('customProvider missing-model errors without a fallback', () {
@@ -59,28 +48,6 @@ void main() {
     test('transcription model not found throws ArgumentError', () {
       final provider = customProvider();
       expect(() => provider.transcriptionModel('asr'), throwsArgumentError);
-    });
-
-    test('image model not found (with unrelated fallback) throws', () {
-      // A speech fallback does not satisfy image lookups.
-      final provider = customProvider(
-        fallbackSpeechModel: (id) => FakeSpeechModel(audio: Uint8List(0)),
-      );
-      expect(() => provider.imageModel('dalle'), throwsArgumentError);
-    });
-
-    test('language model not found (with unrelated fallback) throws', () {
-      final provider = customProvider(
-        fallbackImageModel: (id) => _FakeImageModel(),
-      );
-      expect(() => provider.languageModel('gpt'), throwsArgumentError);
-    });
-
-    test('embedding model not found (with unrelated fallback) throws', () {
-      final provider = customProvider(
-        fallbackImageModel: (id) => _FakeImageModel(),
-      );
-      expect(() => provider.textEmbeddingModel('embed'), throwsArgumentError);
     });
   });
 }

@@ -1,9 +1,8 @@
-import 'dart:convert';
-
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/ai_motion.dart';
+import 'pretty_json.dart';
 
 /// A human-in-the-loop prompt for a tool call that requires approval.
 ///
@@ -132,7 +131,7 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
                 ),
               ),
               const SizedBox(height: 6),
-              _CodeBlock(text: _prettyJson(call.input)),
+              CodeBlock(text: prettyJson(call.input)),
               if (widget.showReasonField) ...[
                 const SizedBox(height: 10),
                 TextField(
@@ -173,42 +172,6 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-
-  static String _prettyJson(Object? value) {
-    try {
-      return const JsonEncoder.withIndent('  ').convert(value);
-    } catch (_) {
-      return value.toString();
-    }
-  }
-}
-
-class _CodeBlock extends StatelessWidget {
-  const _CodeBlock({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: SelectableText(
-        text,
-        style: TextStyle(
-          fontFamily: 'monospace',
-          fontSize: 12,
-          height: 1.4,
-          color: scheme.onSurface,
         ),
       ),
     );

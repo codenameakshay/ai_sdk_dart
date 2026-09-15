@@ -14,13 +14,19 @@ assignees: ''
 
 <!-- Which package(s) are affected? -->
 
-- [ ] `ai`
+- [ ] `ai_sdk_dart`
 - [ ] `ai_sdk_openai`
 - [ ] `ai_sdk_anthropic`
 - [ ] `ai_sdk_google`
-- [ ] `ai_sdk_flutter`
-- [ ] `ai_sdk_mcp`
+- [ ] `ai_sdk_azure`
+- [ ] `ai_sdk_cohere`
+- [ ] `ai_sdk_groq`
+- [ ] `ai_sdk_mistral`
+- [ ] `ai_sdk_ollama`
+- [ ] `ai_sdk_openai_compatible`
 - [ ] `ai_sdk_provider`
+- [ ] `ai_sdk_flutter_ui`
+- [ ] `ai_sdk_mcp`
 
 **Version:** <!-- e.g. 0.2.0 — run `dart pub deps | grep ai` -->
 
@@ -37,7 +43,7 @@ dart --version
 <!-- The smallest possible Dart/Flutter snippet that demonstrates the bug. -->
 
 ```dart
-import 'package:ai/ai.dart';
+import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 
 void main() async {
   // your code here

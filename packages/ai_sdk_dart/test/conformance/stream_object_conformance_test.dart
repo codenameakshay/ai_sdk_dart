@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
@@ -11,20 +13,8 @@ void main() {
       fromJson: (json) => json,
     );
 
-    // Streams a JSON object character-by-character so partial parses occur.
-    FakeStreamModel chunked(String json) {
-      final parts = <LanguageModelV4StreamPart>[
-        const StreamPartTextStart(id: 't1'),
-        for (final ch in json.split(''))
-          StreamPartTextDelta(id: 't1', delta: ch),
-        const StreamPartTextEnd(id: 't1'),
-        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
-      ];
-      return FakeStreamModel(parts);
-    }
-
     test('partialObjectStream emits snapshots, object completes', () async {
-      final model = chunked('{"a":1,"b":2}');
+      final model = textDeltaStream('{"a":1,"b":2}'.split(''));
       final result = await streamObject(
         model: model,
         schema: schema,
@@ -38,7 +28,7 @@ void main() {
     });
 
     test('textStream forwards raw deltas', () async {
-      final model = chunked('{"x":true}');
+      final model = textDeltaStream('{"x":true}'.split(''));
       final result = await streamObject(
         model: model,
         schema: schema,
@@ -51,7 +41,7 @@ void main() {
     test(
       'patchStream emits replace ops consistent with the final object',
       () async {
-        final model = chunked('{"a":1,"b":2}');
+        final model = textDeltaStream('{"a":1,"b":2}'.split(''));
         final result = await streamObject(
           model: model,
           schema: schema,
@@ -129,15 +119,15 @@ void main() {
     });
 
     test('system instruction is included in the call', () async {
-      final model = chunked('{"a":1}');
-      await streamObject(
+      final model = _CapturingStreamModel();
+      final result = await streamObject(
         model: model,
         schema: schema,
         system: 'be terse',
         prompt: 'json',
       );
-      // FakeStreamModel does not capture options, so just assert it ran.
-      expect(true, isTrue);
+      await result.object;
+      expect(model.lastOptions?.prompt.system, startsWith('be terse'));
     });
 
     test('converts ModelMessages of every role', () async {
@@ -169,7 +159,7 @@ void main() {
             prompt: 'json',
             timeout: const Duration(milliseconds: 10),
           ),
-          throwsA(isA<Object>()),
+          throwsA(isA<TimeoutException>()),
         );
       },
     );

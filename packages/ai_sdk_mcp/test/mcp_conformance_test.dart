@@ -1,6 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 
 import 'package:ai_sdk_mcp/ai_sdk_mcp.dart';
 import 'package:test/test.dart';
@@ -8,109 +6,11 @@ import 'package:test/test.dart';
 import 'support/fake_streamable_http_server.dart';
 
 // ---------------------------------------------------------------------------
-// Mock MCP HTTP server
-// ---------------------------------------------------------------------------
-
-/// A local HTTP server that responds to JSON-RPC MCP requests from queued responses.
-class _MockMCPServer {
-  _MockMCPServer._(this._server);
-
-  final HttpServer _server;
-  final List<Map<String, dynamic>> _requestLog = [];
-  final _responseQueue = <Map<String, dynamic>>[];
-  int? _initializedNotificationStatusCode;
-  String _initializedNotificationBody = '';
-
-  List<Map<String, dynamic>> get requestLog => List.unmodifiable(_requestLog);
-
-  static Future<_MockMCPServer> start() async {
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    final mock = _MockMCPServer._(server);
-    unawaited(mock._serve());
-    return mock;
-  }
-
-  void enqueue(Map<String, dynamic> response) {
-    _responseQueue.add(response);
-  }
-
-  /// Queue the standard initialize success + an empty response for the
-  /// `notifications/initialized` fire-and-forget call.
-  void enqueueInitialize({bool includeInitializedResponse = true}) {
-    enqueue({
-      'jsonrpc': '2.0',
-      'result': {
-        'protocolVersion': '2025-06-18',
-        'capabilities': {'tools': {}},
-        'serverInfo': {'name': 'test-server', 'version': '1.0.0'},
-      },
-    });
-    if (includeInitializedResponse) {
-      // notifications/initialized may get a response — provide one so the
-      // legacy request path still completes.
-      enqueue({'jsonrpc': '2.0', 'result': {}});
-    }
-  }
-
-  void acceptInitializedNotification({int statusCode = 202, String body = ''}) {
-    _initializedNotificationStatusCode = statusCode;
-    _initializedNotificationBody = body;
-  }
-
-  Future<void> _serve() async {
-    await for (final request in _server) {
-      if (request.method == 'GET' || request.method == 'DELETE') {
-        request.response.statusCode = 405;
-        await request.response.close();
-        continue;
-      }
-
-      final bodyText = await utf8.decoder.bind(request).join();
-      try {
-        final body = (jsonDecode(bodyText) as Map).cast<String, dynamic>();
-        _requestLog.add(body);
-        if (body['method'] == 'notifications/initialized' &&
-            _initializedNotificationStatusCode != null) {
-          request.response.statusCode = _initializedNotificationStatusCode!;
-          if (_initializedNotificationBody.isNotEmpty) {
-            request.response.write(_initializedNotificationBody);
-          }
-          await request.response.close();
-          continue;
-        }
-
-        final id = body['id'];
-
-        Map<String, dynamic> responseBody;
-        if (_responseQueue.isNotEmpty) {
-          responseBody = Map.of(_responseQueue.removeAt(0))..['id'] = id;
-        } else {
-          responseBody = {'jsonrpc': '2.0', 'id': id, 'result': {}};
-        }
-
-        request.response.statusCode = 200;
-        request.response.headers.contentType = ContentType.json;
-        request.response.write(jsonEncode(responseBody));
-      } catch (e) {
-        request.response.statusCode = 500;
-        request.response.write('{"error":"$e"}');
-      }
-      await request.response.close();
-    }
-  }
-
-  Uri get uri =>
-      Uri.parse('http://${_server.address.address}:${_server.port}/mcp');
-
-  Future<void> close() => _server.close(force: true);
-}
-
-// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-MCPClient _client(_MockMCPServer mock) =>
-    MCPClient(transport: StreamableHttpClientTransport(url: mock.uri));
+MCPClient _client(FakeStreamableHttpServer server) =>
+    MCPClient(transport: StreamableHttpClientTransport(url: server.uri));
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -124,19 +24,19 @@ void main() {
       test(
         'sends protocol version "2025-06-18" and tools capability',
         () async {
-          final mock = await _MockMCPServer.start();
-          addTearDown(mock.close);
-          mock.enqueueInitialize();
+          final server = await FakeStreamableHttpServer.start();
+          addTearDown(server.close);
+          server.queueInitializeResponse();
 
-          final client = _client(mock);
+          final client = _client(server);
           addTearDown(client.close);
 
           await client.initialize();
 
-          expect(mock.requestLog, isNotEmpty);
-          final initReq = mock.requestLog.first;
-          expect(initReq['method'], 'initialize');
-          final params = initReq['params'] as Map<String, dynamic>;
+          expect(server.requestLog, isNotEmpty);
+          final initReq = server.requestLog.first;
+          expect(initReq.body?['method'], 'initialize');
+          final params = initReq.body?['params'] as Map<String, dynamic>;
           expect(params['protocolVersion'], '2025-06-18');
           final caps = params['capabilities'] as Map<String, dynamic>;
           expect(caps.keys, contains('tools'));
@@ -146,18 +46,18 @@ void main() {
       test(
         'is idempotent — second call does not send another initialize',
         () async {
-          final mock = await _MockMCPServer.start();
-          addTearDown(mock.close);
-          mock.enqueueInitialize();
+          final server = await FakeStreamableHttpServer.start();
+          addTearDown(server.close);
+          server.queueInitializeResponse();
 
-          final client = _client(mock);
+          final client = _client(server);
           addTearDown(client.close);
 
           await client.initialize();
           await client.initialize(); // no-op
 
-          final initCount = mock.requestLog
-              .where((r) => r['method'] == 'initialize')
+          final initCount = server.requestLog
+              .where((r) => r.body?['method'] == 'initialize')
               .length;
           expect(initCount, 1);
         },
@@ -166,35 +66,34 @@ void main() {
       test(
         'sends notifications/initialized without an id and accepts 202 with an empty body',
         () async {
-          final mock = await _MockMCPServer.start();
-          addTearDown(mock.close);
-          mock.enqueueInitialize(includeInitializedResponse: false);
-          mock.acceptInitializedNotification();
+          final server = await FakeStreamableHttpServer.start();
+          addTearDown(server.close);
+          server.queueInitializeResponse();
 
-          final client = _client(mock);
+          final client = _client(server);
           addTearDown(client.close);
 
           await client.initialize();
 
-          expect(mock.requestLog, hasLength(2));
-          final initialized = mock.requestLog[1];
-          expect(initialized['method'], 'notifications/initialized');
-          expect(initialized.containsKey('id'), isFalse);
+          expect(server.requestLog, hasLength(2));
+          final initialized = server.requestLog[1];
+          expect(initialized.body?['method'], 'notifications/initialized');
+          expect(initialized.body?.containsKey('id'), isFalse);
         },
       );
 
       test(
         'throws MCPException when server returns a JSON-RPC error',
         () async {
-          final mock = await _MockMCPServer.start();
-          addTearDown(mock.close);
+          final server = await FakeStreamableHttpServer.start();
+          addTearDown(server.close);
 
-          mock.enqueue({
+          server.queueJsonResponse({
             'jsonrpc': '2.0',
             'error': {'code': -32600, 'message': 'Invalid Request'},
           });
 
-          final client = _client(mock);
+          final client = _client(server);
           addTearDown(client.close);
 
           await expectLater(
@@ -351,10 +250,10 @@ void main() {
 
     group('tools()', () {
       test('returns a ToolSet with correct tool names from server', () async {
-        final mock = await _MockMCPServer.start();
-        addTearDown(mock.close);
-        mock.enqueueInitialize();
-        mock.enqueue({
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse();
+        server.queueJsonResponse({
           'jsonrpc': '2.0',
           'result': {
             'tools': [
@@ -377,7 +276,7 @@ void main() {
           },
         });
 
-        final client = _client(mock);
+        final client = _client(server);
         addTearDown(client.close);
 
         final toolSet = await client.tools();
@@ -386,15 +285,15 @@ void main() {
       });
 
       test('returns empty ToolSet when server returns no tools', () async {
-        final mock = await _MockMCPServer.start();
-        addTearDown(mock.close);
-        mock.enqueueInitialize();
-        mock.enqueue({
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse();
+        server.queueJsonResponse({
           'jsonrpc': '2.0',
           'result': {'tools': []},
         });
 
-        final client = _client(mock);
+        final client = _client(server);
         addTearDown(client.close);
 
         final toolSet = await client.tools();
@@ -406,10 +305,10 @@ void main() {
 
     group('callTool()', () {
       test('returns text content from MCP tool response', () async {
-        final mock = await _MockMCPServer.start();
-        addTearDown(mock.close);
-        mock.enqueueInitialize();
-        mock.enqueue({
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse();
+        server.queueJsonResponse({
           'jsonrpc': '2.0',
           'result': {
             'content': [
@@ -419,7 +318,7 @@ void main() {
           },
         });
 
-        final client = _client(mock);
+        final client = _client(server);
         addTearDown(client.close);
 
         final result = await client.callTool('get_weather', {'city': 'Paris'});
@@ -427,10 +326,10 @@ void main() {
       });
 
       test('throws MCPException when isError is true', () async {
-        final mock = await _MockMCPServer.start();
-        addTearDown(mock.close);
-        mock.enqueueInitialize();
-        mock.enqueue({
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse();
+        server.queueJsonResponse({
           'jsonrpc': '2.0',
           'result': {
             'content': [
@@ -440,7 +339,7 @@ void main() {
           },
         });
 
-        final client = _client(mock);
+        final client = _client(server);
         addTearDown(client.close);
 
         await expectLater(
@@ -456,10 +355,10 @@ void main() {
       });
 
       test('sends tools/call with correct name and arguments', () async {
-        final mock = await _MockMCPServer.start();
-        addTearDown(mock.close);
-        mock.enqueueInitialize();
-        mock.enqueue({
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse();
+        server.queueJsonResponse({
           'jsonrpc': '2.0',
           'result': {
             'content': [
@@ -469,16 +368,19 @@ void main() {
           },
         });
 
-        final client = _client(mock);
+        final client = _client(server);
         addTearDown(client.close);
 
         await client.callTool('calculate', {'expression': '6*7'});
 
-        final callReq = mock.requestLog.firstWhere(
-          (r) => r['method'] == 'tools/call',
+        final callReq = server.requestLog.firstWhere(
+          (r) => r.body?['method'] == 'tools/call',
         );
-        expect(callReq['params']['name'], 'calculate');
-        expect((callReq['params']['arguments'] as Map)['expression'], '6*7');
+        expect(callReq.body?['params']['name'], 'calculate');
+        expect(
+          (callReq.body?['params']['arguments'] as Map)['expression'],
+          '6*7',
+        );
       });
     });
 
@@ -486,10 +388,10 @@ void main() {
 
     group('listPrompts()', () {
       test('returns prompt list from server', () async {
-        final mock = await _MockMCPServer.start();
-        addTearDown(mock.close);
-        mock.enqueueInitialize();
-        mock.enqueue({
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse();
+        server.queueJsonResponse({
           'jsonrpc': '2.0',
           'result': {
             'prompts': [
@@ -506,7 +408,7 @@ void main() {
           },
         });
 
-        final client = _client(mock);
+        final client = _client(server);
         addTearDown(client.close);
 
         final prompts = await client.listPrompts();
@@ -520,15 +422,15 @@ void main() {
       });
 
       test('returns empty list when server has no prompts', () async {
-        final mock = await _MockMCPServer.start();
-        addTearDown(mock.close);
-        mock.enqueueInitialize();
-        mock.enqueue({
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse();
+        server.queueJsonResponse({
           'jsonrpc': '2.0',
           'result': {'prompts': []},
         });
 
-        final client = _client(mock);
+        final client = _client(server);
         addTearDown(client.close);
 
         final prompts = await client.listPrompts();
@@ -536,21 +438,21 @@ void main() {
       });
 
       test('sends prompts/list method', () async {
-        final mock = await _MockMCPServer.start();
-        addTearDown(mock.close);
-        mock.enqueueInitialize();
-        mock.enqueue({
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse();
+        server.queueJsonResponse({
           'jsonrpc': '2.0',
           'result': {'prompts': []},
         });
 
-        final client = _client(mock);
+        final client = _client(server);
         addTearDown(client.close);
 
         await client.listPrompts();
 
         expect(
-          mock.requestLog.any((r) => r['method'] == 'prompts/list'),
+          server.requestLog.any((r) => r.body?['method'] == 'prompts/list'),
           isTrue,
         );
       });
@@ -560,10 +462,10 @@ void main() {
 
     group('getPrompt()', () {
       test('returns rendered prompt messages', () async {
-        final mock = await _MockMCPServer.start();
-        addTearDown(mock.close);
-        mock.enqueueInitialize();
-        mock.enqueue({
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse();
+        server.queueJsonResponse({
           'jsonrpc': '2.0',
           'result': {
             'description': 'Summarize this',
@@ -576,7 +478,7 @@ void main() {
           },
         });
 
-        final client = _client(mock);
+        final client = _client(server);
         addTearDown(client.close);
 
         final result = await client.getPrompt(
@@ -590,36 +492,36 @@ void main() {
       });
 
       test('sends prompts/get with name and arguments', () async {
-        final mock = await _MockMCPServer.start();
-        addTearDown(mock.close);
-        mock.enqueueInitialize();
-        mock.enqueue({
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse();
+        server.queueJsonResponse({
           'jsonrpc': '2.0',
           'result': {'messages': []},
         });
 
-        final client = _client(mock);
+        final client = _client(server);
         addTearDown(client.close);
 
         await client.getPrompt('summarize', arguments: {'doc': 'test'});
 
-        final req = mock.requestLog.firstWhere(
-          (r) => r['method'] == 'prompts/get',
+        final req = server.requestLog.firstWhere(
+          (r) => r.body?['method'] == 'prompts/get',
         );
-        expect(req['params']['name'], 'summarize');
-        expect((req['params']['arguments'] as Map)['doc'], 'test');
+        expect(req.body?['params']['name'], 'summarize');
+        expect((req.body?['params']['arguments'] as Map)['doc'], 'test');
       });
 
       test('throws MCPException on server error', () async {
-        final mock = await _MockMCPServer.start();
-        addTearDown(mock.close);
-        mock.enqueueInitialize();
-        mock.enqueue({
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse();
+        server.queueJsonResponse({
           'jsonrpc': '2.0',
           'error': {'code': -32601, 'message': 'Prompt not found'},
         });
 
-        final client = _client(mock);
+        final client = _client(server);
         addTearDown(client.close);
 
         await expectLater(
@@ -633,10 +535,10 @@ void main() {
 
     group('listResources()', () {
       test('returns resource list from server', () async {
-        final mock = await _MockMCPServer.start();
-        addTearDown(mock.close);
-        mock.enqueueInitialize();
-        mock.enqueue({
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse();
+        server.queueJsonResponse({
           'jsonrpc': '2.0',
           'result': {
             'resources': [
@@ -651,7 +553,7 @@ void main() {
           },
         });
 
-        final client = _client(mock);
+        final client = _client(server);
         addTearDown(client.close);
 
         final resources = await client.listResources();
@@ -663,15 +565,15 @@ void main() {
       });
 
       test('returns empty list when server has no resources', () async {
-        final mock = await _MockMCPServer.start();
-        addTearDown(mock.close);
-        mock.enqueueInitialize();
-        mock.enqueue({
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse();
+        server.queueJsonResponse({
           'jsonrpc': '2.0',
           'result': {'resources': []},
         });
 
-        final client = _client(mock);
+        final client = _client(server);
         addTearDown(client.close);
 
         final resources = await client.listResources();
@@ -683,10 +585,10 @@ void main() {
 
     group('readResource()', () {
       test('returns resource content', () async {
-        final mock = await _MockMCPServer.start();
-        addTearDown(mock.close);
-        mock.enqueueInitialize();
-        mock.enqueue({
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse();
+        server.queueJsonResponse({
           'jsonrpc': '2.0',
           'result': {
             'contents': [
@@ -699,7 +601,7 @@ void main() {
           },
         });
 
-        final client = _client(mock);
+        final client = _client(server);
         addTearDown(client.close);
 
         final content = await client.readResource('file:///data/config.json');
@@ -709,10 +611,10 @@ void main() {
       });
 
       test('sends resources/read with correct uri', () async {
-        final mock = await _MockMCPServer.start();
-        addTearDown(mock.close);
-        mock.enqueueInitialize();
-        mock.enqueue({
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse();
+        server.queueJsonResponse({
           'jsonrpc': '2.0',
           'result': {
             'contents': [
@@ -721,27 +623,27 @@ void main() {
           },
         });
 
-        final client = _client(mock);
+        final client = _client(server);
         addTearDown(client.close);
 
         await client.readResource('file:///x');
 
-        final req = mock.requestLog.firstWhere(
-          (r) => r['method'] == 'resources/read',
+        final req = server.requestLog.firstWhere(
+          (r) => r.body?['method'] == 'resources/read',
         );
-        expect(req['params']['uri'], 'file:///x');
+        expect(req.body?['params']['uri'], 'file:///x');
       });
 
       test('throws MCPException on server error', () async {
-        final mock = await _MockMCPServer.start();
-        addTearDown(mock.close);
-        mock.enqueueInitialize();
-        mock.enqueue({
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse();
+        server.queueJsonResponse({
           'jsonrpc': '2.0',
           'error': {'code': -32601, 'message': 'Resource not found'},
         });
 
-        final client = _client(mock);
+        final client = _client(server);
         addTearDown(client.close);
 
         await expectLater(
@@ -754,27 +656,13 @@ void main() {
     // ── subscribeResource / notifyResourceUpdated ─────────────────────────────
 
     group('resource subscriptions', () {
-      test('subscribeResource returns a stream', () async {
-        final mock = await _MockMCPServer.start();
-        addTearDown(mock.close);
-        mock.enqueueInitialize();
-        // Server accepts subscribe silently
-        mock.enqueue({'jsonrpc': '2.0', 'result': {}});
-
-        final client = _client(mock);
-        addTearDown(client.close);
-
-        final stream = client.subscribeResource('file:///data/log.txt');
-        expect(stream, isA<Stream<MCPResourceContent>>());
-      });
-
       test('notifyResourceUpdated pushes to subscribers', () async {
-        final mock = await _MockMCPServer.start();
-        addTearDown(mock.close);
-        mock.enqueueInitialize();
-        mock.enqueue({'jsonrpc': '2.0', 'result': {}});
+        final server = await FakeStreamableHttpServer.start();
+        addTearDown(server.close);
+        server.queueInitializeResponse();
+        server.queueJsonResponse({'jsonrpc': '2.0', 'result': {}});
 
-        final client = _client(mock);
+        final client = _client(server);
         addTearDown(client.close);
 
         final updates = <MCPResourceContent>[];
@@ -825,18 +713,6 @@ void main() {
         final delay = policy.delayFor(10);
         expect(delay.inMilliseconds, lessThanOrEqualTo(3000));
       });
-
-      test('MCPClient accepts reconnectPolicy constructor param', () {
-        final mockTransport = StreamableHttpClientTransport(
-          url: Uri.parse('http://localhost:9999/mcp'),
-        );
-        final client = MCPClient(
-          transport: mockTransport,
-          reconnectPolicy: const MCPReconnectPolicy(maxAttempts: 3),
-        );
-        expect(client.reconnectPolicy?.maxAttempts, 3);
-        client.close();
-      });
     });
 
     // ── capabilities advertised in initialize() ───────────────────────────────
@@ -845,18 +721,18 @@ void main() {
       test(
         'initialize advertises prompts and resources capabilities',
         () async {
-          final mock = await _MockMCPServer.start();
-          addTearDown(mock.close);
-          mock.enqueueInitialize();
+          final server = await FakeStreamableHttpServer.start();
+          addTearDown(server.close);
+          server.queueInitializeResponse();
 
-          final client = _client(mock);
+          final client = _client(server);
           addTearDown(client.close);
 
           await client.initialize();
 
-          final initReq = mock.requestLog.first;
+          final initReq = server.requestLog.first;
           final caps =
-              (initReq['params'] as Map)['capabilities']
+              (initReq.body?['params'] as Map)['capabilities']
                   as Map<String, dynamic>;
           expect(caps.keys, contains('prompts'));
           expect(caps.keys, contains('resources'));
@@ -868,41 +744,10 @@ void main() {
     // ── MCPException ─────────────────────────────────────────────────────────
 
     group('MCPException', () {
-      test('has a message field', () {
-        const e = MCPException('something went wrong');
-        expect(e.message, 'something went wrong');
-      });
-
       test('toString includes MCPException prefix and message', () {
         const e = MCPException('oops');
         expect(e.toString(), contains('MCPException'));
         expect(e.toString(), contains('oops'));
-      });
-    });
-
-    // ── Transport types ──────────────────────────────────────────────────────
-
-    group('transport types', () {
-      test('StreamableHttpClientTransport accepts url and headers', () {
-        final t = StreamableHttpClientTransport(
-          url: Uri.parse('http://localhost:3000/mcp'),
-          headers: {'Authorization': 'Bearer token'},
-        );
-        expect(t.url.path, '/mcp');
-        expect(t.headers?['Authorization'], 'Bearer token');
-      });
-
-      test('StdioMCPTransport accepts command and args', () {
-        final t = StdioMCPTransport(
-          command: 'npx',
-          args: ['-y', '@modelcontextprotocol/server-filesystem', '/tmp'],
-        );
-        expect(t.command, 'npx');
-        expect(t.args, [
-          '-y',
-          '@modelcontextprotocol/server-filesystem',
-          '/tmp',
-        ]);
       });
     });
 

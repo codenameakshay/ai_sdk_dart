@@ -8,12 +8,16 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
+import '../../ai_sdk_provider/test/support/cancellation_adapter.dart';
+import '../../ai_sdk_provider/test/support/prompts.dart';
+import '../../ai_sdk_provider/test/support/test_server.dart';
+
 void main() {
   group('OpenAICompatibleChatLanguageModel', () {
     // ── tool serialization + tool_choice modes ──────────────────────────
     test('serializes tools (strict) and tool_choice modes', () async {
       final seenBodies = <Map<String, dynamic>>[];
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         final body = await utf8.decoder.bind(request).join();
         seenBodies.add((jsonDecode(body) as Map).cast<String, dynamic>());
         _writeJson(request, {
@@ -32,7 +36,7 @@ void main() {
       Future<void> call(LanguageModelV4ToolChoice toolChoice) {
         return model.doGenerate(
           LanguageModelV4CallOptions(
-            prompt: _userPrompt('hi'),
+            prompt: userPrompt('hi'),
             tools: const [
               LanguageModelV4FunctionTool(
                 name: 'weather',
@@ -70,7 +74,7 @@ void main() {
 
     test('serializes provider-defined tools verbatim', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         captured = await _captureBody(request);
         _writeOk(request);
       });
@@ -79,7 +83,7 @@ void main() {
       final model = _bearerModel(server.baseUrl);
       await model.doGenerate(
         LanguageModelV4CallOptions(
-          prompt: _userPrompt('hi'),
+          prompt: userPrompt('hi'),
           tools: const [
             LanguageModelV4ProviderDefinedTool(
               id: 'test.search',
@@ -102,7 +106,7 @@ void main() {
 
     test('omits tools when supportsTools is false', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         captured = await _captureBody(request);
         _writeOk(request);
       });
@@ -121,7 +125,7 @@ void main() {
 
       await model.doGenerate(
         LanguageModelV4CallOptions(
-          prompt: _userPrompt('hi'),
+          prompt: userPrompt('hi'),
           tools: const [
             LanguageModelV4FunctionTool(
               name: 'weather',
@@ -141,7 +145,7 @@ void main() {
       final imageB64 = base64Encode(utf8.encode('img'));
       final audioB64 = base64Encode(utf8.encode('audio'));
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         captured = await _captureBody(request);
         _writeOk(request);
       });
@@ -191,7 +195,7 @@ void main() {
 
     test('flattens content to text when supportsMultimodal is false', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         captured = await _captureBody(request);
         _writeOk(request);
       });
@@ -236,7 +240,7 @@ void main() {
     // ── response_format json_schema ──────────────────────────────────────
     test('serializes a JSON response format', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         captured = await _captureBody(request);
         _writeOk(request);
       });
@@ -245,7 +249,7 @@ void main() {
       final model = _bearerModel(server.baseUrl);
       await model.doGenerate(
         LanguageModelV4CallOptions(
-          prompt: _userPrompt('weather'),
+          prompt: userPrompt('weather'),
           responseFormat: const LanguageModelV4JsonResponseFormat(
             schema: {
               'type': 'object',
@@ -268,7 +272,7 @@ void main() {
 
     test('serializes JSON response format descriptions', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         captured = await _captureBody(request);
         _writeOk(request);
       });
@@ -277,7 +281,7 @@ void main() {
       final model = _bearerModel(server.baseUrl);
       await model.doGenerate(
         LanguageModelV4CallOptions(
-          prompt: _userPrompt('weather'),
+          prompt: userPrompt('weather'),
           responseFormat: const LanguageModelV4JsonResponseFormat(
             name: 'weather_response',
             description: 'Structured weather response.',
@@ -294,7 +298,7 @@ void main() {
 
     test('omits response_format when flag disabled', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         captured = await _captureBody(request);
         _writeOk(request);
       });
@@ -312,7 +316,7 @@ void main() {
       );
       await model.doGenerate(
         LanguageModelV4CallOptions(
-          prompt: _userPrompt('hi'),
+          prompt: userPrompt('hi'),
           responseFormat: const LanguageModelV4JsonResponseFormat(
             schema: {'type': 'object'},
           ),
@@ -324,7 +328,7 @@ void main() {
 
     // ── non-streaming tool-call parsing + finish reason + usage ──────────
     test('doGenerate parses tool calls, finish reason, usage', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         _writeJson(request, {
           'id': 'chatcmpl_1',
           'model': 'm',
@@ -357,7 +361,7 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       final result = await model.doGenerate(
-        LanguageModelV4CallOptions(prompt: _userPrompt('weather')),
+        LanguageModelV4CallOptions(prompt: userPrompt('weather')),
       );
 
       expect(result.finishReason, LanguageModelV4FinishReason.toolCalls);
@@ -375,7 +379,7 @@ void main() {
     });
 
     test('doGenerate maps prompt_tokens_details.cached_tokens', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         _writeJson(request, {
           'id': 'chatcmpl_c',
           'model': 'm',
@@ -397,7 +401,7 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       final result = await model.doGenerate(
-        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
       );
 
       // prompt_tokens already includes cache hits, so total stays at 100 and
@@ -410,7 +414,7 @@ void main() {
 
     // ── SSE text + tool-call streaming ───────────────────────────────────
     test('doStream parses text deltas and tool-call deltas', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         _writeSse(request, [
           '{"choices":[{"delta":{"content":"Hel"}}]}',
           '{"choices":[{"delta":{"content":"lo"}}]}',
@@ -424,7 +428,7 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       final streamResult = await model.doStream(
-        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
       );
 
       final parts = await streamResult.stream.toList();
@@ -434,10 +438,7 @@ void main() {
         'Hello',
       );
       expect(parts.whereType<StreamPartToolInputStart>().length, 1);
-      expect(
-        parts.whereType<StreamPartToolInputDelta>().length,
-        greaterThanOrEqualTo(1),
-      );
+      expect(parts.whereType<StreamPartToolInputDelta>().length, 2);
       expect(parts.whereType<StreamPartToolInputEnd>().length, 1);
       final toolCall = parts.whereType<StreamPartToolCall>().single.toolCall;
       expect(toolCall.toolName, 'weather');
@@ -449,7 +450,7 @@ void main() {
     });
 
     test('stream finish includes usage and provider metadata', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         _writeSse(request, [
           '{"id":"chatcmpl_123","model":"m","warnings":["careful"],"choices":[{"delta":{"content":"Hi"}}]}',
           '{"id":"chatcmpl_123","model":"m","usage":{"prompt_tokens":9,"completion_tokens":3,"total_tokens":12},"choices":[{"delta":{},"finish_reason":"stop"}]}',
@@ -460,7 +461,7 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       final streamResult = await model.doStream(
-        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
       );
       final parts = await streamResult.stream.toList();
       final finish = parts.whereType<StreamPartFinish>().single;
@@ -481,7 +482,7 @@ void main() {
     });
 
     test('emits raw chunks when includeRawChunks is enabled', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         _writeSse(request, [
           '{"id":"chatcmpl_raw","model":"m","choices":[{"delta":{"content":"Hi"}}]}',
           '{"id":"chatcmpl_raw","model":"m","choices":[{"delta":{},"finish_reason":"stop"}]}',
@@ -493,7 +494,7 @@ void main() {
       final model = _bearerModel(server.baseUrl);
       final streamResult = await model.doStream(
         LanguageModelV4CallOptions(
-          prompt: _userPrompt('hi'),
+          prompt: userPrompt('hi'),
           includeRawChunks: true,
         ),
       );
@@ -509,14 +510,14 @@ void main() {
     test(
       'emits a stream-start part even when the stream has no JSON chunks',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           _writeSse(request, ['[DONE]']);
         });
         addTearDown(server.close);
 
         final model = _bearerModel(server.baseUrl);
         final streamResult = await model.doStream(
-          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+          LanguageModelV4CallOptions(prompt: userPrompt('hi')),
         );
         final parts = await streamResult.stream.toList();
         expect(parts.whereType<StreamPartStreamStart>(), hasLength(1));
@@ -527,7 +528,7 @@ void main() {
     // ── finish-reason mapping ────────────────────────────────────────────
     test('maps finish reasons', () async {
       Future<LanguageModelV4FinishReason> reasonFor(String? raw) async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           _writeJson(request, {
             'choices': [
               {
@@ -540,7 +541,7 @@ void main() {
         addTearDown(server.close);
         final model = _bearerModel(server.baseUrl);
         final result = await model.doGenerate(
-          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+          LanguageModelV4CallOptions(prompt: userPrompt('hi')),
         );
         await server.close();
         return result.finishReason;
@@ -563,7 +564,7 @@ void main() {
     // ── config quirks ────────────────────────────────────────────────────
     test('seed key override (random_seed) + max_tokens key override', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         captured = await _captureBody(request);
         _writeOk(request);
       });
@@ -582,7 +583,7 @@ void main() {
       );
       await model.doGenerate(
         LanguageModelV4CallOptions(
-          prompt: _userPrompt('hi'),
+          prompt: userPrompt('hi'),
           seed: 42,
           maxOutputTokens: 128,
         ),
@@ -596,7 +597,7 @@ void main() {
 
     test('default keys are seed + max_completion_tokens', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         captured = await _captureBody(request);
         _writeOk(request);
       });
@@ -605,7 +606,7 @@ void main() {
       final model = _bearerModel(server.baseUrl);
       await model.doGenerate(
         LanguageModelV4CallOptions(
-          prompt: _userPrompt('hi'),
+          prompt: userPrompt('hi'),
           seed: 7,
           maxOutputTokens: 64,
         ),
@@ -617,7 +618,7 @@ void main() {
 
     test('api-version query parameter is sent (Azure quirk)', () async {
       late String capturedQuery;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         capturedQuery = request.uri.query;
         _writeOk(request);
       });
@@ -634,7 +635,7 @@ void main() {
         ),
       );
       await model.doGenerate(
-        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
       );
 
       expect(capturedQuery, contains('api-version=2024-02-15-preview'));
@@ -644,7 +645,7 @@ void main() {
       'baseUrl ending with slash still posts to chat/completions once',
       () async {
         late String capturedPath;
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           capturedPath = request.uri.path;
           _writeOk(request);
         });
@@ -661,7 +662,7 @@ void main() {
         );
 
         await model.doGenerate(
-          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+          LanguageModelV4CallOptions(prompt: userPrompt('hi')),
         );
 
         expect(capturedPath, '/v1/chat/completions');
@@ -670,7 +671,7 @@ void main() {
 
     test('api-key header vs Bearer auth scheme', () async {
       late HttpHeaders apiKeyHeaders;
-      final apiKeyServer = await _TestServer.start((request) async {
+      final apiKeyServer = await _startServer((request) async {
         apiKeyHeaders = request.headers;
         _writeOk(request);
       });
@@ -686,20 +687,20 @@ void main() {
         ),
       );
       await apiKeyModel.doGenerate(
-        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
       );
       expect(apiKeyHeaders.value('api-key'), 'secret-key');
       expect(apiKeyHeaders.value('authorization'), isNull);
 
       late HttpHeaders bearerHeaders;
-      final bearerServer = await _TestServer.start((request) async {
+      final bearerServer = await _startServer((request) async {
         bearerHeaders = request.headers;
         _writeOk(request);
       });
       addTearDown(bearerServer.close);
       final bearerModel = _bearerModel(bearerServer.baseUrl);
       await bearerModel.doGenerate(
-        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
       );
       expect(bearerHeaders.value('authorization'), 'Bearer test-token');
       expect(bearerHeaders.value('api-key'), isNull);
@@ -707,7 +708,7 @@ void main() {
 
     test('headers are resolved immediately before each dispatch', () async {
       final authorizations = <String?>[];
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         authorizations.add(request.headers.value('authorization'));
         _writeOk(request);
       });
@@ -725,11 +726,11 @@ void main() {
       );
 
       await model.doGenerate(
-        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
       );
       token = 'second-token';
       await model.doGenerate(
-        LanguageModelV4CallOptions(prompt: _userPrompt('again')),
+        LanguageModelV4CallOptions(prompt: userPrompt('again')),
       );
 
       expect(authorizations, ['Bearer first-token', 'Bearer second-token']);
@@ -740,7 +741,7 @@ void main() {
       () async {
         String? authorization;
         String? traceId;
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           authorization = request.headers.value('authorization');
           traceId = request.headers.value('x-trace-id');
           _writeOk(request);
@@ -760,7 +761,7 @@ void main() {
 
         await model.doGenerate(
           LanguageModelV4CallOptions(
-            prompt: _userPrompt('hi'),
+            prompt: userPrompt('hi'),
             headers: const {
               'Authorization': 'Bearer request-token',
               'X-Trace-Id': 'trace-1',
@@ -776,7 +777,7 @@ void main() {
 
     test('concurrent dispatches resolve independent request headers', () async {
       final authByPrompt = <String, String?>{};
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         final body = await _captureBody(request);
         final content =
             ((body['messages'] as List).first
@@ -808,10 +809,10 @@ void main() {
       );
 
       final first = model.doGenerate(
-        LanguageModelV4CallOptions(prompt: _userPrompt('first')),
+        LanguageModelV4CallOptions(prompt: userPrompt('first')),
       );
       final second = model.doGenerate(
-        LanguageModelV4CallOptions(prompt: _userPrompt('second')),
+        LanguageModelV4CallOptions(prompt: userPrompt('second')),
       );
 
       gates[1].complete();
@@ -825,7 +826,7 @@ void main() {
     });
 
     test('reuses an injected client across requests', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         _writeOk(request);
       });
       addTearDown(server.close);
@@ -853,10 +854,10 @@ void main() {
       );
 
       await model.doGenerate(
-        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
       );
       await model.doGenerate(
-        LanguageModelV4CallOptions(prompt: _userPrompt('again')),
+        LanguageModelV4CallOptions(prompt: userPrompt('again')),
       );
 
       expect(interceptedRequests, 2);
@@ -865,10 +866,10 @@ void main() {
     test(
       'doGenerate cancels an in-flight Dio request via abortSignal',
       () async {
-        final adapter = _CancellationHttpClientAdapter();
+        final adapter = CancellationHttpClientAdapter();
         final client = _cancellationClient(adapter, 'http://localhost/v1');
         addTearDown(() => client.close(force: true));
-        final abortSignal = _TestAbortSignal();
+        final abortSignal = TestAbortSignal();
         final model = OpenAICompatibleChatLanguageModel(
           modelId: 'm',
           config: OpenAICompatibleConfig(
@@ -881,7 +882,7 @@ void main() {
 
         final future = model.doGenerate(
           LanguageModelV4CallOptions(
-            prompt: _userPrompt('hi'),
+            prompt: userPrompt('hi'),
             abortSignal: abortSignal,
           ),
         );
@@ -898,10 +899,10 @@ void main() {
     test(
       'doGenerate surfaces AiOperationCancelledError for a pre-cancelled abortSignal',
       () async {
-        final adapter = _CancellationHttpClientAdapter();
+        final adapter = CancellationHttpClientAdapter();
         final client = _cancellationClient(adapter, 'http://localhost/v1');
         addTearDown(() => client.close(force: true));
-        final abortSignal = _TestAbortSignal()..cancel();
+        final abortSignal = TestAbortSignal()..cancel();
         final model = OpenAICompatibleChatLanguageModel(
           modelId: 'm',
           config: OpenAICompatibleConfig(
@@ -915,7 +916,7 @@ void main() {
         await expectLater(
           model.doGenerate(
             LanguageModelV4CallOptions(
-              prompt: _userPrompt('hi'),
+              prompt: userPrompt('hi'),
               abortSignal: abortSignal,
             ),
           ),
@@ -926,10 +927,10 @@ void main() {
     );
 
     test('doStream cancels the Dio handshake via abortSignal', () async {
-      final adapter = _CancellationHttpClientAdapter();
+      final adapter = CancellationHttpClientAdapter();
       final client = _cancellationClient(adapter, 'http://localhost/v1');
       addTearDown(() => client.close(force: true));
-      final abortSignal = _TestAbortSignal();
+      final abortSignal = TestAbortSignal();
       final model = OpenAICompatibleChatLanguageModel(
         modelId: 'm',
         config: OpenAICompatibleConfig(
@@ -942,7 +943,7 @@ void main() {
 
       final future = model.doStream(
         LanguageModelV4CallOptions(
-          prompt: _userPrompt('hi'),
+          prompt: userPrompt('hi'),
           abortSignal: abortSignal,
         ),
       );
@@ -957,7 +958,7 @@ void main() {
 
     test('extraBody hook injects provider-specific fields', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         captured = await _captureBody(request);
         _writeOk(request);
       });
@@ -979,7 +980,7 @@ void main() {
       );
       await model.doGenerate(
         LanguageModelV4CallOptions(
-          prompt: _userPrompt('hi'),
+          prompt: userPrompt('hi'),
           providerOptions: const {
             'openai': {'reasoningEffort': 'high'},
           },
@@ -991,7 +992,7 @@ void main() {
 
     test('serializes assistant tool calls and tool result messages', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         captured = await _captureBody(request);
         _writeOk(request);
       });
@@ -1056,7 +1057,7 @@ void main() {
       'serializes sampling params, stop sequences and system prompt',
       () async {
         late Map<String, dynamic> captured;
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           captured = await _captureBody(request);
           _writeOk(request);
         });
@@ -1096,19 +1097,19 @@ void main() {
 
     // ── empty / missing response shapes ──────────────────────────────────
     test('doGenerate tolerates empty choices and missing message', () async {
-      final emptyChoicesServer = await _TestServer.start((request) async {
+      final emptyChoicesServer = await _startServer((request) async {
         _writeJson(request, {'choices': <dynamic>[]});
       });
       addTearDown(emptyChoicesServer.close);
 
       final model1 = _bearerModel(emptyChoicesServer.baseUrl);
       final result1 = await model1.doGenerate(
-        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
       );
       expect(result1.content, isEmpty);
       expect(result1.finishReason, LanguageModelV4FinishReason.unknown);
 
-      final missingMessageServer = await _TestServer.start((request) async {
+      final missingMessageServer = await _startServer((request) async {
         // A choice with no `message` and a tool_call whose `function` is absent.
         _writeJson(request, {
           'choices': [
@@ -1127,7 +1128,7 @@ void main() {
 
       final model2 = _bearerModel(missingMessageServer.baseUrl);
       final result2 = await model2.doGenerate(
-        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
       );
       final call = result2.content
           .whereType<LanguageModelV4ToolCallPart>()
@@ -1141,7 +1142,7 @@ void main() {
     test(
       'doGenerate extracts url_citation and file_citation annotations',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           _writeJson(request, {
             'choices': [
               {
@@ -1161,6 +1162,8 @@ void main() {
                     {'type': 'file_citation'},
                     // ignored: unknown annotation type
                     {'type': 'other'},
+                    // ignored: malformed annotation
+                    7,
                   ],
                 },
               },
@@ -1171,7 +1174,7 @@ void main() {
 
         final model = _bearerModel(server.baseUrl);
         final result = await model.doGenerate(
-          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+          LanguageModelV4CallOptions(prompt: userPrompt('hi')),
         );
 
         final source = result.content
@@ -1192,7 +1195,7 @@ void main() {
 
     // ── annotations during streaming ─────────────────────────────────────
     test('doStream emits source/file parts from delta annotations', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         _writeSse(request, [
           '{"choices":[{"delta":{"annotations":[{"type":"url_citation","url":"https://docs.example","title":"Docs"},{"type":"file_citation","file_id":"file_9"}]}}]}',
           '{"choices":[{"delta":{},"finish_reason":"stop"}]}',
@@ -1203,7 +1206,7 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       final streamResult = await model.doStream(
-        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
       );
       final parts = await streamResult.stream.toList();
 
@@ -1221,7 +1224,7 @@ void main() {
     test(
       'doStream emits reasoning deltas from delta.reasoning_content',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           _writeSse(request, [
             '{"choices":[{"delta":{"reasoning_content":"Let me "}}]}',
             '{"choices":[{"delta":{"reasoning_content":"think."}}]}',
@@ -1234,7 +1237,7 @@ void main() {
 
         final model = _bearerModel(server.baseUrl);
         final streamResult = await model.doStream(
-          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+          LanguageModelV4CallOptions(prompt: userPrompt('hi')),
         );
         final parts = await streamResult.stream.toList();
 
@@ -1253,7 +1256,7 @@ void main() {
     );
 
     test('doStream emits reasoning deltas from delta.reasoning', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         _writeSse(request, [
           '{"choices":[{"delta":{"reasoning":"Because X."}}]}',
           '{"choices":[{"delta":{},"finish_reason":"stop"}]}',
@@ -1264,7 +1267,7 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       final streamResult = await model.doStream(
-        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
       );
       final parts = await streamResult.stream.toList();
 
@@ -1275,7 +1278,7 @@ void main() {
     });
 
     test('doStream emits reasoning deltas from delta.thinking', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         _writeSse(request, [
           '{"choices":[{"delta":{"thinking":"Hmm."}}]}',
           '{"choices":[{"delta":{},"finish_reason":"stop"}]}',
@@ -1286,7 +1289,7 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       final streamResult = await model.doStream(
-        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
       );
       final parts = await streamResult.stream.toList();
 
@@ -1296,7 +1299,7 @@ void main() {
     test(
       'doStream emits no reasoning delta when the field is absent or empty',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           _writeSse(request, [
             '{"choices":[{"delta":{"reasoning_content":""}}]}',
             '{"choices":[{"delta":{"content":"Hi"}}]}',
@@ -1308,7 +1311,7 @@ void main() {
 
         final model = _bearerModel(server.baseUrl);
         final streamResult = await model.doStream(
-          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+          LanguageModelV4CallOptions(prompt: userPrompt('hi')),
         );
         final parts = await streamResult.stream.toList();
 
@@ -1317,7 +1320,7 @@ void main() {
     );
 
     test('doStream honors custom config.reasoningKeys', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         _writeSse(request, [
           '{"choices":[{"delta":{"chain_of_thought":"Step 1."}}]}',
           '{"choices":[{"delta":{},"finish_reason":"stop"}]}',
@@ -1337,7 +1340,7 @@ void main() {
         ),
       );
       final streamResult = await model.doStream(
-        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
       );
       final parts = await streamResult.stream.toList();
 
@@ -1351,7 +1354,7 @@ void main() {
     test(
       'doGenerate extracts reasoning from message.reasoning_content',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           _writeJson(request, {
             'choices': [
               {
@@ -1368,7 +1371,7 @@ void main() {
 
         final model = _bearerModel(server.baseUrl);
         final result = await model.doGenerate(
-          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+          LanguageModelV4CallOptions(prompt: userPrompt('hi')),
         );
 
         final reasoning = result.content
@@ -1381,7 +1384,7 @@ void main() {
     );
 
     test('doGenerate emits no reasoning part when absent', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         _writeJson(request, {
           'choices': [
             {
@@ -1395,7 +1398,7 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       final result = await model.doGenerate(
-        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
       );
 
       expect(result.content.whereType<LanguageModelV4ReasoningPart>(), isEmpty);
@@ -1403,7 +1406,7 @@ void main() {
 
     // ── streaming tool call without explicit id/function ─────────────────
     test('doStream generates a tool id when none is provided', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         _writeSse(request, [
           // tool_calls delta with no index, no id, no function block.
           '{"choices":[{"delta":{"tool_calls":[{}]}}]}',
@@ -1416,7 +1419,7 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       final streamResult = await model.doStream(
-        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
       );
       final parts = await streamResult.stream.toList();
 
@@ -1431,39 +1434,12 @@ void main() {
       );
     });
 
-    // ── streaming error path ─────────────────────────────────────────────
-    test('doStream surfaces a StreamPartError when the body errors', () async {
-      final server = await _TestServer.start((request) async {
-        request.response.statusCode = 200;
-        request.response.headers.set('content-type', 'text/event-stream');
-        request.response.write(
-          'data: {"choices":[{"delta":{"content":"Hi"}}]}\n\n',
-        );
-        // Abruptly destroy the connection mid-stream to trigger a read error.
-        await request.response.flush();
-        await request.response.close();
-        request.response.deadline = Duration.zero;
-      });
-      addTearDown(server.close);
-
-      final model = _bearerModel(server.baseUrl);
-      final streamResult = await model.doStream(
-        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
-      );
-      // Just draining is enough; the finally{} closes the controller.
-      final parts = await streamResult.stream.toList();
-      expect(
-        parts.whereType<StreamPartTextDelta>().length,
-        greaterThanOrEqualTo(0),
-      );
-    });
-
     // ── file content parts: image-file + generic file ────────────────────
     test('serializes image-typed and generic file content parts', () async {
       final imgB64 = base64Encode(utf8.encode('img'));
       final pdfB64 = base64Encode(utf8.encode('pdf'));
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         captured = await _captureBody(request);
         _writeOk(request);
       });
@@ -1520,7 +1496,7 @@ void main() {
     test('serializes image content from a base64 data source', () async {
       final imgB64 = base64Encode(utf8.encode('img64'));
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         captured = await _captureBody(request);
         _writeOk(request);
       });
@@ -1560,7 +1536,7 @@ void main() {
       'drops image content backed by a bare URL with no media type',
       () async {
         late Map<String, dynamic> captured;
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           captured = await _captureBody(request);
           _writeOk(request);
         });
@@ -1604,7 +1580,7 @@ void main() {
       'serializes rich tool result content (text, image, file, source)',
       () async {
         late Map<String, dynamic> captured;
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           captured = await _captureBody(request);
           _writeOk(request);
         });
@@ -1672,7 +1648,7 @@ void main() {
 
     test('passes plain text tool results through unwrapped', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         captured = await _captureBody(request);
         _writeOk(request);
       });
@@ -1706,7 +1682,7 @@ void main() {
 
     test('wraps errored text tool results as structured JSON', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         captured = await _captureBody(request);
         _writeOk(request);
       });
@@ -1746,7 +1722,7 @@ void main() {
 
     // ── usage parsed from string-typed token counts ──────────────────────
     test('parses usage when token counts arrive as strings', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         _writeJson(request, {
           'choices': [
             {
@@ -1765,7 +1741,7 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       final result = await model.doGenerate(
-        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
       );
       // String prompt_tokens, num completion_tokens, string total_tokens all
       // coerced via _intOrNull.
@@ -1775,7 +1751,7 @@ void main() {
 
     // ── tool call id generation when none is returned ────────────────────
     test('doGenerate generates a tool call id when none is returned', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         _writeJson(request, {
           'choices': [
             {
@@ -1796,7 +1772,7 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       final result = await model.doGenerate(
-        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
       );
       final call = result.content
           .whereType<LanguageModelV4ToolCallPart>()
@@ -1806,7 +1782,7 @@ void main() {
 
     // ── stream: choice with no `delta` key falls back to {} ──────────────
     test('doStream tolerates a choice with no delta object', () async {
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         _writeSse(request, [
           // A choice carrying only a finish_reason, with no `delta` key at all,
           // exercises the `?? <String, dynamic>{}` delta fallback.
@@ -1818,7 +1794,7 @@ void main() {
 
       final model = _bearerModel(server.baseUrl);
       final streamResult = await model.doStream(
-        LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
       );
 
       final parts = await streamResult.stream.toList();
@@ -1832,7 +1808,7 @@ void main() {
     test(
       'doStream emits StreamPartError when a chunk choice is not a map',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           _writeSse(request, [
             // `choices.first` is a string, so `(choices.first as Map)` throws and
             // the loop's catch converts it into a StreamPartError.
@@ -1844,7 +1820,7 @@ void main() {
 
         final model = _bearerModel(server.baseUrl);
         final streamResult = await model.doStream(
-          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+          LanguageModelV4CallOptions(prompt: userPrompt('hi')),
         );
 
         final parts = await streamResult.stream.toList();
@@ -1857,7 +1833,7 @@ void main() {
     test(
       'structured warning maps are surfaced on stream-start and finish metadata',
       () async {
-        final server = await _TestServer.start((request) async {
+        final server = await _startServer((request) async {
           _writeSse(request, [
             '{"id":"chatcmpl_warn","model":"m","warnings":[{"type":"unsupported","feature":"tools","details":"Disabled"},{"type":"compatibility","feature":"reasoning"},{"type":"deprecated","feature":"legacy-mode","details":"Use default mode"},{"type":"other","message":"fallback"},{"unexpected":"shape"},7],"choices":[{"delta":{"content":"Hi"}}]}',
             '{"id":"chatcmpl_warn","model":"m","choices":[{"delta":{},"finish_reason":"stop"}]}',
@@ -1868,7 +1844,7 @@ void main() {
 
         final model = _bearerModel(server.baseUrl);
         final streamResult = await model.doStream(
-          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+          LanguageModelV4CallOptions(prompt: userPrompt('hi')),
         );
         final parts = await streamResult.stream.toList();
 
@@ -1913,7 +1889,7 @@ void main() {
         );
 
         final streamResult = await model.doStream(
-          LanguageModelV4CallOptions(prompt: _userPrompt('hi')),
+          LanguageModelV4CallOptions(prompt: userPrompt('hi')),
         );
         final parts = await streamResult.stream.toList();
 
@@ -1925,7 +1901,7 @@ void main() {
     // ── stream tool result: image part carrying a DataContentUrl ─────────
     test('serializes a url-backed image inside tool result content', () async {
       late Map<String, dynamic> captured;
-      final server = await _TestServer.start((request) async {
+      final server = await _startServer((request) async {
         captured = await _captureBody(request);
         _writeOk(request);
       });
@@ -1991,7 +1967,7 @@ void main() {
       );
 
       await expectLater(
-        model.doStream(LanguageModelV4CallOptions(prompt: _userPrompt('hi'))),
+        model.doStream(LanguageModelV4CallOptions(prompt: userPrompt('hi'))),
         throwsA(
           isA<StateError>().having(
             (e) => e.message,
@@ -2032,17 +2008,6 @@ Dio _cancellationClient(HttpClientAdapter adapter, String baseUrl) {
   final client = _testClient(baseUrl);
   client.httpClientAdapter = adapter;
   return client;
-}
-
-LanguageModelV4Prompt _userPrompt(String text) {
-  return LanguageModelV4Prompt(
-    messages: [
-      LanguageModelV4Message(
-        role: LanguageModelV4Role.user,
-        content: [LanguageModelV4TextPart(text: text)],
-      ),
-    ],
-  );
 }
 
 Future<Map<String, dynamic>> _captureBody(HttpRequest request) async {
@@ -2088,79 +2053,9 @@ void _writeSse(HttpRequest request, List<String> events) {
   request.response.close();
 }
 
-class _TestServer {
-  _TestServer._(this._server);
-
-  final HttpServer _server;
-
-  static Future<_TestServer> start(
-    FutureOr<void> Function(HttpRequest request) handler,
-  ) async {
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    unawaited(() async {
-      await for (final request in server) {
-        await handler(request);
-      }
-    }());
-    return _TestServer._(server);
-  }
-
-  String get baseUrl => 'http://${_server.address.host}:${_server.port}/v1';
-
-  Future<void> close() => _server.close(force: true);
-}
-
-class _TestAbortSignal implements LanguageModelV4AbortSignal {
-  final Completer<void> _completer = Completer<void>();
-  bool _isCancelled = false;
-
-  @override
-  bool get isCancelled => _isCancelled;
-
-  @override
-  Future<void> get onCancelled => _completer.future;
-
-  void cancel() {
-    if (_isCancelled) return;
-    _isCancelled = true;
-    _completer.complete();
-  }
-}
-
-class _CancellationHttpClientAdapter implements HttpClientAdapter {
-  int fetchCount = 0;
-  RequestOptions? lastOptions;
-  final Completer<void> fetchStarted = Completer<void>();
-
-  @override
-  Future<ResponseBody> fetch(
-    RequestOptions options,
-    Stream<Uint8List>? requestStream,
-    Future<void>? cancelFuture,
-  ) {
-    fetchCount++;
-    lastOptions = options;
-    if (!fetchStarted.isCompleted) {
-      fetchStarted.complete();
-    }
-
-    final completer = Completer<ResponseBody>();
-    cancelFuture?.then((_) {
-      if (!completer.isCompleted) {
-        completer.completeError(
-          DioException.requestCancelled(
-            requestOptions: options,
-            reason: 'abortSignal',
-          ),
-        );
-      }
-    });
-    return completer.future;
-  }
-
-  @override
-  void close({bool force = false}) {}
-}
+Future<TestServer> _startServer(
+  Future<void> Function(HttpRequest request) handler,
+) => TestServer.start(handler, pathSuffix: '/v1');
 
 class _ErroredStreamHttpClientAdapter implements HttpClientAdapter {
   @override

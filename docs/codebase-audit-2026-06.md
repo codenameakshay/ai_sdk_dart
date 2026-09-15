@@ -1,5 +1,10 @@
 # AI SDK Dart — Grounded Codebase Audit (2026-06-29)
 
+> Historical snapshot from before the 2.0.0 release. Its V3 references,
+> capability gaps, and recommendations describe the June 2026 tree and are not
+> current status. See `docs/next-release-report.md` and the parity matrix for
+> the released implementation.
+
 A ground-truthed analysis of this repo against its own documentation, produced by reading
 the actual source of every package. Each claim below cites `file:line`. The goal: separate
 what is *real* from what the docs *say*, identify what is genuinely useful in Dart/Flutter

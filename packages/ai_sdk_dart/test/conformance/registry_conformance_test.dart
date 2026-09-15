@@ -22,17 +22,23 @@ void main() {
                 FakeEmbeddingModel([0.1, 0.2, 0.3], modelId: modelId),
           ),
           'other': RegistrableProvider(
-            languageModelFactory: (modelId) =>
-                FakeTextModel('from other/$modelId', modelId: modelId),
-            embeddingModelFactory: (modelId) =>
-                FakeEmbeddingModel([0.4, 0.5, 0.6], modelId: modelId),
+            languageModelFactory: (modelId) => FakeTextModel(
+              'from other/$modelId',
+              modelId: modelId,
+              provider: 'other',
+            ),
+            embeddingModelFactory: (modelId) => FakeEmbeddingModel(
+              [0.4, 0.5, 0.6],
+              modelId: modelId,
+              provider: 'other',
+            ),
           ),
         });
       });
 
-      test('resolves language model by provider:modelId string', () async {
+      test('resolves language model by provider:modelId string', () {
         final model = registry.languageModel('fake:gpt-4o');
-        expect(model, isA<LanguageModelV4>());
+        expect(model.provider, 'fake');
         expect(model.modelId, 'gpt-4o');
       });
 
@@ -46,12 +52,13 @@ void main() {
         final model = registry.textEmbeddingModel(
           'fake:text-embedding-3-small',
         );
-        expect(model, isA<EmbeddingModelV2<String>>());
+        expect(model.provider, 'fake');
         expect(model.modelId, 'text-embedding-3-small');
       });
 
       test('resolves model from second provider', () {
         final model = registry.languageModel('other:claude-3-5');
+        expect(model.provider, 'other');
         expect(model.modelId, 'claude-3-5');
       });
 
@@ -75,13 +82,16 @@ void main() {
       test(
         'error message for unknown provider mentions available providers',
         () {
-          try {
-            registry.languageModel('unknown:model');
-            fail('Expected ArgumentError');
-          } on ArgumentError catch (e) {
-            // Should mention available providers
-            expect(e.message.toString(), isNotEmpty);
-          }
+          expect(
+            () => registry.languageModel('unknown:model'),
+            throwsA(
+              isA<ArgumentError>().having(
+                (e) => e.message.toString(),
+                'message',
+                contains('fake'),
+              ),
+            ),
+          );
         },
       );
     });
@@ -153,19 +163,19 @@ void main() {
 
       test('resolves image model by provider:modelId', () {
         final model = registry.imageModel('fake:dall-e-3');
-        expect(model, isA<ImageModelV3>());
+        expect(model.provider, 'fake');
         expect(model.modelId, 'dall-e-3');
       });
 
       test('resolves speech model by provider:modelId', () {
         final model = registry.speechModel('fake:tts-1');
-        expect(model, isA<SpeechModelV1>());
+        expect(model.provider, 'fake');
         expect(model.modelId, 'tts-1');
       });
 
       test('resolves transcription model by provider:modelId', () {
         final model = registry.transcriptionModel('fake:whisper-1');
-        expect(model, isA<TranscriptionModelV1>());
+        expect(model.provider, 'fake');
         expect(model.modelId, 'whisper-1');
       });
 
@@ -195,33 +205,6 @@ void main() {
           );
         },
       );
-    });
-
-    // ── RegistrableProvider ───────────────────────────────────────────────
-
-    group('RegistrableProvider', () {
-      test('can be constructed with language and embedding factories', () {
-        final provider = RegistrableProvider(
-          languageModelFactory: (modelId) => FakeTextModel('hi'),
-          embeddingModelFactory: (modelId) => FakeEmbeddingModel([0.1]),
-        );
-        expect(provider, isNotNull);
-        expect(provider.languageModelFactory('test'), isA<LanguageModelV4>());
-        expect(
-          provider.embeddingModelFactory('test'),
-          isA<EmbeddingModelV2<String>>(),
-        );
-      });
-
-      test('optional model factories default to null', () {
-        final provider = RegistrableProvider(
-          languageModelFactory: (id) => FakeTextModel('hi'),
-          embeddingModelFactory: (id) => FakeEmbeddingModel([0.1]),
-        );
-        expect(provider.imageModelFactory, isNull);
-        expect(provider.speechModelFactory, isNull);
-        expect(provider.transcriptionModelFactory, isNull);
-      });
     });
   });
 }

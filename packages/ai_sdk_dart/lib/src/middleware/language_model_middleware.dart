@@ -518,6 +518,7 @@ class _DefaultSettingsMiddleware extends LanguageModelMiddlewareBase {
       maxOutputTokens: opts.maxOutputTokens ?? maxOutputTokens,
       temperature: opts.temperature ?? temperature,
       topP: opts.topP ?? topP,
+      topK: opts.topK,
       presencePenalty: opts.presencePenalty,
       frequencyPenalty: opts.frequencyPenalty,
       stopSequences: opts.stopSequences,

@@ -3,8 +3,6 @@
 .packages
 pubspec.lock
 build/
-*.g.dart
-*.freezed.dart
 
 # IDE
 .idea/

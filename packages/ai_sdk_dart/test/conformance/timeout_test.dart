@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:typed_data';
-// ignore_for_file: avoid_dynamic_calls
 
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_dart/src/core/retry_helper.dart';

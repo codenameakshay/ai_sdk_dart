@@ -45,6 +45,23 @@ void main() {
           throwsA(isA<AiNoContentGeneratedError>()),
         );
       });
+
+      test('forwards headers and providerOptions to the model', () async {
+        final model = FakeEmbeddingModel([0.1]);
+        const providerOptions = <String, Map<String, dynamic>>{
+          'openai': {'dimensions': 3},
+        };
+
+        await embed(
+          model: model,
+          value: 'test',
+          headers: const {'x-test': '1'},
+          providerOptions: providerOptions,
+        );
+
+        expect(model.lastOptions?.headers, {'x-test': '1'});
+        expect(model.lastOptions?.providerOptions, providerOptions);
+      });
     });
 
     // ── cosineSimilarity() ────────────────────────────────────────────────

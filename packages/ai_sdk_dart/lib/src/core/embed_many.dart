@@ -50,6 +50,8 @@ Future<EmbedManyResult<VALUE>> embedMany<VALUE>({
   required EmbeddingModelV2<VALUE> model,
   required List<VALUE> values,
   int? maxParallelCalls,
+  Map<String, String>? headers,
+  ProviderOptions? providerOptions,
   Duration? timeout,
 }) async {
   if (maxParallelCalls != null && maxParallelCalls < 1) {
@@ -65,7 +67,11 @@ Future<EmbedManyResult<VALUE>> embedMany<VALUE>({
 
   Future<EmbeddingModelV2GenerateResult<VALUE>> doEmbed(List<VALUE> chunk) {
     final call = model.doEmbed(
-      EmbeddingModelV2CallOptions<VALUE>(values: chunk),
+      EmbeddingModelV2CallOptions<VALUE>(
+        values: chunk,
+        headers: headers,
+        providerOptions: providerOptions,
+      ),
     );
     return withOptionalTimeout(call, timeout).then((result) {
       if (result.embeddings.isEmpty) {

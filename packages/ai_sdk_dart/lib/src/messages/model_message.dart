@@ -20,31 +20,3 @@ class ModelMessage {
   final String? content;
   final List<LanguageModelV4ContentPart>? parts;
 }
-
-/// Tool approval request emitted when a tool requires user approval.
-class ToolApprovalRequestContent {
-  const ToolApprovalRequestContent({
-    required this.approvalId,
-    required this.toolCallId,
-    required this.toolName,
-    required this.input,
-  });
-
-  final String approvalId;
-  final String toolCallId;
-  final String toolName;
-  final Object input;
-}
-
-/// User's approval or denial response for a tool call.
-class ToolApprovalResponseContent {
-  const ToolApprovalResponseContent({
-    required this.approvalId,
-    required this.approved,
-    this.reason,
-  });
-
-  final String approvalId;
-  final bool approved;
-  final String? reason;
-}

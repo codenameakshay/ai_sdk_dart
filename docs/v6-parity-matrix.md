@@ -94,11 +94,11 @@ Legend:
 
 ## MCP
 
-- [x] transport/client scaffolding (real SSE + HTTP POST + Stdio)
+- [x] transport/client scaffolding (Streamable HTTP + Stdio)
 - [x] tool discovery (`tools/list` → `ToolSet`)
 - [x] tool invocation (`tools/call` with structured result extraction)
-- [x] initialize handshake (MCP protocol 2024-11-05)
-- [x] real Server-Sent-Events streaming transport (`SseClientTransport`) + server-pushed notifications
+- [x] initialize handshake (MCP protocol 2025-06-18)
+- [x] Streamable HTTP server-pushed notifications
 - [x] web-safe (`dart:io` isolated behind conditional imports; stdio is native-only)
 - [~] streaming tool outputs (transport reconnect and server-pushed notifications are implemented; live tool-output streaming remains pending)
 

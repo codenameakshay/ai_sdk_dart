@@ -68,8 +68,9 @@ short-lived tokens minted by your backend or a trusted proxy.
 
 ### Transport behavior notes
 
-- `initialize()` negotiates MCP protocol version `2025-06-18`. Older
-  HTTP+SSE (`2024-11-05`) servers are not supported by this transport.
+- `initialize()` negotiates MCP protocol version `2025-06-18`. Legacy
+  HTTP+SSE servers that only speak older protocol versions are not supported
+  by this transport.
 - If the server returns `Mcp-Session-Id` during initialize, the transport
   includes it on later requests and sends `DELETE` on `close()` to end the
   session. A server may reject `DELETE` with `405 Method Not Allowed`; that is

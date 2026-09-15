@@ -134,6 +134,152 @@ void main() {
       await expectLater(result.text, throwsA(isA<TimeoutException>()));
     });
   });
+
+  group('ToolLoopAgent.resume', () {
+    test(
+      'replays an approved call with its stable provider tool-call ID',
+      () async {
+        var executions = 0;
+        final model = FakeTextModel('resumed answer');
+        final agent = ToolLoopAgent(
+          model: model,
+          tools: {
+            'danger': tool<Map<String, dynamic>, String>(
+              inputSchema: objectSchema(),
+              needsApproval: (_, _) async => true,
+              execute: (input, _) async {
+                executions++;
+                return 'approved:${input['value']}';
+              },
+            ),
+          },
+        );
+        const toolCallId = 'provider-call-42';
+        const approvalId = 'approval-42';
+        final toolCall = LanguageModelV4ToolCallPart(
+          toolCallId: toolCallId,
+          toolName: 'danger',
+          input: {'value': 'x'},
+        );
+
+        final result = await agent.resume(
+          replay: ToolApprovalReplay(
+            messages: [
+              const ModelMessage(content: 'go', role: ModelMessageRole.user),
+              ModelMessage.parts(
+                role: ModelMessageRole.assistant,
+                parts: [toolCall],
+              ),
+            ],
+            requests: [
+              LanguageModelV4ToolApprovalRequestPart(
+                approvalId: approvalId,
+                toolCall: toolCall,
+              ),
+            ],
+          ),
+          toolApprovalResponses: const [
+            LanguageModelV4ToolApprovalResponse(
+              approvalId: approvalId,
+              approved: true,
+            ),
+          ],
+          timeout: const TimeoutConfiguration(tool: Duration(seconds: 1)),
+        );
+
+        expect(await result.text, 'resumed answer');
+        expect(executions, 1);
+        final messages = model.lastCallOptions!.prompt.messages;
+        final assistantCall = messages[1].content
+            .whereType<LanguageModelV4ToolCallPart>()
+            .single;
+        final toolResult = messages[2].content
+            .whereType<LanguageModelV4ToolResultPart>()
+            .single;
+        expect(assistantCall.toolCallId, toolCallId);
+        expect(toolResult.toolCallId, toolCallId);
+        expect((toolResult.output as ToolResultOutputText).text, 'approved:x');
+      },
+    );
+
+    test(
+      'prevalidates every approval before executing or calling the provider',
+      () async {
+        var approvalChecks = 0;
+        var executions = 0;
+        final model = FakeTextModel('unexpected');
+        final agent = ToolLoopAgent(
+          model: model,
+          tools: {
+            'danger': tool<Map<String, dynamic>, String>(
+              inputSchema: objectSchema(),
+              needsApproval: (_, _) async {
+                approvalChecks++;
+                return true;
+              },
+              execute: (_, _) async {
+                executions++;
+                return 'unexpected';
+              },
+            ),
+          },
+        );
+        final firstCall = LanguageModelV4ToolCallPart(
+          toolCallId: 'provider-call-1',
+          toolName: 'danger',
+          input: const {},
+        );
+        final missingCall = LanguageModelV4ToolCallPart(
+          toolCallId: 'provider-call-2',
+          toolName: 'danger',
+          input: const {},
+        );
+        const firstApprovalId = 'approval-1';
+        const missingApprovalId = 'approval-missing';
+
+        await expectLater(
+          agent.resume(
+            replay: ToolApprovalReplay(
+              messages: [
+                const ModelMessage(content: 'go', role: ModelMessageRole.user),
+                ModelMessage.parts(
+                  role: ModelMessageRole.assistant,
+                  parts: [firstCall, missingCall],
+                ),
+              ],
+              requests: [
+                LanguageModelV4ToolApprovalRequestPart(
+                  approvalId: firstApprovalId,
+                  toolCall: firstCall,
+                ),
+                LanguageModelV4ToolApprovalRequestPart(
+                  approvalId: missingApprovalId,
+                  toolCall: missingCall,
+                ),
+              ],
+            ),
+            toolApprovalResponses: const [
+              LanguageModelV4ToolApprovalResponse(
+                approvalId: firstApprovalId,
+                approved: true,
+              ),
+            ],
+          ),
+          throwsA(
+            isA<ArgumentError>().having(
+              (error) => error.message,
+              'message',
+              contains(missingApprovalId),
+            ),
+          ),
+        );
+
+        expect(approvalChecks, 0);
+        expect(executions, 0);
+        expect(model.lastCallOptions, isNull);
+      },
+    );
+  });
 }
 
 // ---------------------------------------------------------------------------

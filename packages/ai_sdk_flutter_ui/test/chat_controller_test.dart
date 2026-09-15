@@ -7,6 +7,63 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'helpers.dart';
 
+class _ApprovalReplayModel extends LanguageModelV4 {
+  int streamCalls = 0;
+  List<LanguageModelV4Message> resumedMessages = const [];
+
+  @override
+  String get provider => 'mock';
+
+  @override
+  String get modelId => 'approval-replay';
+
+  @override
+  String get specificationVersion => 'v4';
+
+  @override
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
+  ) => throw UnimplementedError();
+
+  @override
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
+  ) async {
+    streamCalls++;
+    resumedMessages = options.prompt.messages;
+    const call = LanguageModelV4ToolCallPart(
+      toolCallId: 'provider-call-1',
+      toolName: 'secureTool',
+      input: {'path': '/x'},
+    );
+    final parts = streamCalls == 1
+        ? <LanguageModelV4StreamPart>[
+            const StreamPartToolInputStart(
+              id: 'provider-call-1',
+              toolName: 'secureTool',
+            ),
+            const StreamPartToolInputDelta(
+              id: 'provider-call-1',
+              delta: '{"path":"/x"}',
+            ),
+            const StreamPartToolInputEnd(id: 'provider-call-1'),
+            const StreamPartToolCall(toolCall: call),
+            const StreamPartFinish(
+              finishReason: LanguageModelV4FinishReason.toolCalls,
+            ),
+          ]
+        : <LanguageModelV4StreamPart>[
+            const StreamPartTextStart(id: 'answer'),
+            const StreamPartTextDelta(id: 'answer', delta: 'continued'),
+            const StreamPartTextEnd(id: 'answer'),
+            const StreamPartFinish(
+              finishReason: LanguageModelV4FinishReason.stop,
+            ),
+          ];
+    return LanguageModelV4StreamResult(stream: Stream.fromIterable(parts));
+  }
+}
+
 void main() {
   group('ChatController', () {
     test('starts ready and empty (or with initial messages)', () {
@@ -321,6 +378,62 @@ void main() {
       expect(controller.messages.single.role, ModelMessageRole.user);
       controller.dispose();
     });
+
+    test(
+      'approval resume replays the exact pending call for a real provider',
+      () async {
+        final model = _ApprovalReplayModel();
+        var executions = 0;
+        final secureTool = tool<Map<String, dynamic>, String>(
+          inputSchema: Schema<Map<String, dynamic>>(
+            jsonSchema: const {'type': 'object'},
+            fromJson: (json) => json,
+          ),
+          approvalPolicy: ToolApprovalPolicy.always,
+          execute: (_, _) async {
+            executions++;
+            return 'approved';
+          },
+        );
+        final controller = ChatController();
+        final agent = ToolLoopAgent(
+          model: model,
+          tools: {'secureTool': secureTool},
+          maxSteps: 3,
+        );
+
+        await controller.sendMessage(agent: agent, text: 'go');
+        await pumpUntil(() => controller.status == ChatStatus.awaitingApproval);
+        expect(
+          controller.pendingApprovalRequests.single.approvalId,
+          'approval_provider-call-1',
+        );
+
+        controller.addToolApprovalResponse(
+          approvalId: 'approval_provider-call-1',
+          approved: true,
+        );
+        await pumpUntil(() => controller.status == ChatStatus.ready);
+
+        expect(executions, 1);
+        expect(controller.messages.last.content, 'continued');
+        final assistant = model.resumedMessages
+            .where((message) => message.role == LanguageModelV4Role.assistant)
+            .single;
+        final replayedCall = assistant.content
+            .whereType<LanguageModelV4ToolCallPart>()
+            .single;
+        expect(replayedCall.toolCallId, 'provider-call-1');
+        final toolMessage = model.resumedMessages
+            .where((message) => message.role == LanguageModelV4Role.tool)
+            .single;
+        final replayedResult = toolMessage.content
+            .whereType<LanguageModelV4ToolResultPart>()
+            .single;
+        expect(replayedResult.toolCallId, 'provider-call-1');
+        controller.dispose();
+      },
+    );
 
     test(
       'approving the tool preserves approval-step metadata after resume',

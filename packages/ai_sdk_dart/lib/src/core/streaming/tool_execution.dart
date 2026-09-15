@@ -28,6 +28,7 @@ Future<ToolExecutionResult> executeToolCall({
   required LanguageModelV4ToolCallPart call,
   required List<LanguageModelV4Message> messages,
   required Map<String, LanguageModelV4ToolApprovalResponse> approvalById,
+  String? approvalId,
   CancellationToken? abortSignal,
   Duration? timeout,
   Map<String, Object?>? runtimeContext,
@@ -53,7 +54,7 @@ Future<ToolExecutionResult> executeToolCall({
   }
   // coverage:ignore-end
 
-  final approvalId = 'approval_${call.toolCallId}';
+  final effectiveApprovalId = approvalId ?? 'approval_${call.toolCallId}';
   final rawInput = call.input;
 
   try {
@@ -67,7 +68,7 @@ Future<ToolExecutionResult> executeToolCall({
     );
 
     final approvalEvaluator = tool.needsApprovalDynamic;
-    final approvalResponse = approvalById[approvalId];
+    final approvalResponse = approvalById[effectiveApprovalId];
     throwIfCancelled(abortSignal);
     final needsApproval = switch (tool.approvalPolicy) {
       ToolApprovalPolicy.never => false,
@@ -85,7 +86,7 @@ Future<ToolExecutionResult> executeToolCall({
     if (needsApproval && approvalResponse == null) {
       return ToolExecutionResult(
         approvalRequest: LanguageModelV4ToolApprovalRequestPart(
-          approvalId: approvalId,
+          approvalId: effectiveApprovalId,
           toolCall: call,
         ),
       );

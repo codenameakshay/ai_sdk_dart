@@ -144,6 +144,7 @@ class ChatController extends StreamingControllerBase {
 
   // Pending tool-approval responses indexed by approvalId.
   final Map<String, LanguageModelV4ToolApprovalResponse> _pendingApprovals = {};
+  ToolApprovalReplay? _pendingApprovalReplay;
 
   void _cancelActiveRequestSync() {
     activeRequestId = null;
@@ -180,6 +181,7 @@ class ChatController extends StreamingControllerBase {
   void _discardApprovalState() {
     _pendingApprovalRequests = const [];
     _pendingApprovals.clear();
+    _pendingApprovalReplay = null;
   }
 
   /// Submit [text] as a user message and stream the assistant response.
@@ -276,6 +278,7 @@ class ChatController extends StreamingControllerBase {
     ToolLoopAgent agent, {
     bool consumeApprovals = false,
   }) async {
+    final approvalReplay = consumeApprovals ? _pendingApprovalReplay : null;
     _cancelActiveRequestSync();
     final requestId = ++nextRequestId;
     final abortSignal = CancellationToken();
@@ -284,6 +287,7 @@ class ChatController extends StreamingControllerBase {
     _streamBuffer.clear();
     _streamingReasoning = '';
     _pendingApprovalRequests = const [];
+    if (consumeApprovals) _pendingApprovalReplay = null;
     if (!consumeApprovals) {
       _reasoningText = '';
       _lastUsage = null;
@@ -296,13 +300,20 @@ class ChatController extends StreamingControllerBase {
     notifyListenersSafely(immediate: true, status: true, content: true);
 
     try {
-      final streamResult = await agent.stream(
-        messages: messages,
-        toolApprovalResponses: consumeApprovals
-            ? _consumeApprovals()
-            : const [],
-        abortSignal: abortSignal,
-      );
+      final List<LanguageModelV4ToolApprovalResponse> approvals =
+          consumeApprovals ? _consumeApprovals() : const [];
+      final streamResult = approvalReplay == null
+          ? await agent.stream(
+              messages: messages,
+              toolApprovalResponses: approvals,
+              abortSignal: abortSignal,
+            )
+          : await agent.resume(
+              replay: approvalReplay,
+              messages: messages,
+              toolApprovalResponses: approvals,
+              abortSignal: abortSignal,
+            );
       if (!isCurrentRequest(requestId)) return;
       _status = ChatStatus.streaming;
       notifyListenersSafely(immediate: true, status: true);
@@ -337,6 +348,7 @@ class ChatController extends StreamingControllerBase {
             streamResult,
             requestId,
             mergeMetadata: consumeApprovals,
+            approvalReplay: approvalReplay,
           ),
         ),
         onError: (Object err) => _handleError(err, requestId),
@@ -351,10 +363,29 @@ class ChatController extends StreamingControllerBase {
   /// Finalize a completed (or approval-paused) turn: capture the turn's
   /// metadata, then either surface pending approval requests or commit the
   /// assistant message.
+  Iterable<ModelMessage> _replayMessagesForStep(GenerateTextStep step) sync* {
+    final assistantParts = step.content
+        .where((part) => part is! LanguageModelV4ToolApprovalRequestPart)
+        .toList(growable: false);
+    if (assistantParts.isNotEmpty) {
+      yield ModelMessage.parts(
+        role: ModelMessageRole.assistant,
+        parts: assistantParts,
+      );
+    }
+    if (step.toolResults.isNotEmpty) {
+      yield ModelMessage.parts(
+        role: ModelMessageRole.tool,
+        parts: step.toolResults,
+      );
+    }
+  }
+
   Future<void> _finalizeTurn(
     StreamTextResult streamResult,
     int requestId, {
     required bool mergeMetadata,
+    ToolApprovalReplay? approvalReplay,
   }) async {
     _activeSubscription = null;
     unawaited(_errorSubscription?.cancel());
@@ -366,13 +397,14 @@ class ChatController extends StreamingControllerBase {
     }
 
     var approvals = const <LanguageModelV4ToolApprovalRequestPart>[];
+    var steps = const <GenerateTextStep>[];
     LanguageModelV4Usage? usage;
     List<LanguageModelV4SourcePart> sources = const [];
     List<LanguageModelV4ToolCallPart> toolCalls = const [];
     List<LanguageModelV4ToolResultPart> toolResults = const [];
     String reasoningText = '';
     try {
-      final steps = await streamResult.steps;
+      steps = await streamResult.steps;
       approvals = [for (final step in steps) ...step.toolApprovalRequests];
       usage = await streamResult.totalUsage ?? await streamResult.usage;
       sources = await streamResult.sources;
@@ -405,6 +437,13 @@ class ChatController extends StreamingControllerBase {
     }
 
     if (approvals.isNotEmpty) {
+      _pendingApprovalReplay = ToolApprovalReplay(
+        messages: [
+          ...?approvalReplay?.messages,
+          for (final step in steps) ..._replayMessagesForStep(step),
+        ],
+        requests: approvals,
+      );
       _pendingApprovalRequests = approvals;
       _streamBuffer.clear();
       _streamingReasoning = '';

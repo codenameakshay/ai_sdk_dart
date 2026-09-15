@@ -704,6 +704,7 @@ void main() {
               {
                 'embedding': [1, 2, 3],
               },
+              {'embedding': 'ignored malformed extra row'},
             ],
             'usage': {'total_tokens': 20},
           }),
@@ -721,6 +722,47 @@ void main() {
       expect(result.embeddings, hasLength(2));
       expect(result.embeddings.first.embedding, [0.1, 0.2, 0.3]);
       expect(result.usage?.tokens, 20);
+    });
+
+    test('rejects malformed 2xx embedding responses', () async {
+      final server = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({'data': 'not-a-list'}));
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      await expectLater(
+        OpenAIProvider(apiKey: 'test', baseUrl: server.baseUrl)
+            .embedding('text-embedding-3-small')
+            .doEmbed(const EmbeddingModelV2CallOptions(values: ['hi'])),
+        throwsA(isA<AiApiCallError>()),
+      );
+    });
+
+    test('rejects a null 2xx embedding body', () async {
+      final server = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      await expectLater(
+        OpenAIProvider(apiKey: 'test', baseUrl: server.baseUrl)
+            .embedding('text-embedding-3-small')
+            .doEmbed(const EmbeddingModelV2CallOptions(values: ['hi'])),
+        throwsA(
+          isA<AiApiCallError>()
+              .having((error) => error.statusCode, 'statusCode', 200)
+              .having(
+                (error) => error.url,
+                'url',
+                '${server.baseUrl}/embeddings',
+              ),
+        ),
+      );
     });
 
     test('image endpoint parses b64 images', () async {
@@ -751,6 +793,65 @@ void main() {
       expect(result.images, hasLength(1));
       expect(result.images.first.bytes, imageBytes);
       expect(result.usage?.imagesGenerated, 1);
+    });
+
+    test('rejects malformed 2xx image responses', () async {
+      final server = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({'data': 'not-a-list'}));
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      await expectLater(
+        OpenAIProvider(apiKey: 'test', baseUrl: server.baseUrl)
+            .image('gpt-image-1')
+            .doGenerate(const ImageModelV3CallOptions(prompt: 'hi')),
+        throwsA(isA<AiApiCallError>()),
+      );
+    });
+
+    test('rejects a null 2xx image body', () async {
+      final server = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      await expectLater(
+        OpenAIProvider(apiKey: 'test', baseUrl: server.baseUrl)
+            .image('gpt-image-1')
+            .doGenerate(const ImageModelV3CallOptions(prompt: 'hi')),
+        throwsA(
+          isA<AiApiCallError>()
+              .having((error) => error.statusCode, 'statusCode', 200)
+              .having(
+                (error) => error.url,
+                'url',
+                '${server.baseUrl}/images/generations',
+              ),
+        ),
+      );
+    });
+
+    test('accepts an image response without optional data', () async {
+      final server = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({}));
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final result =
+          await OpenAIProvider(apiKey: 'test', baseUrl: server.baseUrl)
+              .image('gpt-image-1')
+              .doGenerate(const ImageModelV3CallOptions(prompt: 'hi'));
+
+      expect(result.images, isEmpty);
+      expect(result.usage?.imagesGenerated, 0);
     });
 
     test('passes providerOptions into request body', () async {
@@ -1551,6 +1652,19 @@ void main() {
       expect(result.mediaType, 'audio/mpeg');
     });
 
+    test('rejects a null 2xx speech body', () async {
+      final client = Dio(BaseOptions(baseUrl: 'http://localhost/v1'))
+        ..interceptors.add(_NullResponseInterceptor());
+      addTearDown(() => client.close(force: true));
+
+      await expectLater(
+        OpenAIProvider(apiKey: 'test', client: client)
+            .speech('tts-1')
+            .doGenerate(const SpeechModelV1CallOptions(text: 'hi')),
+        throwsA(isA<AiApiCallError>()),
+      );
+    });
+
     // ── transcription (speech-to-text) ───────────────────────────────────
 
     test('transcription posts multipart audio and parses text', () async {
@@ -1667,6 +1781,34 @@ void main() {
       expect(result.text, '');
     });
 
+    test('rejects a null 2xx transcription body', () async {
+      final server = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      await expectLater(
+        OpenAIProvider(apiKey: 'test', baseUrl: server.baseUrl)
+            .transcription('whisper-1')
+            .doGenerate(
+              TranscriptionModelV1CallOptions(
+                audio: Uint8List.fromList([1, 2, 3]),
+              ),
+            ),
+        throwsA(
+          isA<AiApiCallError>()
+              .having((error) => error.statusCode, 'statusCode', 200)
+              .having(
+                (error) => error.url,
+                'url',
+                '${server.baseUrl}/audio/transcriptions',
+              ),
+        ),
+      );
+    });
+
     runProviderContractTests(
       providerName: 'openai',
       captureRequestBody: _captureOpenAiRequestBody,
@@ -1726,3 +1868,12 @@ Future<Map<String, dynamic>> _captureOpenAiRequestBody(
 Future<TestServer> _startServer(
   Future<void> Function(HttpRequest request) handler,
 ) => TestServer.start(handler, pathSuffix: '/v1');
+
+class _NullResponseInterceptor extends Interceptor {
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    handler.resolve(
+      Response<Uint8List>(requestOptions: options, statusCode: 200),
+    );
+  }
+}

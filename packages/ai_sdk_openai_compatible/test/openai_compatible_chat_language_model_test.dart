@@ -1138,6 +1138,50 @@ void main() {
       expect(call.input, <String, dynamic>{});
     });
 
+    test('rejects null and malformed 2xx chat responses', () async {
+      final nullServer = await _startServer((request) async {
+        request.response.statusCode = 200;
+        await request.response.close();
+      });
+      addTearDown(nullServer.close);
+
+      await expectLater(
+        _bearerModel(
+          nullServer.baseUrl,
+        ).doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('hi'))),
+        throwsA(
+          isA<AiApiCallError>()
+              .having((error) => error.statusCode, 'statusCode', 200)
+              .having(
+                (error) => error.url,
+                'url',
+                contains('/v1/chat/completions'),
+              )
+              .having((error) => error.cause, 'cause', isNull),
+        ),
+      );
+
+      final malformedServer = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        _writeJson(request, {'choices': 'not-a-list'});
+      });
+      addTearDown(malformedServer.close);
+
+      await expectLater(
+        _bearerModel(
+          malformedServer.baseUrl,
+        ).doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('hi'))),
+        throwsA(
+          isA<AiApiCallError>().having(
+            (error) => error.cause,
+            'cause',
+            isNotNull,
+          ),
+        ),
+      );
+    });
+
     // ── annotations → source/file parts (non-streaming) ──────────────────
     test(
       'doGenerate extracts url_citation and file_citation annotations',

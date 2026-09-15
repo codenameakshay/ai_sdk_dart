@@ -133,7 +133,38 @@ class _MistralEmbeddingModel implements EmbeddingModelV2<String> {
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);
     }
-    final data = response.data!;
-    return parseOpenAiEmbeddings(data, options.values);
+    final data = response.data;
+    if (data == null) {
+      throw _invalidResponse(response);
+    }
+    try {
+      final rawData = data['data'];
+      if (rawData != null) {
+        if (rawData is! List) {
+          throw const FormatException(
+            'The embeddings data field is not a list.',
+          );
+        }
+        for (final item in rawData.take(options.values.length)) {
+          if (item is! Map || item['embedding'] is! List) {
+            throw const FormatException('An embedding item is malformed.');
+          }
+          if ((item['embedding'] as List).any((value) => value is! num)) {
+            throw const FormatException('An embedding vector is malformed.');
+          }
+        }
+      }
+      return parseOpenAiEmbeddings(data, options.values);
+    } on Object catch (error) {
+      throw _invalidResponse(response, error);
+    }
   }
 }
+
+AiApiCallError _invalidResponse<T>(Response<T> response, [Object? cause]) =>
+    AiApiCallError(
+      'Mistral returned an invalid 2xx response body.',
+      statusCode: response.statusCode,
+      url: response.requestOptions.uri.toString(),
+      cause: cause,
+    );

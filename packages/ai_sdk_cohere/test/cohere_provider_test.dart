@@ -39,6 +39,38 @@ void main() {
     });
   });
 
+  test('malformed 2xx chat responses raise AiApiCallError', () async {
+    final server = await TestServer.start((request) async {
+      request.response.statusCode = 200;
+      await request.response.close();
+    });
+    addTearDown(server.close);
+
+    await expectLater(
+      CohereProvider(apiKey: 'test', baseUrl: server.baseUrl)
+          .call('command-r-plus')
+          .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('hi'))),
+      throwsA(isA<AiApiCallError>()),
+    );
+  });
+
+  test('wrong-shaped 2xx chat responses raise AiApiCallError', () async {
+    final server = await TestServer.start((request) async {
+      request.response.statusCode = 200;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({'message': 'not-an-object'}));
+      await request.response.close();
+    });
+    addTearDown(server.close);
+
+    await expectLater(
+      CohereProvider(apiKey: 'test', baseUrl: server.baseUrl)
+          .call('command-r-plus')
+          .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('hi'))),
+      throwsA(isA<AiApiCallError>()),
+    );
+  });
+
   group('Cohere doGenerate wire format', () {
     test(
       'serializes tools, tool_choice, and image content; parses tool calls',

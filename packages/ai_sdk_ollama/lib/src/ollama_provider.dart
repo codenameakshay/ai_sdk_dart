@@ -228,26 +228,33 @@ class _OllamaLanguageModel extends LanguageModelV4 {
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);
     }
-    final data = response.data!;
-
-    final message = data['message'] as Map<String, dynamic>?;
-    final text = (message?['content'] as String?) ?? '';
-    final rawFinishReason = data['done_reason'] as String?;
-
-    final content = <LanguageModelV4ContentPart>[];
-    if (text.isNotEmpty) {
-      content.add(LanguageModelV4TextPart(text: text));
+    final data = response.data;
+    if (data == null) {
+      throw _invalidResponse(response);
     }
-    content.addAll(_parseToolCalls(message?['tool_calls'] as List?));
 
-    return LanguageModelV4GenerateResult(
-      content: content,
-      finishReason: content.any((p) => p is LanguageModelV4ToolCallPart)
-          ? LanguageModelV4FinishReason.toolCalls
-          : _mapFinishReason(rawFinishReason),
-      rawFinishReason: rawFinishReason,
-      usage: _usageFrom(data),
-    );
+    try {
+      final message = data['message'] as Map<String, dynamic>?;
+      final text = (message?['content'] as String?) ?? '';
+      final rawFinishReason = data['done_reason'] as String?;
+
+      final content = <LanguageModelV4ContentPart>[];
+      if (text.isNotEmpty) {
+        content.add(LanguageModelV4TextPart(text: text));
+      }
+      content.addAll(_parseToolCalls(message?['tool_calls'] as List?));
+
+      return LanguageModelV4GenerateResult(
+        content: content,
+        finishReason: content.any((p) => p is LanguageModelV4ToolCallPart)
+            ? LanguageModelV4FinishReason.toolCalls
+            : _mapFinishReason(rawFinishReason),
+        rawFinishReason: rawFinishReason,
+        usage: _usageFrom(data),
+      );
+    } on Object catch (error) {
+      throw _invalidResponse(response, error);
+    }
   }
 
   @override
@@ -279,9 +286,13 @@ class _OllamaLanguageModel extends LanguageModelV4 {
       (key, value) => MapEntry(key, value.join(',')),
     );
     final responseTimestamp = DateTime.now().toUtc();
+    final responseBody = response.data;
+    if (responseBody == null) {
+      throw _invalidResponse(response);
+    }
     unawaited(
       _processStream(
-        response.data!.stream,
+        responseBody.stream,
         controller,
         includeRawChunks: options.includeRawChunks,
         responseHeaders: responseHeaders,
@@ -485,23 +496,38 @@ class _OllamaEmbeddingModel implements EmbeddingModelV2<String> {
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);
     }
-    final data = response.data!;
-    final embeddingsList = (data['embeddings'] as List?) ?? [];
-    final embeddings = embeddingsList.take(options.values.length).indexed.map((
-      entry,
-    ) {
-      final vector = (entry.$2 as List)
-          .map((value) => (value as num).toDouble())
-          .toList();
-      return EmbeddingModelV2Embedding<String>(
-        value: options.values[entry.$1],
-        embedding: vector,
-      );
-    }).toList();
+    final data = response.data;
+    if (data == null) {
+      throw _invalidResponse(response);
+    }
+    try {
+      final embeddingsList = (data['embeddings'] as List?) ?? [];
+      final embeddings = embeddingsList.take(options.values.length).indexed.map(
+        (entry) {
+          final vector = (entry.$2 as List)
+              .map((value) => (value as num).toDouble())
+              .toList();
+          return EmbeddingModelV2Embedding<String>(
+            value: options.values[entry.$1],
+            embedding: vector,
+          );
+        },
+      ).toList();
 
-    return EmbeddingModelV2GenerateResult<String>(embeddings: embeddings);
+      return EmbeddingModelV2GenerateResult<String>(embeddings: embeddings);
+    } on Object catch (error) {
+      throw _invalidResponse(response, error);
+    }
   }
 }
+
+AiApiCallError _invalidResponse<T>(Response<T> response, [Object? cause]) =>
+    AiApiCallError(
+      'Ollama returned an invalid 2xx response body.',
+      statusCode: response.statusCode,
+      url: response.requestOptions.uri.toString(),
+      cause: cause,
+    );
 
 /// Maps a [DioException] from a non-2xx response to a typed [AiApiCallError]
 /// carrying the provider's message/status/code. Drains a streamed error body

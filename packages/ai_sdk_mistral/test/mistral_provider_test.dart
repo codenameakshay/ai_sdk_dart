@@ -324,6 +324,36 @@ void main() {
       expect(result.embeddings, isEmpty);
     });
 
+    test('rejects null and malformed 2xx embedding responses', () async {
+      final nullServer = await _startServer((request) async {
+        request.response.statusCode = 200;
+        await request.response.close();
+      });
+      addTearDown(nullServer.close);
+
+      await expectLater(
+        MistralProvider(apiKey: 'key', baseUrl: nullServer.baseUrl)
+            .embedding('mistral-embed')
+            .doEmbed(const EmbeddingModelV2CallOptions(values: ['hi'])),
+        throwsA(isA<AiApiCallError>()),
+      );
+
+      final malformedServer = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({'data': 'not-a-list'}));
+        await request.response.close();
+      });
+      addTearDown(malformedServer.close);
+
+      await expectLater(
+        MistralProvider(apiKey: 'key', baseUrl: malformedServer.baseUrl)
+            .embedding('mistral-embed')
+            .doEmbed(const EmbeddingModelV2CallOptions(values: ['hi'])),
+        throwsA(isA<AiApiCallError>()),
+      );
+    });
+
     test(
       'normalizes numeric vectors and ignores response rows beyond the input',
       () async {
@@ -340,9 +370,7 @@ void main() {
                 {
                   'embedding': [-3, 4],
                 },
-                {
-                  'embedding': [99],
-                },
+                {'embedding': 'ignored malformed extra row'},
               ],
             }),
           );

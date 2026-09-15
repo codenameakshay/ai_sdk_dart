@@ -156,32 +156,59 @@ class _OpenAIEmbeddingModel implements EmbeddingModelV2<String> {
       throw await apiErrorFromDioException(e, provider: provider);
     }
 
-    final data = response.data ?? <String, dynamic>{};
-    final rawEmbeddings = (data['data'] as List?) ?? const [];
-
-    final embeddings = <EmbeddingModelV2Embedding<String>>[];
-    for (
-      var i = 0;
-      i < rawEmbeddings.length && i < options.values.length;
-      i++
-    ) {
-      final row = (rawEmbeddings[i] as Map).cast<String, dynamic>();
-      final vector = ((row['embedding'] as List?) ?? const [])
-          .map((v) => (v as num).toDouble())
-          .toList();
-      embeddings.add(
-        EmbeddingModelV2Embedding<String>(
-          value: options.values[i],
-          embedding: vector,
-        ),
-      );
+    final data = response.data;
+    if (data == null) {
+      throw _invalidResponse(response);
     }
+    try {
+      final rawEmbeddings = data['data'];
+      if (rawEmbeddings != null) {
+        if (rawEmbeddings is! List) {
+          throw const FormatException(
+            'The embeddings data field is not a list.',
+          );
+        }
+        for (final item in rawEmbeddings.take(options.values.length)) {
+          if (item is! Map || item['embedding'] is! List) {
+            throw const FormatException('An embedding item is malformed.');
+          }
+          if ((item['embedding'] as List).any((value) => value is! num)) {
+            throw const FormatException('An embedding vector is malformed.');
+          }
+        }
+      }
 
-    final usage = (data['usage'] as Map?)?.cast<String, dynamic>();
-    return EmbeddingModelV2GenerateResult<String>(
-      embeddings: embeddings,
-      usage: EmbeddingModelV2Usage(tokens: intOrNull(usage?['total_tokens'])),
-    );
+      final embeddingsData = (rawEmbeddings as List?) ?? const [];
+      final embeddings = <EmbeddingModelV2Embedding<String>>[];
+      for (
+        var i = 0;
+        i < embeddingsData.length && i < options.values.length;
+        i++
+      ) {
+        final row = (embeddingsData[i] as Map).cast<String, dynamic>();
+        final vector = (row['embedding'] as List)
+            .map((value) => (value as num).toDouble())
+            .toList();
+        embeddings.add(
+          EmbeddingModelV2Embedding<String>(
+            value: options.values[i],
+            embedding: vector,
+          ),
+        );
+      }
+
+      final rawUsage = data['usage'];
+      if (rawUsage != null && rawUsage is! Map) {
+        throw const FormatException('The embeddings usage field is malformed.');
+      }
+      final usage = (rawUsage as Map?)?.cast<String, dynamic>();
+      return EmbeddingModelV2GenerateResult<String>(
+        embeddings: embeddings,
+        usage: EmbeddingModelV2Usage(tokens: intOrNull(usage?['total_tokens'])),
+      );
+    } on Object catch (error) {
+      throw _invalidResponse(response, error);
+    }
   }
 }
 
@@ -231,31 +258,47 @@ class _OpenAIImageModel implements ImageModelV3 {
       throw await apiErrorFromDioException(e, provider: provider);
     }
 
-    final data = response.data ?? <String, dynamic>{};
-    final imagesData = (data['data'] as List?) ?? const [];
-    final images = <GeneratedImage>[];
-    for (final item in imagesData) {
-      final map = (item as Map).cast<String, dynamic>();
-      final b64 = map['b64_json']?.toString();
-      if (b64 == null || b64.isEmpty) continue;
-      images.add(
-        GeneratedImage(
-          bytes: Uint8List.fromList(base64Decode(b64)),
-          mediaType: 'image/png',
-        ),
-      );
+    final data = response.data;
+    if (data == null) {
+      throw _invalidResponse(response);
     }
+    try {
+      final imagesData = data['data'];
+      if (imagesData != null && imagesData is! List) {
+        throw const FormatException('The image data field is not a list.');
+      }
+      final imageRows = (imagesData as List?) ?? const [];
+      final images = <GeneratedImage>[];
+      for (final item in imageRows) {
+        if (item is! Map) {
+          throw const FormatException('An image item is malformed.');
+        }
+        final b64 = item['b64_json'];
+        if (b64 != null && b64 is! String) {
+          throw const FormatException('An image base64 field is malformed.');
+        }
+        if (b64 is! String || b64.isEmpty) continue;
+        images.add(
+          GeneratedImage(
+            bytes: Uint8List.fromList(base64Decode(b64)),
+            mediaType: 'image/png',
+          ),
+        );
+      }
 
-    return ImageModelV3GenerateResult(
-      images: images,
-      usage: ImageModelV3Usage(imagesGenerated: images.length),
-      responses: [
-        ImageModelV3ResponseMetadata(
-          timestamp: DateTime.now().toUtc(),
-          modelId: modelId,
-        ),
-      ],
-    );
+      return ImageModelV3GenerateResult(
+        images: images,
+        usage: ImageModelV3Usage(imagesGenerated: images.length),
+        responses: [
+          ImageModelV3ResponseMetadata(
+            timestamp: DateTime.now().toUtc(),
+            modelId: modelId,
+          ),
+        ],
+      );
+    } on Object catch (error) {
+      throw _invalidResponse(response, error);
+    }
   }
 }
 
@@ -308,6 +351,9 @@ class _OpenAISpeechModel implements SpeechModelV1 {
       );
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);
+    }
+    if (response.data == null) {
+      throw _invalidResponse(response);
     }
     final contentType = response.headers.value('content-type') ?? 'audio/mpeg';
     final mediaType = contentType.split(';').first.trim();
@@ -364,7 +410,10 @@ class _OpenAITranscriptionModel implements TranscriptionModelV1 {
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);
     }
-    final data = response.data ?? <String, dynamic>{};
+    final data = response.data;
+    if (data == null) {
+      throw _invalidResponse(response);
+    }
     return TranscriptionModelV1GenerateResult(
       text: data['text']?.toString() ?? '',
     );
@@ -401,3 +450,11 @@ class _OpenAITranscriptionModel implements TranscriptionModelV1 {
 
   return (reasoningEffort, reasoningSummary, cleaned.isEmpty ? null : cleaned);
 }
+
+AiApiCallError _invalidResponse<T>(Response<T> response, [Object? cause]) =>
+    AiApiCallError(
+      'OpenAI returned an invalid 2xx response body.',
+      statusCode: response.statusCode,
+      url: response.requestOptions.uri.toString(),
+      cause: cause,
+    );

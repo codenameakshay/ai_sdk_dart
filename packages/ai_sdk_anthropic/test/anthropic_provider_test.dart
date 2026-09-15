@@ -16,6 +16,103 @@ import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
   group('AnthropicProvider', () {
+    test('rejects null and malformed 2xx chat responses', () async {
+      final nullServer = await _startServer((request) async {
+        request.response.statusCode = 200;
+        await request.response.close();
+      });
+      addTearDown(nullServer.close);
+
+      await expectLater(
+        AnthropicProvider(apiKey: 'test', baseUrl: nullServer.baseUrl)
+            .call('claude-sonnet-4-5')
+            .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('hi'))),
+        throwsA(
+          isA<AiApiCallError>()
+              .having((error) => error.statusCode, 'statusCode', 200)
+              .having((error) => error.url, 'url', contains('/v1/messages'))
+              .having((error) => error.cause, 'cause', isNull),
+        ),
+      );
+
+      final malformedServer = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({'content': 'not-a-list'}));
+        await request.response.close();
+      });
+      addTearDown(malformedServer.close);
+
+      await expectLater(
+        AnthropicProvider(apiKey: 'test', baseUrl: malformedServer.baseUrl)
+            .call('claude-sonnet-4-5')
+            .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('hi'))),
+        throwsA(
+          isA<AiApiCallError>()
+              .having((error) => error.statusCode, 'statusCode', 200)
+              .having((error) => error.cause, 'cause', isNotNull),
+        ),
+      );
+    });
+
+    test('allows absent optional chat output', () async {
+      final server = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({}));
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final result =
+          await AnthropicProvider(apiKey: 'test', baseUrl: server.baseUrl)
+              .call('claude-sonnet-4-5')
+              .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('hi')));
+      expect(result.content, isEmpty);
+    });
+
+    test('rejects malformed nested 2xx chat response fields', () async {
+      final cases = <Map<String, dynamic>>[
+        {
+          'content': [
+            {
+              'type': 'text',
+              'text': 'citation',
+              'citations': ['invalid'],
+            },
+          ],
+        },
+        {
+          'content': [
+            {'type': 'text', 'text': 'citation', 'citations': 'invalid'},
+          ],
+        },
+        {'usage': 'invalid'},
+      ];
+
+      for (final body in cases) {
+        final server = await _startServer((request) async {
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(jsonEncode(body));
+          await request.response.close();
+        });
+
+        try {
+          await expectLater(
+            AnthropicProvider(apiKey: 'test', baseUrl: server.baseUrl)
+                .call('claude-sonnet-4-5')
+                .doGenerate(
+                  LanguageModelV4CallOptions(prompt: userPrompt('hi')),
+                ),
+            throwsA(isA<AiApiCallError>()),
+          );
+        } finally {
+          await server.close();
+        }
+      }
+    });
+
     test('doGenerate maps text/tool_use/reasoning and usage', () async {
       final server = await _startServer((request) async {
         expect(request.uri.path, '/v1/messages');

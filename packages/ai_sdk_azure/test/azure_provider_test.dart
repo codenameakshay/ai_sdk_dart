@@ -53,6 +53,48 @@ void main() {
     });
   });
 
+  test('malformed 2xx embedding responses raise AiApiCallError', () async {
+    final server = await TestServer.start((request) async {
+      request.response.statusCode = 200;
+      await request.response.close();
+    });
+    addTearDown(server.close);
+
+    final model = AzureOpenAIProvider(
+      endpoint: server.baseUrl,
+      apiKey: 'key',
+    ).embedding('text-embedding-ada-002');
+
+    await expectLater(
+      model.doEmbed(
+        const EmbeddingModelV2CallOptions<String>(values: ['hello']),
+      ),
+      throwsA(isA<AiApiCallError>()),
+    );
+  });
+
+  test('wrong-shaped 2xx embedding responses raise AiApiCallError', () async {
+    final server = await TestServer.start((request) async {
+      request.response.statusCode = 200;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({'data': 'not-a-list'}));
+      await request.response.close();
+    });
+    addTearDown(server.close);
+
+    final model = AzureOpenAIProvider(
+      endpoint: server.baseUrl,
+      apiKey: 'key',
+    ).embedding('text-embedding-ada-002');
+
+    await expectLater(
+      model.doEmbed(
+        const EmbeddingModelV2CallOptions<String>(values: ['hello']),
+      ),
+      throwsA(isA<AiApiCallError>()),
+    );
+  });
+
   group('OpenAI-compatible capabilities (via shared base)', () {
     test('serializes tools and tool_choice', () async {
       late Map<String, dynamic> captured;

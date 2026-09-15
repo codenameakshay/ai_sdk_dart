@@ -16,6 +16,197 @@ import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
   group('GoogleGenerativeAIProvider', () {
+    test('rejects null and malformed 2xx chat responses', () async {
+      final nullServer = await _startServer((request) async {
+        request.response.statusCode = 200;
+        await request.response.close();
+      });
+      addTearDown(nullServer.close);
+
+      await expectLater(
+        GoogleGenerativeAIProvider(apiKey: 'test', baseUrl: nullServer.baseUrl)
+            .call('gemini-2.0-flash')
+            .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('hi'))),
+        throwsA(isA<AiApiCallError>()),
+      );
+
+      final malformedServer = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({'candidates': 'not-a-list'}));
+        await request.response.close();
+      });
+      addTearDown(malformedServer.close);
+
+      await expectLater(
+        GoogleGenerativeAIProvider(
+              apiKey: 'test',
+              baseUrl: malformedServer.baseUrl,
+            )
+            .call('gemini-2.0-flash')
+            .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('hi'))),
+        throwsA(isA<AiApiCallError>()),
+      );
+    });
+
+    test('rejects malformed 2xx embedding responses', () async {
+      final server = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({'embeddings': 'not-a-list'}));
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      await expectLater(
+        GoogleGenerativeAIProvider(apiKey: 'test', baseUrl: server.baseUrl)
+            .embedding('text-embedding-004')
+            .doEmbed(const EmbeddingModelV2CallOptions(values: ['hi'])),
+        throwsA(isA<AiApiCallError>()),
+      );
+    });
+
+    test('rejects malformed nested 2xx chat response fields', () async {
+      final cases = <Map<String, dynamic>>[
+        {
+          'candidates': [
+            {
+              'content': {
+                'parts': ['invalid'],
+              },
+            },
+          ],
+        },
+        {
+          'candidates': [
+            {
+              'content': {'parts': 'invalid'},
+            },
+          ],
+        },
+        {
+          'candidates': [
+            {'content': 'invalid'},
+          ],
+        },
+        {'usageMetadata': 'invalid'},
+      ];
+
+      for (final body in cases) {
+        final server = await _startServer((request) async {
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(jsonEncode(body));
+          await request.response.close();
+        });
+
+        try {
+          await expectLater(
+            GoogleGenerativeAIProvider(apiKey: 'test', baseUrl: server.baseUrl)
+                .call('gemini-2.0-flash')
+                .doGenerate(
+                  LanguageModelV4CallOptions(prompt: userPrompt('hi')),
+                ),
+            throwsA(isA<AiApiCallError>()),
+          );
+        } finally {
+          await server.close();
+        }
+      }
+    });
+
+    test(
+      'types malformed nested parsing errors with response context',
+      () async {
+        final cases = [
+          {
+            'candidates': [
+              {
+                'content': {
+                  'parts': [
+                    {'functionCall': 'invalid'},
+                  ],
+                },
+              },
+            ],
+          },
+          {
+            'candidates': [
+              {
+                'content': {
+                  'parts': [
+                    {'text': 'answer'},
+                  ],
+                },
+                'groundingMetadata': {
+                  'groundingChunks': [
+                    {'web': 'invalid'},
+                  ],
+                },
+              },
+            ],
+          },
+        ];
+
+        for (final body in cases) {
+          final server = await _startServer((request) async {
+            request.response.statusCode = 200;
+            request.response.headers.contentType = ContentType.json;
+            request.response.write(jsonEncode(body));
+            await request.response.close();
+          });
+
+          try {
+            late AiApiCallError error;
+            try {
+              await GoogleGenerativeAIProvider(
+                    apiKey: 'test',
+                    baseUrl: server.baseUrl,
+                  )
+                  .call('gemini-2.0-flash')
+                  .doGenerate(
+                    LanguageModelV4CallOptions(prompt: userPrompt('hi')),
+                  );
+              fail('Expected malformed response to throw.');
+            } on AiApiCallError catch (caught) {
+              error = caught;
+            }
+
+            expect(error.statusCode, 200);
+            expect(error.url, contains(server.baseUrl));
+            expect(error.cause, isNotNull);
+          } finally {
+            await server.close();
+          }
+        }
+      },
+    );
+
+    test('rejects non-numeric 2xx embedding values', () async {
+      final server = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'embeddings': [
+              {
+                'values': [0.1, 'invalid'],
+              },
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      await expectLater(
+        GoogleGenerativeAIProvider(apiKey: 'test', baseUrl: server.baseUrl)
+            .embedding('text-embedding-004')
+            .doEmbed(const EmbeddingModelV2CallOptions(values: ['hi'])),
+        throwsA(isA<AiApiCallError>()),
+      );
+    });
+
     test('doGenerate parses text/functionCall and usage', () async {
       final server = await _startServer((request) async {
         expect(

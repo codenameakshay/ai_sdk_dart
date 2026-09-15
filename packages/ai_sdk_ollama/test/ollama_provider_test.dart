@@ -194,6 +194,38 @@ void main() {
     );
   });
 
+  test('malformed 2xx chat responses raise AiApiCallError', () async {
+    final server = await _startServer((request) async {
+      request.response.statusCode = 200;
+      await request.response.close();
+    });
+    addTearDown(server.close);
+
+    await expectLater(
+      OllamaProvider(baseUrl: server.baseUrl)
+          .call('llama3')
+          .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('hi'))),
+      throwsA(isA<AiApiCallError>()),
+    );
+  });
+
+  test('wrong-shaped 2xx chat responses raise AiApiCallError', () async {
+    final server = await _startServer((request) async {
+      request.response.statusCode = 200;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({'message': 'not-an-object'}));
+      await request.response.close();
+    });
+    addTearDown(server.close);
+
+    await expectLater(
+      OllamaProvider(baseUrl: server.baseUrl)
+          .call('llama3')
+          .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('hi'))),
+      throwsA(isA<AiApiCallError>()),
+    );
+  });
+
   group('Ollama doGenerate wire format', () {
     test('forwards providerOptions and headers', () async {
       late Map<String, dynamic> captured;

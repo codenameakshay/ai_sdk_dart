@@ -118,7 +118,31 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
       throw await apiErrorFromDioException(e, provider: provider);
     }
 
-    final data = response.data ?? <String, dynamic>{};
+    final data = response.data;
+    if (data == null) throw _invalidResponse(response);
+    try {
+      final rawContent = data['content'];
+      if (rawContent is List) {
+        for (final item in rawContent) {
+          if (item is! Map) throw StateError('content item is not an object');
+          final citations = item['citations'];
+          if (citations is List && citations.any((item) => item is! Map)) {
+            throw StateError('citation item is not an object');
+          }
+          if (citations != null && citations is! List) {
+            throw StateError('citations are not a list');
+          }
+        }
+      } else if (rawContent != null) {
+        throw StateError('content is not a list');
+      }
+      final usage = data['usage'];
+      if (usage != null && usage is! Map) {
+        throw StateError('usage is not an object');
+      }
+    } on Object catch (error) {
+      throw _invalidResponse(response, error);
+    }
     final content = <LanguageModelV4ContentPart>[];
 
     final parts = (data['content'] as List?) ?? const [];
@@ -501,6 +525,14 @@ Dio _anthropicDio({String? baseUrl}) => createProviderDio(
     'content-type': 'application/json',
   },
 );
+
+AiApiCallError _invalidResponse<T>(Response<T> response, [Object? cause]) =>
+    AiApiCallError(
+      'Anthropic returned an invalid 2xx response body.',
+      statusCode: response.statusCode,
+      url: response.requestOptions.uri.toString(),
+      cause: cause,
+    );
 
 List<Map<String, dynamic>> _toAnthropicMessages(LanguageModelV4Prompt prompt) {
   final out = <Map<String, dynamic>>[];

@@ -126,49 +126,96 @@ class _GoogleLanguageModel extends LanguageModelV4 {
       throw await apiErrorFromDioException(e, provider: provider);
     }
 
-    final data = response.data ?? <String, dynamic>{};
-    final candidates = (data['candidates'] as List?) ?? const [];
-    final first = candidates.isNotEmpty
-        ? (candidates.first as Map).cast<String, dynamic>()
-        : <String, dynamic>{};
-
-    final content = <LanguageModelV4ContentPart>[];
-    final contentObj =
-        (first['content'] as Map?)?.cast<String, dynamic>() ??
-        <String, dynamic>{};
-    final parts = (contentObj['parts'] as List?) ?? const [];
-    for (final part in parts) {
-      final partMap = (part as Map).cast<String, dynamic>();
-      if (partMap['text'] is String) {
-        final text = partMap['text'].toString();
-        if (text.isNotEmpty) {
-          content.add(LanguageModelV4TextPart(text: text));
+    final data = response.data;
+    if (data == null) throw _invalidResponse(response);
+    try {
+      final rawCandidates = data['candidates'];
+      if (rawCandidates is List) {
+        for (final candidate in rawCandidates) {
+          if (candidate is! Map) throw StateError('candidate is not an object');
+          final content = candidate['content'];
+          if (content is Map) {
+            final parts = content['parts'];
+            if (parts is List && parts.any((part) => part is! Map)) {
+              throw StateError('content part is not an object');
+            }
+            if (parts != null && parts is! List) {
+              throw StateError('content parts are not a list');
+            }
+          } else if (content != null) {
+            throw StateError('candidate content is not an object');
+          }
         }
+      } else if (rawCandidates != null) {
+        throw StateError('candidates are not a list');
       }
-      final functionCall = (partMap['functionCall'] as Map?)
-          ?.cast<String, dynamic>();
-      if (functionCall != null) {
-        final toolCall = _parseGoogleFunctionCall(functionCall);
-        content.add(
-          LanguageModelV4ToolCallPart(
-            toolCallId: prefixedId('tool'),
-            toolName: toolCall.toolName,
-            input: toolCall.input,
-          ),
-        );
+      final usage = data['usageMetadata'];
+      if (usage != null && usage is! Map) {
+        throw StateError('usage metadata is not an object');
       }
+    } on Object catch (error) {
+      throw _invalidResponse(response, error);
+    }
+    try {
+      final candidates = (data['candidates'] as List?) ?? const [];
+      final first = candidates.isNotEmpty
+          ? (candidates.first as Map).cast<String, dynamic>()
+          : <String, dynamic>{};
 
-      final fileData = (partMap['fileData'] as Map?)?.cast<String, dynamic>();
-      if (fileData != null) {
-        final uri = fileData['fileUri']?.toString();
-        final mime =
-            fileData['mimeType']?.toString() ?? 'application/octet-stream';
-        if (uri != null && uri.isNotEmpty) {
-          final parsed = Uri.tryParse(uri);
-          if (parsed != null) {
+      final content = <LanguageModelV4ContentPart>[];
+      final contentObj =
+          (first['content'] as Map?)?.cast<String, dynamic>() ??
+          <String, dynamic>{};
+      final parts = (contentObj['parts'] as List?) ?? const [];
+      for (final part in parts) {
+        final partMap = (part as Map).cast<String, dynamic>();
+        if (partMap['text'] is String) {
+          final text = partMap['text'].toString();
+          if (text.isNotEmpty) {
+            content.add(LanguageModelV4TextPart(text: text));
+          }
+        }
+        final functionCall = (partMap['functionCall'] as Map?)
+            ?.cast<String, dynamic>();
+        if (functionCall != null) {
+          final toolCall = _parseGoogleFunctionCall(functionCall);
+          content.add(
+            LanguageModelV4ToolCallPart(
+              toolCallId: prefixedId('tool'),
+              toolName: toolCall.toolName,
+              input: toolCall.input,
+            ),
+          );
+        }
+
+        final fileData = (partMap['fileData'] as Map?)?.cast<String, dynamic>();
+        if (fileData != null) {
+          final uri = fileData['fileUri']?.toString();
+          final mime =
+              fileData['mimeType']?.toString() ?? 'application/octet-stream';
+          if (uri != null && uri.isNotEmpty) {
+            final parsed = Uri.tryParse(uri);
+            if (parsed != null) {
+              content.add(
+                LanguageModelV4FilePart(
+                  data: DataContentUrl(parsed),
+                  mediaType: mime,
+                ),
+              );
+            }
+          }
+        }
+
+        final inlineData = (partMap['inlineData'] as Map?)
+            ?.cast<String, dynamic>();
+        if (inlineData != null) {
+          final mime =
+              inlineData['mimeType']?.toString() ?? 'application/octet-stream';
+          final data = inlineData['data']?.toString();
+          if (data != null && data.isNotEmpty) {
             content.add(
               LanguageModelV4FilePart(
-                data: DataContentUrl(parsed),
+                data: DataContentBase64(data),
                 mediaType: mime,
               ),
             );
@@ -176,61 +223,47 @@ class _GoogleLanguageModel extends LanguageModelV4 {
         }
       }
 
-      final inlineData = (partMap['inlineData'] as Map?)
-          ?.cast<String, dynamic>();
-      if (inlineData != null) {
-        final mime =
-            inlineData['mimeType']?.toString() ?? 'application/octet-stream';
-        final data = inlineData['data']?.toString();
-        if (data != null && data.isNotEmpty) {
-          content.add(
-            LanguageModelV4FilePart(
-              data: DataContentBase64(data),
-              mediaType: mime,
-            ),
-          );
-        }
+      final grounding =
+          (first['groundingMetadata'] as Map?)?.cast<String, dynamic>() ??
+          <String, dynamic>{};
+      final chunks = (grounding['groundingChunks'] as List?) ?? const [];
+      for (var i = 0; i < chunks.length; i++) {
+        final chunk = (chunks[i] as Map).cast<String, dynamic>();
+        final web = (chunk['web'] as Map?)?.cast<String, dynamic>();
+        if (web == null) continue;
+        final url = web['uri']?.toString();
+        if (url == null || url.isEmpty) continue;
+        content.add(
+          LanguageModelV4SourcePart(
+            id: 'google_source_$i',
+            url: url,
+            title: web['title']?.toString(),
+            providerMetadata: chunk,
+          ),
+        );
       }
-    }
 
-    final grounding =
-        (first['groundingMetadata'] as Map?)?.cast<String, dynamic>() ??
-        <String, dynamic>{};
-    final chunks = (grounding['groundingChunks'] as List?) ?? const [];
-    for (var i = 0; i < chunks.length; i++) {
-      final chunk = (chunks[i] as Map).cast<String, dynamic>();
-      final web = (chunk['web'] as Map?)?.cast<String, dynamic>();
-      if (web == null) continue;
-      final url = web['uri']?.toString();
-      if (url == null || url.isEmpty) continue;
-      content.add(
-        LanguageModelV4SourcePart(
-          id: 'google_source_$i',
-          url: url,
-          title: web['title']?.toString(),
-          providerMetadata: chunk,
+      final usage = (data['usageMetadata'] as Map?)?.cast<String, dynamic>();
+      final warnings = _readGoogleWarnings(data);
+      return LanguageModelV4GenerateResult(
+        content: content,
+        finishReason: _mapGoogleFinishReason(first['finishReason']?.toString()),
+        rawFinishReason: first['finishReason']?.toString(),
+        usage: usage == null ? null : _googleUsageFrom(usage),
+        warnings: warnings,
+        request: LanguageModelV4RequestMetadata(body: requestBody),
+        response: LanguageModelV4ResponseMetadata(
+          modelId: modelId,
+          timestamp: DateTime.now().toUtc(),
+          headers: response.headers.map.map(
+            (key, value) => MapEntry(key, value.join(',')),
+          ),
+          body: data,
         ),
       );
+    } on Object catch (error) {
+      throw _invalidResponse(response, error);
     }
-
-    final usage = (data['usageMetadata'] as Map?)?.cast<String, dynamic>();
-    final warnings = _readGoogleWarnings(data);
-    return LanguageModelV4GenerateResult(
-      content: content,
-      finishReason: _mapGoogleFinishReason(first['finishReason']?.toString()),
-      rawFinishReason: first['finishReason']?.toString(),
-      usage: usage == null ? null : _googleUsageFrom(usage),
-      warnings: warnings,
-      request: LanguageModelV4RequestMetadata(body: requestBody),
-      response: LanguageModelV4ResponseMetadata(
-        modelId: modelId,
-        timestamp: DateTime.now().toUtc(),
-        headers: response.headers.map.map(
-          (key, value) => MapEntry(key, value.join(',')),
-        ),
-        body: data,
-      ),
-    );
   }
 
   @override
@@ -563,7 +596,24 @@ class _GoogleEmbeddingModel implements EmbeddingModelV2<String> {
       throw await apiErrorFromDioException(e, provider: provider);
     }
 
-    final data = response.data ?? <String, dynamic>{};
+    final data = response.data;
+    if (data == null) throw _invalidResponse(response);
+    try {
+      final rawEmbeddings = data['embeddings'];
+      if (rawEmbeddings is List) {
+        for (final row in rawEmbeddings.take(options.values.length)) {
+          if (row is! Map) throw StateError('embedding is not an object');
+          final values = row['values'];
+          if (values is! List || values.any((value) => value is! num)) {
+            throw StateError('embedding values are not numeric');
+          }
+        }
+      } else if (rawEmbeddings != null) {
+        throw StateError('embeddings are not a list');
+      }
+    } on Object catch (error) {
+      throw _invalidResponse(response, error);
+    }
     final embeddings = (data['embeddings'] as List?) ?? const [];
 
     final out = <EmbeddingModelV2Embedding<String>>[];
@@ -588,6 +638,14 @@ Dio _googleDio({String? baseUrl}) => createProviderDio(
   baseUrl: baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta',
   headers: {'content-type': 'application/json'},
 );
+
+AiApiCallError _invalidResponse<T>(Response<T> response, [Object? cause]) =>
+    AiApiCallError(
+      'Google returned an invalid 2xx response body.',
+      statusCode: response.statusCode,
+      url: response.requestOptions.uri.toString(),
+      cause: cause,
+    );
 
 String _modelPath(String modelId) {
   if (modelId.startsWith('models/')) return modelId;

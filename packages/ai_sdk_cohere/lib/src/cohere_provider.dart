@@ -311,52 +311,58 @@ class _CohereLanguageModel extends LanguageModelV4 {
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);
     }
-    final data = response.data!;
-
-    final message = data['message'] as Map<String, dynamic>?;
-    final contentList = message?['content'] as List?;
-    final text =
-        contentList
-            ?.whereType<Map<String, dynamic>>()
-            .where((c) => c['type'] == 'text')
-            .map((c) => c['text'] as String)
-            .join() ??
-        '';
-
-    final content = <LanguageModelV4ContentPart>[];
-    if (text.isNotEmpty) {
-      content.add(LanguageModelV4TextPart(text: text));
+    final data = response.data;
+    if (data == null) {
+      throw _invalidResponse(response);
     }
 
-    // Parse tool calls from the assistant message.
-    final toolCalls = (message?['tool_calls'] as List?) ?? const [];
-    for (final raw in toolCalls.whereType<Map<String, dynamic>>()) {
-      final function = raw['function'] as Map<String, dynamic>?;
-      content.add(
-        LanguageModelV4ToolCallPart(
-          toolCallId: raw['id']?.toString() ?? prefixedId('cohere-tool'),
-          toolName: function?['name']?.toString() ?? 'unknown_tool',
-          input: safeParseJson(function?['arguments']?.toString() ?? '{}'),
+    try {
+      final message = data['message'] as Map<String, dynamic>?;
+      final contentList = message?['content'] as List?;
+      final text =
+          contentList
+              ?.whereType<Map<String, dynamic>>()
+              .where((c) => c['type'] == 'text')
+              .map((c) => c['text'] as String)
+              .join() ??
+          '';
+
+      final content = <LanguageModelV4ContentPart>[];
+      if (text.isNotEmpty) {
+        content.add(LanguageModelV4TextPart(text: text));
+      }
+
+      final toolCalls = (message?['tool_calls'] as List?) ?? const [];
+      for (final raw in toolCalls.whereType<Map<String, dynamic>>()) {
+        final function = raw['function'] as Map<String, dynamic>?;
+        content.add(
+          LanguageModelV4ToolCallPart(
+            toolCallId: raw['id']?.toString() ?? prefixedId('cohere-tool'),
+            toolName: function?['name']?.toString() ?? 'unknown_tool',
+            input: safeParseJson(function?['arguments']?.toString() ?? '{}'),
+          ),
+        );
+      }
+
+      final usage = data['usage'] as Map<String, dynamic>?;
+      final tokens = usage?['tokens'] as Map<String, dynamic>?;
+
+      return LanguageModelV4GenerateResult(
+        content: content,
+        finishReason: _mapFinishReason(data['finish_reason'] as String?),
+        rawFinishReason: data['finish_reason'] as String?,
+        usage: LanguageModelV4Usage(
+          inputTokens: LanguageModelV4InputTokenUsage(
+            total: (tokens?['input_tokens'] as num?)?.toInt() ?? 0,
+          ),
+          outputTokens: LanguageModelV4OutputTokenUsage(
+            total: (tokens?['output_tokens'] as num?)?.toInt() ?? 0,
+          ),
         ),
       );
+    } on Object catch (error) {
+      throw _invalidResponse(response, error);
     }
-
-    final usage = data['usage'] as Map<String, dynamic>?;
-    final tokens = usage?['tokens'] as Map<String, dynamic>?;
-
-    return LanguageModelV4GenerateResult(
-      content: content,
-      finishReason: _mapFinishReason(data['finish_reason'] as String?),
-      rawFinishReason: data['finish_reason'] as String?,
-      usage: LanguageModelV4Usage(
-        inputTokens: LanguageModelV4InputTokenUsage(
-          total: (tokens?['input_tokens'] as num?)?.toInt() ?? 0,
-        ),
-        outputTokens: LanguageModelV4OutputTokenUsage(
-          total: (tokens?['output_tokens'] as num?)?.toInt() ?? 0,
-        ),
-      ),
-    );
   }
 
   @override
@@ -383,7 +389,11 @@ class _CohereLanguageModel extends LanguageModelV4 {
     }
 
     final controller = StreamController<LanguageModelV4StreamPart>();
-    final byteStream = response.data!.stream;
+    final responseBody = response.data;
+    if (responseBody == null) {
+      throw _invalidResponse(response);
+    }
+    final byteStream = responseBody.stream;
     final responseHeaders = response.headers.map.map(
       (key, value) => MapEntry(key, value.join(',')),
     );
@@ -637,20 +647,29 @@ class _CohereEmbeddingModel implements EmbeddingModelV2<String> {
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);
     }
-    final data = response.data!;
-    final embeddingsData = data['embeddings'] as Map<String, dynamic>?;
-    final floats = (embeddingsData?['float'] as List?) ?? [];
-    final embeddings = floats.take(options.values.length).indexed.map((entry) {
-      final vector = (entry.$2 as List)
-          .map((value) => (value as num).toDouble())
-          .toList();
-      return EmbeddingModelV2Embedding<String>(
-        value: options.values[entry.$1],
-        embedding: vector,
-      );
-    }).toList();
+    final data = response.data;
+    if (data == null) {
+      throw _invalidResponse(response);
+    }
+    try {
+      final embeddingsData = data['embeddings'] as Map<String, dynamic>?;
+      final floats = (embeddingsData?['float'] as List?) ?? [];
+      final embeddings = floats.take(options.values.length).indexed.map((
+        entry,
+      ) {
+        final vector = (entry.$2 as List)
+            .map((value) => (value as num).toDouble())
+            .toList();
+        return EmbeddingModelV2Embedding<String>(
+          value: options.values[entry.$1],
+          embedding: vector,
+        );
+      }).toList();
 
-    return EmbeddingModelV2GenerateResult<String>(embeddings: embeddings);
+      return EmbeddingModelV2GenerateResult<String>(embeddings: embeddings);
+    } on Object catch (error) {
+      throw _invalidResponse(response, error);
+    }
   }
 }
 
@@ -697,22 +716,37 @@ class _CohereRerankModel implements RerankModelV1 {
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);
     }
-    final data = response.data!;
-    final results = (data['results'] as List?) ?? [];
+    final data = response.data;
+    if (data == null) {
+      throw _invalidResponse(response);
+    }
+    try {
+      final results = (data['results'] as List?) ?? [];
 
-    final documents = results.map((r) {
-      final map = r as Map<String, dynamic>;
-      final idx = (map['index'] as num).toInt();
-      return RerankDocument(
-        index: idx,
-        document: options.documents[idx],
-        relevanceScore: (map['relevance_score'] as num).toDouble(),
-      );
-    }).toList();
+      final documents = results.map((r) {
+        final map = r as Map<String, dynamic>;
+        final idx = (map['index'] as num).toInt();
+        return RerankDocument(
+          index: idx,
+          document: options.documents[idx],
+          relevanceScore: (map['relevance_score'] as num).toDouble(),
+        );
+      }).toList();
 
-    return RerankModelV1Result(documents: documents);
+      return RerankModelV1Result(documents: documents);
+    } on Object catch (error) {
+      throw _invalidResponse(response, error);
+    }
   }
 }
+
+AiApiCallError _invalidResponse<T>(Response<T> response, [Object? cause]) =>
+    AiApiCallError(
+      'Cohere returned an invalid 2xx response body.',
+      statusCode: response.statusCode,
+      url: response.requestOptions.uri.toString(),
+      cause: cause,
+    );
 
 /// Maps a [DioException] from a non-2xx response to a typed [AiApiCallError]
 /// carrying the provider's message/status/code. Drains a streamed error body

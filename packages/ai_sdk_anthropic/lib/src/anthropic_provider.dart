@@ -319,6 +319,20 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
                 final id = block['id']?.toString() ?? 'reasoning-$index';
                 reasoningState[index] = _ReasoningState(id: id);
                 controller.add(StreamPartReasoningStart(id: id));
+              } else if (blockType == 'redacted_thinking') {
+                final id = block['id']?.toString() ?? 'reasoning-$index';
+                reasoningState[index] = _ReasoningState(id: id);
+                final redacted = block['data']?.toString();
+                controller.add(
+                  StreamPartReasoningStart(
+                    id: id,
+                    providerMetadata: redacted == null || redacted.isEmpty
+                        ? null
+                        : {
+                            provider: {'redactedData': redacted},
+                          },
+                  ),
+                );
               }
               break;
             case 'content_block_delta':

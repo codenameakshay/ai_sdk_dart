@@ -1223,6 +1223,38 @@ void main() {
       expect(utf8.decode(redacted.data), 'REDACTED-PAYLOAD');
     });
 
+    test('streams redacted_thinking content with provider metadata', () async {
+      final server = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.set('content-type', 'text/event-stream');
+        request.response.write(
+          'data: {"type":"content_block_start","index":0,"content_block":{"type":"redacted_thinking","data":"REDACTED-PAYLOAD"}}\n\n',
+        );
+        request.response.write(
+          'data: {"type":"content_block_stop","index":0}\n\n',
+        );
+        request.response.write(
+          'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n',
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = AnthropicProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).call('claude-sonnet-4-5');
+
+      final streamResult = await model.doStream(
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
+      );
+      final parts = await streamResult.stream.toList();
+      final start = parts.whereType<StreamPartReasoningStart>().single;
+
+      expect(start.providerMetadata?['anthropic']?['redactedData'], 'REDACTED-PAYLOAD');
+      expect(parts.whereType<StreamPartReasoningEnd>().single.id, start.id);
+    });
+
     test('serializes assistant tool calls and image url parts', () async {
       late Map<String, dynamic> captured;
       final server = await _startServer((request) async {

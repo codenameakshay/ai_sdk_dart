@@ -41,5 +41,8 @@ Future<GenerateSpeechResult> generateSpeech({
     ),
   );
   final result = await withOptionalTimeout(call, timeout);
+  if (result.audio.isEmpty) {
+    throw const AiNoSpeechGeneratedError(message: 'No speech was generated.');
+  }
   return GenerateSpeechResult(audio: result.audio, mediaType: result.mediaType);
 }

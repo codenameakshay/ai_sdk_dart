@@ -171,8 +171,31 @@ void main() {
         expect(result.embeddings.first.embedding, isNotEmpty);
         expect(result.embeddings.first.embedding, hasLength(4));
       });
+
+      test('throws AiNoContentGeneratedError for an empty provider result', () {
+        expect(
+          () => embedMany(model: _EmptyEmbeddingModel(), values: ['test']),
+          throwsA(isA<AiNoContentGeneratedError>()),
+        );
+      });
     });
   });
+}
+
+class _EmptyEmbeddingModel implements EmbeddingModelV2<String> {
+  @override
+  String get provider => 'fake';
+
+  @override
+  String get modelId => 'empty-embedding-model';
+
+  @override
+  String get specificationVersion => 'v2';
+
+  @override
+  Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
+    EmbeddingModelV2CallOptions<String> options,
+  ) async => const EmbeddingModelV2GenerateResult(embeddings: []);
 }
 
 /// A fake embedding model that counts how many times doEmbed is called.

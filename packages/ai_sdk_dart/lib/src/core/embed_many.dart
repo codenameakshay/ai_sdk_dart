@@ -67,7 +67,12 @@ Future<EmbedManyResult<VALUE>> embedMany<VALUE>({
     final call = model.doEmbed(
       EmbeddingModelV2CallOptions<VALUE>(values: chunk),
     );
-    return withOptionalTimeout(call, timeout);
+    return withOptionalTimeout(call, timeout).then((result) {
+      if (result.embeddings.isEmpty) {
+        throw const AiNoContentGeneratedError('No embedding was generated.');
+      }
+      return result;
+    });
   }
 
   // If maxParallelCalls is null or >= values.length, send all at once.

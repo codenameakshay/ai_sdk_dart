@@ -129,6 +129,21 @@ void main() {
           throwsA(isA<Exception>()),
         );
       });
+
+      test('throws AiNoImageGeneratedError for an empty result', () {
+        final model = MockImageModelV3(images: const []);
+        expect(
+          () => generateImage(model: model, prompt: 'hi'),
+          throwsA(isA<AiNoImageGeneratedError>()),
+        );
+      });
+
+      test('image getter throws AiNoImageGeneratedError when empty', () {
+        expect(
+          () => const GenerateImageResult(images: []).image,
+          throwsA(isA<AiNoImageGeneratedError>()),
+        );
+      });
     });
 
     // ── MockEmbeddingModelV3 ─────────────────────────────────────────────

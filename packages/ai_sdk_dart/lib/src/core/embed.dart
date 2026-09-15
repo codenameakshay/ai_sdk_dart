@@ -35,6 +35,10 @@ Future<EmbedResult<VALUE>> embed<VALUE>({
   final call = model.doEmbed(EmbeddingModelV2CallOptions(values: [value]));
   final result = await withOptionalTimeout(call, timeout);
 
+  if (result.embeddings.isEmpty) {
+    throw const AiNoContentGeneratedError('No embedding was generated.');
+  }
+
   final first = result.embeddings.first;
   return EmbedResult<VALUE>(
     value: first.value,

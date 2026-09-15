@@ -38,6 +38,13 @@ void main() {
         final result = await embed(model: model, value: 'specific text');
         expect(result.value, 'specific text');
       });
+
+      test('throws AiNoContentGeneratedError for an empty provider result', () {
+        expect(
+          () => embed(model: _EmptyEmbeddingModel(), value: 'test'),
+          throwsA(isA<AiNoContentGeneratedError>()),
+        );
+      });
     });
 
     // ── cosineSimilarity() ────────────────────────────────────────────────
@@ -95,4 +102,20 @@ void main() {
       });
     });
   });
+}
+
+class _EmptyEmbeddingModel implements EmbeddingModelV2<String> {
+  @override
+  String get provider => 'fake';
+
+  @override
+  String get modelId => 'empty-embedding-model';
+
+  @override
+  String get specificationVersion => 'v2';
+
+  @override
+  Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
+    EmbeddingModelV2CallOptions<String> options,
+  ) async => const EmbeddingModelV2GenerateResult(embeddings: []);
 }

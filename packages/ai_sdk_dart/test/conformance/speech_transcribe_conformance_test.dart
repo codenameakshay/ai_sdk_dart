@@ -20,35 +20,35 @@ void main() {
       });
 
       test('passes text to model doGenerate options', () async {
-        final model = FakeSpeechModel(audio: Uint8List(0));
+        final model = FakeSpeechModel(audio: Uint8List(1));
 
         await generateSpeech(model: model, text: 'test utterance');
         expect(model.lastOptions?.text, 'test utterance');
       });
 
       test('passes voice option to model', () async {
-        final model = FakeSpeechModel(audio: Uint8List(0));
+        final model = FakeSpeechModel(audio: Uint8List(1));
 
         await generateSpeech(model: model, text: 'Hello', voice: 'alloy');
         expect(model.lastOptions?.voice, 'alloy');
       });
 
       test('passes format option to model', () async {
-        final model = FakeSpeechModel(audio: Uint8List(0));
+        final model = FakeSpeechModel(audio: Uint8List(1));
 
         await generateSpeech(model: model, text: 'Hello', format: 'mp3');
         expect(model.lastOptions?.format, 'mp3');
       });
 
       test('passes speed option to model', () async {
-        final model = FakeSpeechModel(audio: Uint8List(0));
+        final model = FakeSpeechModel(audio: Uint8List(1));
 
         await generateSpeech(model: model, text: 'Hello', speed: 1.5);
         expect(model.lastOptions?.speed, 1.5);
       });
 
       test('passes providerOptions to model', () async {
-        final model = FakeSpeechModel(audio: Uint8List(0));
+        final model = FakeSpeechModel(audio: Uint8List(1));
         const providerOptions = <String, Map<String, dynamic>>{
           'openai': {'quality': 'hd'},
         };
@@ -76,6 +76,14 @@ void main() {
 
         expect(mp3Result.mediaType, 'audio/mpeg');
         expect(wavResult.mediaType, 'audio/wav');
+      });
+
+      test('throws AiNoSpeechGeneratedError for empty audio', () {
+        final model = FakeSpeechModel(audio: Uint8List(0));
+        expect(
+          () => generateSpeech(model: model, text: 'Hello'),
+          throwsA(isA<AiNoSpeechGeneratedError>()),
+        );
       });
     });
 
@@ -140,6 +148,14 @@ void main() {
           providerOptions: opts,
         );
         expect(model.lastOptions?.providerOptions, opts);
+      });
+
+      test('throws AiNoTranscriptGeneratedError for empty text', () {
+        final model = FakeTranscriptionModel('');
+        expect(
+          () => transcribe(model: model, audio: Uint8List.fromList([1])),
+          throwsA(isA<AiNoTranscriptGeneratedError>()),
+        );
       });
     });
   });

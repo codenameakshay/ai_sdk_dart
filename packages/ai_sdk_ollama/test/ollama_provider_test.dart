@@ -195,6 +195,41 @@ void main() {
   });
 
   group('Ollama doGenerate wire format', () {
+    test('forwards providerOptions and headers', () async {
+      late Map<String, dynamic> captured;
+      String? clientHeader;
+      final server = await _startServer((request) async {
+        clientHeader = request.headers.value('x-client');
+        final body = await utf8.decoder.bind(request).join();
+        captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'message': {'content': 'ok'},
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      await OllamaProvider(baseUrl: server.baseUrl)
+          .call('llama3')
+          .doGenerate(
+            LanguageModelV4CallOptions(
+              prompt: userPrompt('hi'),
+              headers: {'x-client': 'test'},
+              providerOptions: const {
+                'ollama': {'num_ctx': 2048},
+              },
+            ),
+          );
+
+      expect(clientHeader, 'test');
+      expect(captured['options'], {'num_ctx': 2048});
+      expect(captured['stream'], isFalse);
+    });
+
     test(
       'serializes tools and image content; parses tool calls and real usage',
       () async {
@@ -691,6 +726,47 @@ void main() {
     });
 
     test(
+      'forwards providerOptions and headers while forcing stream mode',
+      () async {
+        late Map<String, dynamic> captured;
+        String? clientHeader;
+        final server = await _startServer((request) async {
+          clientHeader = request.headers.value('x-client');
+          final body = await utf8.decoder.bind(request).join();
+          captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            '${jsonEncode({
+              'message': {'content': 'ok'},
+              'done': true,
+              'done_reason': 'stop',
+            })}\n',
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final result = await OllamaProvider(baseUrl: server.baseUrl)
+            .call('llama3')
+            .doStream(
+              LanguageModelV4CallOptions(
+                prompt: userPrompt('hi'),
+                headers: {'x-client': 'test'},
+                providerOptions: const {
+                  'ollama': {'num_ctx': 4096},
+                },
+              ),
+            );
+        await result.stream.drain<void>();
+
+        expect(clientHeader, 'test');
+        expect(captured['options'], {'num_ctx': 4096});
+        expect(captured['stream'], isTrue);
+      },
+    );
+
+    test(
       'plain text stream maps the length finish reason (no tool calls)',
       () async {
         final server = await _startServer((request) async {
@@ -772,6 +848,42 @@ void main() {
   });
 
   group('Ollama doEmbed wire format', () {
+    test('forwards embedding providerOptions and headers', () async {
+      late Map<String, dynamic> captured;
+      String? clientHeader;
+      final server = await _startServer((request) async {
+        clientHeader = request.headers.value('x-client');
+        final body = await utf8.decoder.bind(request).join();
+        captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'embeddings': [
+              [0.1],
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      await OllamaProvider(baseUrl: server.baseUrl)
+          .embedding('nomic-embed-text')
+          .doEmbed(
+            const EmbeddingModelV2CallOptions<String>(
+              values: ['hello'],
+              headers: {'x-client': 'test'},
+              providerOptions: {
+                'ollama': {'truncate': true},
+              },
+            ),
+          );
+
+      expect(clientHeader, 'test');
+      expect(captured['truncate'], isTrue);
+    });
+
     test('posts to /api/embed and parses embeddings in order', () async {
       late Map<String, dynamic> captured;
       String? path;

@@ -58,6 +58,7 @@ class GroqProvider {
       baseUrl: baseUrl ?? _defaultBaseUrl,
       headers: _headers,
       client: _client,
+      extraBody: (options) => options.providerOptions?['groq'],
       // Groq uses the classic `max_tokens` field.
       maxTokensKey: 'max_tokens',
     ),

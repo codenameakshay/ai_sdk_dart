@@ -157,6 +157,28 @@ void main() {
       expect(captured['max_tokens'], 256);
       expect(captured.containsKey('max_completion_tokens'), isFalse);
     });
+
+    test('forwards providerOptions into the request body', () async {
+      late Map<String, dynamic> captured;
+      final server = await _startServer((request) async {
+        captured = await captureBody(request);
+        writeOk(request);
+      });
+      addTearDown(server.close);
+
+      await GroqProvider(apiKey: 'key', baseUrl: server.baseUrl)(
+        'llama3-8b-8192',
+      ).doGenerate(
+        LanguageModelV4CallOptions(
+          prompt: userPrompt('hi'),
+          providerOptions: const {
+            'groq': {'reasoning_format': 'parsed'},
+          },
+        ),
+      );
+
+      expect(captured['reasoning_format'], 'parsed');
+    });
   });
 }
 

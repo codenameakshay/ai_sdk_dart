@@ -185,6 +185,36 @@ void main() {
       });
     });
 
+    test('forwards providerOptions into the generate request body', () async {
+      late Map<String, dynamic> captured;
+      final server = await TestServer.start((request) async {
+        final body = await utf8.decoder.bind(request).join();
+        captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'message': {'content': []},
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      await CohereProvider(apiKey: 'test', baseUrl: server.baseUrl)
+          .call('command-r-plus')
+          .doGenerate(
+            LanguageModelV4CallOptions(
+              prompt: userPrompt('hi'),
+              providerOptions: const {
+                'cohere': {'safety_mode': 'CONTEXTUAL'},
+              },
+            ),
+          );
+
+      expect(captured['safety_mode'], 'CONTEXTUAL');
+    });
+
     test('maps tool choice none and serializes tool-result messages', () async {
       late Map<String, dynamic> captured;
       final server = await TestServer.start((request) async {
@@ -548,6 +578,40 @@ void main() {
         ]);
       },
     );
+
+    test('forwards providerOptions into the stream request body', () async {
+      late Map<String, dynamic> captured;
+      final server = await TestServer.start((request) async {
+        final body = await utf8.decoder.bind(request).join();
+        captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          '${jsonEncode({
+            'type': 'message-end',
+            'delta': {'finish_reason': 'COMPLETE'},
+          })}\n',
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final stream =
+          await CohereProvider(apiKey: 'test', baseUrl: server.baseUrl)
+              .call('command-r-plus')
+              .doStream(
+                LanguageModelV4CallOptions(
+                  prompt: userPrompt('hi'),
+                  providerOptions: const {
+                    'cohere': {'safety_mode': 'CONTEXTUAL'},
+                  },
+                ),
+              );
+      await stream.stream.toList();
+
+      expect(captured['safety_mode'], 'CONTEXTUAL');
+      expect(captured['stream'], isTrue);
+    });
 
     test(
       'dispose closes owned clients and leaves injected clients open',

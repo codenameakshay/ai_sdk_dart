@@ -341,7 +341,9 @@ class _OpenAITranscriptionModel implements TranscriptionModelV1 {
     TranscriptionModelV1CallOptions options,
   ) async {
     final resolvedHeaders = await headers();
+    final providerOptions = options.providerOptions?['openai'];
     final formData = FormData.fromMap({
+      ...?providerOptions,
       'model': modelId,
       'file': MultipartFile.fromBytes(
         options.audio,

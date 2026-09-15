@@ -189,6 +189,7 @@ class _OllamaLanguageModel extends LanguageModelV4 {
   }
 
   Map<String, dynamic> _buildBody(LanguageModelV4CallOptions options) {
+    final providerOptions = options.providerOptions?['ollama'];
     final ollamaOptions = <String, dynamic>{
       if (options.maxOutputTokens != null)
         'num_predict': options.maxOutputTokens,
@@ -197,6 +198,7 @@ class _OllamaLanguageModel extends LanguageModelV4 {
       if (options.topK != null) 'top_k': options.topK,
       if (options.seed != null) 'seed': options.seed,
       if (options.stopSequences.isNotEmpty) 'stop': options.stopSequences,
+      ...?providerOptions,
     };
 
     return <String, dynamic>{
@@ -220,6 +222,7 @@ class _OllamaLanguageModel extends LanguageModelV4 {
       response = await client.post<Map<String, dynamic>>(
         '/chat',
         data: body,
+        options: Options(headers: options.headers),
         cancelToken: cancelToken,
       );
     } on DioException catch (e) {
@@ -261,7 +264,10 @@ class _OllamaLanguageModel extends LanguageModelV4 {
       response = await client.post<ResponseBody>(
         '/chat',
         data: body,
-        options: Options(responseType: ResponseType.stream),
+        options: Options(
+          responseType: ResponseType.stream,
+          headers: options.headers,
+        ),
         cancelToken: cancelToken,
       );
     } on DioException catch (e) {
@@ -462,11 +468,20 @@ class _OllamaEmbeddingModel implements EmbeddingModelV2<String> {
   Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
     EmbeddingModelV2CallOptions<String> options,
   ) async {
-    final body = <String, dynamic>{'model': model, 'input': options.values};
+    final providerOptions = options.providerOptions?['ollama'];
+    final body = <String, dynamic>{
+      'model': model,
+      'input': options.values,
+      ...?providerOptions,
+    };
 
     final Response<Map<String, dynamic>> response;
     try {
-      response = await client.post<Map<String, dynamic>>('/embed', data: body);
+      response = await client.post<Map<String, dynamic>>(
+        '/embed',
+        data: body,
+        options: Options(headers: options.headers),
+      );
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);
     }

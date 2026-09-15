@@ -274,6 +274,7 @@ class _CohereLanguageModel extends LanguageModelV4 {
     final toolChoice = options.toolChoice == null
         ? null
         : _toolChoice(options.toolChoice!);
+    final providerOptions = options.providerOptions?['cohere'];
     return <String, dynamic>{
       'model': modelId,
       'messages': _buildMessages(options.prompt),
@@ -287,6 +288,7 @@ class _CohereLanguageModel extends LanguageModelV4 {
       if (options.stopSequences.isNotEmpty)
         'stop_sequences': options.stopSequences,
       if (options.seed != null) 'seed': options.seed,
+      ...?providerOptions,
     };
   }
 

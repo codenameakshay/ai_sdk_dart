@@ -70,6 +70,7 @@ class AzureOpenAIProvider {
           headers: _headers,
           client: _client,
           queryParameters: {'api-version': apiVersion},
+          extraBody: (options) => options.providerOptions?['azure'],
           // Azure (like classic OpenAI deployments) uses `max_tokens`.
           maxTokensKey: 'max_tokens',
         ),
@@ -132,9 +133,11 @@ class _AzureEmbeddingModel implements EmbeddingModelV2<String> {
     EmbeddingModelV2CallOptions<String> options,
   ) async {
     final resolvedHeaders = await headers();
+    final providerOptions = options.providerOptions?['azure'];
     final body = <String, dynamic>{
       'input': options.values,
       'model': deploymentId,
+      ...?providerOptions,
     };
 
     final Response<Map<String, dynamic>> response;

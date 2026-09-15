@@ -1577,15 +1577,31 @@ void main() {
           audioMediaType: 'audio/wav',
           language: 'en',
           prompt: 'a greeting',
+          providerOptions: const {
+            'openai': {
+              'temperature': 0.2,
+              'model': 'ignored-model',
+              'response_format': 'text',
+              'language': 'ignored-language',
+              'prompt': 'ignored-prompt',
+            },
+          },
         ),
       );
 
       expect(contentTypeHeader, contains('multipart/form-data'));
-      // multipart form should carry the model, language, prompt and a .wav file.
+      // Multipart form should carry provider fields and controlled call fields.
       expect(rawBody, contains('whisper-1'));
       expect(rawBody, contains('audio.wav'));
       expect(rawBody, contains('a greeting'));
       expect(rawBody, contains('name="language"'));
+      expect(rawBody, contains('name="temperature"'));
+      expect(rawBody, contains('0.2'));
+      expect(rawBody, contains('name="response_format"'));
+      expect(rawBody, contains('json'));
+      expect(rawBody, isNot(contains('ignored-model')));
+      expect(rawBody, isNot(contains('ignored-language')));
+      expect(rawBody, isNot(contains('ignored-prompt')));
       expect(result.text, 'hello there');
       expect(model.provider, 'openai');
       expect(model.specificationVersion, 'v1');

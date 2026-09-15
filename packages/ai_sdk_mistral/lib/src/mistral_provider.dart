@@ -59,6 +59,7 @@ class MistralProvider {
       baseUrl: baseUrl ?? _defaultBaseUrl,
       headers: _headers,
       client: _client,
+      extraBody: (options) => options.providerOptions?['mistral'],
       // Mistral names the seed field `random_seed` and uses `max_tokens`.
       seedKey: 'random_seed',
       maxTokensKey: 'max_tokens',
@@ -115,7 +116,12 @@ class _MistralEmbeddingModel implements EmbeddingModelV2<String> {
     EmbeddingModelV2CallOptions<String> options,
   ) async {
     final resolvedHeaders = await headers();
-    final body = <String, dynamic>{'model': modelId, 'input': options.values};
+    final providerOptions = options.providerOptions?['mistral'];
+    final body = <String, dynamic>{
+      'model': modelId,
+      'input': options.values,
+      ...?providerOptions,
+    };
 
     final Response<Map<String, dynamic>> response;
     try {

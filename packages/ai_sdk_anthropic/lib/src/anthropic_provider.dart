@@ -217,6 +217,8 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
       'stream': true,
       if (options.temperature != null) 'temperature': options.temperature,
       if (options.topP != null) 'top_p': options.topP,
+      if (options.stopSequences.isNotEmpty)
+        'stop_sequences': options.stopSequences,
       if (options.tools.isNotEmpty)
         'tools': options.tools.map(_toAnthropicTool).toList(),
       if (options.toolChoice != null)

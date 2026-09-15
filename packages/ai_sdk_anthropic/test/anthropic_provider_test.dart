@@ -1113,6 +1113,36 @@ void main() {
       expect(result.finishReason, LanguageModelV4FinishReason.stop);
     });
 
+    test('sends stop_sequences when streaming', () async {
+      late Map<String, dynamic> captured;
+      final server = await _startServer((request) async {
+        final body = await utf8.decoder.bind(request).join();
+        captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+        request.response.statusCode = 200;
+        request.response.headers.set('content-type', 'text/event-stream');
+        request.response.write(
+          'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n',
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = AnthropicProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).call('claude-sonnet-4-5');
+
+      final streamResult = await model.doStream(
+        LanguageModelV4CallOptions(
+          prompt: userPrompt('hi'),
+          stopSequences: const ['STOP', 'END'],
+        ),
+      );
+      await streamResult.stream.toList();
+
+      expect(captured['stop_sequences'], ['STOP', 'END']);
+    });
+
     test('maps unknown stop_reason to other', () async {
       final server = await _startServer((request) async {
         request.response.statusCode = 200;

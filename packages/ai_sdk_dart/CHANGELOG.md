@@ -8,6 +8,16 @@
 - Tools now execute only after a complete validated stream tool call, not when
   its input stream ends.
 
+### Error Corrections
+
+- `withRetry` now throws `AiRetryError` after retryable provider failures
+  exhaust the configured retry count, including the ordered `errors` history.
+  Cancellation, timeout-budget exhaustion, and non-retryable failures retain
+  their existing error types.
+- Removed the unsupported `AiToolCallRepairError` and `AiDownloadError` types;
+  the SDK has no tool-call repair callback or downloader subsystem that could
+  throw them.
+
 ---
 
 ## 1.2.0

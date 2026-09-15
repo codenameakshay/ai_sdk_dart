@@ -199,31 +199,6 @@ class AiNoObjectGeneratedError extends AiSdkError {
   static bool isInstance(Object error) => error is AiNoObjectGeneratedError;
 }
 
-/// Thrown when a tool call cannot be repaired after a validation failure.
-///
-/// Mirrors `AI_ToolCallRepairError` from the JS AI SDK v6.
-/// Contains the [toolCall] that failed, the [cause], and any [repairAttempts]
-/// made before giving up.
-class AiToolCallRepairError extends AiSdkError {
-  const AiToolCallRepairError({
-    required String message,
-    required this.toolName,
-    required this.cause,
-    this.repairAttempts = 0,
-  }) : super(message);
-
-  /// The name of the tool whose call could not be repaired.
-  final String toolName;
-
-  /// The underlying error that triggered the repair attempt.
-  final Object cause;
-
-  /// How many repair attempts were made before giving up.
-  final int repairAttempts;
-
-  static bool isInstance(Object error) => error is AiToolCallRepairError;
-}
-
 /// Thrown when image generation produces no output.
 ///
 /// Mirrors `AI_NoImageGeneratedError` from the JS AI SDK v6.
@@ -263,12 +238,13 @@ class AiNoTranscriptGeneratedError extends AiSdkError {
 /// Thrown when all retry attempts are exhausted.
 ///
 /// Mirrors `AI_RetryError` from the JS AI SDK v6.
-/// [attempts] contains the errors from each attempt in order.
+/// [errors] contains the errors from each attempt in order.
 class AiRetryError extends AiSdkError {
   const AiRetryError({
     required String message,
     required this.attempts,
     required this.lastError,
+    this.errors = const [],
   }) : super(message);
 
   /// Number of attempts made (including the first try).
@@ -277,29 +253,12 @@ class AiRetryError extends AiSdkError {
   /// The error from the final attempt.
   final Object lastError;
 
+  /// The errors from each attempt, in order.
+  ///
+  /// The SDK populates this list when [withRetry] exhausts retryable provider
+  /// failures. It is optional for compatibility with manually constructed
+  /// errors from earlier releases.
+  final List<Object> errors;
+
   static bool isInstance(Object error) => error is AiRetryError;
-}
-
-/// Thrown when a required file or URL download fails.
-///
-/// Mirrors `AI_DownloadError` from the JS AI SDK v6.
-/// Typically raised when a transcription URL cannot be fetched.
-class AiDownloadError extends AiSdkError {
-  const AiDownloadError({
-    required String message,
-    required this.url,
-    this.statusCode,
-    this.cause,
-  }) : super(message);
-
-  /// The URL that failed to download.
-  final String url;
-
-  /// HTTP status code, if available.
-  final int? statusCode;
-
-  /// The underlying error.
-  final Object? cause;
-
-  static bool isInstance(Object error) => error is AiDownloadError;
 }

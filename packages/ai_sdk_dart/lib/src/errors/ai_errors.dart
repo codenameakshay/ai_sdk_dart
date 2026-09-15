@@ -14,9 +14,7 @@ export 'package:ai_sdk_provider/ai_sdk_provider.dart'
         AiNoContentGeneratedError,
         AiOperationCancelledError,
         AiNoObjectGeneratedError,
-        AiToolCallRepairError,
         AiNoImageGeneratedError,
         AiNoSpeechGeneratedError,
         AiNoTranscriptGeneratedError,
-        AiRetryError,
-        AiDownloadError;
+        AiRetryError;

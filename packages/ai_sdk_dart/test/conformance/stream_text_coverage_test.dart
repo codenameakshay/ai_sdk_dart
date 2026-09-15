@@ -638,11 +638,11 @@ void main() {
       // observed while the stream drains and the error event fires.
       final outputExpectation = expectLater(
         result.output,
-        throwsA(isA<AiApiCallError>()),
+        throwsA(isA<AiRetryError>()),
       );
       final events = await _collectFailingFullStream(
         result,
-        isA<AiApiCallError>(),
+        isA<AiRetryError>(),
       );
       expect(events.whereType<StreamTextErrorEvent>(), isNotEmpty);
       expect(model.attempts, 2);

@@ -170,6 +170,43 @@ void main() {
       controller.dispose();
     });
 
+    test('async lifecycle callback failures are contained', () async {
+      final callbackFailure = StateError('callback failed');
+      var finishInvoked = false;
+      final finished = ChatController(
+        onFinish: (_) async {
+          finishInvoked = true;
+          throw callbackFailure;
+        },
+      );
+      await finished.sendMessage(agent: textAgent('done'), text: 'go');
+      await pumpUntil(() => finished.status == ChatStatus.ready);
+      await Future<void>.delayed(Duration.zero);
+      expect(finishInvoked, isTrue);
+      expect(finished.status, ChatStatus.ready);
+      expect(finished.error, isNull);
+      finished.dispose();
+
+      final streamFailure = StateError('stream failed');
+      var errorInvoked = false;
+      final errored = ChatController(
+        onError: (_) async {
+          errorInvoked = true;
+          throw callbackFailure;
+        },
+      );
+      await errored.sendMessage(
+        agent: erroringAgent(streamFailure),
+        text: 'go',
+      );
+      await pumpUntil(() => errored.status == ChatStatus.error);
+      await Future<void>.delayed(Duration.zero);
+      expect(errorInvoked, isTrue);
+      expect(errored.status, ChatStatus.error);
+      expect(errored.error, same(streamFailure));
+      errored.dispose();
+    });
+
     test('clearError resets error status to ready', () async {
       final controller = ChatController();
       await controller.sendMessage(

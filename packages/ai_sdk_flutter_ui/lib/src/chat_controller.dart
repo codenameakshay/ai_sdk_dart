@@ -53,10 +53,12 @@ class ChatController extends StreamingControllerBase {
   final List<ModelMessage> initialMessages;
 
   /// Called when a generation completes successfully.
-  final void Function(ModelMessage message)? onFinish;
+  /// Errors from the callback are ignored after state is updated.
+  final FutureOr<void> Function(ModelMessage message)? onFinish;
 
   /// Called when a generation errors.
-  final void Function(Object error)? onError;
+  /// Errors from the callback are ignored after state is updated.
+  final FutureOr<void> Function(Object error)? onError;
 
   /// Notifies when generation/composer-facing state changes.
   ///
@@ -461,7 +463,10 @@ class ChatController extends StreamingControllerBase {
     _streamingReasoning = '';
     _status = ChatStatus.ready;
     notifyListenersSafely(immediate: true, status: true, content: true);
-    onFinish?.call(assistantMessage);
+    try {
+      final result = onFinish?.call(assistantMessage);
+      if (result is Future<void>) unawaited(result.catchError((_) {}));
+    } catch (_) {}
   }
 
   /// Merges [previous] and [current] by the key returned from [keyOf],
@@ -497,7 +502,10 @@ class ChatController extends StreamingControllerBase {
     _streamingReasoning = '';
     _status = ChatStatus.error;
     notifyListenersSafely(immediate: true, status: true, content: true);
-    onError?.call(err);
+    try {
+      final result = onError?.call(err);
+      if (result is Future<void>) unawaited(result.catchError((_) {}));
+    } catch (_) {}
   }
 
   /// Cancel the active stream.

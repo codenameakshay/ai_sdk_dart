@@ -173,6 +173,42 @@ void main() {
       controller.dispose();
     });
 
+    test('async lifecycle callback failures are contained', () async {
+      final callbackFailure = StateError('callback failed');
+      var finishInvoked = false;
+      final finished = ObjectStreamController<int>(
+        onFinish: (_) async {
+          finishInvoked = true;
+          throw callbackFailure;
+        },
+      );
+      await finished.bind(Stream<int>.value(1));
+      await pumpUntil(() => !finished.isLoading);
+      await Future<void>.delayed(Duration.zero);
+      expect(finishInvoked, isTrue);
+      expect(finished.isLoading, isFalse);
+      expect(finished.isStreaming, isFalse);
+      expect(finished.error, isNull);
+      finished.dispose();
+
+      final streamFailure = StateError('stream failed');
+      var errorInvoked = false;
+      final errored = ObjectStreamController<int>(
+        onError: (_) async {
+          errorInvoked = true;
+          throw callbackFailure;
+        },
+      );
+      await errored.bind(Stream<int>.error(streamFailure));
+      await pumpUntil(() => errored.error != null);
+      await Future<void>.delayed(Duration.zero);
+      expect(errorInvoked, isTrue);
+      expect(errored.error, same(streamFailure));
+      expect(errored.isLoading, isFalse);
+      expect(errored.isStreaming, isFalse);
+      errored.dispose();
+    });
+
     test('clear / reset wipe value and error', () async {
       final controller = ObjectStreamController<int>();
       await controller.bind(Stream<int>.value(42));

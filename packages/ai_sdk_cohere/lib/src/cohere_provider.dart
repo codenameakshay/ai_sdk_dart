@@ -353,10 +353,10 @@ class _CohereLanguageModel extends LanguageModelV4 {
         rawFinishReason: data['finish_reason'] as String?,
         usage: LanguageModelV4Usage(
           inputTokens: LanguageModelV4InputTokenUsage(
-            total: (tokens?['input_tokens'] as num?)?.toInt() ?? 0,
+            total: _tokenCount(tokens?['input_tokens']),
           ),
           outputTokens: LanguageModelV4OutputTokenUsage(
-            total: (tokens?['output_tokens'] as num?)?.toInt() ?? 0,
+            total: _tokenCount(tokens?['output_tokens']),
           ),
         ),
       );
@@ -530,10 +530,10 @@ class _CohereLanguageModel extends LanguageModelV4 {
                 rawFinishReason: delta?['finish_reason'] as String?,
                 usage: LanguageModelV4Usage(
                   inputTokens: LanguageModelV4InputTokenUsage(
-                    total: (tokens?['input_tokens'] as num?)?.toInt() ?? 0,
+                    total: _tokenCount(tokens?['input_tokens']),
                   ),
                   outputTokens: LanguageModelV4OutputTokenUsage(
-                    total: (tokens?['output_tokens'] as num?)?.toInt() ?? 0,
+                    total: _tokenCount(tokens?['output_tokens']),
                   ),
                 ),
               ),
@@ -585,6 +585,8 @@ class _CohereToolState {
   final String name;
   final StringBuffer args = StringBuffer();
 }
+
+int? _tokenCount(Object? value) => value is num ? value.toInt() : null;
 
 /// Resolve a Cohere v2 image `url` from data content (URL or base64 data URI).
 String? _imageUrl(LanguageModelV4DataContent data, String? mediaType) {

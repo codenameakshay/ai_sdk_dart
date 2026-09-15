@@ -71,6 +71,61 @@ void main() {
     );
   });
 
+  test('keeps missing and non-numeric generate usage fields unknown', () async {
+    final server = await TestServer.start((request) async {
+      request.response.statusCode = 200;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(
+        jsonEncode({
+          'finish_reason': 'COMPLETE',
+          'message': {'content': []},
+          'usage': {
+            'tokens': {'input_tokens': 'unknown'},
+          },
+        }),
+      );
+      await request.response.close();
+    });
+    addTearDown(server.close);
+
+    final result = await CohereProvider(apiKey: 'test', baseUrl: server.baseUrl)
+        .call('command-r-plus')
+        .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('hi')));
+
+    expect(result.usage.inputTokens.total, isNull);
+    expect(result.usage.outputTokens.total, isNull);
+  });
+
+  test('keeps missing and non-numeric stream usage fields unknown', () async {
+    final server = await TestServer.start((request) async {
+      request.response.statusCode = 200;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(
+        '${jsonEncode({
+          'type': 'message-end',
+          'delta': {
+            'finish_reason': 'COMPLETE',
+            'usage': {
+              'tokens': {'input_tokens': 'unknown'},
+            },
+          },
+        })}\n',
+      );
+      await request.response.close();
+    });
+    addTearDown(server.close);
+
+    final stream = await CohereProvider(apiKey: 'test', baseUrl: server.baseUrl)
+        .call('command-r-plus')
+        .doStream(LanguageModelV4CallOptions(prompt: userPrompt('hi')));
+    final finish = (await stream.stream.toList())
+        .whereType<StreamPartFinish>()
+        .single;
+
+    expect(finish.usage.inputTokens.total, isNull);
+    expect(finish.usage.outputTokens.total, isNull);
+  });
+
   group('Cohere doGenerate wire format', () {
     test(
       'serializes tools, tool_choice, and image content; parses tool calls',

@@ -148,7 +148,7 @@ for the exact renames and contract changes.
 - Discovered tools are directly compatible with `generateText`/`streamText`
 
 ### 🚨 Typed Errors
-- Sealed `AiSdkError` hierarchy — `AiApiCallError`, `AiNoObjectGeneratedError`, `AiRetryError`, and more
+- Sealed `AiSdkError` hierarchy — `AiApiCallError`, `AiNoObjectGeneratedError`, and `AiRetryError` for exhausted retryable failures
 - **Provider API errors are typed** — a non-2xx response throws `AiApiCallError` carrying the
   provider's `message`, `type`, `code`, `statusCode`, raw body, and an `isRetryable` flag,
   consistently across every provider

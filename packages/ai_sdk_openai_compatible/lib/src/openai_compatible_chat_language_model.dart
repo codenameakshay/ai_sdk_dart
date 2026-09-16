@@ -119,67 +119,80 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
       throw await apiErrorFromDioException(e, provider: provider);
     }
 
-    final data = response.data ?? <String, dynamic>{};
-    final choices = (data['choices'] as List?) ?? const [];
-    final firstChoice = choices.isNotEmpty
-        ? (choices.first as Map).cast<String, dynamic>()
-        : <String, dynamic>{};
-    final message =
-        (firstChoice['message'] as Map?)?.cast<String, dynamic>() ??
-        <String, dynamic>{};
-
-    final content = <LanguageModelV4ContentPart>[];
-    final reasoning = _extractReasoning(message);
-    if (reasoning != null) {
-      content.add(LanguageModelV4ReasoningPart(text: reasoning));
+    final data = response.data;
+    if (data == null) {
+      throw _invalidResponse(response, provider: provider);
     }
-
-    final text = message['content'];
-    if (text is String && text.isNotEmpty) {
-      content.add(LanguageModelV4TextPart(text: text));
-    }
-
-    final toolCalls = (message['tool_calls'] as List?) ?? const [];
-    for (final call in toolCalls) {
-      final callMap = (call as Map).cast<String, dynamic>();
-      final function =
-          (callMap['function'] as Map?)?.cast<String, dynamic>() ??
+    try {
+      final rawChoices = data['choices'];
+      if (rawChoices != null && rawChoices is! List) {
+        throw const FormatException('The choices field is not a list.');
+      }
+      final choices = (rawChoices as List?) ?? const [];
+      final firstChoice = choices.isNotEmpty
+          ? (choices.first as Map).cast<String, dynamic>()
+          : <String, dynamic>{};
+      final message =
+          (firstChoice['message'] as Map?)?.cast<String, dynamic>() ??
           <String, dynamic>{};
-      final rawInput = function['arguments']?.toString() ?? '{}';
-      content.add(
-        LanguageModelV4ToolCallPart(
-          toolCallId: callMap['id']?.toString() ?? prefixedId('call'),
-          toolName: function['name']?.toString() ?? 'unknown_tool',
-          input: safeParseJson(rawInput),
+
+      final content = <LanguageModelV4ContentPart>[];
+      final reasoning = _extractReasoning(message);
+      if (reasoning != null) {
+        content.add(LanguageModelV4ReasoningPart(text: reasoning));
+      }
+
+      final text = message['content'];
+      if (text is String && text.isNotEmpty) {
+        content.add(LanguageModelV4TextPart(text: text));
+      }
+
+      final toolCalls = (message['tool_calls'] as List?) ?? const [];
+      for (final call in toolCalls) {
+        final callMap = (call as Map).cast<String, dynamic>();
+        final function =
+            (callMap['function'] as Map?)?.cast<String, dynamic>() ??
+            <String, dynamic>{};
+        final rawInput = function['arguments']?.toString() ?? '{}';
+        content.add(
+          LanguageModelV4ToolCallPart(
+            toolCallId: callMap['id']?.toString() ?? prefixedId('call'),
+            toolName: function['name']?.toString() ?? 'unknown_tool',
+            input: safeParseJson(rawInput),
+          ),
+        );
+      }
+
+      _appendAnnotationParts(
+        (message['annotations'] as List?) ?? const [],
+        onSource: content.add,
+        onFile: content.add,
+      );
+
+      final usageMap = (data['usage'] as Map?)?.cast<String, dynamic>();
+      final warnings = _readWarnings(data['warnings']);
+      return LanguageModelV4GenerateResult(
+        content: content,
+        finishReason: _mapFinishReason(
+          firstChoice['finish_reason']?.toString(),
+        ),
+        rawFinishReason: firstChoice['finish_reason']?.toString(),
+        usage: usageMap == null ? null : _usageFrom(usageMap),
+        warnings: warnings,
+        request: LanguageModelV4RequestMetadata(body: requestBody),
+        response: LanguageModelV4ResponseMetadata(
+          id: data['id']?.toString(),
+          modelId: data['model']?.toString() ?? modelId,
+          timestamp: DateTime.now().toUtc(),
+          headers: response.headers.map.map(
+            (key, value) => MapEntry(key, value.join(',')),
+          ),
+          body: data,
         ),
       );
+    } on Object catch (error) {
+      throw _invalidResponse(response, provider: provider, cause: error);
     }
-
-    _appendAnnotationParts(
-      (message['annotations'] as List?) ?? const [],
-      onSource: content.add,
-      onFile: content.add,
-    );
-
-    final usageMap = (data['usage'] as Map?)?.cast<String, dynamic>();
-    final warnings = _readWarnings(data['warnings']);
-    return LanguageModelV4GenerateResult(
-      content: content,
-      finishReason: _mapFinishReason(firstChoice['finish_reason']?.toString()),
-      rawFinishReason: firstChoice['finish_reason']?.toString(),
-      usage: usageMap == null ? null : _usageFrom(usageMap),
-      warnings: warnings,
-      request: LanguageModelV4RequestMetadata(body: requestBody),
-      response: LanguageModelV4ResponseMetadata(
-        id: data['id']?.toString(),
-        modelId: data['model']?.toString() ?? modelId,
-        timestamp: DateTime.now().toUtc(),
-        headers: response.headers.map.map(
-          (key, value) => MapEntry(key, value.join(',')),
-        ),
-        body: data,
-      ),
-    );
   }
 
   @override
@@ -798,3 +811,14 @@ class _ToolStreamState {
   String name;
   final StringBuffer argumentsBuffer = StringBuffer();
 }
+
+AiApiCallError _invalidResponse<T>(
+  Response<T> response, {
+  required String provider,
+  Object? cause,
+}) => AiApiCallError(
+  '$provider returned an invalid 2xx response body.',
+  statusCode: response.statusCode,
+  url: response.requestOptions.uri.toString(),
+  cause: cause,
+);

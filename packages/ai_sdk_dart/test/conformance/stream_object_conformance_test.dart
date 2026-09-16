@@ -27,6 +27,36 @@ void main() {
       expect(finalObject, {'a': 1, 'b': 2});
     });
 
+    test('stream emits only the completed object', () async {
+      final model = textDeltaStream('{}\n{"a":1}\n{"a":1,"b":2}'.split(''));
+      final result = await streamObject(
+        model: model,
+        schema: schema,
+        prompt: 'json',
+      );
+
+      final completedFuture = result.stream.toList();
+      final partialFuture = result.partialObjectStream.toList();
+
+      expect(await completedFuture, [
+        {'a': 1, 'b': 2},
+      ]);
+      expect((await partialFuture).length, greaterThan(1));
+    });
+
+    test('stream replays the completed object to a late listener', () async {
+      final model = textDeltaStream('{"a":1}'.split(''));
+      final result = await streamObject(
+        model: model,
+        schema: schema,
+        prompt: 'json',
+      );
+
+      final completedObject = await result.object;
+
+      expect(await result.stream.toList(), [completedObject]);
+    });
+
     test('textStream forwards raw deltas', () async {
       final model = textDeltaStream('{"x":true}'.split(''));
       final result = await streamObject(
@@ -93,10 +123,44 @@ void main() {
         schema: schema,
         prompt: 'json',
       );
+      final objectExpectation = expectLater(
+        result.object,
+        throwsA(isA<StateError>()),
+      );
       expect(
         () => result.partialObjectStream.toList(),
         throwsA(isA<StateError>()),
       );
+      await objectExpectation;
+    });
+
+    test('stream and object fail after a valid partial object', () async {
+      final error = StateError('boom');
+      final model = FakeStreamModel([
+        const StreamPartTextStart(id: 't1'),
+        const StreamPartTextDelta(id: 't1', delta: '{"a":1}'),
+        StreamPartError(error: error),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.error),
+      ]);
+      final result = await streamObject(
+        model: model,
+        schema: schema,
+        prompt: 'json',
+      );
+
+      final streamedObjects = <Map<String, dynamic>>[];
+      final streamExpectation = expectLater(
+        result.stream.forEach(streamedObjects.add),
+        throwsA(same(error)),
+      );
+      final objectExpectation = expectLater(
+        result.object,
+        throwsA(same(error)),
+      );
+
+      await streamExpectation;
+      await objectExpectation;
+      expect(streamedObjects, isEmpty);
     });
 
     test('parses typed response metadata from stream result', () async {

@@ -510,10 +510,13 @@ class FakeEmbeddingModel implements EmbeddingModelV2<String> {
   @override
   String get specificationVersion => 'v2';
 
+  EmbeddingModelV2CallOptions<String>? lastOptions;
+
   @override
   Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
     EmbeddingModelV2CallOptions<String> options,
   ) async {
+    lastOptions = options;
     return EmbeddingModelV2GenerateResult(
       embeddings: options.values
           .map((v) => EmbeddingModelV2Embedding(value: v, embedding: embedding))

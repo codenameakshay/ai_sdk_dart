@@ -30,10 +30,22 @@ class EmbedResult<VALUE> {
 Future<EmbedResult<VALUE>> embed<VALUE>({
   required EmbeddingModelV2<VALUE> model,
   required VALUE value,
+  Map<String, String>? headers,
+  ProviderOptions? providerOptions,
   Duration? timeout,
 }) async {
-  final call = model.doEmbed(EmbeddingModelV2CallOptions(values: [value]));
+  final call = model.doEmbed(
+    EmbeddingModelV2CallOptions(
+      values: [value],
+      headers: headers,
+      providerOptions: providerOptions,
+    ),
+  );
   final result = await withOptionalTimeout(call, timeout);
+
+  if (result.embeddings.isEmpty) {
+    throw const AiNoContentGeneratedError('No embedding was generated.');
+  }
 
   final first = result.embeddings.first;
   return EmbedResult<VALUE>(

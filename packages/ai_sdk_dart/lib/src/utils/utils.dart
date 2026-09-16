@@ -171,6 +171,13 @@ List<ModelMessage> pruneMessages(
   List<ModelMessage> messages, {
   int? maxMessages,
 }) {
+  if (maxMessages != null && maxMessages < 0) {
+    throw ArgumentError.value(
+      maxMessages,
+      'maxMessages',
+      'must not be negative.',
+    );
+  }
   if (maxMessages == null || messages.isEmpty) return List.of(messages);
 
   // Split off a leading system message so it's always preserved.

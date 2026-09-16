@@ -96,6 +96,28 @@ void main() {
         expect(adapter.lastForce, true);
       },
     );
+
+    test('forwards providerOptions into the request body', () async {
+      late Map<String, dynamic> captured;
+      final server = await _startServer((request) async {
+        captured = await captureBody(request);
+        writeOk(request);
+      });
+      addTearDown(server.close);
+
+      await MistralProvider(apiKey: 'key', baseUrl: server.baseUrl)(
+        'mistral-small',
+      ).doGenerate(
+        LanguageModelV4CallOptions(
+          prompt: userPrompt('hi'),
+          providerOptions: const {
+            'mistral': {'safe_prompt': true},
+          },
+        ),
+      );
+
+      expect(captured['safe_prompt'], isTrue);
+    });
   });
 
   group('OpenAI-compatible capabilities (via shared base)', () {
@@ -196,6 +218,39 @@ void main() {
   });
 
   group('Mistral embedding doEmbed wire format', () {
+    test('forwards embedding providerOptions', () async {
+      late Map<String, dynamic> captured;
+      final server = await _startServer((request) async {
+        captured = await captureBody(request);
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'data': [
+              {
+                'embedding': [0.1],
+              },
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      await MistralProvider(apiKey: 'key', baseUrl: server.baseUrl)
+          .embedding('mistral-embed')
+          .doEmbed(
+            const EmbeddingModelV2CallOptions<String>(
+              values: ['hello'],
+              providerOptions: {
+                'mistral': {'output_dtype': 'float'},
+              },
+            ),
+          );
+
+      expect(captured['output_dtype'], 'float');
+    });
+
     test(
       'posts to /embeddings with bearer auth, parses embeddings in order',
       () async {
@@ -269,6 +324,36 @@ void main() {
       expect(result.embeddings, isEmpty);
     });
 
+    test('rejects null and malformed 2xx embedding responses', () async {
+      final nullServer = await _startServer((request) async {
+        request.response.statusCode = 200;
+        await request.response.close();
+      });
+      addTearDown(nullServer.close);
+
+      await expectLater(
+        MistralProvider(apiKey: 'key', baseUrl: nullServer.baseUrl)
+            .embedding('mistral-embed')
+            .doEmbed(const EmbeddingModelV2CallOptions(values: ['hi'])),
+        throwsA(isA<AiApiCallError>()),
+      );
+
+      final malformedServer = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({'data': 'not-a-list'}));
+        await request.response.close();
+      });
+      addTearDown(malformedServer.close);
+
+      await expectLater(
+        MistralProvider(apiKey: 'key', baseUrl: malformedServer.baseUrl)
+            .embedding('mistral-embed')
+            .doEmbed(const EmbeddingModelV2CallOptions(values: ['hi'])),
+        throwsA(isA<AiApiCallError>()),
+      );
+    });
+
     test(
       'normalizes numeric vectors and ignores response rows beyond the input',
       () async {
@@ -285,9 +370,7 @@ void main() {
                 {
                   'embedding': [-3, 4],
                 },
-                {
-                  'embedding': [99],
-                },
+                {'embedding': 'ignored malformed extra row'},
               ],
             }),
           );

@@ -93,7 +93,7 @@ void main() {
         fn: (_) async =>
             throw const AiApiCallError('retryable', isRetryable: true),
       ),
-      throwsA(isA<AiApiCallError>()),
+      throwsA(isA<AiRetryError>()),
     );
 
     expect(slept, hasLength(65));
@@ -104,4 +104,58 @@ void main() {
     ]);
     expect(slept.skip(3), everyElement(const Duration(milliseconds: 250)));
   });
+
+  test('retry exhaustion preserves every retryable attempt error', () async {
+    final first = const AiApiCallError('first', isRetryable: true);
+    final second = const AiApiCallError('second', isRetryable: true);
+    var calls = 0;
+    debugConfigureRetryHooksForTests(sleep: (_) async {});
+
+    AiRetryError? caught;
+    try {
+      await withRetry<String>(
+        maxRetries: 1,
+        totalTimeout: null,
+        stepTimeout: null,
+        fn: (_) async {
+          calls++;
+          throw calls == 1 ? first : second;
+        },
+      );
+    } on AiRetryError catch (error) {
+      caught = error;
+    }
+
+    expect(calls, 2);
+    final error = caught;
+    expect(error, isNotNull);
+    expect(error!.attempts, 2);
+    expect(error.lastError, same(second));
+    expect(error.errors, [same(first), same(second)]);
+  });
+
+  test(
+    'maxRetries zero reports the first retryable failure as exhausted',
+    () async {
+      final failure = const AiApiCallError('first', isRetryable: true);
+
+      AiRetryError? caught;
+      try {
+        await withRetry<String>(
+          maxRetries: 0,
+          totalTimeout: null,
+          stepTimeout: null,
+          fn: (_) async => throw failure,
+        );
+      } on AiRetryError catch (error) {
+        caught = error;
+      }
+
+      final error = caught;
+      expect(error, isNotNull);
+      expect(error!.attempts, 1);
+      expect(error.lastError, same(failure));
+      expect(error.errors, [same(failure)]);
+    },
+  );
 }

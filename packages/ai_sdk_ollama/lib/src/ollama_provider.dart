@@ -165,17 +165,23 @@ class _OllamaLanguageModel extends LanguageModelV4 {
   }
 
   /// Serialize function tools into Ollama's OpenAI-style `tools` field.
-  List<Map<String, dynamic>> _buildTools(
-    List<LanguageModelV4FunctionTool> tools,
-  ) {
+  List<Map<String, dynamic>> _buildTools(List<LanguageModelV4Tool> tools) {
     return tools
         .map(
-          (tool) => {
-            'type': 'function',
-            'function': {
+          (tool) => switch (tool) {
+            LanguageModelV4FunctionTool() => {
+              'type': 'function',
+              'function': {
+                'name': tool.name,
+                if (tool.description != null) 'description': tool.description,
+                'parameters': tool.inputSchema,
+              },
+            },
+            LanguageModelV4ProviderDefinedTool() => {
+              'type': tool.id,
               'name': tool.name,
               if (tool.description != null) 'description': tool.description,
-              'parameters': tool.inputSchema,
+              ...tool.args,
             },
           },
         )
@@ -183,6 +189,7 @@ class _OllamaLanguageModel extends LanguageModelV4 {
   }
 
   Map<String, dynamic> _buildBody(LanguageModelV4CallOptions options) {
+    final providerOptions = options.providerOptions?['ollama'];
     final ollamaOptions = <String, dynamic>{
       if (options.maxOutputTokens != null)
         'num_predict': options.maxOutputTokens,
@@ -191,13 +198,13 @@ class _OllamaLanguageModel extends LanguageModelV4 {
       if (options.topK != null) 'top_k': options.topK,
       if (options.seed != null) 'seed': options.seed,
       if (options.stopSequences.isNotEmpty) 'stop': options.stopSequences,
+      ...?providerOptions,
     };
 
     return <String, dynamic>{
       'model': model,
       'messages': _buildMessages(options.prompt),
-      if (options.functionTools.isNotEmpty)
-        'tools': _buildTools(options.functionTools.toList()),
+      if (options.tools.isNotEmpty) 'tools': _buildTools(options.tools),
       if (ollamaOptions.isNotEmpty) 'options': ollamaOptions,
       'stream': false,
     };
@@ -215,31 +222,39 @@ class _OllamaLanguageModel extends LanguageModelV4 {
       response = await client.post<Map<String, dynamic>>(
         '/chat',
         data: body,
+        options: Options(headers: options.headers),
         cancelToken: cancelToken,
       );
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);
     }
-    final data = response.data!;
-
-    final message = data['message'] as Map<String, dynamic>?;
-    final text = (message?['content'] as String?) ?? '';
-    final rawFinishReason = data['done_reason'] as String?;
-
-    final content = <LanguageModelV4ContentPart>[];
-    if (text.isNotEmpty) {
-      content.add(LanguageModelV4TextPart(text: text));
+    final data = response.data;
+    if (data == null) {
+      throw _invalidResponse(response);
     }
-    content.addAll(_parseToolCalls(message?['tool_calls'] as List?));
 
-    return LanguageModelV4GenerateResult(
-      content: content,
-      finishReason: content.any((p) => p is LanguageModelV4ToolCallPart)
-          ? LanguageModelV4FinishReason.toolCalls
-          : _mapFinishReason(rawFinishReason),
-      rawFinishReason: rawFinishReason,
-      usage: _usageFrom(data),
-    );
+    try {
+      final message = data['message'] as Map<String, dynamic>?;
+      final text = (message?['content'] as String?) ?? '';
+      final rawFinishReason = data['done_reason'] as String?;
+
+      final content = <LanguageModelV4ContentPart>[];
+      if (text.isNotEmpty) {
+        content.add(LanguageModelV4TextPart(text: text));
+      }
+      content.addAll(_parseToolCalls(message?['tool_calls'] as List?));
+
+      return LanguageModelV4GenerateResult(
+        content: content,
+        finishReason: content.any((p) => p is LanguageModelV4ToolCallPart)
+            ? LanguageModelV4FinishReason.toolCalls
+            : _mapFinishReason(rawFinishReason),
+        rawFinishReason: rawFinishReason,
+        usage: _usageFrom(data),
+      );
+    } on Object catch (error) {
+      throw _invalidResponse(response, error);
+    }
   }
 
   @override
@@ -256,7 +271,10 @@ class _OllamaLanguageModel extends LanguageModelV4 {
       response = await client.post<ResponseBody>(
         '/chat',
         data: body,
-        options: Options(responseType: ResponseType.stream),
+        options: Options(
+          responseType: ResponseType.stream,
+          headers: options.headers,
+        ),
         cancelToken: cancelToken,
       );
     } on DioException catch (e) {
@@ -268,9 +286,13 @@ class _OllamaLanguageModel extends LanguageModelV4 {
       (key, value) => MapEntry(key, value.join(',')),
     );
     final responseTimestamp = DateTime.now().toUtc();
+    final responseBody = response.data;
+    if (responseBody == null) {
+      throw _invalidResponse(response);
+    }
     unawaited(
       _processStream(
-        response.data!.stream,
+        responseBody.stream,
         controller,
         includeRawChunks: options.includeRawChunks,
         responseHeaders: responseHeaders,
@@ -457,31 +479,55 @@ class _OllamaEmbeddingModel implements EmbeddingModelV2<String> {
   Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
     EmbeddingModelV2CallOptions<String> options,
   ) async {
-    final body = <String, dynamic>{'model': model, 'input': options.values};
+    final providerOptions = options.providerOptions?['ollama'];
+    final body = <String, dynamic>{
+      'model': model,
+      'input': options.values,
+      ...?providerOptions,
+    };
 
     final Response<Map<String, dynamic>> response;
     try {
-      response = await client.post<Map<String, dynamic>>('/embed', data: body);
+      response = await client.post<Map<String, dynamic>>(
+        '/embed',
+        data: body,
+        options: Options(headers: options.headers),
+      );
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);
     }
-    final data = response.data!;
-    final embeddingsList = (data['embeddings'] as List?) ?? [];
-    final embeddings = embeddingsList.take(options.values.length).indexed.map((
-      entry,
-    ) {
-      final vector = (entry.$2 as List)
-          .map((value) => (value as num).toDouble())
-          .toList();
-      return EmbeddingModelV2Embedding<String>(
-        value: options.values[entry.$1],
-        embedding: vector,
-      );
-    }).toList();
+    final data = response.data;
+    if (data == null) {
+      throw _invalidResponse(response);
+    }
+    try {
+      final embeddingsList = (data['embeddings'] as List?) ?? [];
+      final embeddings = embeddingsList.take(options.values.length).indexed.map(
+        (entry) {
+          final vector = (entry.$2 as List)
+              .map((value) => (value as num).toDouble())
+              .toList();
+          return EmbeddingModelV2Embedding<String>(
+            value: options.values[entry.$1],
+            embedding: vector,
+          );
+        },
+      ).toList();
 
-    return EmbeddingModelV2GenerateResult<String>(embeddings: embeddings);
+      return EmbeddingModelV2GenerateResult<String>(embeddings: embeddings);
+    } on Object catch (error) {
+      throw _invalidResponse(response, error);
+    }
   }
 }
+
+AiApiCallError _invalidResponse<T>(Response<T> response, [Object? cause]) =>
+    AiApiCallError(
+      'Ollama returned an invalid 2xx response body.',
+      statusCode: response.statusCode,
+      url: response.requestOptions.uri.toString(),
+      cause: cause,
+    );
 
 /// Maps a [DioException] from a non-2xx response to a typed [AiApiCallError]
 /// carrying the provider's message/status/code. Drains a streamed error body

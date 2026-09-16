@@ -171,8 +171,76 @@ void main() {
         expect(result.embeddings.first.embedding, isNotEmpty);
         expect(result.embeddings.first.embedding, hasLength(4));
       });
+
+      test('throws AiNoContentGeneratedError for an empty provider result', () {
+        expect(
+          () => embedMany(model: _EmptyEmbeddingModel(), values: ['test']),
+          throwsA(isA<AiNoContentGeneratedError>()),
+        );
+      });
+
+      test('forwards headers and providerOptions to the model', () async {
+        final model = _CapturingEmbeddingModel();
+        const providerOptions = <String, Map<String, dynamic>>{
+          'cohere': {'inputType': 'search_query'},
+        };
+
+        await embedMany(
+          model: model,
+          values: const ['a', 'b'],
+          headers: const {'x-test': '1'},
+          providerOptions: providerOptions,
+        );
+
+        expect(model.lastOptions?.headers, {'x-test': '1'});
+        expect(model.lastOptions?.providerOptions, providerOptions);
+      });
     });
   });
+}
+
+class _EmptyEmbeddingModel implements EmbeddingModelV2<String> {
+  @override
+  String get provider => 'fake';
+
+  @override
+  String get modelId => 'empty-embedding-model';
+
+  @override
+  String get specificationVersion => 'v2';
+
+  @override
+  Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
+    EmbeddingModelV2CallOptions<String> options,
+  ) async => const EmbeddingModelV2GenerateResult(embeddings: []);
+}
+
+class _CapturingEmbeddingModel implements EmbeddingModelV2<String> {
+  EmbeddingModelV2CallOptions<String>? lastOptions;
+
+  @override
+  String get provider => 'fake';
+
+  @override
+  String get modelId => 'capturing-embedding-model';
+
+  @override
+  String get specificationVersion => 'v2';
+
+  @override
+  Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
+    EmbeddingModelV2CallOptions<String> options,
+  ) async {
+    lastOptions = options;
+    return EmbeddingModelV2GenerateResult(
+      embeddings: options.values
+          .map(
+            (value) =>
+                EmbeddingModelV2Embedding(value: value, embedding: const [1.0]),
+          )
+          .toList(),
+    );
+  }
 }
 
 /// A fake embedding model that counts how many times doEmbed is called.

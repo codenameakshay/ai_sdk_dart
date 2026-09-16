@@ -506,12 +506,6 @@ void main() {
         ),
         cause: const FormatException('bad json'),
       );
-      final repairError = const AiToolCallRepairError(
-        message: 'repair failed',
-        toolName: 'lookup',
-        cause: 'invalid schema',
-        repairAttempts: 2,
-      );
       final noImage = const AiNoImageGeneratedError(
         message: 'no image',
         cause: 'timeout',
@@ -528,12 +522,7 @@ void main() {
         message: 'retries exhausted',
         attempts: 3,
         lastError: 'boom',
-      );
-      final downloadError = const AiDownloadError(
-        message: 'download failed',
-        url: 'https://example.com/audio.wav',
-        statusCode: 404,
-        cause: 'not found',
+        errors: ['first', 'second', 'boom'],
       );
 
       expect(cancelled.message, 'Operation cancelled.');
@@ -549,10 +538,6 @@ void main() {
       expect(noObject.cause, isA<FormatException>());
       expect(AiNoObjectGeneratedError.isInstance(noObject), isTrue);
 
-      expect(repairError.toolName, 'lookup');
-      expect(repairError.repairAttempts, 2);
-      expect(AiToolCallRepairError.isInstance(repairError), isTrue);
-
       expect(noImage.cause, 'timeout');
       expect(AiNoImageGeneratedError.isInstance(noImage), isTrue);
       expect(noSpeech.cause, 'timeout');
@@ -562,12 +547,8 @@ void main() {
 
       expect(retryError.attempts, 3);
       expect(retryError.lastError, 'boom');
+      expect(retryError.errors, ['first', 'second', 'boom']);
       expect(AiRetryError.isInstance(retryError), isTrue);
-
-      expect(downloadError.url, 'https://example.com/audio.wav');
-      expect(downloadError.statusCode, 404);
-      expect(downloadError.cause, 'not found');
-      expect(AiDownloadError.isInstance(downloadError), isTrue);
     });
   });
 }

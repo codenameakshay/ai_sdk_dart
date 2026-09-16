@@ -129,6 +129,42 @@ void main() {
           throwsA(isA<Exception>()),
         );
       });
+
+      test('throws AiNoImageGeneratedError for an empty result', () {
+        final model = MockImageModelV3(images: const []);
+        expect(
+          () => generateImage(model: model, prompt: 'hi'),
+          throwsA(isA<AiNoImageGeneratedError>()),
+        );
+      });
+
+      test('forwards headers and providerOptions to the model', () async {
+        final model = MockImageModelV3(
+          images: [
+            Uint8List.fromList([1]),
+          ],
+        );
+        const providerOptions = <String, Map<String, dynamic>>{
+          'openai': {'quality': 'hd'},
+        };
+
+        await generateImage(
+          model: model,
+          prompt: 'hi',
+          headers: const {'x-test': '1'},
+          providerOptions: providerOptions,
+        );
+
+        expect(model.generateCalls.single.headers, {'x-test': '1'});
+        expect(model.generateCalls.single.providerOptions, providerOptions);
+      });
+
+      test('image getter throws AiNoImageGeneratedError when empty', () {
+        expect(
+          () => const GenerateImageResult(images: []).image,
+          throwsA(isA<AiNoImageGeneratedError>()),
+        );
+      });
     });
 
     // ── MockEmbeddingModelV3 ─────────────────────────────────────────────

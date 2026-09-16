@@ -14,7 +14,12 @@ class GenerateImageResult {
   final List<GeneratedImage> images;
   final ImageModelV3Usage? usage;
 
-  GeneratedImage get image => images.first;
+  GeneratedImage get image {
+    if (images.isEmpty) {
+      throw const AiNoImageGeneratedError(message: 'No image was generated.');
+    }
+    return images.first;
+  }
 }
 
 /// Generates images from a text prompt.
@@ -36,6 +41,8 @@ Future<GenerateImageResult> generateImage({
   String? size,
   String? aspectRatio,
   int? seed,
+  Map<String, String>? headers,
+  ProviderOptions? providerOptions,
   Duration? timeout,
 }) async {
   final call = model.doGenerate(
@@ -45,9 +52,15 @@ Future<GenerateImageResult> generateImage({
       size: size,
       aspectRatio: aspectRatio,
       seed: seed,
+      headers: headers,
+      providerOptions: providerOptions,
     ),
   );
   final result = await withOptionalTimeout(call, timeout);
+
+  if (result.images.isEmpty) {
+    throw const AiNoImageGeneratedError(message: 'No image was generated.');
+  }
 
   return GenerateImageResult(images: result.images, usage: result.usage);
 }

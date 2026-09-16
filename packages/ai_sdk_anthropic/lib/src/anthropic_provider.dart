@@ -88,7 +88,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
     final po = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
-    final (thinking, cleanedPo) = _extractThinkingOptions(po);
+    final (thinking, cacheControl, cleanedPo) = _extractAnthropicOptions(po);
     final requestBody = {
       'model': modelId,
       'max_tokens': options.maxOutputTokens ?? 1024,
@@ -103,6 +103,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
       if (options.toolChoice != null)
         'tool_choice': _toAnthropicToolChoice(options.toolChoice!),
       'thinking': ?thinking,
+      'cache_control': ?cacheControl,
       ...?cleanedPo,
     };
     final Response<Map<String, dynamic>> response;
@@ -117,7 +118,31 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
       throw await apiErrorFromDioException(e, provider: provider);
     }
 
-    final data = response.data ?? <String, dynamic>{};
+    final data = response.data;
+    if (data == null) throw _invalidResponse(response);
+    try {
+      final rawContent = data['content'];
+      if (rawContent is List) {
+        for (final item in rawContent) {
+          if (item is! Map) throw StateError('content item is not an object');
+          final citations = item['citations'];
+          if (citations is List && citations.any((item) => item is! Map)) {
+            throw StateError('citation item is not an object');
+          }
+          if (citations != null && citations is! List) {
+            throw StateError('citations are not a list');
+          }
+        }
+      } else if (rawContent != null) {
+        throw StateError('content is not a list');
+      }
+      final usage = data['usage'];
+      if (usage != null && usage is! Map) {
+        throw StateError('usage is not an object');
+      }
+    } on Object catch (error) {
+      throw _invalidResponse(response, error);
+    }
     final content = <LanguageModelV4ContentPart>[];
 
     final parts = (data['content'] as List?) ?? const [];
@@ -208,7 +233,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
     final po = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
-    final (thinking, cleanedPo) = _extractThinkingOptions(po);
+    final (thinking, cacheControl, cleanedPo) = _extractAnthropicOptions(po);
     final requestBody = {
       'model': modelId,
       'max_tokens': options.maxOutputTokens ?? 1024,
@@ -217,11 +242,14 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
       'stream': true,
       if (options.temperature != null) 'temperature': options.temperature,
       if (options.topP != null) 'top_p': options.topP,
+      if (options.stopSequences.isNotEmpty)
+        'stop_sequences': options.stopSequences,
       if (options.tools.isNotEmpty)
         'tools': options.tools.map(_toAnthropicTool).toList(),
       if (options.toolChoice != null)
         'tool_choice': _toAnthropicToolChoice(options.toolChoice!),
       'thinking': ?thinking,
+      'cache_control': ?cacheControl,
       ...?cleanedPo,
     };
     final Response<ResponseBody> response;
@@ -317,6 +345,20 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
                 final id = block['id']?.toString() ?? 'reasoning-$index';
                 reasoningState[index] = _ReasoningState(id: id);
                 controller.add(StreamPartReasoningStart(id: id));
+              } else if (blockType == 'redacted_thinking') {
+                final id = block['id']?.toString() ?? 'reasoning-$index';
+                reasoningState[index] = _ReasoningState(id: id);
+                final redacted = block['data']?.toString();
+                controller.add(
+                  StreamPartReasoningStart(
+                    id: id,
+                    providerMetadata: redacted == null || redacted.isEmpty
+                        ? null
+                        : {
+                            provider: {'redactedData': redacted},
+                          },
+                  ),
+                );
               }
               break;
             case 'content_block_delta':
@@ -484,6 +526,14 @@ Dio _anthropicDio({String? baseUrl}) => createProviderDio(
   },
 );
 
+AiApiCallError _invalidResponse<T>(Response<T> response, [Object? cause]) =>
+    AiApiCallError(
+      'Anthropic returned an invalid 2xx response body.',
+      statusCode: response.statusCode,
+      url: response.requestOptions.uri.toString(),
+      cause: cause,
+    );
+
 List<Map<String, dynamic>> _toAnthropicMessages(LanguageModelV4Prompt prompt) {
   final out = <Map<String, dynamic>>[];
 
@@ -498,16 +548,25 @@ List<Map<String, dynamic>> _toAnthropicMessages(LanguageModelV4Prompt prompt) {
     final contentParts = <Map<String, dynamic>>[];
     for (final part in message.content) {
       if (part is LanguageModelV4TextPart) {
-        contentParts.add({'type': 'text', 'text': part.text});
+        contentParts.add(
+          _withAnthropicCacheControl({
+            'type': 'text',
+            'text': part.text,
+          }, part.providerOptions),
+        );
       } else if (part is LanguageModelV4ImagePart) {
         final image = _toAnthropicImagePart(part);
         if (image != null) {
-          contentParts.add(image);
+          contentParts.add(
+            _withAnthropicCacheControl(image, part.providerOptions),
+          );
         }
       } else if (part is LanguageModelV4FilePart) {
         final document = _toAnthropicFilePart(part);
         if (document != null) {
-          contentParts.add(document);
+          contentParts.add(
+            _withAnthropicCacheControl(document, part.providerOptions),
+          );
         }
       } else if (part is LanguageModelV4ToolCallPart) {
         contentParts.add({
@@ -517,12 +576,14 @@ List<Map<String, dynamic>> _toAnthropicMessages(LanguageModelV4Prompt prompt) {
           'input': part.input,
         });
       } else if (part is LanguageModelV4ToolResultPart) {
-        contentParts.add({
-          'type': 'tool_result',
-          'tool_use_id': part.toolCallId,
-          'content': _toAnthropicToolResultContent(part.output),
-          'is_error': part.isError,
-        });
+        contentParts.add(
+          _withAnthropicCacheControl({
+            'type': 'tool_result',
+            'tool_use_id': part.toolCallId,
+            'content': _toAnthropicToolResultContent(part.output),
+            'is_error': part.isError,
+          }, part.providerOptions),
+        );
       }
     }
 
@@ -565,8 +626,9 @@ Map<String, dynamic>? _safeParseMap(String input) {
 /// OpenAI/Google, where cached tokens are a subset of the prompt count), so
 /// the reported [LanguageModelV4InputTokenUsage.total] is the sum of the fresh
 /// input, cache-read, and cache-creation tokens. When the response carries no
-/// cache fields the total collapses back to `input_tokens`, preserving prior
-/// behaviour while leaving the cache breakdown unset.
+/// cache fields the total collapses back to `input_tokens`. For a later stream
+/// update, that value is reported as uncached input while stale cache fields
+/// are cleared; an initial response leaves the breakdown unset.
 ///
 /// [previous] carries usage forward across streaming events: `message_start`
 /// reports the input/cache breakdown while later `message_delta` events report
@@ -582,18 +644,32 @@ LanguageModelV4Usage _anthropicUsageFrom(
   final hasCache = cacheRead != null || cacheWrite != null;
 
   final int? totalInput;
-  if (inputTokens != null || hasCache) {
-    totalInput = (inputTokens ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0);
+  final int? noCache;
+  final int? effectiveCacheRead;
+  final int? effectiveCacheWrite;
+  if (inputTokens != null) {
+    totalInput = inputTokens + (cacheRead ?? 0) + (cacheWrite ?? 0);
+    noCache = hasCache || previous != null ? inputTokens : null;
+    effectiveCacheRead = cacheRead;
+    effectiveCacheWrite = cacheWrite;
+  } else if (hasCache) {
+    totalInput = (cacheRead ?? 0) + (cacheWrite ?? 0);
+    noCache = null;
+    effectiveCacheRead = cacheRead;
+    effectiveCacheWrite = cacheWrite;
   } else {
     totalInput = previous?.inputTokens.total;
+    noCache = previous?.inputTokens.noCache;
+    effectiveCacheRead = previous?.inputTokens.cacheRead;
+    effectiveCacheWrite = previous?.inputTokens.cacheWrite;
   }
 
   return LanguageModelV4Usage(
     inputTokens: LanguageModelV4InputTokenUsage(
       total: totalInput,
-      noCache: hasCache ? inputTokens : previous?.inputTokens.noCache,
-      cacheRead: hasCache ? cacheRead : previous?.inputTokens.cacheRead,
-      cacheWrite: hasCache ? cacheWrite : previous?.inputTokens.cacheWrite,
+      noCache: noCache,
+      cacheRead: effectiveCacheRead,
+      cacheWrite: effectiveCacheWrite,
     ),
     outputTokens: LanguageModelV4OutputTokenUsage(
       total: outputTokens ?? previous?.outputTokens.total,
@@ -686,6 +762,7 @@ Map<String, dynamic> _toAnthropicTool(LanguageModelV4Tool tool) =>
         'input_schema': tool.inputSchema,
         if (tool.inputExamples case final examples? when examples.isNotEmpty)
           'input_examples': examples,
+        ..._anthropicCacheControlEntry(tool.providerOptions),
       },
       LanguageModelV4ProviderDefinedTool() => {
         'type': tool.id.split('.').last,
@@ -694,6 +771,31 @@ Map<String, dynamic> _toAnthropicTool(LanguageModelV4Tool tool) =>
         ...tool.args,
       },
     };
+
+Map<String, dynamic> _withAnthropicCacheControl(
+  Map<String, dynamic> content,
+  Map<String, dynamic>? providerOptions,
+) {
+  final cacheControl = _anthropicCacheControl(providerOptions);
+  return cacheControl == null
+      ? content
+      : {...content, 'cache_control': cacheControl};
+}
+
+Map<String, dynamic> _anthropicCacheControlEntry(
+  Map<String, dynamic>? providerOptions,
+) {
+  final cacheControl = _anthropicCacheControl(providerOptions);
+  return cacheControl == null ? const {} : {'cache_control': cacheControl};
+}
+
+Map<String, dynamic>? _anthropicCacheControl(
+  Map<String, dynamic>? providerOptions,
+) {
+  final options = providerOptions?['anthropic'];
+  final value = options?['cacheControl'] ?? options?['cache_control'];
+  return value is Map ? value.cast<String, dynamic>() : null;
+}
 
 List<LanguageModelV4Warning> _readWarnings(Object? warningsRaw) {
   if (warningsRaw is! List) {
@@ -751,21 +853,22 @@ class _ReasoningState {
   final String id;
 }
 
-/// Extracts the `thinking` configuration from raw [providerOptions].
+/// Extracts Anthropic-specific request options from raw [providerOptions].
 ///
 /// Handles the following sources (in order of precedence):
 /// 1. A `'thinking'` key whose value is already a Map (e.g. from
 ///    [AnthropicThinkingOptions.toMap]).
 /// 2. A legacy `'speed'` key set to `'fast'` → `{type: disabled}`.
+/// 3. A `'cache_control'` or `'cacheControl'` key whose value is a Map.
 ///
-/// Returns the thinking map (or `null`) plus a cleaned copy of [po] with the
-/// handled keys removed.
-(Map<String, dynamic>?, Map<String, dynamic>?) _extractThinkingOptions(
-  Map<String, dynamic>? po,
-) {
-  if (po == null) return (null, null);
+/// Returns the thinking map, cache control map, and a cleaned copy of [po]
+/// with the handled keys removed.
+(Map<String, dynamic>?, Map<String, dynamic>?, Map<String, dynamic>?)
+_extractAnthropicOptions(Map<String, dynamic>? po) {
+  if (po == null) return (null, null, null);
 
   Map<String, dynamic>? thinking;
+  Map<String, dynamic>? cacheControl;
   final cleaned = Map<String, dynamic>.from(po);
 
   if (po['thinking'] is Map) {
@@ -776,7 +879,15 @@ class _ReasoningState {
     cleaned.remove('speed');
   }
 
-  return (thinking, cleaned.isEmpty ? null : cleaned);
+  final rawCacheControl = po['cache_control'] ?? po['cacheControl'];
+  if (rawCacheControl is Map) {
+    cacheControl = rawCacheControl.cast<String, dynamic>();
+    cleaned
+      ..remove('cache_control')
+      ..remove('cacheControl');
+  }
+
+  return (thinking, cacheControl, cleaned.isEmpty ? null : cleaned);
 }
 
 /// Maps a [DioException] from a non-2xx response to a typed [AiApiCallError]

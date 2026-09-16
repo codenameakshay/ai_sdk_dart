@@ -112,6 +112,7 @@ Future<StreamObjectResult<T>> streamObject<T>({
     Map<String, dynamic>? previousJson;
     String? lastPartialFingerprint;
     T? lastObject;
+    Object? streamError;
     try {
       await for (final part in broadcast) {
         if (part is StreamPartTextDelta) {
@@ -141,22 +142,24 @@ Future<StreamObjectResult<T>> streamObject<T>({
           }
         }
         if (part is StreamPartError) {
+          streamError ??= part.error;
           objectController.addError(part.error);
           patchController.addError(part.error);
         }
       }
 
-      if (lastObject != null) {
+      if (streamError != null) {
+        objectCompleter.completeError(streamError);
+      } else if (lastObject != null) {
         objectCompleter.complete(lastObject);
       } else {
-        objectCompleter.completeError(
-          AiNoObjectGeneratedError(
-            message: 'Failed to generate a valid structured object.',
-            text: buffer.toString(),
-            response: responseMetadata,
-            usage: null,
-          ),
+        final error = AiNoObjectGeneratedError(
+          message: 'Failed to generate a valid structured object.',
+          text: buffer.toString(),
+          response: responseMetadata,
+          usage: null,
         );
+        objectCompleter.completeError(error);
       }
     } finally {
       await objectController.close();
@@ -165,7 +168,7 @@ Future<StreamObjectResult<T>> streamObject<T>({
   }());
 
   return StreamObjectResult<T>(
-    stream: objectController.stream,
+    stream: objectCompleter.future.asStream(),
     partialObjectStream: objectController.stream,
     patchStream: patchController.stream,
     rawStream: broadcast,

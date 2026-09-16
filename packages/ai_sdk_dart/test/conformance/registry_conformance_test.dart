@@ -56,6 +56,42 @@ void main() {
         expect(model.modelId, 'text-embedding-3-small');
       });
 
+      test('resolves rerank model by provider:modelId string', () {
+        final registry = createProviderRegistry({
+          'fake': RegistrableProvider(
+            languageModelFactory: (modelId) =>
+                FakeTextModel('from $modelId', modelId: modelId),
+            rerankModelFactory: (modelId) => _FakeRerankModel(modelId),
+          ),
+        });
+
+        final model = registry.rerankModel('fake:rerank-v4');
+        expect(model.provider, 'fake');
+        expect(model.modelId, 'rerank-v4');
+      });
+
+      test('allows providers without optional factories', () {
+        final registry = createProviderRegistry({
+          'language-only': RegistrableProvider(
+            languageModelFactory: (modelId) =>
+                FakeTextModel('from $modelId', modelId: modelId),
+          ),
+        });
+
+        expect(
+          registry.languageModel('language-only:model'),
+          isA<FakeTextModel>(),
+        );
+        expect(
+          () => registry.textEmbeddingModel('language-only:model'),
+          throwsA(isA<UnsupportedError>()),
+        );
+        expect(
+          () => registry.rerankModel('language-only:model'),
+          throwsA(isA<UnsupportedError>()),
+        );
+      });
+
       test('resolves model from second provider', () {
         final model = registry.languageModel('other:claude-3-5');
         expect(model.provider, 'other');
@@ -221,4 +257,22 @@ class _FakeImageModel implements ImageModelV3 {
   Future<ImageModelV3GenerateResult> doGenerate(
     ImageModelV3CallOptions options,
   ) async => const ImageModelV3GenerateResult(images: []);
+}
+
+class _FakeRerankModel implements RerankModelV1 {
+  _FakeRerankModel(this.modelId);
+
+  @override
+  final String modelId;
+
+  @override
+  String get provider => 'fake';
+
+  @override
+  String get specificationVersion => 'v1';
+
+  @override
+  Future<RerankModelV1Result> doRerank(
+    RerankModelV1CallOptions options,
+  ) async => const RerankModelV1Result(documents: []);
 }

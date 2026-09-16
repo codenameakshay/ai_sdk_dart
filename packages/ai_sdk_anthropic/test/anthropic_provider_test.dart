@@ -16,6 +16,103 @@ import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
   group('AnthropicProvider', () {
+    test('rejects null and malformed 2xx chat responses', () async {
+      final nullServer = await _startServer((request) async {
+        request.response.statusCode = 200;
+        await request.response.close();
+      });
+      addTearDown(nullServer.close);
+
+      await expectLater(
+        AnthropicProvider(apiKey: 'test', baseUrl: nullServer.baseUrl)
+            .call('claude-sonnet-4-5')
+            .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('hi'))),
+        throwsA(
+          isA<AiApiCallError>()
+              .having((error) => error.statusCode, 'statusCode', 200)
+              .having((error) => error.url, 'url', contains('/v1/messages'))
+              .having((error) => error.cause, 'cause', isNull),
+        ),
+      );
+
+      final malformedServer = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({'content': 'not-a-list'}));
+        await request.response.close();
+      });
+      addTearDown(malformedServer.close);
+
+      await expectLater(
+        AnthropicProvider(apiKey: 'test', baseUrl: malformedServer.baseUrl)
+            .call('claude-sonnet-4-5')
+            .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('hi'))),
+        throwsA(
+          isA<AiApiCallError>()
+              .having((error) => error.statusCode, 'statusCode', 200)
+              .having((error) => error.cause, 'cause', isNotNull),
+        ),
+      );
+    });
+
+    test('allows absent optional chat output', () async {
+      final server = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({}));
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final result =
+          await AnthropicProvider(apiKey: 'test', baseUrl: server.baseUrl)
+              .call('claude-sonnet-4-5')
+              .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('hi')));
+      expect(result.content, isEmpty);
+    });
+
+    test('rejects malformed nested 2xx chat response fields', () async {
+      final cases = <Map<String, dynamic>>[
+        {
+          'content': [
+            {
+              'type': 'text',
+              'text': 'citation',
+              'citations': ['invalid'],
+            },
+          ],
+        },
+        {
+          'content': [
+            {'type': 'text', 'text': 'citation', 'citations': 'invalid'},
+          ],
+        },
+        {'usage': 'invalid'},
+      ];
+
+      for (final body in cases) {
+        final server = await _startServer((request) async {
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(jsonEncode(body));
+          await request.response.close();
+        });
+
+        try {
+          await expectLater(
+            AnthropicProvider(apiKey: 'test', baseUrl: server.baseUrl)
+                .call('claude-sonnet-4-5')
+                .doGenerate(
+                  LanguageModelV4CallOptions(prompt: userPrompt('hi')),
+                ),
+            throwsA(isA<AiApiCallError>()),
+          );
+        } finally {
+          await server.close();
+        }
+      }
+    });
+
     test('doGenerate maps text/tool_use/reasoning and usage', () async {
       final server = await _startServer((request) async {
         expect(request.uri.path, '/v1/messages');
@@ -929,6 +1026,39 @@ void main() {
       expect(finish.usage.inputTokens.cacheWrite, 0);
     });
 
+    test('stream resets stale cache fields on an input-only delta', () async {
+      final server = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.set('content-type', 'text/event-stream');
+        request.response.write(
+          'data: {"type":"message_start","message":{"id":"msg_c2","model":"claude-sonnet-4-5","usage":{"input_tokens":8,"output_tokens":1,"cache_read_input_tokens":40,"cache_creation_input_tokens":2}}}\n\n',
+        );
+        request.response.write(
+          'data: {"type":"message_delta","usage":{"input_tokens":9},"delta":{"stop_reason":"end_turn"}}\n\n',
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = AnthropicProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).call('claude-sonnet-4-5');
+
+      final streamResult = await model.doStream(
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
+      );
+
+      final finish = (await streamResult.stream.toList())
+          .whereType<StreamPartFinish>()
+          .single;
+      expect(finish.usage.inputTokens.total, 9);
+      expect(finish.usage.inputTokens.noCache, 9);
+      expect(finish.usage.inputTokens.cacheRead, isNull);
+      expect(finish.usage.inputTokens.cacheWrite, isNull);
+      expect(finish.usage.outputTokens.total, 1);
+    });
+
     // ── AnthropicThinkingOptions / speed ─────────────────────────────────
 
     group('AnthropicThinkingOptions', () {
@@ -965,6 +1095,17 @@ void main() {
         );
         final map = langOpts.toMap();
         expect(map['thinking'], {'type': 'enabled', 'budget_tokens': 2000});
+      });
+
+      test('serializes typed cache control options', () {
+        const cache = AnthropicCacheControlOptions(ttl: '1h');
+        expect(cache.toMap(), {
+          'cache_control': {'type': 'ephemeral', 'ttl': '1h'},
+        });
+        expect(
+          const AnthropicLanguageModelOptions(cacheControl: cache).toMap(),
+          cache.toMap(),
+        );
       });
 
       test(
@@ -1059,6 +1200,65 @@ void main() {
         expect(captured['thinking'], {'type': 'disabled'});
         expect(captured.containsKey('speed'), isFalse);
       });
+
+      test('sends typed cache control on requests and content parts', () async {
+        late Map<String, dynamic> captured;
+        final server = await _startServer((request) async {
+          final body = await utf8.decoder.bind(request).join();
+          captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'stop_reason': 'end_turn',
+              'content': [
+                {'type': 'text', 'text': 'ok'},
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = AnthropicProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('claude-sonnet-4-5');
+
+        await model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [
+                    LanguageModelV4TextPart(
+                      text: 'cached',
+                      providerOptions: const {
+                        'anthropic': {
+                          'cacheControl': {'type': 'ephemeral'},
+                        },
+                      },
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            providerOptions: const {
+              'anthropic': {
+                'cache_control': {'type': 'ephemeral', 'ttl': '1h'},
+              },
+            },
+          ),
+        );
+
+        expect(captured['cache_control'], {'type': 'ephemeral', 'ttl': '1h'});
+        final messages = (captured['messages'] as List)
+            .cast<Map<String, dynamic>>();
+        final content = (messages.single['content'] as List)
+            .cast<Map<String, dynamic>>();
+        expect(content.single['cache_control'], {'type': 'ephemeral'});
+      });
     });
 
     // ── Additional coverage ──────────────────────────────────────────────
@@ -1111,6 +1311,36 @@ void main() {
       expect(captured['stop_sequences'], ['STOP', 'END']);
       // 'stop_sequence' maps to stop finish reason.
       expect(result.finishReason, LanguageModelV4FinishReason.stop);
+    });
+
+    test('sends stop_sequences when streaming', () async {
+      late Map<String, dynamic> captured;
+      final server = await _startServer((request) async {
+        final body = await utf8.decoder.bind(request).join();
+        captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+        request.response.statusCode = 200;
+        request.response.headers.set('content-type', 'text/event-stream');
+        request.response.write(
+          'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n',
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = AnthropicProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).call('claude-sonnet-4-5');
+
+      final streamResult = await model.doStream(
+        LanguageModelV4CallOptions(
+          prompt: userPrompt('hi'),
+          stopSequences: const ['STOP', 'END'],
+        ),
+      );
+      await streamResult.stream.toList();
+
+      expect(captured['stop_sequences'], ['STOP', 'END']);
     });
 
     test('maps unknown stop_reason to other', () async {
@@ -1191,6 +1421,41 @@ void main() {
           .whereType<LanguageModelV4RedactedReasoningPart>()
           .single;
       expect(utf8.decode(redacted.data), 'REDACTED-PAYLOAD');
+    });
+
+    test('streams redacted_thinking content with provider metadata', () async {
+      final server = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.set('content-type', 'text/event-stream');
+        request.response.write(
+          'data: {"type":"content_block_start","index":0,"content_block":{"type":"redacted_thinking","data":"REDACTED-PAYLOAD"}}\n\n',
+        );
+        request.response.write(
+          'data: {"type":"content_block_stop","index":0}\n\n',
+        );
+        request.response.write(
+          'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n',
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = AnthropicProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).call('claude-sonnet-4-5');
+
+      final streamResult = await model.doStream(
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
+      );
+      final parts = await streamResult.stream.toList();
+      final start = parts.whereType<StreamPartReasoningStart>().single;
+
+      expect(
+        start.providerMetadata?['anthropic']?['redactedData'],
+        'REDACTED-PAYLOAD',
+      );
+      expect(parts.whereType<StreamPartReasoningEnd>().single.id, start.id);
     });
 
     test('serializes assistant tool calls and image url parts', () async {

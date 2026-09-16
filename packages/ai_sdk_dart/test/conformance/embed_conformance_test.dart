@@ -38,6 +38,30 @@ void main() {
         final result = await embed(model: model, value: 'specific text');
         expect(result.value, 'specific text');
       });
+
+      test('throws AiNoContentGeneratedError for an empty provider result', () {
+        expect(
+          () => embed(model: _EmptyEmbeddingModel(), value: 'test'),
+          throwsA(isA<AiNoContentGeneratedError>()),
+        );
+      });
+
+      test('forwards headers and providerOptions to the model', () async {
+        final model = FakeEmbeddingModel([0.1]);
+        const providerOptions = <String, Map<String, dynamic>>{
+          'openai': {'dimensions': 3},
+        };
+
+        await embed(
+          model: model,
+          value: 'test',
+          headers: const {'x-test': '1'},
+          providerOptions: providerOptions,
+        );
+
+        expect(model.lastOptions?.headers, {'x-test': '1'});
+        expect(model.lastOptions?.providerOptions, providerOptions);
+      });
     });
 
     // ── cosineSimilarity() ────────────────────────────────────────────────
@@ -95,4 +119,20 @@ void main() {
       });
     });
   });
+}
+
+class _EmptyEmbeddingModel implements EmbeddingModelV2<String> {
+  @override
+  String get provider => 'fake';
+
+  @override
+  String get modelId => 'empty-embedding-model';
+
+  @override
+  String get specificationVersion => 'v2';
+
+  @override
+  Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
+    EmbeddingModelV2CallOptions<String> options,
+  ) async => const EmbeddingModelV2GenerateResult(embeddings: []);
 }

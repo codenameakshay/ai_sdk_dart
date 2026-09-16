@@ -39,6 +39,93 @@ void main() {
     });
   });
 
+  test('malformed 2xx chat responses raise AiApiCallError', () async {
+    final server = await TestServer.start((request) async {
+      request.response.statusCode = 200;
+      await request.response.close();
+    });
+    addTearDown(server.close);
+
+    await expectLater(
+      CohereProvider(apiKey: 'test', baseUrl: server.baseUrl)
+          .call('command-r-plus')
+          .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('hi'))),
+      throwsA(isA<AiApiCallError>()),
+    );
+  });
+
+  test('wrong-shaped 2xx chat responses raise AiApiCallError', () async {
+    final server = await TestServer.start((request) async {
+      request.response.statusCode = 200;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({'message': 'not-an-object'}));
+      await request.response.close();
+    });
+    addTearDown(server.close);
+
+    await expectLater(
+      CohereProvider(apiKey: 'test', baseUrl: server.baseUrl)
+          .call('command-r-plus')
+          .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('hi'))),
+      throwsA(isA<AiApiCallError>()),
+    );
+  });
+
+  test('keeps missing and non-numeric generate usage fields unknown', () async {
+    final server = await TestServer.start((request) async {
+      request.response.statusCode = 200;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(
+        jsonEncode({
+          'finish_reason': 'COMPLETE',
+          'message': {'content': []},
+          'usage': {
+            'tokens': {'input_tokens': 'unknown'},
+          },
+        }),
+      );
+      await request.response.close();
+    });
+    addTearDown(server.close);
+
+    final result = await CohereProvider(apiKey: 'test', baseUrl: server.baseUrl)
+        .call('command-r-plus')
+        .doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('hi')));
+
+    expect(result.usage.inputTokens.total, isNull);
+    expect(result.usage.outputTokens.total, isNull);
+  });
+
+  test('keeps missing and non-numeric stream usage fields unknown', () async {
+    final server = await TestServer.start((request) async {
+      request.response.statusCode = 200;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(
+        '${jsonEncode({
+          'type': 'message-end',
+          'delta': {
+            'finish_reason': 'COMPLETE',
+            'usage': {
+              'tokens': {'input_tokens': 'unknown'},
+            },
+          },
+        })}\n',
+      );
+      await request.response.close();
+    });
+    addTearDown(server.close);
+
+    final stream = await CohereProvider(apiKey: 'test', baseUrl: server.baseUrl)
+        .call('command-r-plus')
+        .doStream(LanguageModelV4CallOptions(prompt: userPrompt('hi')));
+    final finish = (await stream.stream.toList())
+        .whereType<StreamPartFinish>()
+        .single;
+
+    expect(finish.usage.inputTokens.total, isNull);
+    expect(finish.usage.outputTokens.total, isNull);
+  });
+
   group('Cohere doGenerate wire format', () {
     test(
       'serializes tools, tool_choice, and image content; parses tool calls',
@@ -146,6 +233,74 @@ void main() {
         expect(result.usage.outputTokens.total, 7);
       },
     );
+
+    test('serializes provider-defined tools', () async {
+      late Map<String, dynamic> captured;
+      final server = await TestServer.start((request) async {
+        final body = await utf8.decoder.bind(request).join();
+        captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'message': {'content': []},
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      await CohereProvider(apiKey: 'test', baseUrl: server.baseUrl)
+          .call('command-r-plus')
+          .doGenerate(
+            LanguageModelV4CallOptions(
+              prompt: userPrompt('search'),
+              tools: const [
+                LanguageModelV4ProviderDefinedTool(
+                  id: 'cohere.search',
+                  name: 'search',
+                  args: {'max_results': 5},
+                ),
+              ],
+            ),
+          );
+
+      expect((captured['tools'] as List).single, {
+        'type': 'cohere.search',
+        'name': 'search',
+        'max_results': 5,
+      });
+    });
+
+    test('forwards providerOptions into the generate request body', () async {
+      late Map<String, dynamic> captured;
+      final server = await TestServer.start((request) async {
+        final body = await utf8.decoder.bind(request).join();
+        captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'message': {'content': []},
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      await CohereProvider(apiKey: 'test', baseUrl: server.baseUrl)
+          .call('command-r-plus')
+          .doGenerate(
+            LanguageModelV4CallOptions(
+              prompt: userPrompt('hi'),
+              providerOptions: const {
+                'cohere': {'safety_mode': 'CONTEXTUAL'},
+              },
+            ),
+          );
+
+      expect(captured['safety_mode'], 'CONTEXTUAL');
+    });
 
     test('maps tool choice none and serializes tool-result messages', () async {
       late Map<String, dynamic> captured;
@@ -510,6 +665,40 @@ void main() {
         ]);
       },
     );
+
+    test('forwards providerOptions into the stream request body', () async {
+      late Map<String, dynamic> captured;
+      final server = await TestServer.start((request) async {
+        final body = await utf8.decoder.bind(request).join();
+        captured = (jsonDecode(body) as Map).cast<String, dynamic>();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          '${jsonEncode({
+            'type': 'message-end',
+            'delta': {'finish_reason': 'COMPLETE'},
+          })}\n',
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final stream =
+          await CohereProvider(apiKey: 'test', baseUrl: server.baseUrl)
+              .call('command-r-plus')
+              .doStream(
+                LanguageModelV4CallOptions(
+                  prompt: userPrompt('hi'),
+                  providerOptions: const {
+                    'cohere': {'safety_mode': 'CONTEXTUAL'},
+                  },
+                ),
+              );
+      await stream.stream.toList();
+
+      expect(captured['safety_mode'], 'CONTEXTUAL');
+      expect(captured['stream'], isTrue);
+    });
 
     test(
       'dispose closes owned clients and leaves injected clients open',

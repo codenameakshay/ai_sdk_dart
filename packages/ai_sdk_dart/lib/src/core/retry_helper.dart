@@ -61,6 +61,7 @@ Future<T> withRetry<T>({
 }) async {
   final stopwatch = Stopwatch()..start();
   var retryCount = 0;
+  final attemptErrors = <Object>[];
 
   while (true) {
     throwIfCancelled(abortSignal);
@@ -86,12 +87,24 @@ Future<T> withRetry<T>({
     try {
       return await raceWithCancellation(fn(attemptTimeout), abortSignal);
     } catch (error) {
+      attemptErrors.add(error);
       if (!_shouldRetry(
         error,
         retryCount: retryCount,
         maxRetries: maxRetries,
         abortSignal: abortSignal,
       )) {
+        if (!(abortSignal?.isCancelled ?? false) &&
+            error is AiApiCallError &&
+            error.isRetryable &&
+            retryCount >= maxRetries) {
+          throw AiRetryError(
+            message: 'Retry attempts exhausted.',
+            attempts: attemptErrors.length,
+            lastError: error,
+            errors: List.unmodifiable(attemptErrors),
+          );
+        }
         rethrow;
       }
 

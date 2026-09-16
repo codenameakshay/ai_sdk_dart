@@ -365,6 +365,16 @@ void main() {
         expect(result, hasLength(1));
         expect(result[0].role, ModelMessageRole.system);
       });
+
+      test('rejects negative maxMessages', () {
+        const message = ModelMessage(role: ModelMessageRole.user, content: 'u');
+
+        expect(
+          () => pruneMessages([message], maxMessages: -1),
+          throwsArgumentError,
+        );
+        expect(() => pruneMessages([], maxMessages: -1), throwsArgumentError);
+      });
     });
   });
 }

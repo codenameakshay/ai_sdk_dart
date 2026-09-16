@@ -465,6 +465,132 @@ void main() {
       );
     });
 
+    test('bounds buffered JSON response bodies at 1 MiB', () async {
+      final mock = await _MockHttpServer.start();
+      addTearDown(mock.close);
+      final oversizedValue = 'x' * ((1024 * 1024) + 1);
+      mock.enqueueRaw(
+        status: 200,
+        body: '{"jsonrpc":"2.0","id":1,"result":{"value":"$oversizedValue"}}',
+        contentType: 'application/json',
+      );
+
+      final transport = StreamableHttpClientTransport(url: mock.uri);
+      addTearDown(transport.close);
+
+      await expectLater(
+        transport.send(JsonRpcRequest(method: 'ping', id: 1)),
+        throwsA(
+          isA<MCPTransportException>()
+              .having((e) => e.message, 'message', contains('response body'))
+              .having(
+                (e) => e.message,
+                'message',
+                contains('exceeded 1048576 characters'),
+              )
+              .having(
+                (e) => e.message,
+                'message',
+                isNot(contains(oversizedValue.substring(0, 64))),
+              ),
+        ),
+      );
+    });
+
+    test('bounds buffered SSE lines at 1 MiB', () async {
+      final oversizedValue = 'x' * ((1024 * 1024) + 1);
+      final responseBody = 'data: $oversizedValue\n\n';
+      final client = _StreamedResponseClient(
+        (_) async => http.StreamedResponse(
+          Stream<List<int>>.value(utf8.encode(responseBody)),
+          200,
+          headers: const {'content-type': 'text/event-stream'},
+        ),
+      );
+      final transport = StreamableHttpClientTransport(
+        url: Uri.parse('http://example.com/mcp'),
+        client: client,
+      );
+      addTearDown(transport.close);
+
+      await expectLater(
+        transport.send(JsonRpcRequest(method: 'ping', id: 1)),
+        throwsA(
+          isA<MCPException>()
+              .having((e) => e.message, 'message', contains('SSE line'))
+              .having(
+                (e) => e.message,
+                'message',
+                contains('exceeded 1048576 characters'),
+              )
+              .having(
+                (e) => e.message,
+                'message',
+                isNot(contains(oversizedValue.substring(0, 64))),
+              ),
+        ),
+      );
+    });
+
+    test('bounds buffered SSE events at 1 MiB across data lines', () async {
+      final dataLine = 'x' * (64 * 1024);
+      final responseBody =
+          '${List.filled(17, 'data: $dataLine').join('\n')}\n\n';
+      final client = _StreamedResponseClient(
+        (_) async => http.StreamedResponse(
+          Stream<List<int>>.value(utf8.encode(responseBody)),
+          200,
+          headers: const {'content-type': 'text/event-stream'},
+        ),
+      );
+      final transport = StreamableHttpClientTransport(
+        url: Uri.parse('http://example.com/mcp'),
+        client: client,
+      );
+      addTearDown(transport.close);
+
+      await expectLater(
+        transport.send(JsonRpcRequest(method: 'ping', id: 1)),
+        throwsA(
+          isA<MCPException>()
+              .having((e) => e.message, 'message', contains('SSE event'))
+              .having(
+                (e) => e.message,
+                'message',
+                contains('exceeded 1048576 characters'),
+              ),
+        ),
+      );
+    });
+
+    test('joins all SSE data lines before decoding a response', () async {
+      final responseBody = [
+        'data: {"jsonrpc":"2.0",',
+        'data: "id":1,',
+        'data: "result":{"ok":true}}',
+        '',
+      ].join('\n');
+      final client = _StreamedResponseClient(
+        (_) async => http.StreamedResponse(
+          Stream<List<int>>.value(utf8.encode(responseBody)),
+          200,
+          headers: const {'content-type': 'text/event-stream'},
+        ),
+      );
+      final transport = StreamableHttpClientTransport(
+        url: Uri.parse('http://example.com/mcp'),
+        client: client,
+      );
+      addTearDown(transport.close);
+
+      final response = await transport.send(
+        JsonRpcRequest(method: 'ping', id: 1),
+      );
+
+      expect(response.result, {'ok': true});
+      expect(response.id, 1);
+    });
+
     test('sends custom headers with every request', () async {
       final mock = await _MockHttpServer.start();
       addTearDown(mock.close);

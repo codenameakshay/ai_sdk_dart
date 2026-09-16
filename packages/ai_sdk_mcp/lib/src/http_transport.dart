@@ -32,6 +32,8 @@ class StreamableHttpClientTransport implements MCPTransport {
   final bool _ownsClient;
   final _notifications = StreamController<Map<String, dynamic>>.broadcast();
 
+  static const _maxBufferedResponseChars = 1024 * 1024;
+
   StreamSubscription<_SseEvent>? _listenerSubscription;
   Timer? _listenerReconnectTimer;
   bool _listenerConnecting = false;
@@ -234,7 +236,7 @@ class StreamableHttpClientTransport implements MCPTransport {
     http.StreamedResponse response, {
     required int expectedId,
   }) async {
-    final bodyText = await response.stream.bytesToString();
+    final bodyText = await _readBoundedResponseBody(response, method: 'POST');
     final decoded = jsonDecode(bodyText);
     if (decoded is! Map) {
       throw MCPException('Unexpected MCP response format: $decoded');
@@ -242,6 +244,26 @@ class StreamableHttpClientTransport implements MCPTransport {
     final message = decoded.cast<String, dynamic>();
     _validateResponseMessage(message, expectedId: expectedId);
     return JsonRpcResponse.fromJson(message);
+  }
+
+  Future<String> _readBoundedResponseBody(
+    http.StreamedResponse response, {
+    required String method,
+  }) async {
+    final buffer = StringBuffer();
+    await for (final chunk in response.stream.transform(utf8.decoder)) {
+      if (buffer.length + chunk.length > _maxBufferedResponseChars) {
+        throw MCPTransportException(
+          method: method,
+          uri: url,
+          statusCode: response.statusCode,
+          context:
+              'response body exceeded $_maxBufferedResponseChars characters',
+        );
+      }
+      buffer.write(chunk);
+    }
+    return buffer.toString();
   }
 
   void _dispatchMessage(Map<String, dynamic> message) {
@@ -366,7 +388,7 @@ class StreamableHttpClientTransport implements MCPTransport {
     }
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      final bodyText = await response.stream.bytesToString();
+      final bodyText = await _readBoundedResponseBody(response, method: 'POST');
       throw _transportError(
         method: 'POST',
         uri: url,
@@ -410,7 +432,7 @@ class StreamableHttpClientTransport implements MCPTransport {
     }
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      final bodyText = await response.stream.bytesToString();
+      final bodyText = await _readBoundedResponseBody(response, method: 'POST');
       throw _transportError(
         method: 'POST',
         uri: url,
@@ -552,7 +574,10 @@ class StreamableHttpClientTransport implements MCPTransport {
         final response = await _sendRequest(request);
         if (!((response.statusCode >= 200 && response.statusCode < 300) ||
             response.statusCode == 405)) {
-          final bodyText = await response.stream.bytesToString();
+          final bodyText = await _readBoundedResponseBody(
+            response,
+            method: 'DELETE',
+          );
           closeError = _transportError(
             method: 'DELETE',
             uri: url,
@@ -585,7 +610,9 @@ class StreamableHttpClientTransport implements MCPTransport {
 
   Stream<_SseEvent> _parseSse(Stream<List<int>> byteStream) {
     return Stream<_SseEvent>.eventTransformed(
-      byteStream.transform(utf8.decoder).transform(const LineSplitter()),
+      byteStream
+          .transform(utf8.decoder)
+          .transform(const _BoundedLineSplitter()),
       (sink) => _SseLineSink(sink),
     );
   }
@@ -626,10 +653,11 @@ class _SseLineSink implements EventSink<String> {
   final EventSink<_SseEvent> _out;
   String _event = '';
   String? _id;
-  final _data = StringBuffer();
+  final _dataLines = <String>[];
   bool _hasEvent = false;
   bool _hasData = false;
   bool _hasId = false;
+  int _bufferedChars = 0;
 
   @override
   void add(String line) {
@@ -650,16 +678,21 @@ class _SseLineSink implements EventSink<String> {
 
     switch (field) {
       case 'event':
+        _bufferedChars -= _event.length;
         _event = value;
+        _checkBuffer(value.length);
         _hasEvent = true;
       case 'data':
         if (_hasData) {
-          _data.write('\n');
+          _checkBuffer(1);
         }
-        _data.write(value);
+        _checkBuffer(value.length);
+        _dataLines.add(value);
         _hasData = true;
       case 'id':
+        _bufferedChars -= _id?.length ?? 0;
         _id = value;
+        _checkBuffer(value.length);
         _hasId = true;
       default:
         break;
@@ -670,13 +703,25 @@ class _SseLineSink implements EventSink<String> {
     if (!_hasEvent && !_hasData && !_hasId) {
       return;
     }
-    _out.add(_SseEvent(event: _event, data: _data.toString(), id: _id));
+    _out.add(_SseEvent(event: _event, data: _dataLines.join('\n'), id: _id));
     _event = '';
     _id = null;
-    _data.clear();
+    _dataLines.clear();
     _hasEvent = false;
     _hasData = false;
     _hasId = false;
+    _bufferedChars = 0;
+  }
+
+  void _checkBuffer(int additionalChars) {
+    _bufferedChars += additionalChars;
+    if (_bufferedChars >
+        StreamableHttpClientTransport._maxBufferedResponseChars) {
+      throw MCPException(
+        'SSE event exceeded '
+        '${StreamableHttpClientTransport._maxBufferedResponseChars} characters',
+      );
+    }
   }
 
   @override
@@ -688,5 +733,52 @@ class _SseLineSink implements EventSink<String> {
   void close() {
     _flush();
     _out.close();
+  }
+}
+
+class _BoundedLineSplitter extends StreamTransformerBase<String, String> {
+  const _BoundedLineSplitter();
+
+  @override
+  Stream<String> bind(Stream<String> stream) {
+    final line = StringBuffer();
+    var pendingCarriageReturn = false;
+    return stream.transform(
+      StreamTransformer<String, String>.fromHandlers(
+        handleData: (chunk, sink) {
+          for (var index = 0; index < chunk.length; index++) {
+            final character = chunk[index];
+            if (pendingCarriageReturn) {
+              pendingCarriageReturn = false;
+              if (character == '\n') {
+                continue;
+              }
+            }
+
+            if (character == '\r' || character == '\n') {
+              sink.add(line.toString());
+              line.clear();
+              pendingCarriageReturn = character == '\r';
+              continue;
+            }
+
+            line.write(character);
+            if (line.length >
+                StreamableHttpClientTransport._maxBufferedResponseChars) {
+              throw MCPException(
+                'SSE line exceeded '
+                '${StreamableHttpClientTransport._maxBufferedResponseChars} characters',
+              );
+            }
+          }
+        },
+        handleDone: (sink) {
+          if (line.isNotEmpty) {
+            sink.add(line.toString());
+          }
+          sink.close();
+        },
+      ),
+    );
   }
 }

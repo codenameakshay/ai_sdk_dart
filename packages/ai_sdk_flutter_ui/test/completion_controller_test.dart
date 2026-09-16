@@ -66,6 +66,44 @@ void main() {
       controller.dispose();
     });
 
+    test('async lifecycle callback failures are contained', () async {
+      final callbackFailure = StateError('callback failed');
+      var finishInvoked = false;
+      final finished = CompletionController(
+        agent: textAgent('done'),
+        onFinish: (_) async {
+          finishInvoked = true;
+          throw callbackFailure;
+        },
+      );
+      await finished.complete('go');
+      await pumpUntil(() => !finished.isLoading);
+      await Future<void>.delayed(Duration.zero);
+      expect(finishInvoked, isTrue);
+      expect(finished.isLoading, isFalse);
+      expect(finished.isStreaming, isFalse);
+      expect(finished.error, isNull);
+      finished.dispose();
+
+      final streamFailure = StateError('stream failed');
+      var errorInvoked = false;
+      final errored = CompletionController(
+        agent: erroringAgent(streamFailure),
+        onError: (_) async {
+          errorInvoked = true;
+          throw callbackFailure;
+        },
+      );
+      await errored.complete('go');
+      await pumpUntil(() => errored.error != null);
+      await Future<void>.delayed(Duration.zero);
+      expect(errorInvoked, isTrue);
+      expect(errored.error, same(streamFailure));
+      expect(errored.isLoading, isFalse);
+      expect(errored.isStreaming, isFalse);
+      errored.dispose();
+    });
+
     test('complete resets prior state on a new call', () async {
       final controller = CompletionController(agent: textAgent('first'));
       await controller.complete('a');

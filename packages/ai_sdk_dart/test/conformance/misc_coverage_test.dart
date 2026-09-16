@@ -166,21 +166,23 @@ void main() {
   });
 
   group('model message content classes', () {
-    test('ToolApprovalRequestContent stores its fields', () {
-      const content = ToolApprovalRequestContent(
+    test('active tool approval request content stores its fields', () {
+      const content = LanguageModelV4ToolApprovalRequestPart(
         approvalId: 'a1',
-        toolCallId: 'tc1',
-        toolName: 'danger',
-        input: {'x': 1},
+        toolCall: LanguageModelV4ToolCallPart(
+          toolCallId: 'tc1',
+          toolName: 'danger',
+          input: {'x': 1},
+        ),
       );
       expect(content.approvalId, 'a1');
-      expect(content.toolCallId, 'tc1');
-      expect(content.toolName, 'danger');
-      expect(content.input, {'x': 1});
+      expect(content.toolCall.toolCallId, 'tc1');
+      expect(content.toolCall.toolName, 'danger');
+      expect(content.toolCall.input, {'x': 1});
     });
 
-    test('ToolApprovalResponseContent stores its fields', () {
-      const content = ToolApprovalResponseContent(
+    test('active tool approval response content stores its fields', () {
+      const content = LanguageModelV4ToolApprovalResponse(
         approvalId: 'a1',
         approved: true,
         reason: 'looks safe',

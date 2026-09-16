@@ -49,10 +49,12 @@ class ObjectStreamController<T> extends StreamingControllerBase {
   final Schema<T>? schema;
 
   /// Called when the stream completes with the final value.
-  final void Function(T? value)? onFinish;
+  /// Errors from the callback are ignored after state is updated.
+  final FutureOr<void> Function(T? value)? onFinish;
 
   /// Called when an error occurs.
-  final void Function(Object error)? onError;
+  /// Errors from the callback are ignored after state is updated.
+  final FutureOr<void> Function(Object error)? onError;
 
   /// Notifies when loading/streaming/error state changes.
   @override
@@ -127,7 +129,10 @@ class ObjectStreamController<T> extends StreamingControllerBase {
         _isLoading = false;
         _isStreaming = false;
         notifyListenersSafely(immediate: true, status: true, content: true);
-        onFinish?.call(_value);
+        try {
+          final result = onFinish?.call(_value);
+          if (result is Future<void>) unawaited(result.catchError((_) {}));
+        } catch (_) {}
       },
       onError: (Object err) {
         if (!isCurrentRequest(requestId)) return;
@@ -138,7 +143,10 @@ class ObjectStreamController<T> extends StreamingControllerBase {
         _isLoading = false;
         _isStreaming = false;
         notifyTerminalListeners(statusChanged: true);
-        onError?.call(err);
+        try {
+          final result = onError?.call(err);
+          if (result is Future<void>) unawaited(result.catchError((_) {}));
+        } catch (_) {}
       },
       cancelOnError: true,
     );
@@ -188,7 +196,10 @@ class ObjectStreamController<T> extends StreamingControllerBase {
       _isLoading = false;
       _isStreaming = false;
       notifyTerminalListeners(statusChanged: true);
-      onError?.call(err);
+      try {
+        final result = onError?.call(err);
+        if (result is Future<void>) unawaited(result.catchError((_) {}));
+      } catch (_) {}
     }
   }
 

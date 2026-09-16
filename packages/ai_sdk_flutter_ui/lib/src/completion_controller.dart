@@ -25,10 +25,12 @@ class CompletionController extends StreamingControllerBase {
   final ToolLoopAgent agent;
 
   /// Called when completion finishes with the full text.
-  final void Function(String text)? onFinish;
+  /// Errors from the callback are ignored after state is updated.
+  final FutureOr<void> Function(String text)? onFinish;
 
   /// Called when an error occurs.
-  final void Function(Object error)? onError;
+  /// Errors from the callback are ignored after state is updated.
+  final FutureOr<void> Function(Object error)? onError;
 
   /// Notifies when loading/streaming/error state changes.
   @override
@@ -137,7 +139,10 @@ class CompletionController extends StreamingControllerBase {
           _isLoading = false;
           _isStreaming = false;
           notifyListenersSafely(immediate: true, status: true, content: true);
-          onFinish?.call(_completion);
+          try {
+            final result = onFinish?.call(_completion);
+            if (result is Future<void>) unawaited(result.catchError((_) {}));
+          } catch (_) {}
         },
         onError: (Object err) => _handleError(err, requestId),
         cancelOnError: true,
@@ -160,7 +165,10 @@ class CompletionController extends StreamingControllerBase {
     _isLoading = false;
     _isStreaming = false;
     notifyTerminalListeners(statusChanged: true);
-    onError?.call(err);
+    try {
+      final result = onError?.call(err);
+      if (result is Future<void>) unawaited(result.catchError((_) {}));
+    } catch (_) {}
   }
 
   Future<void> stop() async {

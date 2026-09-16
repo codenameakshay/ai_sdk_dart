@@ -53,6 +53,48 @@ void main() {
     });
   });
 
+  test('malformed 2xx embedding responses raise AiApiCallError', () async {
+    final server = await TestServer.start((request) async {
+      request.response.statusCode = 200;
+      await request.response.close();
+    });
+    addTearDown(server.close);
+
+    final model = AzureOpenAIProvider(
+      endpoint: server.baseUrl,
+      apiKey: 'key',
+    ).embedding('text-embedding-ada-002');
+
+    await expectLater(
+      model.doEmbed(
+        const EmbeddingModelV2CallOptions<String>(values: ['hello']),
+      ),
+      throwsA(isA<AiApiCallError>()),
+    );
+  });
+
+  test('wrong-shaped 2xx embedding responses raise AiApiCallError', () async {
+    final server = await TestServer.start((request) async {
+      request.response.statusCode = 200;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({'data': 'not-a-list'}));
+      await request.response.close();
+    });
+    addTearDown(server.close);
+
+    final model = AzureOpenAIProvider(
+      endpoint: server.baseUrl,
+      apiKey: 'key',
+    ).embedding('text-embedding-ada-002');
+
+    await expectLater(
+      model.doEmbed(
+        const EmbeddingModelV2CallOptions<String>(values: ['hello']),
+      ),
+      throwsA(isA<AiApiCallError>()),
+    );
+  });
+
   group('OpenAI-compatible capabilities (via shared base)', () {
     test('serializes tools and tool_choice', () async {
       late Map<String, dynamic> captured;
@@ -249,9 +291,64 @@ void main() {
         expect(rf['type'], 'json_schema');
       },
     );
+
+    test('forwards providerOptions into the request body', () async {
+      late Map<String, dynamic> captured;
+      final server = await TestServer.start((request) async {
+        captured = await captureBody(request);
+        writeOk(request);
+      });
+      addTearDown(server.close);
+
+      await AzureOpenAIProvider(endpoint: server.baseUrl, apiKey: 'key')(
+        'gpt-4o-deployment',
+      ).doGenerate(
+        LanguageModelV4CallOptions(
+          prompt: userPrompt('hi'),
+          providerOptions: const {
+            'azure': {'data_residency': 'eu'},
+          },
+        ),
+      );
+
+      expect(captured['data_residency'], 'eu');
+    });
   });
 
   group('Azure embedding doEmbed wire format', () {
+    test('forwards embedding providerOptions', () async {
+      late Map<String, dynamic> captured;
+      final server = await TestServer.start((request) async {
+        captured = await captureBody(request);
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'data': [
+              {
+                'embedding': [0.1],
+              },
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      await AzureOpenAIProvider(endpoint: server.baseUrl, apiKey: 'key')
+          .embedding('text-embedding-ada-002')
+          .doEmbed(
+            const EmbeddingModelV2CallOptions<String>(
+              values: ['hello'],
+              providerOptions: {
+                'azure': {'dimensions': 3},
+              },
+            ),
+          );
+
+      expect(captured['dimensions'], 3);
+    });
+
     test('posts to deployment /embeddings with api-key header and api-version '
         'query, parses embeddings in input order', () async {
       late Map<String, dynamic> captured;

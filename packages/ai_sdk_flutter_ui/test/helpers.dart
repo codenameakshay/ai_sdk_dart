@@ -175,12 +175,14 @@ class RecordedStreamInvocation {
     required this.prompt,
     required this.messages,
     required this.toolApprovalResponses,
+    this.approvalReplay,
   });
 
   final CancellationToken? abortSignal;
   final String? prompt;
   final List<ModelMessage>? messages;
   final List<LanguageModelV4ToolApprovalResponse> toolApprovalResponses;
+  final ToolApprovalReplay? approvalReplay;
 
   late final StreamController<String> _textController =
       StreamController<String>(
@@ -330,6 +332,25 @@ class RecordingStreamAgent extends ToolLoopAgent {
       prompt: prompt,
       messages: messages,
       toolApprovalResponses: toolApprovalResponses,
+    );
+    invocations.add(invocation);
+    return invocation.buildResult();
+  }
+
+  @override
+  Future<StreamTextResult> resume({
+    required ToolApprovalReplay replay,
+    List<ModelMessage>? messages,
+    List<LanguageModelV4ToolApprovalResponse> toolApprovalResponses = const [],
+    CancellationToken? abortSignal,
+    TimeoutConfiguration? timeout,
+  }) async {
+    final invocation = RecordedStreamInvocation(
+      abortSignal: abortSignal,
+      prompt: null,
+      messages: messages,
+      toolApprovalResponses: toolApprovalResponses,
+      approvalReplay: replay,
     );
     invocations.add(invocation);
     return invocation.buildResult();

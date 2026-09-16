@@ -38,5 +38,10 @@ Future<TranscribeResult> transcribe({
     ),
   );
   final result = await withOptionalTimeout(call, timeout);
+  if (result.text.isEmpty) {
+    throw const AiNoTranscriptGeneratedError(
+      message: 'No transcript was generated.',
+    );
+  }
   return TranscribeResult(text: result.text);
 }

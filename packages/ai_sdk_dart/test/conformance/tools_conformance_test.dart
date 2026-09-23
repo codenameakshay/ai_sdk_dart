@@ -491,7 +491,79 @@ void main() {
       );
       expect(myTool.inputSchema.jsonSchema['type'], 'object');
     });
+
+    test(
+      'schema validators reject invalid decoded input with stable issues',
+      () {
+        final schema = Schema<Map<String, dynamic>>(
+          jsonSchema: const {'type': 'object'},
+          validator: _RequiredFieldValidator(),
+          fromJson: (json) => json,
+        );
+
+        expect(
+          () => schema.fromJson(const {}),
+          throwsA(
+            isA<SchemaValidationException>().having(
+              (error) => error.issues.single.path,
+              'path',
+              '/name',
+            ),
+          ),
+        );
+        expect(
+          SchemaValidationException(const [
+            SchemaValidationIssue(
+              path: '',
+              message: 'invalid',
+              schemaPath: '#/type',
+            ),
+          ]).toString(),
+          'Schema validation failed (1 issues).',
+        );
+      },
+    );
+
+    test(
+      'tool helper defaults and provider message conversion are explicit',
+      () {
+        final noExecutor = tool<Map<String, dynamic>, String>(
+          inputSchema: jsonSchema({'type': 'object'}),
+        );
+        expect(noExecutor.executeDynamic, isNull);
+        expect(noExecutor.approvalPolicy, ToolApprovalPolicy.never);
+
+        final approvalTool = tool<Map<String, dynamic>, String>(
+          inputSchema: jsonSchema({'type': 'object'}),
+          needsApproval: (_, _) => false,
+        );
+        expect(approvalTool.approvalPolicy, ToolApprovalPolicy.conditional);
+
+        final providerMessage = LanguageModelV4Message(
+          role: LanguageModelV4Role.tool,
+          content: const [LanguageModelV4TextPart(text: 'done')],
+        );
+        final message = ModelMessage.fromProvider(providerMessage);
+        expect(message.role, ModelMessageRole.tool);
+        expect(message.parts, hasLength(1));
+        expect((message.parts!.single as LanguageModelV4TextPart).text, 'done');
+      },
+    );
   });
+}
+
+class _RequiredFieldValidator implements SchemaValidator {
+  @override
+  List<SchemaValidationIssue> validate(Map<String, dynamic> value) {
+    if (value.containsKey('name')) return const [];
+    return const [
+      SchemaValidationIssue(
+        path: '/name',
+        message: 'name is required',
+        schemaPath: '#/required',
+      ),
+    ];
+  }
 }
 
 // Helper model that calls a factory function for each doGenerate

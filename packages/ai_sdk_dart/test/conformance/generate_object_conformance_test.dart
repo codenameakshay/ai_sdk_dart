@@ -75,6 +75,39 @@ class _HangingObjectModel extends LanguageModelV4 {
   ) => throw UnimplementedError();
 }
 
+class _MetadataObjectModel extends LanguageModelV4 {
+  _MetadataObjectModel(this.text);
+
+  final String text;
+
+  @override
+  String get provider => 'fake';
+
+  @override
+  String get modelId => 'metadata-object';
+
+  @override
+  String get specificationVersion => 'v4';
+
+  @override
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
+  ) async => LanguageModelV4GenerateResult(
+    content: [LanguageModelV4TextPart(text: text)],
+    finishReason: LanguageModelV4FinishReason.stop,
+    request: const LanguageModelV4RequestMetadata(body: {'request': true}),
+    response: LanguageModelV4ResponseMetadata(
+      id: 'response-1',
+      body: const {'response': true},
+    ),
+  );
+
+  @override
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
+  ) => throw UnimplementedError();
+}
+
 void main() {
   group('generateObject conformance', () {
     final schema = Schema<Map<String, dynamic>>(
@@ -98,6 +131,29 @@ void main() {
       expect(result.rawJson, {'name': 'Alice'});
       expect(result.response, isNotNull);
     });
+
+    test(
+      'filters request and response bodies according to body inclusion',
+      () async {
+        final model = _MetadataObjectModel('{"name":"Alice"}');
+        final omitted = await generateObject(
+          model: model,
+          schema: schema,
+          prompt: 'name?',
+        );
+        expect(omitted.response.request?.body, isNull);
+        expect(omitted.response.response?.body, isNull);
+
+        final included = await generateObject(
+          model: model,
+          schema: schema,
+          prompt: 'name?',
+          bodyInclusion: const BodyInclusionPolicy.all(),
+        );
+        expect(included.response.request?.body, {'request': true});
+        expect(included.response.response?.body, {'response': true});
+      },
+    );
 
     test('recovers JSON from ```json``` fences', () async {
       final model = FakeTextModel('```json\n{"name":"Bob"}\n```');

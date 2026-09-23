@@ -1,0 +1,14 @@
+{
+  "run": 35882901359,
+  "commit": "dd14f0961ca13244bb02d57113e59ddf90b4a226",
+  "conclusion": "failure",
+  "boundary": "App launched paused and emitted VM-service address; Flutter tool remained in log-based discovery",
+  "xcode": "15.4",
+  "flutter": "3.44.3",
+  "testCompletions": 0,
+  "sourceArtifacts": {
+    "run-1/flutter-drive.log": "7e411f766bc844307b75962c380f93ae14fb72262c765b4780cb1d030409029c",
+    "diagnostics/simulator.log": "56788533aebd06e46ec8eedcaf54a7f66ae383dc7bcc6913ede35f7680b6fb6a",
+    "diagnostics/simulator.png": "9f4ebd4d12de0f2a9186103cb0d0f682ca90ab752cab1e600186b24414f60811"
+  }
+}

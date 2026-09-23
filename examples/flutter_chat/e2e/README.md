@@ -41,3 +41,10 @@ directly. The app has no tracked iOS `Podfile`, native integration-test target,
 or `flutter_driver` dependency; Flutter's SDK integration-test package and the
 existing Runner project are sufficient for this harness. The workflow does not
 claim physical-device coverage or provider/API coverage.
+
+The CI harness builds and installs the integration target once, launches it
+paused on a fixed loopback VM-service port, and attaches `flutter drive` with
+`--use-existing-app`. This avoids log-based VM-service discovery, which missed
+a recorded service address in run35882901359. The app restarts before each
+required run. Debug-service authentication is disabled only for this isolated,
+key-free simulator fixture; no production app configuration is changed.

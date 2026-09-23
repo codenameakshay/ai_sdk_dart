@@ -122,12 +122,36 @@ jobs:
           set -euo pipefail
           artifact_root="$GITHUB_WORKSPACE/flutter-chat-ios-e2e-artifacts"
           mkdir -p "$artifact_root/run-1" "$artifact_root/run-2"
+          flutter build ios --simulator --debug --no-pub \
+            --target=integration_test/conversation_e2e_test.dart \
+            --dart-define=REMOTE_BACKEND_URL="$REMOTE_BACKEND_URL" \
+            2>&1 | tee "$artifact_root/build.log"
+          app_path=build/ios/iphonesimulator/Runner.app
+          bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_path/Info.plist")"
+          xcrun simctl install "$SIMULATOR_UDID" "$app_path"
           for run_number in 1 2; do
             find . -maxdepth 1 -name 'conversation-*.png' -delete
+            xcrun simctl terminate "$SIMULATOR_UDID" "$bundle_id" 2>/dev/null || true
+            xcrun simctl launch "$SIMULATOR_UDID" "$bundle_id" \
+              --enable-dart-profiling --disable-vm-service-publication \
+              --start-paused --enable-checked-mode --verify-entry-points \
+              --vm-service-port=8181 --disable-service-auth-codes \
+              2>&1 | tee "$artifact_root/run-$run_number/launch.log"
+            service_ready=false
+            for attempt in $(seq 1 60); do
+              if curl --fail --silent --max-time 2 http://127.0.0.1:8181/getVM \
+                  > "$artifact_root/run-$run_number/vm-service.json"; then
+                service_ready=true
+                break
+              fi
+              sleep 1
+            done
+            test "$service_ready" = true
             set +e
             flutter drive \
               --verbose \
               --no-pub \
+              --use-existing-app=http://127.0.0.1:8181/ \
               --driver=test_driver/integration_test.dart \
               --target=integration_test/conversation_e2e_test.dart \
               -d "$SIMULATOR_UDID" \
@@ -143,6 +167,7 @@ jobs:
           done
 
       - name: Capture simulator diagnostics
+        timeout-minutes: 2
         if: always()
         run: |
           mkdir -p "$GITHUB_WORKSPACE/flutter-chat-ios-e2e-artifacts/diagnostics"

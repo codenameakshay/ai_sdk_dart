@@ -3,6 +3,42 @@ import 'package:ai_sdk_json_schema/ai_sdk_json_schema.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('configured JSON limits must be positive', () {
+    expect(
+      () => validatedJsonSchema<Map<String, dynamic>>(
+        schema: {'type': 'object'},
+        fromJson: (json) => json,
+        maxDepth: 0,
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => validatedJsonSchema<Map<String, dynamic>>(
+        schema: {'type': 'object'},
+        fromJson: (json) => json,
+        maxNodes: 0,
+      ),
+      throwsArgumentError,
+    );
+  });
+
+  test('value validation rejects nonfinite values before the decoder', () {
+    var decoded = false;
+    final schema = validatedJsonSchema<Map<String, dynamic>>(
+      schema: {'type': 'object'},
+      fromJson: (json) {
+        decoded = true;
+        return json;
+      },
+    );
+    expect(
+      () => schema.fromJson({'value': double.infinity}),
+      throwsA(isA<SchemaValidationException>()),
+    );
+    expect(decoded, isFalse);
+    expect(schema.validator!.validate({'value': double.nan}), isNotEmpty);
+  });
+
   test('nonfinite numbers and excessive value depth fail safely', () {
     final schema = validatedJsonSchema<Map<String, dynamic>>(
       schema: {'type': 'object'},

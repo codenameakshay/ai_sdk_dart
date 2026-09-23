@@ -182,6 +182,12 @@ void main() {
       expect(client.calls, 2);
       expect(sink.pendingCount, 0);
       client.firstConnection.complete(_ImmediateRequest());
+      await sink.dispose();
+      expect(
+        client.closed,
+        isFalse,
+        reason: 'Injected HttpClient ownership remains with the caller.',
+      );
     },
   );
 }

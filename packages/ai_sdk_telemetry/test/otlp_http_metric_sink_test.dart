@@ -291,6 +291,113 @@ void main() {
     expect(() => sink.flush(deadline: Duration.zero), throwsArgumentError);
     await sink.dispose();
   });
+
+  test('rejects invalid endpoints and batch bounds', () {
+    expect(
+      () => OtlpHttpMetricSink(endpoint: Uri.parse('fixture.test/metrics')),
+      throwsArgumentError,
+    );
+    expect(
+      () => OtlpHttpMetricSink(
+        endpoint: Uri.parse('http://127.0.0.1:${server.port}/v1/metrics'),
+        maxBufferSize: 1,
+        batchSize: 2,
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => OtlpHttpMetricSink(
+        endpoint: Uri.parse('http://127.0.0.1:${server.port}/v1/metrics'),
+        maxAttributes: 0,
+      ),
+      throwsArgumentError,
+    );
+  });
+
+  test(
+    'record after dispose is diagnosed and flush remains harmless',
+    () async {
+      final diagnostics = <Object>[];
+      final sink = OtlpHttpMetricSink(
+        endpoint: Uri.parse('http://127.0.0.1:${server.port}/v1/metrics'),
+        onDiagnostic: (error, [_]) => diagnostics.add(error),
+      );
+      await sink.dispose();
+      sink.record(const TelemetryMetric(name: 'late', value: 1));
+      await sink.flush();
+      await sink.dispose();
+      expect(diagnostics, hasLength(1));
+      expect(diagnostics.single, isA<StateError>());
+    },
+  );
+
+  test('concurrent flushes share one in-flight operation', () async {
+    requestStarted = Completer<void>();
+    releaseResponse = Completer<void>();
+    final sink = OtlpHttpMetricSink(
+      endpoint: Uri.parse('http://127.0.0.1:${server.port}/v1/metrics'),
+      batchSize: 1,
+    );
+    sink.record(const TelemetryMetric(name: 'one', value: 1));
+    await requestStarted!.future;
+    final first = sink.flush();
+    final second = sink.flush();
+    expect(identical(first, second), isTrue);
+    releaseResponse!.complete();
+    await first;
+    await sink.dispose();
+  });
+
+  test(
+    'drops newest metric when only an in-flight batch fills the buffer',
+    () async {
+      requestStarted = Completer<void>();
+      releaseResponse = Completer<void>();
+      final diagnostics = <Object>[];
+      final sink = OtlpHttpMetricSink(
+        endpoint: Uri.parse('http://127.0.0.1:${server.port}/v1/metrics'),
+        maxBufferSize: 1,
+        batchSize: 1,
+        onDiagnostic: (error, [_]) => diagnostics.add(error),
+      );
+      sink.record(const TelemetryMetric(name: 'first', value: 1));
+      await requestStarted!.future;
+      sink.record(const TelemetryMetric(name: 'dropped', value: 2));
+      expect(sink.pendingCount, 1);
+      expect(diagnostics, contains(isA<StateError>()));
+      releaseResponse!.complete();
+      await sink.flush();
+      await sink.dispose();
+    },
+  );
+
+  test(
+    'limits nested OTLP attribute values and diagnoses the omission',
+    () async {
+      final diagnostics = <Object>[];
+      final sink = OtlpHttpMetricSink(
+        endpoint: Uri.parse('http://127.0.0.1:${server.port}/v1/metrics'),
+        maxListLength: 1,
+        onDiagnostic: (error, [_]) => diagnostics.add(error),
+      );
+      sink.record(
+        const TelemetryMetric(
+          name: 'nested',
+          value: 1,
+          attributes: {
+            'value': [
+              ['nested'],
+            ],
+          },
+        ),
+      );
+      await sink.flush();
+      final attributes = _firstDataPointAttributes(payloads.single);
+      expect(attributes, isEmpty);
+      expect(diagnostics, contains(isA<StateError>()));
+      await sink.dispose();
+    },
+  );
 }
 
 String _firstMetricName(Map<String, dynamic> payload) {

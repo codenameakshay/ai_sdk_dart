@@ -112,6 +112,8 @@ String _eventName(StreamTextEvent event) {
     StreamTextUsageEvent() => 'usage',
     StreamTextErrorEvent() => 'error',
     StreamTextRawEvent() => 'raw',
+    StreamTextDocumentSourceEvent() => 'document-source',
+    StreamTextReasoningFileEvent() => 'reasoning-file',
   };
 }
 

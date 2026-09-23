@@ -987,9 +987,6 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
     };
   }
 
-  Map<String, dynamic> _optionalString(String key, String? value) =>
-      value == null ? const {} : {key: value};
-
   List<LanguageModelV4Warning> _warnings(LanguageModelV4CallOptions options) =>
       [
         if (options.stopSequences.isNotEmpty)

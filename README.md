@@ -1,6 +1,6 @@
 # 🤖 AI SDK Dart
 
-**A Dart/Flutter port of [Vercel AI SDK v6](https://sdk.vercel.ai) — provider-agnostic APIs for text generation, streaming, structured output, tool use, embeddings, image generation, speech, and more.**
+**A Dart/Flutter SDK inspired by [Vercel AI SDK](https://ai-sdk.dev) — provider-agnostic APIs for text generation, streaming, structured output, tool use, embeddings, image generation, speech, and more.**
 
 [![ai_sdk_dart pub.dev](https://img.shields.io/pub/v/ai_sdk_dart.svg?label=ai_sdk_dart)](https://pub.dev/packages/ai_sdk_dart)
 [![ai_sdk_openai pub.dev](https://img.shields.io/pub/v/ai_sdk_openai.svg?label=ai_sdk_openai)](https://pub.dev/packages/ai_sdk_openai)
@@ -22,7 +22,22 @@
 
 ## What is this?
 
-AI SDK Dart brings the core concepts of [Vercel AI SDK v6](https://sdk.vercel.ai) to Dart and Flutter. Write your AI logic once, swap providers without changing business code, and ship on mobile, web, and server. The API follows the same provider-agnostic model while using idiomatic Dart types and lifecycle primitives.
+AI SDK Dart brings Vercel AI SDK concepts to Dart and Flutter with Dart types,
+streams, and lifecycle primitives. Core workflows share a provider-neutral API;
+provider-specific capabilities remain explicit.
+
+## v3 development
+
+The v3 work targets the contracts reviewed against Vercel AI SDK 7.0.111. See
+the [contract comparison](docs/v3-contract-matrix.md),
+[v2-to-v3 migration guide](docs/migration/v2-to-v3.md), and
+[qualification ledger](plans/v3-execution.md) for implemented changes and
+remaining release gates. This branch is not a completed v3 release.
+
+Model IDs remain open strings. The [dated capability catalog](docs/provider-capability-catalog.md)
+separates upstream catalog information from protocol fixtures and live evidence;
+a model appearing in that catalog does not establish every SDK feature works
+with that model.
 
 ## Upgrading to 2.0
 
@@ -178,6 +193,9 @@ for the exact renames and contract changes.
 | [`ai_sdk_mcp`](https://pub.dev/packages/ai_sdk_mcp) | `dart pub add ai_sdk_mcp` | `MCPClient`, `StreamableHttpClientTransport`, native-only `StdioMCPTransport` |
 | [`ai_sdk_provider`](https://pub.dev/packages/ai_sdk_provider) | *(transitive)* | Provider interfaces for building custom providers |
 | `ai_sdk_openai_compatible` | *(transitive)* | Shared OpenAI Chat Completions base — powers the OpenAI/Azure/Groq/Mistral language models |
+| [`ai_sdk_json_schema`](packages/ai_sdk_json_schema) | v3 companion | Optional local JSON Schema validation before decoding tool inputs or final structured output |
+| [`ai_sdk_conversation`](packages/ai_sdk_conversation) | v3 companion | Immutable typed conversation snapshots and a versioned persistence codec; no model or tool execution |
+| [`ai_sdk_remote`](packages/ai_sdk_remote) | v3 companion | Optional transport for a trusted backend's Vercel UI-message stream, with cancellation and conversation reduction |
 
 > `ai_sdk_provider` and `ai_sdk_openai_compatible` are transitive dependencies — you **do not** need to add them directly.
 

@@ -1,0 +1,50 @@
+{
+  "date": "2026-09-23",
+  "baseline": "b702929811281ac6be4c5ea2c10004b412b74924",
+  "releaseComplete": false,
+  "checks": [
+    {
+      "command": "fvm dart test packages/ai_sdk_dart/test/conformance/streamed_tool_cleanup_test.dart",
+      "exitCode": 0,
+      "passedTests": 1
+    },
+    {
+      "command": "fvm dart test packages/ai_sdk_openai/test/openai_files_test.dart",
+      "exitCode": 0,
+      "passedTests": 20,
+      "scope": "before subsequent batch edits"
+    },
+    {
+      "command": "fvm dart pub publish --dry-run -C packages/ai_sdk_conversation",
+      "exitCode": 0,
+      "warnings": 0
+    },
+    {
+      "command": "fvm dart pub publish --dry-run -C packages/ai_sdk_remote",
+      "exitCode": 0,
+      "warnings": 0,
+      "scope": "before adding packaged Dart example"
+    },
+    {
+      "command": "fvm dart run packages/ai_sdk_remote/example/example.dart http://127.0.0.1:8081/chat",
+      "exitCode": 0,
+      "output": "Hello from the pinned AI SDK backend."
+    },
+    {
+      "command": "fvm dart analyze packages/ai_sdk_remote/example/example.dart",
+      "exitCode": 0,
+      "output": "No issues found!"
+    },
+    {
+      "command": "fvm dart compile js packages/ai_sdk_remote/example/example.dart -o /tmp/v3-remote-example.js",
+      "exitCode": 0,
+      "scope": "compilation only, not browser runtime qualification"
+    },
+    {
+      "command": "make analyze",
+      "exitCode": 2,
+      "scope": "interim shared-tree run",
+      "failure": "Flutter test helper overrides and missing finalStep; correction assigned"
+    }
+  ]
+}

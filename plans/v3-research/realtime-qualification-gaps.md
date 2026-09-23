@@ -24,22 +24,39 @@ configuration. Its actual loopback WebSocket test first observed the old
 header, then passed after removal. This establishes the emitted request shape,
 not acceptance by a live OpenAI endpoint.
 
+## Current deterministic qualification
+
+The parent reran the complete realtime suite with pinned Dart 3.12.2:
+21 tests passed (`/tmp/v3-parent-realtime-contract-current.log`). The current
+implementation includes typed server/semantic VAD, function tools, transcript
+completion/failure, and response/token usage. Tests cover typed serialization,
+transcript/usage parsing, startup identity matching, loopback WebSocket
+handshake, paused event queues, and cancellation cleanup.
+
+Tool-call and cancelled-response identities now have configurable session
+limits (`maxRememberedToolCalls` and `maxRememberedCancelledResponses`, both
+8192 by default). The implementation refuses unsafe eviction and reports the
+limit instead of forgetting identities and permitting duplicate execution.
+This bounds retained identities but requires the application to recover or
+start a new session when its limit is reached.
+
+README, changelog, license and a preview example now exist. The package remains
+`publish_to: none` at version `3.0.0-dev.1`. Stable workspace packages use
+`3.0.0`; the realtime preview is excluded from the stable publication set.
+
 ## Remaining W18 work
 
-- Session configuration exposes raw maps for turn detection/tools; response
-  usage is a raw map. These need the planned typed protocol qualification and
-  current official fixtures, including transcript completion and tool results.
-- Session-wide tool-call and cancelled-response ID sets currently grow without
-  a configured bound. Queue byte/count limits do not cover those sets. Define
-  their lifetime/budget without silently permitting duplicate tool execution.
+- Validate the typed protocol against current official fixtures and a live
+  provider, including actual audio and tool exchanges. Deterministic fixtures
+  alone do not establish service acceptance.
 - The default authenticated WebSocket connector uses `dart:io`. Browser callers
   must supply an appropriate connector/ephemeral-credential flow; a conditional
   stub is not a verified browser session implementation.
-- The package is still `publish_to: none`, version 2.0.0, and lacks a README,
-  changelog, and license copy. Preview packaging/version decisions remain.
 - Microphone permission, capture/playback, audio-route interruptions, and
   physical or simulator device behavior have not been verified. Deterministic
   transport/queue tests do not satisfy the approved device-audio requirement.
+- Complete the full release coverage gate; the passing functional suite is
+  not a coverage measurement.
 
-Keep the separate preview scope and the session lifetime/queue tests already
-implemented. Do not mark W18 complete from this targeted cancellation fix.
+Keep the separate preview scope. W18 remains incomplete until its required
+live and device evidence exists.

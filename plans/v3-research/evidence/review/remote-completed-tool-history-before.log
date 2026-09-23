@@ -1,0 +1,23 @@
+00:00 +0: loading packages/ai_sdk_remote/test/completed_tool_history_review_test.dart
+00:00 +0: completed tool history retains the original input
+00:00 +0 -1: completed tool history retains the original input [E]
+  Expected: {'path': '/tmp/history'}
+    Actual: <null>
+     Which: expected a map
+
+  package:matcher                                                           expect
+  packages/ai_sdk_remote/test/completed_tool_history_review_test.dart 36:5  main.<fn>
+
+00:00 +0 -1: pinned Vercel server accepts completed tool history
+00:00 +0 -2: pinned Vercel server accepts completed tool history [E]
+  RemoteProtocolException: Remote request failed (400)
+  package:ai_sdk_remote/src/remote.dart 174:9  RemoteConversationTransport._sendBody
+
+00:00 +0 -2: Some tests failed.
+
+Failing tests:
+  packages/ai_sdk_remote/test/completed_tool_history_review_test.dart: completed tool history retains the original input
+  packages/ai_sdk_remote/test/completed_tool_history_review_test.dart: pinned Vercel server accepts completed tool history
+
+Consider enabling the flag chain-stack-traces to receive more detailed exceptions.
+For example, 'dart test --chain-stack-traces'.

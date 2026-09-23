@@ -54,7 +54,7 @@ void main() {
           .onPressed,
       isNotNull,
     );
-    expect(find.bySemanticsLabel(RegExp('Assistant message')), findsOneWidget);
+    await _waitFor(tester, find.bySemanticsLabel(RegExp('Assistant message')));
     await binding.takeScreenshot('conversation-local-approved');
   });
 
@@ -87,7 +87,7 @@ void main() {
           .onPressed,
       isNotNull,
     );
-    expect(find.bySemanticsLabel(RegExp('Assistant message')), findsOneWidget);
+    await _waitFor(tester, find.bySemanticsLabel(RegExp('Assistant message')));
     await binding.takeScreenshot('conversation-local-denied');
   });
 
@@ -105,7 +105,7 @@ void main() {
     );
 
     expect(find.text('Hello from the pinned AI SDK backend.'), findsOneWidget);
-    expect(find.bySemanticsLabel(RegExp('Assistant message')), findsOneWidget);
+    await _waitFor(tester, find.bySemanticsLabel(RegExp('Assistant message')));
     expect(
       tester
           .widget<TextField>(find.byKey(const ValueKey('chat-composer-field')))
@@ -150,7 +150,7 @@ void main() {
       tester,
       find.byKey(const ValueKey('chat-composer-send')),
     );
-    expect(find.bySemanticsLabel(RegExp('Assistant message')), findsOneWidget);
+    await _waitFor(tester, find.bySemanticsLabel(RegExp('Assistant message')));
     expect(
       tester
           .widget<TextField>(find.byKey(const ValueKey('chat-composer-field')))
@@ -186,7 +186,7 @@ void main() {
       find.text('The scripted tool call was denied and resumed safely.'),
       findsOneWidget,
     );
-    expect(find.bySemanticsLabel(RegExp('Assistant message')), findsOneWidget);
+    await _waitFor(tester, find.bySemanticsLabel(RegExp('Assistant message')));
     expect(
       tester
           .widget<TextField>(find.byKey(const ValueKey('chat-composer-field')))

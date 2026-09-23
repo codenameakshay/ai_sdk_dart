@@ -262,7 +262,7 @@ Future<StreamObjectResult<T>> streamObject<T>({
 
             lastPartialFingerprint = fingerprint;
             objectController.add(
-              _freezeJson(parsedJson) as Map<String, dynamic>,
+              freezePartialJson(parsedJson) as Map<String, dynamic>,
             );
 
             final patch = _diffObjectPatch(previousJson, parsedJson);
@@ -349,6 +349,7 @@ Map<String, dynamic>? _tryParseObjectJson(String text) {
     phase: PartialJsonParsePhase.streamObjectSnapshot,
     trigger: PartialJsonParseTrigger.candidateClosed,
     fallbackCandidate: extractLastJsonObject(text),
+    repairIncomplete: true,
   );
   if (parsed is Map<String, dynamic>) {
     return parsed;
@@ -365,7 +366,7 @@ List<StreamObjectPatchOperation> _diffObjectPatch(
       StreamObjectPatchOperation(
         op: 'replace',
         path: '',
-        value: _freezeJson(current),
+        value: freezePartialJson(current),
       ),
     ];
   }
@@ -393,7 +394,7 @@ void _diffJson(
           StreamObjectPatchOperation(
             op: 'add',
             path: nextPath,
-            value: _freezeJson(entry.value),
+            value: freezePartialJson(entry.value),
           ),
         );
         continue;
@@ -426,7 +427,7 @@ void _diffJson(
         StreamObjectPatchOperation(
           op: 'add',
           path: '$path/$i',
-          value: _freezeJson(current[i]),
+          value: freezePartialJson(current[i]),
         ),
       );
     }
@@ -441,7 +442,7 @@ void _diffJson(
       StreamObjectPatchOperation(
         op: 'replace',
         path: path,
-        value: _freezeJson(current),
+        value: freezePartialJson(current),
       ),
     );
   }
@@ -450,11 +451,3 @@ void _diffJson(
 String _escapeJsonPointerToken(String token) {
   return token.replaceAll('~', '~0').replaceAll('/', '~1');
 }
-
-Object? _freezeJson(Object? value) => switch (value) {
-  Map<String, dynamic>() => Map<String, dynamic>.unmodifiable(
-    value.map((key, child) => MapEntry(key, _freezeJson(child))),
-  ),
-  List() => List<Object?>.unmodifiable(value.map(_freezeJson)),
-  _ => value,
-};

@@ -12,7 +12,8 @@ void main(List<String> arguments) {
     final objectPayload = _buildObjectPayload(targetBytes);
     final arrayPayload = _buildArrayPayload(targetBytes);
     final cases = <_BenchmarkResult Function()>[
-      () => _runObjectBenchmark(objectPayload),
+      () => _runObjectBenchmark(objectPayload, incremental: false),
+      () => _runObjectBenchmark(objectPayload, incremental: true),
       () => _runArrayBenchmark(arrayPayload, structural: false),
       () => _runArrayBenchmark(arrayPayload, structural: true),
     ];
@@ -61,22 +62,30 @@ void main(List<String> arguments) {
   }
 }
 
-_BenchmarkResult _runObjectBenchmark(String payload) {
+_BenchmarkResult _runObjectBenchmark(
+  String payload, {
+  required bool incremental,
+}) {
   final previousCounters = partialJsonDebugCounters;
   final counters = PartialJsonDebugCounters();
   partialJsonDebugCounters = counters;
 
   final tracker = PartialJsonTracker();
+  final buffer = StringBuffer();
   final stopwatch = Stopwatch()..start();
 
   try {
     for (final char in payload.split('')) {
+      buffer.write(char);
       final cadence = tracker.append(char);
-      if (cadence.shouldAttemptValue) {
+      if (incremental
+          ? cadence.shouldAttemptValue
+          : buffer.length == payload.length) {
         tryParsePartialJsonValue(
-          payload,
+          buffer.toString(),
           phase: PartialJsonParsePhase.streamTextPartial,
           trigger: PartialJsonParseTrigger.candidateClosed,
+          repairIncomplete: true,
         );
       }
     }
@@ -86,7 +95,7 @@ _BenchmarkResult _runObjectBenchmark(String payload) {
   }
 
   return _BenchmarkResult(
-    kind: 'object',
+    kind: incremental ? 'object-incremental' : 'object-final',
     bytes: payload.length,
     parseAttempts: counters.parseAttempts,
     decodeAttempts: counters.decodeAttempts,
@@ -152,17 +161,18 @@ _BenchmarkResult _runArrayBenchmark(
 
 void _assertParseBudget(_BenchmarkResult result) {
   final maxAttempts = switch (result.kind) {
-    'object' => 1,
+    'object-incremental' => result.bytes.bitLength,
+    'object-final' => 1,
     'array-copy' || 'array-structural' => result.elements + 1,
     _ => throw StateError('Unknown benchmark kind: ${result.kind}'),
   };
   final maxSnapshotCount = switch (result.kind) {
-    'object' => 0,
+    'object-incremental' || 'object-final' => 0,
     'array-copy' || 'array-structural' => result.elements,
     _ => throw StateError('Unknown benchmark kind: ${result.kind}'),
   };
   final maxSnapshotElementsCopied = switch (result.kind) {
-    'object' => 0,
+    'object-incremental' || 'object-final' => 0,
     'array-copy' => result.elements * (result.elements + 1) ~/ 2,
     'array-structural' => 0,
     _ => throw StateError('Unknown benchmark kind: ${result.kind}'),
@@ -174,10 +184,13 @@ void _assertParseBudget(_BenchmarkResult result) {
       '${result.parseAttempts} > $maxAttempts',
     );
   }
-  if (result.decodeAttempts > maxAttempts) {
+  final maxDecodes = result.kind.startsWith('object-')
+      ? maxAttempts * 4
+      : maxAttempts;
+  if (result.decodeAttempts > maxDecodes) {
     throw StateError(
       '${result.kind} decode attempts grew nonlinearly: '
-      '${result.decodeAttempts} > $maxAttempts',
+      '${result.decodeAttempts} > $maxDecodes',
     );
   }
   if (result.snapshotCount > maxSnapshotCount) {

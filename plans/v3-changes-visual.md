@@ -62,6 +62,23 @@ flowchart LR
 
 [Raw measurements, source hashes, and methodology](v3-research/evidence/benchmarks/README.md) are the authority for these figures. They do not establish mobile frame performance or live-provider speed.
 
+The new object-preview path also changes when a snapshot becomes visible:
+
+```mermaid
+flowchart LR
+  subgraph Before
+    A[Growing JSON string] --> B[Wait for root closure]
+    B --> C[One complete preview]
+  end
+  subgraph After
+    D[Growing JSON string] --> E[Repair an incomplete JSON prefix]
+    E --> F[Immutable raw previews at growing checkpoints]
+    F --> G[Strict final parse and one schema decode]
+  end
+```
+
+Focused tests cover growing strings, trailing spaces, split escapes, nested immutability and invalid final syntax. The full core suite passes locally. A same-source [object-preview comparison](v3-research/evidence/benchmarks/README.md) measures 196.141 ms at the 1 MiB incremental median versus 93.734 ms for final-only parsing on a shared Mac. This added CPU cost buys earlier previews; the older Linux timing table above does not qualify this new cadence.
+
 ## What improves, and what costs more
 
 | Change | Improvement | Cost or unresolved limit |
@@ -92,4 +109,4 @@ flowchart TD
   I --> J[Release-qualified PR]
 ```
 
-The first simulator job timed out after a successful build, before producing test results. Diagnostic execution is in progress. Retry/localization, coverage, native performance, and live qualification remain open. No merge or publication is authorized by this checkpoint.
+The prior pushed iOS job failed in an animated send-button finder. The current local simulator passed the original six flows twice and the focused safe text-retry flow once. A new two-launch test uses the real local backend and a persisted pending approval, but only its write phase has passed locally: separate `flutter test` installs reset the app container. The updated CI job must prove distinct write and restore screenshots after one install. Aggregate coverage, native frame evidence, independent final-head review and live qualification remain open. No merge or publication is authorized by this checkpoint.

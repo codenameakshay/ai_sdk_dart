@@ -1,5 +1,17 @@
 # Structured-stream comparison, 30 runs
 
+## Incremental object previews (2026-09-23)
+
+The current benchmark compares final-only object parsing with repaired incremental previews on the same source and payload. Each case has three warmups and 30 rotating samples on a shared macOS arm64 host with pinned Dart 3.12.2. [Raw samples and source hashes](object-preview-comparison.json) include every observation.
+
+| Object payload | Final-only p50 | Incremental p50 | Incremental parse attempts |
+| --- | ---: | ---: | ---: |
+| 1 KiB | 0.247 ms | 1.063 ms | 8 |
+| 64 KiB | 4.891 ms | 9.774 ms | 14 |
+| 1 MiB | 93.734 ms | 196.141 ms | 18 |
+
+The 1 MiB incremental path costs about 2.09 times the final-only median CPU time in this fixture. In exchange, it exposes immutable previews before closure. Checkpoints grow geometrically, so parse attempts do not grow with every token. This comparison is not a historical release, network, allocation-byte, or Flutter frame result. The older Linux measurements below use different source and hardware; do not compare their absolute times to this table.
+
 Command: `make benchmark`. Runtime: Dart 3.12.2, Linux aarch64. Raw samples and source hashes: [JSON](structured-stream-30-runs.json).
 
 | Payload | Path | p50 ms | p95 ms | empirical p99 ms | Full-list elements copied | Structural nodes |

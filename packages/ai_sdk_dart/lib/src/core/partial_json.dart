@@ -95,6 +95,8 @@ class PartialJsonTracker {
   bool _trackingCandidate = false;
   String? _rootDelimiter;
   var _depth = 0;
+  var _candidateLength = 0;
+  var _nextCheckpoint = 16;
 
   PartialJsonCadence append(String delta) {
     var shouldAttemptValue = false;
@@ -102,6 +104,10 @@ class PartialJsonTracker {
 
     for (final codeUnit in delta.codeUnits) {
       final char = String.fromCharCode(codeUnit);
+      if (_trackingCandidate && ++_candidateLength >= _nextCheckpoint) {
+        shouldAttemptValue = true;
+        _nextCheckpoint *= 2;
+      }
 
       if (_escaped) {
         _escaped = false;
@@ -127,6 +133,8 @@ class PartialJsonTracker {
           _trackingCandidate = true;
           _rootDelimiter = char;
           _depth = 1;
+          _candidateLength = 1;
+          _nextCheckpoint = 16;
         }
         continue;
       }
@@ -279,10 +287,66 @@ Object? tryParsePartialJsonValue(
   required PartialJsonParsePhase phase,
   required PartialJsonParseTrigger trigger,
   String? fallbackCandidate,
+  bool repairIncomplete = false,
 }) {
   partialJsonDebugCounters?.recordParseAttempt(phase: phase, trigger: trigger);
-  return _tryParsePartialJsonValue(text, fallbackCandidate: fallbackCandidate);
+  final parsed = _tryParsePartialJsonValue(
+    text,
+    fallbackCandidate: fallbackCandidate,
+  );
+  if (parsed != null || !repairIncomplete) return parsed;
+  final repaired = _repairIncompleteJson(text);
+  return repaired == null ? null : _tryJsonDecode(repaired);
 }
+
+String? _repairIncompleteJson(String text) {
+  final objectStart = text.indexOf('{');
+  final arrayStart = text.indexOf('[');
+  if (objectStart < 0 && arrayStart < 0) return null;
+  final start = objectStart < 0
+      ? arrayStart
+      : arrayStart < 0 || objectStart < arrayStart
+      ? objectStart
+      : arrayStart;
+  final closers = <String>[];
+  var inString = false;
+  var escaped = false;
+  for (var i = start; i < text.length; i++) {
+    final char = text[i];
+    if (escaped) {
+      escaped = false;
+    } else if (char == '\\' && inString) {
+      escaped = true;
+    } else if (char == '"') {
+      inString = !inString;
+    } else if (!inString) {
+      if (char == '{') closers.add('}');
+      if (char == '[') closers.add(']');
+      if (char == '}' || char == ']') {
+        if (closers.isEmpty || closers.removeLast() != char) return null;
+        if (closers.isEmpty) return null;
+      }
+    }
+  }
+  if (escaped || closers.isEmpty) return null;
+  var prefix = inString
+      ? text.substring(start)
+      : text.substring(start).trimRight();
+  if (inString) {
+    prefix += '"';
+  } else if (prefix.endsWith(',')) {
+    prefix = prefix.substring(0, prefix.length - 1);
+  }
+  return prefix + closers.reversed.join();
+}
+
+Object? freezePartialJson(Object? value) => switch (value) {
+  Map<String, dynamic>() => Map<String, dynamic>.unmodifiable(
+    value.map((key, child) => MapEntry(key, freezePartialJson(child))),
+  ),
+  List() => List<Object?>.unmodifiable(value.map(freezePartialJson)),
+  _ => value,
+};
 
 String? extractJsonCandidate(String text) {
   final startObject = text.indexOf('{');

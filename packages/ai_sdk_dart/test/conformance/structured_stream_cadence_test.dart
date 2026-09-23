@@ -59,14 +59,14 @@ void main() {
             .cast<Map<String, dynamic>>()
             .toList();
 
-        expect(partials, hasLength(1));
-        expect(jsonEncode(partials.single), jsonEncode(await result.output));
-        final item = (partials.single['items'] as List).single as Map;
+        expect(partials, isNotEmpty);
+        expect(jsonEncode(partials.last), jsonEncode(await result.output));
+        final item = (partials.last['items'] as List).single as Map;
         expect(item['text'], 'quote: "hi" and slash \\');
         expect(item['emoji'], '\u{1F600}');
         expect(
           counters.parseAttemptsFor(PartialJsonParsePhase.streamTextPartial),
-          lessThan(8),
+          lessThan(32),
         );
       },
     );
@@ -90,8 +90,8 @@ void main() {
             .cast<Map<String, dynamic>>()
             .toList();
 
-        expect(partials, hasLength(1));
-        expect(partials.single['emoji'], '😀');
+        expect(partials, isNotEmpty);
+        expect(partials.last['emoji'], '😀');
         expect((await result.output)['emoji'], '😀');
       },
     );
@@ -168,6 +168,7 @@ void main() {
         final partials = await result.partialObjectStream.toList();
 
         expect(partials.map(jsonEncode).toList(), [
+          '{"count":2,"nested":{"items":[1]}}',
           '{"count":2,"nested":{"items":[1,2]}}',
         ]);
         expect(await result.object, {
@@ -178,10 +179,105 @@ void main() {
         });
         expect(
           counters.parseAttemptsFor(PartialJsonParsePhase.streamObjectSnapshot),
-          lessThan(8),
+          lessThan(12),
         );
       },
     );
+
+    test(
+      'streamObject previews a growing string before root closure',
+      () async {
+        final result = await streamObject<Map<String, dynamic>>(
+          model: deltaStream([
+            '{"nested":{"text":"Hello there ',
+            'again, ',
+            'world"}}',
+          ]),
+          schema: objectSchema(),
+        );
+        final partials = await result.partialObjectStream.toList();
+        expect(partials.length, greaterThanOrEqualTo(2));
+        expect((partials.first['nested'] as Map)['text'], 'Hello there ');
+        expect(
+          (partials.last['nested'] as Map)['text'],
+          'Hello there again, world',
+        );
+        expect(
+          () => (partials.first['nested'] as Map)['text'] = 'changed',
+          throwsUnsupportedError,
+        );
+        expect((await result.object)['nested'], {
+          'text': 'Hello there again, world',
+        });
+      },
+    );
+
+    test(
+      'streamText previews raw JSON without decoding its schema early',
+      () async {
+        var decodes = 0;
+        final schema = Schema<Map<String, dynamic>>(
+          jsonSchema: const {'type': 'object'},
+          fromJson: (json) {
+            decodes++;
+            return json;
+          },
+        );
+        final result = await streamText<Map<String, dynamic>>(
+          model: deltaStream(['{"text":"Growing now ', 'again', '"}']),
+          output: Output.object(schema: schema),
+        );
+        final partials = await result.partialOutputStream.toList();
+        expect(partials.length, greaterThanOrEqualTo(2));
+        expect((partials.first as Map)['text'], 'Growing now ');
+        expect(decodes, 1);
+        expect((await result.output)['text'], 'Growing now again');
+        expect(decodes, 1);
+      },
+    );
+
+    test(
+      'split escapes preserve Unicode and immutable nested previews',
+      () async {
+        final result = await streamObject<Map<String, dynamic>>(
+          model: deltaStream([
+            '{"items":[{"text":"eight chars \\',
+            'uD83D\\',
+            'uDE00 and slash \\\\',
+            ' end"}]}',
+          ]),
+          schema: objectSchema(),
+        );
+        final partials = await result.partialObjectStream.toList();
+        final finalObject = await result.object;
+        expect(finalObject['items'], [
+          {'text': 'eight chars 😀 and slash \\ end'},
+        ]);
+        expect(partials.last, finalObject);
+        final items = partials.last['items'] as List;
+        expect(() => items.add(null), throwsUnsupportedError);
+        expect(() => (items.first as Map)['text'] = '', throwsUnsupportedError);
+      },
+    );
+
+    test('repaired previews cannot validate an invalid final object', () async {
+      final result = await streamObject<Map<String, dynamic>>(
+        model: deltaStream(['{"text":"unfinished value']),
+        schema: objectSchema(),
+      );
+      final finalFailure = expectLater(
+        result.object,
+        throwsA(isA<AiNoObjectGeneratedError>()),
+      );
+      await expectLater(
+        result.partialObjectStream,
+        emitsInOrder([
+          isA<Map<String, dynamic>>(),
+          emitsError(isA<AiNoObjectGeneratedError>()),
+        ]),
+      );
+      await finalFailure;
+    });
 
     test(
       'streamText large top-level arrays scale decode attempts with element count',

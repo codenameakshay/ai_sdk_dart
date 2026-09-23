@@ -24,8 +24,18 @@ int emitTrackedArrayElements({
   return acceptedCount;
 }
 
-TOutput? tryParsePartialOutput<TOutput>(Output<TOutput> output, String text) {
+Object? tryParsePartialOutput<TOutput>(Output<TOutput> output, String text) {
   try {
+    if (output is ObjectOutput || output is JsonOutput) {
+      final raw = tryParsePartialJsonValue(
+        text,
+        phase: PartialJsonParsePhase.streamTextPartial,
+        trigger: PartialJsonParseTrigger.candidateClosed,
+        repairIncomplete: true,
+      );
+      if (output is ObjectOutput && raw is! Map<String, dynamic>) return null;
+      return freezePartialJson(raw);
+    }
     return parseOutput(output, text);
   } catch (_) {
     return null;

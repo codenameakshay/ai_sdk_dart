@@ -1004,10 +1004,10 @@ void main() {
       );
 
       final prompt = continuation.seenMessages.single;
-      final assistant = prompt.singleWhere(
-        (message) => message.role == LanguageModelV4Role.assistant,
-      );
-      final assistantParts = assistant.content;
+      final assistantParts = prompt
+          .where((message) => message.role == LanguageModelV4Role.assistant)
+          .expand((message) => message.content)
+          .toList();
       expect(
         assistantParts
             .whereType<LanguageModelV4TextPart>()

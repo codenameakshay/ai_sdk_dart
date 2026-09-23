@@ -295,10 +295,10 @@ class ConversationChatController extends ChatController {
 
   void _refreshFromSnapshot() {
     if (isDisposed) return;
-    final assistant = _lastAssistant();
+    final assistant = _lastAssistantForCurrentTurn();
     if (_conversationError != null) {
       _conversationStatus = ChatStatus.error;
-    } else if (_sending && _awaitingBackendSnapshot) {
+    } else if (_sending && (_awaitingBackendSnapshot || assistant == null)) {
       _conversationStatus = ChatStatus.submitted;
     } else {
       _conversationStatus = switch (assistant?.status) {
@@ -319,6 +319,20 @@ class ConversationChatController extends ChatController {
 
   ConversationMessage? _lastAssistant() {
     for (final message in _snapshot.messages.reversed) {
+      if (message.role == ConversationRole.assistant) return message;
+    }
+    return null;
+  }
+
+  ConversationMessage? _lastAssistantForCurrentTurn() {
+    var lastUserIndex = -1;
+    for (var i = 0; i < _snapshot.messages.length; i++) {
+      if (_snapshot.messages[i].role == ConversationRole.user) {
+        lastUserIndex = i;
+      }
+    }
+    for (var i = _snapshot.messages.length - 1; i > lastUserIndex; i--) {
+      final message = _snapshot.messages[i];
       if (message.role == ConversationRole.assistant) return message;
     }
     return null;
@@ -1185,25 +1199,47 @@ class LocalConversationBackend
     ];
   }
 
-  ModelMessage _modelMessageForSnapshot(ConversationMessage message) {
-    return ModelMessage.parts(
-      role: ModelMessageRole.assistant,
-      parts: _providerPartsForReplay(
-        message.parts.where((part) => part is! ToolResultPart),
-      ),
-    );
-  }
-
   List<ModelMessage> _modelMessagesForSnapshot(ConversationMessage message) {
-    final assistant = _modelMessageForSnapshot(message);
-    final toolParts = _providerPartsForReplay(
-      message.parts.whereType<ToolResultPart>(),
-    );
-    return [
-      if (assistant.parts?.isNotEmpty ?? false) assistant,
-      if (toolParts.isNotEmpty)
-        ModelMessage.parts(role: ModelMessageRole.tool, parts: toolParts),
-    ];
+    final result = <ModelMessage>[];
+    var assistantParts = <LanguageModelV4ContentPart>[];
+    var toolParts = <LanguageModelV4ContentPart>[];
+
+    void flushAssistant() {
+      if (assistantParts.isEmpty) return;
+      result.add(
+        ModelMessage.parts(
+          role: ModelMessageRole.assistant,
+          parts: List.of(assistantParts),
+        ),
+      );
+      assistantParts = [];
+    }
+
+    void flushTools() {
+      if (toolParts.isEmpty) return;
+      result.add(
+        ModelMessage.parts(
+          role: ModelMessageRole.tool,
+          parts: List.of(toolParts),
+        ),
+      );
+      toolParts = [];
+    }
+
+    for (final part in message.parts) {
+      final converted = _toProviderPart(part);
+      if (converted == null) continue;
+      if (part is ToolResultPart) {
+        flushAssistant();
+        toolParts.add(converted);
+      } else {
+        flushTools();
+        assistantParts.add(converted);
+      }
+    }
+    flushTools();
+    flushAssistant();
+    return result;
   }
 
   Iterable<ModelMessage> _replayMessagesForStep(GenerateTextStep step) sync* {

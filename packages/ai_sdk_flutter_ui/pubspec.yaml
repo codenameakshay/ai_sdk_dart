@@ -21,5 +21,5 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_bloc: ^9.1.1
-  flutter_riverpod: ^3.4.3
+  flutter_riverpod: ^3.3.2
   http: ^1.6.0

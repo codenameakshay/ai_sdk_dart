@@ -160,19 +160,17 @@ void main() {
             'toolName': 'search',
             'input': {'q': 'dart'},
             'providerExecuted': true,
-            'providerOptions': {
+            'providerMetadata': {
               'vendor': {'trace': 't-1'},
             },
           },
           {
             'type': 'tool-output-available',
             'toolCallId': 'call-json',
-            'toolName': 'search',
             'output': {'ok': true},
-            'outputKind': 'json',
             'preliminary': true,
-            'isDynamic': true,
-            'providerOptions': {
+            'dynamic': true,
+            'providerMetadata': {
               'vendor': {'requestId': 'r-1'},
             },
           },
@@ -182,13 +180,7 @@ void main() {
             'toolName': 'delete',
             'input': {'path': '/tmp/a'},
           },
-          {
-            'type': 'tool-output-denied',
-            'toolCallId': 'call-denied',
-            'toolName': 'delete',
-            'reason': 'Needs approval',
-            'approvalId': 'approval-9',
-          },
+          {'type': 'tool-output-denied', 'toolCallId': 'call-denied'},
           {
             'type': 'source-document',
             'sourceId': 'doc-1',
@@ -203,7 +195,7 @@ void main() {
             'type': 'reasoning-file',
             'url': 'data:application/octet-stream;base64,AAH/',
             'mediaType': 'application/octet-stream',
-            'providerOptions': {
+            'providerMetadata': {
               'vendor': {'encrypted': true},
             },
           },
@@ -240,8 +232,8 @@ void main() {
         (part) => part.callId == 'call-denied',
       );
       expect(denied.outputKind, 'execution_denied');
-      expect(denied.executionDeniedReason, 'Needs approval');
-      expect(denied.executionDeniedApprovalId, 'approval-9');
+      expect(denied.executionDeniedReason, 'Tool execution denied');
+      expect(denied.executionDeniedApprovalId, isNull);
       final doc = parts.whereType<DocumentSourcePart>().single;
       expect(doc.providerMetadata['vendor'], {'documentId': 'doc-7'});
       final reasoning = parts.whereType<ReasoningFilePart>().single;

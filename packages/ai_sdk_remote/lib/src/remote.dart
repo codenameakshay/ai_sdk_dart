@@ -259,9 +259,19 @@ List<Map<String, dynamic>> _toUiMessages(Conversation conversation) {
     for (final part in message.parts) {
       switch (part) {
         case TextPart():
-          parts.add({'type': 'text', 'text': part.text});
+          parts.add({
+            'type': 'text',
+            'text': part.text,
+            if (part.providerOptions.isNotEmpty)
+              'providerMetadata': part.providerOptions,
+          });
         case ReasoningPart():
-          parts.add({'type': 'reasoning', 'text': part.text});
+          parts.add({
+            'type': 'reasoning',
+            'text': part.text,
+            if (part.providerOptions.isNotEmpty)
+              'providerMetadata': part.providerOptions,
+          });
         case FilePart(:final uri, :final data, :final mimeType, :final name):
           final url = switch (data) {
             ConversationFileBytes(:final bytes) =>
@@ -279,6 +289,9 @@ List<Map<String, dynamic>> _toUiMessages(Conversation conversation) {
             'mediaType': mimeType,
           };
           if (name != null) file['filename'] = name;
+          if (part.providerOptions.isNotEmpty) {
+            file['providerMetadata'] = part.providerOptions;
+          }
           parts.add(file);
         case ReasoningFilePart(
           :final uri,
@@ -304,9 +317,38 @@ List<Map<String, dynamic>> _toUiMessages(Conversation conversation) {
           };
           if (name != null) file['filename'] = name;
           if (providerOptions.isNotEmpty) {
-            file['providerOptions'] = providerOptions;
+            file['providerMetadata'] = providerOptions;
           }
           parts.add(file);
+        case ImagePart(
+          :final uri,
+          :final data,
+          :final mimeType,
+          :final providerOptions,
+        ):
+          if (mimeType == null) {
+            throw UnsupportedError(
+              'Image part ${part.id} requires a MIME type for UI transport.',
+            );
+          }
+          final url = switch (data) {
+            ConversationFileBytes(:final bytes) =>
+              'data:$mimeType;base64,${base64Encode(bytes)}',
+            ConversationFileProviderReference() => throw UnsupportedError(
+              'Provider image references are not supported by UI transport.',
+            ),
+            null => uri!,
+          };
+          parts.add({
+            'type': 'file',
+            'url': url,
+            'mediaType': mimeType,
+            if (providerOptions.isNotEmpty) 'providerMetadata': providerOptions,
+          });
+        case RedactedReasoningPart():
+          throw UnsupportedError(
+            'Redacted reasoning is not supported by UI transport.',
+          );
         case SourcePart():
           parts.add({
             'type': 'source-url',
@@ -329,34 +371,44 @@ List<Map<String, dynamic>> _toUiMessages(Conversation conversation) {
         case ToolCallPart():
           final result = toolResults[part.callId];
           final approval = approvals[part.callId];
-          parts.add({
-            'type': 'tool-${part.name}',
+          final dynamicTool =
+              part.extra['dynamic'] == true || result?.isDynamic == true;
+          final denied =
+              approval?.status == ApprovalStatus.rejected ||
+              result?.outputKind == 'execution_denied';
+          if (denied && approval?.status != ApprovalStatus.rejected) {
+            throw UnsupportedError(
+              'Denied tool output ${part.callId} requires a rejected approval.',
+            );
+          }
+          if (result != null && result.isError && !denied) {
+            if (result.output is! String) {
+              throw UnsupportedError(
+                'UI transport supports tool errors with text output only.',
+              );
+            }
+          }
+          final state = result != null
+              ? denied
+                    ? 'output-denied'
+                    : (result.isError ? 'output-error' : 'output-available')
+              : approval != null
+              ? (approval.status == ApprovalStatus.pending
+                    ? 'approval-requested'
+                    : 'approval-responded')
+              : 'input-available';
+          final encoded = <String, dynamic>{
+            'type': dynamicTool ? 'dynamic-tool' : 'tool-${part.name}',
             'toolCallId': part.callId,
-            'state': result != null
-                ? (result.isError ? 'output-error' : 'output-available')
-                : approval != null
-                ? (approval.status == ApprovalStatus.pending
-                      ? 'approval-requested'
-                      : 'approval-responded')
-                : 'input-available',
-            if (result == null) 'input': part.arguments,
+            'state': state,
+            'input': part.arguments,
+            if (dynamicTool) 'toolName': result?.toolName ?? part.name,
             if (part.providerExecuted) 'providerExecuted': true,
             if (part.providerOptions.isNotEmpty)
-              'providerOptions': part.providerOptions,
-            if (result != null && result.isError) 'errorText': result.output,
-            if (result != null && !result.isError) 'output': result.output,
-            if (result != null && result.toolName != null)
-              'toolName': result.toolName,
-            if (result != null && result.outputKind != null)
-              'outputKind': result.outputKind,
+              'callProviderMetadata': part.providerOptions,
             if (result != null && result.preliminary) 'preliminary': true,
-            if (result != null && result.isDynamic) 'isDynamic': true,
             if (result != null && result.providerOptions.isNotEmpty)
-              'providerOptions': result.providerOptions,
-            if (result != null && result.executionDeniedReason != null)
-              'deniedReason': result.executionDeniedReason,
-            if (result != null && result.executionDeniedApprovalId != null)
-              'approvalId': result.executionDeniedApprovalId,
+              'resultProviderMetadata': result.providerOptions,
             if (approval != null)
               'approval': {
                 'id': approval.approvalId ?? approval.id,
@@ -365,7 +417,15 @@ List<Map<String, dynamic>> _toUiMessages(Conversation conversation) {
                 if (approval.extra['reason'] case final String reason)
                   'reason': reason,
               },
-          });
+          };
+          if (result != null && !denied) {
+            if (result.isError) {
+              encoded['errorText'] = result.output;
+            } else {
+              encoded['output'] = result.output;
+            }
+          }
+          parts.add(encoded);
         case ToolResultPart() || ApprovalPart():
           continue;
         case UnknownPart():
@@ -467,13 +527,13 @@ class _ConversationReducer {
       case 'text-delta':
         _textDelta(event, reasoning: false);
       case 'text-end':
-        _requireId(event, 'id');
+        _textMetadata(event, reasoning: false);
       case 'reasoning-start':
         _textStart(event, reasoning: true);
       case 'reasoning-delta':
         _textDelta(event, reasoning: true);
       case 'reasoning-end':
-        _requireId(event, 'id');
+        _textMetadata(event, reasoning: true);
       case 'tool-input-start':
         _toolStart(event);
       case 'tool-input-delta':
@@ -542,7 +602,17 @@ class _ConversationReducer {
     if (_partIndexes.containsKey(id)) return;
     _partIndexes[id] = _parts.length;
     _parts.add(
-      reasoning ? ReasoningPart(id: id, text: '') : TextPart(id: id, text: ''),
+      reasoning
+          ? ReasoningPart(
+              id: id,
+              text: '',
+              providerOptions: _optionalMap(e, 'providerMetadata'),
+            )
+          : TextPart(
+              id: id,
+              text: '',
+              providerOptions: _optionalMap(e, 'providerMetadata'),
+            ),
     );
   }
 
@@ -555,9 +625,54 @@ class _ConversationReducer {
     }
     final old = _parts[index];
     if (reasoning && old is ReasoningPart) {
-      _parts[index] = ReasoningPart(id: id, text: old.text + delta);
+      _parts[index] = ReasoningPart(
+        id: id,
+        text: old.text + delta,
+        providerOptions: _mergeProviderMetadata(
+          old.providerOptions,
+          _optionalMap(e, 'providerMetadata'),
+        ),
+      );
     } else if (!reasoning && old is TextPart) {
-      _parts[index] = TextPart(id: id, text: old.text + delta);
+      _parts[index] = TextPart(
+        id: id,
+        text: old.text + delta,
+        providerOptions: _mergeProviderMetadata(
+          old.providerOptions,
+          _optionalMap(e, 'providerMetadata'),
+        ),
+      );
+    } else {
+      throw RemoteProtocolException('Mismatched text boundary for $id');
+    }
+  }
+
+  void _textMetadata(Map<String, dynamic> e, {required bool reasoning}) {
+    final id = _string(e, 'id');
+    final index = _partIndexes[id];
+    if (index == null) {
+      throw RemoteProtocolException('Boundary without start for $id');
+    }
+    final old = _parts[index];
+    final providerOptions = _optionalMap(e, 'providerMetadata');
+    if (reasoning && old is ReasoningPart) {
+      _parts[index] = ReasoningPart(
+        id: id,
+        text: old.text,
+        providerOptions: _mergeProviderMetadata(
+          old.providerOptions,
+          providerOptions,
+        ),
+      );
+    } else if (!reasoning && old is TextPart) {
+      _parts[index] = TextPart(
+        id: id,
+        text: old.text,
+        providerOptions: _mergeProviderMetadata(
+          old.providerOptions,
+          providerOptions,
+        ),
+      );
     } else {
       throw RemoteProtocolException('Mismatched text boundary for $id');
     }
@@ -569,7 +684,15 @@ class _ConversationReducer {
     final name = _string(e, 'toolName');
     _toolIndexes[id] = _parts.length;
     _parts.add(
-      ToolCallPart(id: 'tool-$id', callId: id, name: name, arguments: {}),
+      ToolCallPart(
+        id: 'tool-$id',
+        callId: id,
+        name: name,
+        arguments: {},
+        providerExecuted: e['providerExecuted'] == true,
+        providerOptions: _optionalMap(e, 'providerMetadata'),
+        extra: {if (e['dynamic'] == true) 'dynamic': true},
+      ),
     );
   }
 
@@ -585,13 +708,23 @@ class _ConversationReducer {
     final input = error ? e['input'] : e['input'];
     final args = _map(input, 'input');
     final index = _toolIndexes[callId];
+    final previous = index == null ? null : _parts[index];
+    final previousCall = previous is ToolCallPart ? previous : null;
+    final dynamicTool =
+        e['dynamic'] == true || (previousCall?.extra['dynamic'] == true);
     final part = ToolCallPart(
       id: 'tool-$callId',
       callId: callId,
       name: name,
       arguments: args,
-      providerExecuted: e['providerExecuted'] == true,
-      providerOptions: _optionalMap(e, 'providerOptions'),
+      providerExecuted:
+          e['providerExecuted'] == true ||
+          (previousCall?.providerExecuted ?? false),
+      providerOptions: _mergeProviderMetadata(
+        previousCall?.providerOptions ?? const {},
+        _optionalMap(e, 'providerMetadata'),
+      ),
+      extra: {if (dynamicTool) 'dynamic': true},
     );
     if (index == null) {
       _toolIndexes[callId] = _parts.length;
@@ -650,6 +783,7 @@ class _ConversationReducer {
           ? ApprovalStatus.approved
           : ApprovalStatus.rejected,
       approvalId: approvalId,
+      metadata: _optionalMap(e, 'providerMetadata'),
       extra: {if (e['reason'] case final String reason) 'reason': reason},
     );
     _status = ConversationMessageStatus.streaming;
@@ -664,20 +798,23 @@ class _ConversationReducer {
       ToolResultPart(
         id: 'result-$callId',
         callId: callId,
-        output: error ? _freeze(e['errorText']) : _freeze(e['output']),
+        output: error ? _string(e, 'errorText') : _freeze(e['output']),
         isError: error,
         toolName: e['toolName'] as String?,
         outputKind:
             e['outputKind'] as String? ?? (error ? 'error_text' : 'json'),
         preliminary: e['preliminary'] == true,
-        isDynamic: e['isDynamic'] == true,
-        providerOptions: _optionalMap(e, 'providerOptions'),
+        isDynamic: e['dynamic'] == true,
+        providerOptions: _optionalMap(e, 'providerMetadata'),
       ),
     );
   }
 
   void _toolOutputDenied(Map<String, dynamic> e) {
     final callId = _string(e, 'toolCallId');
+    if (!_toolIndexes.containsKey(callId)) {
+      throw RemoteProtocolException('Tool output without input $callId');
+    }
     _addPart(
       ToolResultPart(
         id: 'denied-$callId',
@@ -690,8 +827,8 @@ class _ConversationReducer {
             e['reason'] as String? ?? 'Tool execution denied',
         executionDeniedApprovalId: e['approvalId'] as String?,
         preliminary: e['preliminary'] == true,
-        isDynamic: e['isDynamic'] == true,
-        providerOptions: _optionalMap(e, 'providerOptions'),
+        isDynamic: e['dynamic'] == true,
+        providerOptions: _optionalMap(e, 'providerMetadata'),
       ),
     );
   }
@@ -727,7 +864,7 @@ class _ConversationReducer {
           data: data,
           mimeType: _string(e, 'mediaType'),
           name: e['filename'] as String?,
-          providerOptions: _optionalMap(e, 'providerOptions'),
+          providerOptions: _optionalMap(e, 'providerMetadata'),
         ),
       );
     } else {
@@ -738,6 +875,7 @@ class _ConversationReducer {
           data: data,
           mimeType: _string(e, 'mediaType'),
           name: e['filename'] as String?,
+          providerOptions: _optionalMap(e, 'providerMetadata'),
         ),
       );
     }
@@ -782,6 +920,39 @@ Map<String, dynamic> _optionalMap(Map<String, dynamic> e, String key) {
   final value = e[key];
   if (value == null) return const {};
   return _map(value, key);
+}
+
+Map<String, dynamic> _mergeProviderMetadata(
+  Map<String, dynamic> previous,
+  Map<String, dynamic> next,
+) {
+  final merged = <String, dynamic>{...previous};
+  for (final entry in next.entries) {
+    final previousValue = merged[entry.key];
+    final nextValue = entry.value;
+    if (previousValue is Map && nextValue is Map) {
+      merged[entry.key] = _mergeMetadataObjects(previousValue, nextValue);
+    } else {
+      merged[entry.key] = nextValue;
+    }
+  }
+  return merged;
+}
+
+Map<String, dynamic> _mergeMetadataObjects(Map previous, Map next) {
+  final merged = <String, dynamic>{};
+  for (final entry in previous.entries) {
+    if (entry.key is String) merged[entry.key as String] = entry.value;
+  }
+  for (final entry in next.entries) {
+    if (entry.key is! String) continue;
+    final previousValue = merged[entry.key];
+    final nextValue = entry.value;
+    merged[entry.key as String] = previousValue is Map && nextValue is Map
+        ? _mergeMetadataObjects(previousValue, nextValue)
+        : nextValue;
+  }
+  return merged;
 }
 
 ConversationFileData? _fileData(Object? value) {
@@ -848,7 +1019,6 @@ String _stringAllowEmpty(Map<String, dynamic> e, String key) {
   return value;
 }
 
-void _requireId(Map<String, dynamic> e, String key) => _string(e, key);
 Map<String, dynamic> _map(Object? value, String key) {
   if (value is! Map) throw RemoteProtocolException('Expected object $key');
   final result = <String, dynamic>{};

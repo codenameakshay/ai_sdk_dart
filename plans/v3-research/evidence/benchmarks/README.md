@@ -6,11 +6,11 @@ The current benchmark compares final-only object parsing with repaired increment
 
 | Object payload | Final-only p50 | Incremental p50 | Incremental parse attempts |
 | --- | ---: | ---: | ---: |
-| 1 KiB | 0.247 ms | 1.063 ms | 8 |
-| 64 KiB | 4.891 ms | 9.774 ms | 14 |
-| 1 MiB | 93.734 ms | 196.141 ms | 18 |
+| 1 KiB | 0.134 ms | 0.600 ms | 8 |
+| 64 KiB | 3.924 ms | 7.566 ms | 14 |
+| 1 MiB | 63.066 ms | 126.211 ms | 18 |
 
-The 1 MiB incremental path costs about 2.09 times the final-only median CPU time in this fixture. In exchange, it exposes immutable previews before closure. Checkpoints grow geometrically, so parse attempts do not grow with every token. This comparison is not a historical release, network, allocation-byte, or Flutter frame result. The older Linux measurements below use different source and hardware; do not compare their absolute times to this table.
+The 1 MiB incremental path costs about twice the final-only median CPU time in this fixture. In exchange, it exposes immutable previews before closure. Checkpoints grow geometrically, so parse attempts do not grow with every token. This comparison is not a historical release, network, allocation-byte, or Flutter frame result. The older Linux measurements below use different source and hardware; do not compare their absolute times to this table.
 
 Command: `make benchmark`. Runtime: Dart 3.12.2, Linux aarch64. Raw samples and source hashes: [JSON](structured-stream-30-runs.json).
 

@@ -333,6 +333,9 @@ String? _repairIncompleteJson(String text) {
       ? text.substring(start)
       : text.substring(start).trimRight();
   if (inString) {
+    if (RegExp(r'\\u[dD][89aAbB][0-9a-fA-F]{2}$').hasMatch(prefix)) {
+      return null;
+    }
     prefix += '"';
   } else if (prefix.endsWith(',')) {
     prefix = prefix.substring(0, prefix.length - 1);

@@ -260,6 +260,40 @@ void main() {
       },
     );
 
+    test(
+      'split Unicode escape does not expose an unmatched surrogate',
+      () async {
+        final result = await streamObject<Map<String, dynamic>>(
+          model: deltaStream(['{"text":"abcdefghijklmno\\uD83D', '\\uDE00"}']),
+          schema: objectSchema(),
+        );
+        final partials = await result.partialObjectStream.toList();
+        bool hasUnpairedSurrogate(String text) {
+          final units = text.codeUnits;
+          for (var i = 0; i < units.length; i++) {
+            final unit = units[i];
+            if (unit >= 0xD800 && unit <= 0xDBFF) {
+              if (i + 1 >= units.length ||
+                  units[i + 1] < 0xDC00 ||
+                  units[i + 1] > 0xDFFF) {
+                return true;
+              }
+              i++;
+            } else if (unit >= 0xDC00 && unit <= 0xDFFF) {
+              return true;
+            }
+          }
+          return false;
+        }
+
+        expect(
+          partials.any((part) => hasUnpairedSurrogate(part['text'] as String)),
+          isFalse,
+        );
+        expect((await result.object)['text'], 'abcdefghijklmno😀');
+      },
+    );
+
     test('repaired previews cannot validate an invalid final object', () async {
       final result = await streamObject<Map<String, dynamic>>(
         model: deltaStream(['{"text":"unfinished value']),

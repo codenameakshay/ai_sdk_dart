@@ -128,6 +128,7 @@ jobs:
             2>&1 | tee "$artifact_root/build.log"
           app_path=build/ios/iphonesimulator/Runner.app
           bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_path/Info.plist")"
+          xcrun simctl uninstall "$SIMULATOR_UDID" "$bundle_id" 2>/dev/null || true
           xcrun simctl install "$SIMULATOR_UDID" "$app_path"
           for run_number in 1 2; do
             find . -maxdepth 1 -name 'conversation-*.png' -delete
@@ -162,7 +163,15 @@ jobs:
             find . -maxdepth 1 -name 'conversation-*.png' -exec cp {} "$artifact_root/run-$run_number/" \;
             test "$drive_status" -eq 0
             screenshot_count="$(find . -maxdepth 1 -name 'conversation-*.png' | wc -l | tr -d ' ')"
-            test "$screenshot_count" -ge 7
+            test "$screenshot_count" -ge 8
+            test -f conversation-local-retry.png
+            if test "$run_number" -eq 1; then
+              test -f conversation-persisted-write.png
+              test ! -f conversation-persisted-restore.png
+            else
+              test -f conversation-persisted-restore.png
+              test ! -f conversation-persisted-write.png
+            fi
             find . -maxdepth 1 -name 'conversation-*.png' -exec mv {} "$artifact_root/run-$run_number/" \;
           done
 

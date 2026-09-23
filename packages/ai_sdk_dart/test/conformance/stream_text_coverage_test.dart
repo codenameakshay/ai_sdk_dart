@@ -623,40 +623,45 @@ void main() {
       expect(await result.files, hasLength(1));
     });
 
-    test('emits document, reasoning file, and opaque events and chunks', () async {
-      const document = LanguageModelV4DocumentSourcePart(
-        id: 'd1',
-        mediaType: 'application/pdf',
-        title: 'Document',
-      );
-      const reasoningFile = LanguageModelV4ReasoningFilePart(
-        mediaType: 'text/plain',
-        data: DataContentBase64('dGhpbmtpbmc='),
-      );
-      const opaque = LanguageModelV4OpaquePart(
-        provider: 'fake',
-        raw: {'kind': 'opaque'},
-      );
-      final chunks = <StreamTextChunk>[];
-      final result = await streamText(
-        model: FakeStreamModel([
-          const StreamPartDocumentSource(source: document),
-          const StreamPartReasoningFile(file: reasoningFile),
-          const StreamPartOpaque(opaque: opaque),
-          const StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
-        ]),
-        prompt: 'go',
-        onChunk: chunks.add,
-      );
+    test(
+      'emits document, reasoning file, and opaque events and chunks',
+      () async {
+        const document = LanguageModelV4DocumentSourcePart(
+          id: 'd1',
+          mediaType: 'application/pdf',
+          title: 'Document',
+        );
+        const reasoningFile = LanguageModelV4ReasoningFilePart(
+          mediaType: 'text/plain',
+          data: DataContentBase64('dGhpbmtpbmc='),
+        );
+        const opaque = LanguageModelV4OpaquePart(
+          provider: 'fake',
+          raw: {'kind': 'opaque'},
+        );
+        final chunks = <StreamTextChunk>[];
+        final result = await streamText(
+          model: FakeStreamModel([
+            const StreamPartDocumentSource(source: document),
+            const StreamPartReasoningFile(file: reasoningFile),
+            const StreamPartOpaque(opaque: opaque),
+            const StreamPartFinish(
+              finishReason: LanguageModelV4FinishReason.stop,
+            ),
+          ]),
+          prompt: 'go',
+          onChunk: chunks.add,
+        );
 
-      final events = await result.fullStream.toList();
-      expect(events.whereType<StreamTextDocumentSourceEvent>(), hasLength(1));
-      expect(events.whereType<StreamTextReasoningFileEvent>(), hasLength(1));
-      expect(events.whereType<StreamTextOpaqueEvent>(), hasLength(1));
-      expect(chunks.whereType<StreamTextDocumentSourceChunk>(), hasLength(1));
-      expect(chunks.whereType<StreamTextReasoningFileChunk>(), hasLength(1));
-      expect(chunks.whereType<StreamTextRawChunk>(), isEmpty);
-    });
+        final events = await result.fullStream.toList();
+        expect(events.whereType<StreamTextDocumentSourceEvent>(), hasLength(1));
+        expect(events.whereType<StreamTextReasoningFileEvent>(), hasLength(1));
+        expect(events.whereType<StreamTextOpaqueEvent>(), hasLength(1));
+        expect(chunks.whereType<StreamTextDocumentSourceChunk>(), hasLength(1));
+        expect(chunks.whereType<StreamTextReasoningFileChunk>(), hasLength(1));
+        expect(chunks.whereType<StreamTextRawChunk>(), isEmpty);
+      },
+    );
   });
 
   group('streamText retry and timeout', () {

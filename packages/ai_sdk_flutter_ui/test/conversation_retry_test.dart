@@ -430,10 +430,10 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(adapter.status, ChatStatus.submitted);
 
-    backend.release.complete();
-    await sending;
-    await Future<void>.delayed(Duration.zero);
-    expect(adapter.status, ChatStatus.streaming);
+      backend.release.complete();
+      await sending;
+      await Future<void>.delayed(Duration.zero);
+      expect(adapter.status, ChatStatus.streaming);
       adapter.dispose();
       await conversation.dispose();
     },

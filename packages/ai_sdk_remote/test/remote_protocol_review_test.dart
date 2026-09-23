@@ -166,7 +166,11 @@ void main() {
     final part = (message['parts'] as List).single as Map;
     expect(part['state'], 'output-denied');
     expect(part['input'], {'path': '/tmp/review'});
-    expect(part['approval'], {'id': 'approval-1', 'approved': false});
+    expect(part['approval'], {
+      'id': 'approval-1',
+      'approved': false,
+      'reason': 'user denied',
+    });
     expect(part.containsKey('output'), isFalse);
     expect(part.containsKey('errorText'), isFalse);
     expect(part.containsKey('outputKind'), isFalse);
@@ -395,11 +399,14 @@ void main() {
           return _response(
             'data: {"type":"start","messageId":"assistant-1"}\n\n'
             'data: {"type":"text-start","id":"text-1",'
-            '"providerMetadata":{"vendor":{"start":true,"keep":true}}}\n\n'
+            '"providerMetadata":{"vendor":{"start":true,"keep":true,'
+            '"nested":{"start":true}}}}\n\n'
             'data: {"type":"text-delta","id":"text-1","delta":"Hi",'
-            '"providerMetadata":{"vendor":{"delta":true}}}\n\n'
+            '"providerMetadata":{"vendor":{"delta":true,'
+            '"nested":{"delta":true}}}}\n\n'
             'data: {"type":"text-end","id":"text-1",'
-            '"providerMetadata":{"vendor":{"end":true}}}\n\n'
+            '"providerMetadata":{"vendor":{"end":true,'
+            '"nested":{"end":true}}}}\n\n'
             'data: {"type":"reasoning-start","id":"reasoning-1",'
             '"providerMetadata":{"vendor":{"start":true}}}\n\n'
             'data: {"type":"reasoning-delta","id":"reasoning-1",'
@@ -450,7 +457,13 @@ void main() {
           .whereType<ToolResultPart>()
           .single;
       expect(text.providerOptions, {
-        'vendor': {'start': true, 'keep': true, 'delta': true, 'end': true},
+        'vendor': {
+          'start': true,
+          'keep': true,
+          'delta': true,
+          'end': true,
+          'nested': {'start': true, 'delta': true, 'end': true},
+        },
       });
       expect(reasoning.providerOptions, {
         'vendor': {'start': true, 'delta': true, 'end': true},
@@ -470,6 +483,7 @@ void main() {
         'keep': true,
         'delta': true,
         'end': true,
+        'nested': {'start': true, 'delta': true, 'end': true},
       });
       expect(parts[1]['providerMetadata']['vendor'], {
         'start': true,
@@ -518,6 +532,9 @@ void main() {
           '"filename":"document.txt"}\n\n'
           'data: {"type":"file","mediaType":"image/png",'
           '"data":{"kind":"bytes","base64":"AQI="},"filename":"a.png"}\n\n'
+          'data: {"type":"file","mediaType":"text/plain",'
+          '"data":{"kind":"provider_reference","namespace":"vendor",'
+          '"id":"file-1"}}\n\n'
           'data: {"type":"reasoning-file","mediaType":"text/plain",'
           '"url":"data:text/plain,hello","filename":"trace.txt"}\n\n'
           'data: {"type":"message-metadata","messageMetadata":'
@@ -790,6 +807,8 @@ void main() {
       '"toolName":"search","input":{}}\n\n'
       'data: {"type":"tool-approval-request",'
       '"approvalId":"approval-1","toolCallId":"call-1"}\n\n'
+      'data: {"type":"tool-approval-response",'
+      '"approvalId":"approval-1","approved":true}\n\n'
       'data: {"type":"reset-step"}\n\n'
       'data: {"type":"tool-approval-response",'
       '"approvalId":"approval-1","approved":true}\n\n',
@@ -829,6 +848,133 @@ void main() {
       isA<RemoteProtocolException>(),
     );
   });
+
+  test('rejects unsupported outgoing history states', () async {
+    await _expectHistoryError(
+      Conversation(
+        id: 'c1',
+        messages: [
+          ConversationMessage(
+            id: 'user-1',
+            role: ConversationRole.user,
+            parts: [
+              FilePart(
+                id: 'file-1',
+                data: ConversationFileProviderReference(
+                  namespace: 'vendor',
+                  id: 'opaque',
+                ),
+                mimeType: 'text/plain',
+              ),
+            ],
+          ),
+        ],
+      ),
+      isA<UnsupportedError>(),
+    );
+    await _expectHistoryError(
+      Conversation(
+        id: 'c1',
+        messages: [
+          ConversationMessage(
+            id: 'user-1',
+            role: ConversationRole.user,
+            parts: [
+              ImagePart(
+                id: 'image-1',
+                data: ConversationFileProviderReference(
+                  namespace: 'vendor',
+                  id: 'opaque',
+                ),
+                mimeType: 'image/png',
+              ),
+            ],
+          ),
+        ],
+      ),
+      isA<UnsupportedError>(),
+    );
+    await _expectHistoryError(
+      Conversation(
+        id: 'c1',
+        messages: [
+          ConversationMessage(
+            id: 'assistant-1',
+            role: ConversationRole.assistant,
+            parts: [
+              ImagePart(
+                id: 'image-1',
+                data: ConversationFileBytes(Uint8List.fromList([1])),
+                mimeType: null,
+              ),
+            ],
+          ),
+        ],
+      ),
+      isA<UnsupportedError>(),
+    );
+    await _expectHistoryError(
+      Conversation(
+        id: 'c1',
+        messages: [
+          ConversationMessage(
+            id: 'assistant-1',
+            role: ConversationRole.assistant,
+            parts: [
+              ToolCallPart(
+                id: 'call-1',
+                callId: 'call-1',
+                name: 'delete',
+                arguments: {'path': '/tmp/a'},
+              ),
+              ToolResultPart(
+                id: 'result-1',
+                callId: 'call-1',
+                output: null,
+                isError: true,
+                outputKind: 'execution_denied',
+              ),
+            ],
+          ),
+        ],
+      ),
+      isA<UnsupportedError>(),
+    );
+  });
+
+  test('rejects truncated and mismatched text streams', () async {
+    await _expectSendError(
+      'data: {"type":"start"}\n',
+      isA<RemoteProtocolException>(),
+    );
+    await _expectSendError(
+      'data: {"type":"start"}\n\n'
+      'data: {"type":"reasoning-start","id":"reasoning-1"}\n\n'
+      'data: {"type":"text-end","id":"reasoning-1"}\n\n',
+      isA<RemoteProtocolException>(),
+    );
+    await _expectSendError(
+      'data: {"type":"start"}\n\n'
+      'data: {"type":"file","mediaType":"text/plain",'
+      '"url":"data:text/plain;base64,%%%"}\n\n',
+      isA<RemoteProtocolException>(),
+    );
+  });
+
+  test('exposes cancellation and protocol exception descriptions', () async {
+    final token = RemoteCancellationToken();
+    expect(token.isCancelled, isFalse);
+    final cancelled = token.whenCancelled;
+    token.cancel();
+    await cancelled;
+    expect(token.isCancelled, isTrue);
+    expect(const RemoteProtocolException('bad').toString(), contains('bad'));
+    expect(
+      const RemoteCancelledException().toString(),
+      'RemoteCancelledException',
+    );
+    await token.dispose();
+  });
 }
 
 String? _pinnedEndpoint() =>
@@ -854,6 +1000,29 @@ Future<void> _expectSendError(String body, Matcher matcher) async {
       transport.send(Conversation(id: 'c1', messages: const [])).toList(),
       throwsA(matcher),
     );
+  } finally {
+    transport.dispose();
+    client.close();
+  }
+}
+
+Future<void> _expectHistoryError(
+  Conversation conversation,
+  Matcher matcher,
+) async {
+  final client = MockClient(
+    (request) async => _response(
+      'data: {"type":"start"}\n\n'
+      'data: {"type":"finish"}\n\n'
+      'data: [DONE]\n\n',
+    ),
+  );
+  final transport = RemoteConversationTransport(
+    endpoint: Uri.parse('https://backend.test/chat'),
+    client: client,
+  );
+  try {
+    await expectLater(transport.send(conversation).toList(), throwsA(matcher));
   } finally {
     transport.dispose();
     client.close();
@@ -936,6 +1105,7 @@ Conversation _deniedToolHistory() => Conversation(
           callId: 'call-1',
           approvalId: 'approval-1',
           status: ApprovalStatus.rejected,
+          extra: {'reason': 'user denied'},
         ),
         ToolResultPart(
           id: 'result-part',

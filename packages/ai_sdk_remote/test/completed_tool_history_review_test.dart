@@ -43,7 +43,9 @@ void main() {
       markTestSkipped('Set AI_SDK_REMOTE_REFERENCE_URL for the pinned server');
       return;
     }
-    final transport = RemoteConversationTransport(endpoint: Uri.parse(endpoint));
+    final transport = RemoteConversationTransport(
+      endpoint: Uri.parse(endpoint),
+    );
     addTearDown(transport.dispose);
     final snapshots = await transport.send(_history()).toList();
     expect(snapshots, isNotEmpty);

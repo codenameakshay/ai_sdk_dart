@@ -258,6 +258,36 @@ void main() {
             id: 'assistant-1',
             role: ConversationRole.assistant,
             parts: [
+              TextPart(
+                id: 'text-part',
+                text: 'visible answer',
+                providerOptions: {
+                  'vendor': {'segment': 'answer'},
+                },
+              ),
+              ReasoningPart(
+                id: 'reasoning-part',
+                text: 'private trace',
+                signature: 'sig-1',
+                providerOptions: {
+                  'vendor': {'encrypted': true},
+                },
+              ),
+              ImagePart(
+                id: 'image-part',
+                data: ConversationFileBytes(Uint8List.fromList([9, 8, 7])),
+                mimeType: 'image/png',
+                providerOptions: {
+                  'vendor': {'asset': 'image-1'},
+                },
+              ),
+              RedactedReasoningPart(
+                id: 'redacted-reasoning',
+                data: Uint8List.fromList([4, 5, 6]),
+                providerOptions: {
+                  'vendor': {'redacted': true},
+                },
+              ),
               ToolCallPart(
                 id: 'call-part',
                 callId: 'call-1',
@@ -333,16 +363,11 @@ void main() {
       final encoded = ConversationCodec.encode(conversation);
       final restored = ConversationCodec.decode(encoded);
       expect(restored, conversation);
-      expect(
-        (restored.messages.single.parts[1] as ReasoningFilePart).data,
-        isA<ConversationFileBytes>(),
-      );
-      expect(
-        ((restored.messages.single.parts[1] as ReasoningFilePart).data!
-                as ConversationFileBytes)
-            .bytes,
-        [0, 1, 255],
-      );
+      final reasoningFile = restored.messages.single.parts
+          .whereType<ReasoningFilePart>()
+          .single;
+      expect(reasoningFile.data, isA<ConversationFileBytes>());
+      expect((reasoningFile.data! as ConversationFileBytes).bytes, [0, 1, 255]);
       final denied = restored.messages.single.parts.last as ToolResultPart;
       expect(denied.executionDeniedReason, 'Needs approval');
       expect(denied.executionDeniedApprovalId, 'approval-1');

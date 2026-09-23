@@ -196,11 +196,14 @@ class TextPart extends ConversationPart {
     required super.id,
     required this.text,
     Map<String, dynamic> metadata = const {},
+    Map<String, dynamic> providerOptions = const {},
     super.extra,
   }) : metadata = _freezeMap(metadata),
+       providerOptions = _freezeMap(providerOptions),
        super(type: 'text');
   final String text;
   final Map<String, dynamic> metadata;
+  final Map<String, dynamic> providerOptions;
   @override
   Map<String, dynamic> toJson() => {
     ...extra,
@@ -208,6 +211,7 @@ class TextPart extends ConversationPart {
     'type': type,
     'text': text,
     if (metadata.isNotEmpty) 'metadata': metadata,
+    if (providerOptions.isNotEmpty) 'providerOptions': providerOptions,
   };
 }
 
@@ -217,12 +221,15 @@ class ReasoningPart extends ConversationPart {
     required this.text,
     this.signature,
     Map<String, dynamic> metadata = const {},
+    Map<String, dynamic> providerOptions = const {},
     super.extra,
   }) : metadata = _freezeMap(metadata),
+       providerOptions = _freezeMap(providerOptions),
        super(type: 'reasoning');
   final String text;
   final String? signature;
   final Map<String, dynamic> metadata;
+  final Map<String, dynamic> providerOptions;
   @override
   Map<String, dynamic> toJson() => {
     ...extra,
@@ -231,6 +238,78 @@ class ReasoningPart extends ConversationPart {
     'text': text,
     if (signature != null) 'signature': signature,
     if (metadata.isNotEmpty) 'metadata': metadata,
+    if (providerOptions.isNotEmpty) 'providerOptions': providerOptions,
+  };
+}
+
+/// An image content part retained for provider replay.
+class ImagePart extends ConversationPart {
+  ImagePart({
+    required super.id,
+    this.uri,
+    this.mimeType,
+    this.data,
+    Map<String, dynamic> providerOptions = const {},
+    super.extra,
+  }) : providerOptions = _freezeMap(providerOptions),
+       super(type: 'image') {
+    if (uri != null && data != null) {
+      throw const ConversationValidationException(
+        'Image parts cannot contain both a URI and typed data',
+      );
+    }
+    if (uri == null && data == null) {
+      throw const ConversationValidationException(
+        'Image parts require a URI or typed data',
+      );
+    }
+  }
+
+  final String? uri;
+  final String? mimeType;
+  final ConversationFileData? data;
+  final Map<String, dynamic> providerOptions;
+
+  @override
+  Map<String, dynamic> toJson() => {
+    ...extra,
+    'id': id,
+    'type': type,
+    if (uri != null) 'uri': uri,
+    if (mimeType != null) 'mimeType': mimeType,
+    if (data case final ConversationFileBytes bytes)
+      'data': {'kind': 'bytes', 'base64': base64Encode(bytes.bytes)},
+    if (data case final ConversationFileProviderReference reference)
+      'data': {
+        'kind': 'provider_reference',
+        'namespace': reference.namespace,
+        'id': reference.id,
+      },
+    if (providerOptions.isNotEmpty) 'providerOptions': providerOptions,
+  };
+}
+
+/// Redacted reasoning bytes retained for provider replay.
+class RedactedReasoningPart extends ConversationPart {
+  RedactedReasoningPart({
+    required super.id,
+    required Uint8List data,
+    Map<String, dynamic> providerOptions = const {},
+    super.extra,
+  }) : data = Uint8List.fromList(data).asUnmodifiableView(),
+       providerOptions = _freezeMap(providerOptions),
+       super(type: 'redacted_reasoning');
+
+  final Uint8List data;
+  final Map<String, dynamic> providerOptions;
+
+  @override
+  Map<String, dynamic> toJson() => {
+    ...extra,
+    'id': id,
+    'type': type,
+    'data': {'kind': 'bytes', 'base64': base64Encode(data)},
+    if (providerOptions.isNotEmpty) 'providerOptions': providerOptions,
   };
 }
 
@@ -317,8 +396,10 @@ class FilePart extends ConversationPart {
     this.name,
     this.data,
     Map<String, dynamic> metadata = const {},
+    Map<String, dynamic> providerOptions = const {},
     super.extra,
   }) : metadata = _freezeMap(metadata),
+       providerOptions = _freezeMap(providerOptions),
        super(type: 'file') {
     if (uri != null && data != null) {
       throw const ConversationValidationException(
@@ -336,6 +417,7 @@ class FilePart extends ConversationPart {
   final String? name;
   final ConversationFileData? data;
   final Map<String, dynamic> metadata;
+  final Map<String, dynamic> providerOptions;
   @override
   Map<String, dynamic> toJson() => {
     ...extra,
@@ -353,6 +435,7 @@ class FilePart extends ConversationPart {
         'id': reference.id,
       },
     if (metadata.isNotEmpty) 'metadata': metadata,
+    if (providerOptions.isNotEmpty) 'providerOptions': providerOptions,
   };
 }
 
@@ -633,7 +716,14 @@ class ConversationCodec {
           id: id,
           text: _text(json, 'text'),
           metadata: _optionalMap(json, 'metadata'),
-          extra: _extras(json, {'id', 'type', 'text', 'metadata'}),
+          providerOptions: _optionalMap(json, 'providerOptions'),
+          extra: _extras(json, {
+            'id',
+            'type',
+            'text',
+            'metadata',
+            'providerOptions',
+          }),
         );
       case 'reasoning':
         return ReasoningPart(
@@ -641,7 +731,38 @@ class ConversationCodec {
           text: _text(json, 'text'),
           signature: _optionalString(json, 'signature'),
           metadata: _optionalMap(json, 'metadata'),
-          extra: _extras(json, {'id', 'type', 'text', 'signature', 'metadata'}),
+          providerOptions: _optionalMap(json, 'providerOptions'),
+          extra: _extras(json, {
+            'id',
+            'type',
+            'text',
+            'signature',
+            'metadata',
+            'providerOptions',
+          }),
+        );
+      case 'image':
+        return ImagePart(
+          id: id,
+          uri: _optionalString(json, 'uri'),
+          mimeType: _optionalString(json, 'mimeType'),
+          data: _decodeFileData(json['data'], 'Image'),
+          providerOptions: _optionalMap(json, 'providerOptions'),
+          extra: _extras(json, {
+            'id',
+            'type',
+            'uri',
+            'mimeType',
+            'data',
+            'providerOptions',
+          }),
+        );
+      case 'redacted_reasoning':
+        return RedactedReasoningPart(
+          id: id,
+          data: _decodeBytes(json['data'], 'Redacted reasoning'),
+          providerOptions: _optionalMap(json, 'providerOptions'),
+          extra: _extras(json, {'id', 'type', 'data', 'providerOptions'}),
         );
       case 'file':
         return FilePart(
@@ -651,6 +772,7 @@ class ConversationCodec {
           name: _optionalString(json, 'name'),
           data: _decodeFileData(json['data'], 'File'),
           metadata: _optionalMap(json, 'metadata'),
+          providerOptions: _optionalMap(json, 'providerOptions'),
           extra: _extras(json, {
             'id',
             'type',
@@ -659,6 +781,7 @@ class ConversationCodec {
             'name',
             'data',
             'metadata',
+            'providerOptions',
           }),
         );
       case 'reasoning_file':
@@ -867,6 +990,23 @@ ConversationFileData? _decodeFileData(Object? wireData, String label) {
       throw ConversationValidationException(
         'Unsupported $label data kind ${wireData['kind']}',
       );
+  }
+}
+
+Uint8List _decodeBytes(Object? wireData, String label) {
+  if (wireData is! Map || wireData['kind'] != 'bytes') {
+    throw ConversationValidationException('$label data must be byte data');
+  }
+  final encoded = wireData['base64'];
+  if (encoded is! String) {
+    throw ConversationValidationException('$label byte data requires base64');
+  }
+  try {
+    return Uint8List.fromList(base64Decode(encoded));
+  } on FormatException {
+    throw ConversationValidationException(
+      '$label byte data has invalid base64',
+    );
   }
 }
 

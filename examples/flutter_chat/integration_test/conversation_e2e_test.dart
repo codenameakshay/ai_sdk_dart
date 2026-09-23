@@ -36,6 +36,10 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('tool-approval-approve')));
     await _waitFor(tester, find.text('Tool result: deleted /tmp/example'));
+    await _waitForSingle(
+      tester,
+      find.byKey(const ValueKey('chat-composer-send')),
+    );
     expect(find.text('Tool result: deleted /tmp/example'), findsOneWidget);
     expect(find.byKey(const ValueKey('tool-approval-approve')), findsNothing);
     expect(
@@ -50,7 +54,7 @@ void main() {
           .onPressed,
       isNotNull,
     );
-    expect(find.bySemanticsLabel('Assistant message'), findsOneWidget);
+    expect(find.bySemanticsLabel(RegExp('Assistant message')), findsOneWidget);
     await binding.takeScreenshot('conversation-local-approved');
   });
 
@@ -64,6 +68,10 @@ void main() {
     await _waitFor(tester, find.byKey(const ValueKey('tool-approval-deny')));
     await tester.tap(find.byKey(const ValueKey('tool-approval-deny')));
     await _waitFor(tester, find.text('Tool denied; no local action ran.'));
+    await _waitForSingle(
+      tester,
+      find.byKey(const ValueKey('chat-composer-send')),
+    );
 
     expect(find.text('Tool denied; no local action ran.'), findsOneWidget);
     expect(find.byKey(const ValueKey('tool-approval-deny')), findsNothing);
@@ -79,7 +87,7 @@ void main() {
           .onPressed,
       isNotNull,
     );
-    expect(find.bySemanticsLabel('Assistant message'), findsOneWidget);
+    expect(find.bySemanticsLabel(RegExp('Assistant message')), findsOneWidget);
     await binding.takeScreenshot('conversation-local-denied');
   });
 
@@ -91,9 +99,13 @@ void main() {
 
     await _send(tester, 'Say hello.');
     await _waitFor(tester, find.text('Hello from the pinned AI SDK backend.'));
+    await _waitForSingle(
+      tester,
+      find.byKey(const ValueKey('chat-composer-send')),
+    );
 
     expect(find.text('Hello from the pinned AI SDK backend.'), findsOneWidget);
-    expect(find.bySemanticsLabel('Assistant message'), findsOneWidget);
+    expect(find.bySemanticsLabel(RegExp('Assistant message')), findsOneWidget);
     expect(
       tester
           .widget<TextField>(find.byKey(const ValueKey('chat-composer-field')))
@@ -117,7 +129,13 @@ void main() {
 
     await _send(tester, 'I need an approval before deleting anything.');
     await _waitFor(tester, find.byKey(const ValueKey('tool-approval-approve')));
-    expect(find.text('delete'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(ToolApprovalCard),
+        matching: find.text('delete'),
+      ),
+      findsOneWidget,
+    );
     await tester.tap(find.byKey(const ValueKey('tool-approval-approve')));
     await _waitFor(
       tester,
@@ -128,7 +146,11 @@ void main() {
       find.text('The scripted tool call was approved and resumed.'),
       findsOneWidget,
     );
-    expect(find.bySemanticsLabel('Assistant message'), findsOneWidget);
+    await _waitForSingle(
+      tester,
+      find.byKey(const ValueKey('chat-composer-send')),
+    );
+    expect(find.bySemanticsLabel(RegExp('Assistant message')), findsOneWidget);
     expect(
       tester
           .widget<TextField>(find.byKey(const ValueKey('chat-composer-field')))
@@ -155,12 +177,16 @@ void main() {
       tester,
       find.text('The scripted tool call was denied and resumed safely.'),
     );
+    await _waitForSingle(
+      tester,
+      find.byKey(const ValueKey('chat-composer-send')),
+    );
 
     expect(
       find.text('The scripted tool call was denied and resumed safely.'),
       findsOneWidget,
     );
-    expect(find.bySemanticsLabel('Assistant message'), findsOneWidget);
+    expect(find.bySemanticsLabel(RegExp('Assistant message')), findsOneWidget);
     expect(
       tester
           .widget<TextField>(find.byKey(const ValueKey('chat-composer-field')))
@@ -220,6 +246,18 @@ Future<void> _waitFor(
 }) async {
   final deadline = DateTime.now().add(timeout);
   while (finder.evaluate().isEmpty && DateTime.now().isBefore(deadline)) {
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+  expect(finder, findsOneWidget);
+}
+
+Future<void> _waitForSingle(
+  WidgetTester tester,
+  Finder finder, {
+  Duration timeout = const Duration(seconds: 2),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (finder.evaluate().length != 1 && DateTime.now().isBefore(deadline)) {
     await tester.pump(const Duration(milliseconds: 50));
   }
   expect(finder, findsOneWidget);

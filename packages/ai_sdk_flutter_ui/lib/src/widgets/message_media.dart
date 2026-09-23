@@ -4,6 +4,7 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/ai_motion.dart';
+import 'ui_strings.dart';
 
 /// Creates an image provider for a remote URL that the host application has
 /// explicitly chosen to trust.
@@ -58,10 +59,11 @@ class MessageImage extends StatelessWidget {
   Widget build(BuildContext context) {
     final mediaType = image.mediaType;
     final data = image.image;
+    final strings = AiSdkUiStringsScope.of(context);
     if (data is DataContentUrl && remoteImageProviderBuilder == null) {
       return Semantics(
         image: true,
-        label: 'Remote image blocked',
+        label: strings.remoteImageBlocked,
         child: ExcludeSemantics(
           child: ClipRRect(
             borderRadius: borderRadius,
@@ -71,8 +73,8 @@ class MessageImage extends StatelessWidget {
       );
     }
     final semanticLabel = mediaType == null || mediaType.isEmpty
-        ? 'Attached image'
-        : 'Attached image, $mediaType';
+        ? strings.attachedImage
+        : '${strings.attachedImage}, $mediaType';
     return Semantics(
       image: true,
       label: semanticLabel,
@@ -99,7 +101,7 @@ class MessageImage extends StatelessWidget {
               );
             },
             errorBuilder: (context, _, _) => Semantics(
-              label: 'Image failed to load',
+              label: strings.imageFailedToLoad,
               image: true,
               child: _ImageError(width: width, height: height),
             ),
@@ -175,16 +177,17 @@ class MessageAttachment extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final strings = AiSdkUiStringsScope.of(context);
     final title = file.filename ?? file.mediaType;
     final showSubtitle = file.filename != null;
     final canOpen = onTap != null;
 
     return Semantics(
       container: true,
-      label: 'Attachment: $title',
+      label: '${strings.attachment}: $title',
       value: file.mediaType,
       button: canOpen,
-      hint: canOpen ? 'Open attachment' : null,
+      hint: canOpen ? strings.openAttachment : null,
       onTap: canOpen ? onTap : null,
       child: ExcludeSemantics(
         child: PressableScale(
@@ -266,9 +269,10 @@ class MessageReasoningFileAttachment extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final strings = AiSdkUiStringsScope.of(context);
     return Semantics(
       container: true,
-      label: 'Reasoning attachment',
+      label: strings.reasoningAttachment,
       value: file.mediaType,
       child: ExcludeSemantics(
         child: Container(
@@ -285,9 +289,7 @@ class MessageReasoningFileAttachment extends StatelessWidget {
               const SizedBox(width: 10),
               Text(
                 file.mediaType,
-                style: textTheme.bodyMedium?.copyWith(
-                  color: scheme.onSurface,
-                ),
+                style: textTheme.bodyMedium?.copyWith(color: scheme.onSurface),
               ),
             ],
           ),

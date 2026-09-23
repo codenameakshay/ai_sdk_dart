@@ -152,14 +152,7 @@ class AssistantMessageView extends StatelessWidget {
   Widget _text(BuildContext context, String text) {
     final builder = textBuilder;
     if (builder != null) return builder(context, text);
-    // Bubbleless assistant prose reads as the body of the turn; give it a
-    // comfortable reading line-height.
     final style = Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.5);
-    // Flutter web exposes SelectableText as a disabled textbox and can throw
-    // while that editing semantics node is reconfigured during a state change.
-    // SelectionArea keeps prose selectable without creating that textbox;
-    // expose the answer as one read-only text node for screen readers and
-    // browser automation.
     return Semantics(
       container: true,
       excludeSemantics: true,

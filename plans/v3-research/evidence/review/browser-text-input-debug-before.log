@@ -1,0 +1,13 @@
+PHASE send ══╡ EXCEPTION CAUGHT BY SERVICES LIBRARY ╞══════════════════════════════════════════════════════════
+The following assertion was thrown while updating text input configuration:
+Assertion failed: "The DOM element of this text editing strategy is not currently active."
+
+When the exception was thrown, this was the stack
+════════════════════════════════════════════════════════════════════════════════════════════════════
+Error: ══╡ EXCEPTION CAUGHT BY SERVICES LIBRARY ╞══════════════════════════════════════════════════════════
+The following assertion was thrown while updating text input configuration:
+Assertion failed: "The DOM element of this text editing strategy is not currently active."
+
+When the exception was thrown, this was the stack
+════════════════════════════════════════════════════════════════════════════════════════════════════
+    at /tmp/v3-browser-phases.cjs:83:32

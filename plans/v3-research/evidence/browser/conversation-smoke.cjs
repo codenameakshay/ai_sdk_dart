@@ -18,7 +18,7 @@ async function waitForAccessibleText(page, expected) {
   function saveEvidence(passed, failure) {
     const root = path.resolve(__dirname, '../../../..');
     const hashes = {};
-    for (const file of ['examples/flutter_chat/build/web/main.dart.js', 'examples/flutter_chat/lib/pages/conversation_page.dart', 'examples/remote_backend/js/server.mjs', 'examples/remote_backend/js/package-lock.json']) {
+    for (const file of ['examples/flutter_chat/build/web/main.dart.js', 'examples/flutter_chat/lib/pages/conversation_page.dart', 'examples/remote_backend/js/server.mjs', 'examples/remote_backend/js/package-lock.json', 'packages/ai_sdk_flutter_ui/lib/src/widgets/chat_composer.dart', 'packages/ai_sdk_flutter_ui/lib/src/widgets/chat_message_bubble.dart', 'packages/ai_sdk_flutter_ui/lib/src/widgets/assistant_message_view.dart', 'packages/ai_sdk_flutter_ui/lib/src/widgets/ai_chat_scaffold.dart', 'packages/ai_sdk_flutter_ui/lib/src/conversation_controller.dart', 'packages/ai_sdk_conversation/lib/src/conversation.dart', 'packages/ai_sdk_remote/lib/src/remote.dart']) {
       hashes[file] = crypto.createHash('sha256').update(fs.readFileSync(path.join(root, file))).digest('hex');
     }
     const output = { capturedAt: new Date().toISOString(), browser: browser.version(), passed, failure, hashes, results,
@@ -54,6 +54,8 @@ async function waitForAccessibleText(page, expected) {
         const action = page.getByRole('button', { name: scenario.action, exact: true });
         await action.waitFor();
         pending = await page.locator('body').ariaSnapshot();
+        if (await input.isEditable()) throw new Error('Composer accepts edits while approval is pending');
+        if (await page.getByRole('button', { name: 'Send message', exact: true }).isEnabled()) throw new Error('Send is enabled while approval is pending');
         if (scenario.keyboard) {
           await action.focus();
           await page.keyboard.press('Enter');
@@ -63,7 +65,7 @@ async function waitForAccessibleText(page, expected) {
       }
       await waitForAccessibleText(page, scenario.expected);
       const composer = page.getByRole('textbox', { name: 'Message…', exact: true });
-      if (!await composer.isEnabled()) throw new Error('Composer did not return to idle');
+      if (!await composer.isEditable()) throw new Error('Composer did not return to editable idle state');
       const assistantRows = await page.getByRole('group', { name: 'Assistant message', exact: true }).count();
       if (assistantRows !== 1) throw new Error(`Expected one assistant row, found ${assistantRows}`);
       const screenshot = scenario.route === 'remote' && scenario.action

@@ -99,3 +99,20 @@ duplicate-row state for comparison.
 ### PR 15 reproducible failure checkpoint
 
 The release build completed in126.5seconds. The five-flow script still fails in its first local keyboard-approval scenario with a Flutter web text-input configuration null check. The answer is accessible and exactly one assistant row exists before the console-error assertion fails. `conversation-smoke.json` now explicitly records `passed: false`, the exception, completed scenario evidence, and build/source hashes; it must not be read as a successful five-flow run. The harness now saves failed runs rather than leaving an older successful JSON file in place. Widget fixes remain under investigation.
+
+### Keyed editor-session correction
+
+The latest pinned Flutter 3.44.3 release build completed in 55.6 seconds with
+`--no-pub --no-wasm-dry-run`. Replacing the editor session when enabled state
+changes avoids updating the inactive browser editing element. The shared text
+controller retains drafts; the field uses normal disabled semantics.
+
+The unchanged five scenarios now pass, including stricter pending-input and
+final-editability assertions. All local/remote approval and denial flows plus
+remote text expose the expected answer, retain one assistant row, and produce
+zero page or console errors. `conversation-smoke.json` records this successful
+run and source/build hashes. The narrow remote-denial screenshot was visually
+inspected. Parent widget verification passed 144 tests; widget analysis is clean.
+
+This supersedes the browser failure above for these scripted flows. It does not
+qualify native platforms, live providers, persisted replay, or a screen reader.

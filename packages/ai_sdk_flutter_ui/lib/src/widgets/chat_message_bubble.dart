@@ -2,6 +2,7 @@ import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/ai_motion.dart';
+import 'ui_strings.dart';
 
 /// A single chat message rendered as a bubble, styled by its [role].
 ///
@@ -64,11 +65,12 @@ class ChatMessageBubble extends StatelessWidget {
     }
 
     final text = message.content ?? '';
+    final strings = AiSdkUiStringsScope.of(context);
     final semanticLabel = switch (message.role) {
-      ModelMessageRole.user => 'User message',
-      ModelMessageRole.assistant => 'Assistant message',
-      ModelMessageRole.system => 'System message',
-      ModelMessageRole.tool => 'Tool message',
+      ModelMessageRole.user => strings.userMessage,
+      ModelMessageRole.assistant => strings.assistantMessage,
+      ModelMessageRole.system => strings.systemMessage,
+      ModelMessageRole.tool => strings.toolMessage,
     };
 
     return Semantics(
@@ -78,7 +80,9 @@ class ChatMessageBubble extends StatelessWidget {
       readOnly: true,
       child: ExcludeSemantics(
         child: Align(
-          alignment: _isUser ? Alignment.centerRight : Alignment.centerLeft,
+          alignment: _isUser
+              ? AlignmentDirectional.centerEnd
+              : AlignmentDirectional.centerStart,
           child: Container(
             margin: const EdgeInsets.symmetric(vertical: 3),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -87,11 +91,11 @@ class ChatMessageBubble extends StatelessWidget {
             ),
             decoration: BoxDecoration(
               color: background,
-              borderRadius: BorderRadius.only(
-                topLeft: const Radius.circular(16),
-                topRight: const Radius.circular(16),
-                bottomLeft: Radius.circular(_isUser ? 16 : 4),
-                bottomRight: Radius.circular(_isUser ? 4 : 16),
+              borderRadius: BorderRadiusDirectional.only(
+                topStart: const Radius.circular(16),
+                topEnd: const Radius.circular(16),
+                bottomStart: Radius.circular(_isUser ? 16 : 4),
+                bottomEnd: Radius.circular(_isUser ? 4 : 16),
               ),
             ),
             child: Row(
@@ -99,9 +103,11 @@ class ChatMessageBubble extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Flexible(
-                  child: SelectableText(
-                    text.isEmpty ? '…' : text,
-                    style: TextStyle(color: foreground, height: 1.4),
+                  child: SelectionArea(
+                    child: Text(
+                      text.isEmpty ? '…' : text,
+                      style: TextStyle(color: foreground, height: 1.4),
+                    ),
                   ),
                 ),
                 if (isStreaming) ...[

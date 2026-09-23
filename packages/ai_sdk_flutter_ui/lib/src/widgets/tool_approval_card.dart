@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/ai_motion.dart';
 import 'pretty_json.dart';
+import 'ui_strings.dart';
 
 /// A human-in-the-loop prompt for a tool call that requires approval.
 ///
@@ -32,9 +33,9 @@ class ToolApprovalCard extends StatefulWidget {
     required this.onApprove,
     required this.onDeny,
     this.showReasonField = false,
-    this.title = 'Approve tool call?',
-    this.approveLabel = 'Approve',
-    this.denyLabel = 'Deny',
+    this.title,
+    this.approveLabel,
+    this.denyLabel,
   });
 
   /// The approval request to render.
@@ -50,13 +51,13 @@ class ToolApprovalCard extends StatefulWidget {
   final bool showReasonField;
 
   /// Header label.
-  final String title;
+  final String? title;
 
   /// Label for the approve button.
-  final String approveLabel;
+  final String? approveLabel;
 
   /// Label for the deny button.
-  final String denyLabel;
+  final String? denyLabel;
 
   @override
   State<ToolApprovalCard> createState() => _ToolApprovalCardState();
@@ -91,6 +92,10 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final strings = AiSdkUiStringsScope.of(context);
+    final title = widget.title ?? strings.toolApprovalTitle;
+    final approveLabel = widget.approveLabel ?? strings.approve;
+    final denyLabel = widget.denyLabel ?? strings.deny;
     final call = widget.request.toolCall;
 
     return Semantics(
@@ -115,7 +120,7 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      widget.title,
+                      title,
                       style: textTheme.titleSmall?.copyWith(
                         color: scheme.onSurface,
                       ),
@@ -139,10 +144,10 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
                   controller: _reason,
                   minLines: 1,
                   maxLines: 3,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     isDense: true,
                     border: OutlineInputBorder(),
-                    labelText: 'Reason (optional)',
+                    labelText: strings.approvalReasonHint,
                   ),
                 ),
               ],
@@ -157,7 +162,7 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
                       style: TextButton.styleFrom(
                         foregroundColor: scheme.error,
                       ),
-                      child: Text(widget.denyLabel),
+                      child: Text(denyLabel),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -165,7 +170,7 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
                     child: FilledButton(
                       key: const ValueKey('tool-approval-approve'),
                       onPressed: _approve,
-                      child: Text(widget.approveLabel),
+                      child: Text(approveLabel),
                     ),
                   ),
                 ],

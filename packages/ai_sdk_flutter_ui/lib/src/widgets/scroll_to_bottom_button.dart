@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/ai_motion.dart';
 import 'scroll_bottom_policy.dart';
+import 'ui_strings.dart';
 
 /// A small floating button that appears when a scroll view is scrolled away
 /// from its bottom edge, and eases back to the bottom when tapped.
@@ -122,7 +123,7 @@ class _ScrollToBottomButtonState extends State<ScrollToBottomButton> {
       key: const ValueKey('scroll-to-bottom-semantics'),
       container: true,
       button: true,
-      label: 'Scroll to latest message',
+      label: AiSdkUiStringsScope.of(context).scrollToLatest,
       onTap: _scrollToBottom,
       child: ExcludeSemantics(
         child: IconButton.filledTonal(

@@ -12,6 +12,7 @@ import 'chat_error_view.dart';
 import 'chat_message_list.dart';
 import 'scroll_to_bottom_button.dart';
 import 'tool_approval_card.dart';
+import 'ui_strings.dart';
 
 /// Builds the scaffold's inline error state.
 typedef ChatScaffoldErrorBuilder =
@@ -73,7 +74,7 @@ class AiChatScaffold extends StatefulWidget {
     this.approvalBuilder,
     this.statusBuilder,
     this.onAttach,
-    this.hintText = 'Message…',
+    this.hintText,
     this.emptyState,
     this.listPadding = const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
     this.disposeConversationController = false,
@@ -94,7 +95,7 @@ class AiChatScaffold extends StatefulWidget {
     this.approvalBuilder,
     this.statusBuilder,
     this.onAttach,
-    this.hintText = 'Message…',
+    this.hintText,
     this.emptyState,
     this.listPadding = const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
     this.disposeConversationController = true,
@@ -130,7 +131,7 @@ class AiChatScaffold extends StatefulWidget {
   final VoidCallback? onAttach;
 
   /// Placeholder text for the composer.
-  final String hintText;
+  final String? hintText;
 
   /// Widget shown when the conversation is empty.
   final Widget? emptyState;
@@ -195,8 +196,8 @@ class _AiChatScaffoldState extends State<AiChatScaffold> {
                 scrollController: _scrollController,
                 emptyState: widget.emptyState,
               ),
-              Positioned(
-                right: 12,
+              PositionedDirectional(
+                end: 12,
                 bottom: 12,
                 child: ScrollToBottomButton(controller: _scrollController),
               ),
@@ -323,10 +324,11 @@ class _AiChatScaffoldState extends State<AiChatScaffold> {
       return builder(context, _controller, status);
     }
 
+    final strings = AiSdkUiStringsScope.of(context);
     final label = switch (status) {
       ChatStatus.submitted ||
-      ChatStatus.streaming => 'Assistant is responding…',
-      ChatStatus.awaitingApproval => 'Approve the tool call to continue.',
+      ChatStatus.streaming => strings.assistantResponding,
+      ChatStatus.awaitingApproval => strings.approveToolCall,
       ChatStatus.ready || ChatStatus.error => null,
     };
     if (label == null) return null;

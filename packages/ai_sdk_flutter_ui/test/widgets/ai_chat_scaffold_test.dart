@@ -597,9 +597,16 @@ void main() {
         final controller = _ApprovalProbeController();
         addTearDown(controller.dispose);
         final agent = textAgent('unused');
+        var attached = false;
 
         await tester.pumpWidget(
-          _wrap(AiChatScaffold(controller: controller, agent: agent)),
+          _wrap(
+            AiChatScaffold(
+              controller: controller,
+              agent: agent,
+              onAttach: () => attached = true,
+            ),
+          ),
         );
 
         controller.showApproval();
@@ -607,19 +614,40 @@ void main() {
 
         expect(find.byType(ToolApprovalCard), findsOneWidget);
         expect(find.text('Approve the tool call to continue.'), findsOneWidget);
-        expect(
-          tester
-              .widget<TextField>(
-                find.byKey(const ValueKey('chat-composer-field')),
-              )
-              .enabled,
-          isFalse,
+        final field = tester.widget<TextField>(
+          find.byKey(const ValueKey('chat-composer-field')),
         );
+        expect(field.enabled, isFalse);
         expect(
           find.byKey(const ValueKey('chat-composer-send')),
           findsOneWidget,
         );
         expect(find.byKey(const ValueKey('chat-composer-stop')), findsNothing);
+        expect(
+          tester
+              .widget<IconButton>(
+                find.byKey(const ValueKey('chat-composer-send')),
+              )
+              .onPressed,
+          isNull,
+        );
+        expect(
+          tester
+              .widget<IconButton>(
+                find.byKey(const ValueKey('chat-composer-attach')),
+              )
+              .onPressed,
+          isNull,
+        );
+        await tester.tap(
+          find.byKey(const ValueKey('chat-composer-send')),
+          warnIfMissed: false,
+        );
+        await tester.tap(
+          find.byKey(const ValueKey('chat-composer-attach')),
+          warnIfMissed: false,
+        );
+        expect(attached, isFalse);
 
         await tester.tap(find.byKey(const ValueKey('tool-approval-approve')));
         await tester.pump();

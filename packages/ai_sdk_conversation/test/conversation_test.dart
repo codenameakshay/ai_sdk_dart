@@ -627,4 +627,95 @@ void main() {
       returnsNormally,
     );
   });
+
+  test('rejects duplicate message and call IDs or orphaned results', () {
+    ConversationMessage message(String id, List<ConversationPart> parts) =>
+        ConversationMessage(
+          id: id,
+          role: ConversationRole.assistant,
+          parts: parts,
+        );
+    ToolCallPart call(String id) => ToolCallPart(
+      id: 'part-$id',
+      callId: 'call-1',
+      name: 'deleteFile',
+      arguments: const {'path': '/tmp/example'},
+    );
+
+    expect(
+      () => Conversation(
+        id: 'duplicate-message',
+        messages: [message('m1', []), message('m1', [])],
+      ),
+      throwsA(isA<ConversationValidationException>()),
+    );
+    expect(
+      () => Conversation(
+        id: 'duplicate-call',
+        messages: [
+          message('m1', [call('a')]),
+          message('m2', [call('b')]),
+        ],
+      ),
+      throwsA(isA<ConversationValidationException>()),
+    );
+    expect(
+      () => Conversation(
+        id: 'orphaned-result',
+        messages: [
+          message('m1', [
+            ToolResultPart(id: 'result-1', callId: 'missing', output: 'done'),
+          ]),
+        ],
+      ),
+      throwsA(isA<ConversationValidationException>()),
+    );
+  });
+
+  test('rejects malformed wire envelopes and typed file payloads', () {
+    Map<String, dynamic> envelope(Object? part) => {
+      'schemaVersion': 1,
+      'id': 'c1',
+      'messages': [
+        {
+          'id': 'm1',
+          'role': 'assistant',
+          'status': 'complete',
+          'parts': [part],
+        },
+      ],
+    };
+    final malformed = <Object?>[
+      9,
+      {'id': 'p1'},
+      {'id': 'p1', 'type': 'text', 'text': 42},
+      {'id': 'p1', 'type': 'text', 'text': '', 'providerOptions': []},
+      {'id': 'p1', 'type': 'reasoning', 'text': '', 'signature': 42},
+      {'id': 'p1', 'type': 'file', 'mimeType': 'image/png', 'data': []},
+      {
+        'id': 'p1',
+        'type': 'file',
+        'mimeType': 'image/png',
+        'data': {'kind': 'bytes', 'base64': 'not base64'},
+      },
+      {
+        'id': 'p1',
+        'type': 'file',
+        'mimeType': 'image/png',
+        'data': {'kind': 'provider_reference', 'namespace': 'vendor'},
+      },
+      {
+        'id': 'p1',
+        'type': 'redacted_reasoning',
+        'data': {'kind': 'url', 'url': 'https://example.test'},
+      },
+    ];
+    for (final part in malformed) {
+      expect(
+        () => ConversationCodec.decode(envelope(part)),
+        throwsA(isA<ConversationValidationException>()),
+        reason: '$part',
+      );
+    }
+  });
 }

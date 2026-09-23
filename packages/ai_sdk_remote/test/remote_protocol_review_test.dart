@@ -705,6 +705,104 @@ void main() {
     expect(part['state'], 'approval-requested');
   });
 
+  test(
+    'reset-step removes only the current step after pending approval',
+    () async {
+      final client = MockClient((request) async {
+        return _response(
+          'data: {"type":"start","messageId":"assistant-1"}\n\n'
+          'data: {"type":"text-start","id":"prior-text"}\n\n'
+          'data: {"type":"text-delta","id":"prior-text",'
+          '"delta":"prior"}\n\n'
+          'data: {"type":"text-end","id":"prior-text"}\n\n'
+          'data: {"type":"start-step"}\n\n'
+          'data: {"type":"tool-input-available","toolCallId":"call-1",'
+          '"toolName":"delete","input":{"path":"/tmp/a"}}\n\n'
+          'data: {"type":"tool-approval-request",'
+          '"approvalId":"approval-1","toolCallId":"call-1"}\n\n'
+          'data: {"type":"reset-step"}\n\n'
+          'data: {"type":"text-start","id":"next-text"}\n\n'
+          'data: {"type":"text-delta","id":"next-text",'
+          '"delta":"next"}\n\n'
+          'data: {"type":"text-end","id":"next-text"}\n\n'
+          'data: {"type":"finish"}\n\n'
+          'data: [DONE]\n\n',
+        );
+      });
+      final transport = RemoteConversationTransport(
+        endpoint: Uri.parse('https://backend.test/chat'),
+        client: client,
+      );
+      addTearDown(transport.dispose);
+      addTearDown(client.close);
+
+      final conversation =
+          (await transport
+                  .send(Conversation(id: 'c1', messages: const []))
+                  .toList())
+              .last;
+      final message = conversation.messages.single;
+      expect(message.status, ConversationMessageStatus.complete);
+      expect(message.parts.whereType<ToolCallPart>(), isEmpty);
+      expect(message.parts.whereType<ApprovalPart>(), isEmpty);
+      expect(message.parts.whereType<TextPart>().map((part) => part.text), [
+        'prior',
+        'next',
+      ]);
+    },
+  );
+
+  test('reset-step rejects a stale text update from a retained step', () async {
+    await _expectSendError(
+      'data: {"type":"start","messageId":"assistant-1"}\n\n'
+      'data: {"type":"text-start","id":"prior-text"}\n\n'
+      'data: {"type":"text-delta","id":"prior-text",'
+      '"delta":"prior"}\n\n'
+      'data: {"type":"text-end","id":"prior-text"}\n\n'
+      'data: {"type":"start-step"}\n\n'
+      'data: {"type":"text-start","id":"current-text"}\n\n'
+      'data: {"type":"text-delta","id":"current-text",'
+      '"delta":"current"}\n\n'
+      'data: {"type":"reset-step"}\n\n'
+      'data: {"type":"text-delta","id":"prior-text",'
+      '"delta":"late"}\n\n'
+      'data: {"type":"finish"}\n\n'
+      'data: [DONE]\n\n',
+      isA<RemoteProtocolException>(),
+    );
+  });
+
+  test('reset-step resumes a failed step before the next finish', () async {
+    final client = MockClient((request) async {
+      return _response(
+        'data: {"type":"start","messageId":"assistant-1"}\n\n'
+        'data: {"type":"error","errorText":"retryable"}\n\n'
+        'data: {"type":"reset-step"}\n\n'
+        'data: {"type":"text-start","id":"retry-text"}\n\n'
+        'data: {"type":"text-delta","id":"retry-text",'
+        '"delta":"retried"}\n\n'
+        'data: {"type":"text-end","id":"retry-text"}\n\n'
+        'data: {"type":"finish"}\n\n'
+        'data: [DONE]\n\n',
+      );
+    });
+    final transport = RemoteConversationTransport(
+      endpoint: Uri.parse('https://backend.test/chat'),
+      client: client,
+    );
+    addTearDown(transport.dispose);
+    addTearDown(client.close);
+
+    final conversation =
+        (await transport
+                .send(Conversation(id: 'c1', messages: const []))
+                .toList())
+            .last;
+    final message = conversation.messages.single;
+    expect(message.status, ConversationMessageStatus.complete);
+    expect(message.parts.whereType<TextPart>().single.text, 'retried');
+  });
+
   test('pinned server resumes an approved tool continuation', () async {
     final endpoint = _pinnedEndpoint();
     if (endpoint == null) {
@@ -780,6 +878,24 @@ void main() {
       'data: {"type":"start"}\n\n'
       'data: {"type":"text-start","id":"text-1"}\n\n'
       'data: {"type":"reasoning-delta","id":"text-1","delta":"x"}\n\n',
+      isA<RemoteProtocolException>(),
+    );
+    await _expectSendError(
+      'data: {"type":"start"}\n\n'
+      'data: {"type":"text-start","id":"text-1"}\n\n'
+      'data: {"type":"text-end","id":"text-1"}\n\n'
+      'data: {"type":"text-delta","id":"text-1","delta":"late"}\n\n'
+      'data: {"type":"finish"}\n\n'
+      'data: [DONE]\n\n',
+      isA<RemoteProtocolException>(),
+    );
+    await _expectSendError(
+      'data: {"type":"start"}\n\n'
+      'data: {"type":"text-start","id":"text-1"}\n\n'
+      'data: {"type":"text-end","id":"text-1"}\n\n'
+      'data: {"type":"text-end","id":"text-1"}\n\n'
+      'data: {"type":"finish"}\n\n'
+      'data: [DONE]\n\n',
       isA<RemoteProtocolException>(),
     );
     await _expectSendError(

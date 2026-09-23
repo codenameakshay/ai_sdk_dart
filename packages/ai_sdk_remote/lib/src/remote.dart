@@ -509,6 +509,7 @@ class _ConversationReducer {
   final List<ConversationPart> _parts = [];
   final Map<String, int> _partIndexes = {};
   final Map<String, int> _toolIndexes = {};
+  int _currentStepStart = 0;
   Map<String, dynamic> _messageMetadata = {};
   ConversationMessageStatus _status = ConversationMessageStatus.streaming;
   bool _hasTerminalEvent = false;
@@ -574,10 +575,39 @@ class _ConversationReducer {
           _status = ConversationMessageStatus.complete;
         }
       case 'start-step' || 'finish-step' || 'reset-step':
+        if (type == 'start-step') {
+          _currentStepStart = _parts.length;
+        }
         if (type == 'reset-step') {
-          _parts.clear();
+          if (_currentStepStart < _parts.length) {
+            _parts.removeRange(_currentStepStart, _parts.length);
+          }
           _partIndexes.clear();
           _toolIndexes.clear();
+          _inputBuffers.removeWhere(
+            (callId, _) => !_parts.any(
+              (part) => part is ToolCallPart && part.callId == callId,
+            ),
+          );
+          _approvalCalls.removeWhere(
+            (_, callId) => !_parts.any(
+              (part) => part is ToolCallPart && part.callId == callId,
+            ),
+          );
+          for (var index = 0; index < _parts.length; index++) {
+            final part = _parts[index];
+            if (part is ToolCallPart) _toolIndexes[part.callId] = index;
+          }
+          if (_status == ConversationMessageStatus.failed ||
+              (_status == ConversationMessageStatus.pendingApproval &&
+                  !_parts.any(
+                    (part) =>
+                        part is ApprovalPart &&
+                        part.status == ApprovalStatus.pending,
+                  ))) {
+            _status = ConversationMessageStatus.streaming;
+          }
+          _currentStepStart = _parts.length;
         }
       default:
         _unknown(event);
@@ -591,6 +621,9 @@ class _ConversationReducer {
     _parts.clear();
     _partIndexes.clear();
     _toolIndexes.clear();
+    _inputBuffers.clear();
+    _approvalCalls.clear();
+    _currentStepStart = 0;
     _messageMetadata = event['messageMetadata'] == null
         ? {}
         : _map(event['messageMetadata'], 'messageMetadata');
@@ -676,6 +709,7 @@ class _ConversationReducer {
     } else {
       throw RemoteProtocolException('Mismatched text boundary for $id');
     }
+    _partIndexes.remove(id);
   }
 
   void _toolStart(Map<String, dynamic> e) {

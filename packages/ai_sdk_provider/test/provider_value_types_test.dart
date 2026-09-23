@@ -366,6 +366,7 @@ void main() {
         final reasoningFile = LanguageModelV4ReasoningFilePart(
           data: DataContentBytes(Uint8List.fromList([4, 5])),
           mediaType: 'application/pdf',
+          filename: 'trace.pdf',
         );
         const toolResult = LanguageModelV4ToolResultPart(
           toolCallId: 'call-1',
@@ -384,6 +385,7 @@ void main() {
         expect(document.sourceType, 'document');
         expect(document.filename, 'guide.pdf');
         expect(reasoningFile.mediaType, 'application/pdf');
+        expect(reasoningFile.filename, 'trace.pdf');
         expect(reasoningFile.data, isA<DataContentBytes>());
         expect(toolResult.isError, isTrue);
         expect(jsonOutput.value, {'ok': true});

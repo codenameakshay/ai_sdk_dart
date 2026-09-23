@@ -442,6 +442,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
         lastResponseMetadata = response.response;
 
         final stepTextById = <String, StringBuffer>{};
+        final textProviderMetadataById = <String, ProviderMetadata?>{};
         final stepToolCalls = <LanguageModelV4ToolCallPart>[];
         final stepToolResults = <LanguageModelV4ToolResultPart>[];
         final stepApprovalRequests = <LanguageModelV4ToolApprovalRequestPart>[];
@@ -508,10 +509,30 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
             }
 
             switch (part) {
-              case StreamPartTextStart(:final id):
+              case StreamPartTextStart(:final id, :final providerMetadata):
                 stepTextById[id] = StringBuffer();
-                fullController.add(StreamTextTextStartEvent(id: id));
-              case StreamPartTextDelta(:final id, :final delta):
+                textProviderMetadataById[id] = null;
+                _mergeTextProviderMetadata(
+                  textProviderMetadataById,
+                  id,
+                  providerMetadata,
+                );
+                fullController.add(
+                  StreamTextTextStartEvent(
+                    id: id,
+                    providerMetadata: providerMetadata,
+                  ),
+                );
+              case StreamPartTextDelta(
+                :final id,
+                :final delta,
+                :final providerMetadata,
+              ):
+                _mergeTextProviderMetadata(
+                  textProviderMetadataById,
+                  id,
+                  providerMetadata,
+                );
                 final transformedStream =
                     experimentalTransform?.call(delta) ?? Stream.value(delta);
                 final transformedIterator = StreamIterator<String>(
@@ -531,7 +552,11 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                     overallTextBuffer.write(transformedDelta);
                     textController.add(transformedDelta);
                     fullController.add(
-                      StreamTextTextDeltaEvent(id: id, delta: transformedDelta),
+                      StreamTextTextDeltaEvent(
+                        id: id,
+                        delta: transformedDelta,
+                        providerMetadata: providerMetadata,
+                      ),
                     );
                     onChunk?.call(
                       StreamTextTextChunk(id: id, text: transformedDelta),
@@ -590,10 +615,25 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                 } finally {
                   await transformedIterator.cancel();
                 }
-              case StreamPartTextEnd(:final id):
+              case StreamPartTextEnd(:final id, :final providerMetadata):
+                _mergeTextProviderMetadata(
+                  textProviderMetadataById,
+                  id,
+                  providerMetadata,
+                );
                 final text = stepTextById[id]?.toString() ?? '';
-                stepContent.add(LanguageModelV4TextPart(text: text));
-                fullController.add(StreamTextTextEndEvent(id: id));
+                stepContent.add(
+                  LanguageModelV4TextPart(
+                    text: text,
+                    providerOptions: textProviderMetadataById[id],
+                  ),
+                );
+                fullController.add(
+                  StreamTextTextEndEvent(
+                    id: id,
+                    providerMetadata: providerMetadata,
+                  ),
+                );
               case StreamPartReasoningStart(:final id, :final providerMetadata):
                 reasoningBuffers
                     .putIfAbsent(id, ReasoningBuffer.new)
@@ -1320,6 +1360,18 @@ bool _hasMeaningfulTelemetryPayload(LanguageModelV4StreamPart part) =>
       StreamPartFile(:final file) => file.mediaType.isNotEmpty,
       _ => false,
     };
+
+void _mergeTextProviderMetadata(
+  Map<String, ProviderMetadata?> metadataById,
+  String id,
+  ProviderMetadata? metadata,
+) {
+  if (metadata == null) return;
+  final merged = metadataById[id] ??= {};
+  for (final entry in metadata.entries) {
+    merged[entry.key] = {...?merged[entry.key], ...entry.value};
+  }
+}
 
 Future<bool> _moveNextWithStreamTimeout(
   StreamIterator<StreamOutcome<LanguageModelV4StreamPart>> iterator, {

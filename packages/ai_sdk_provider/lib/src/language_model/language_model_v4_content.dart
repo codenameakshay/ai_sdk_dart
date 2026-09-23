@@ -72,11 +72,13 @@ class LanguageModelV4ReasoningFilePart extends LanguageModelV4ContentPart {
   const LanguageModelV4ReasoningFilePart({
     required this.data,
     required this.mediaType,
+    this.filename,
     this.providerOptions,
   });
 
   final LanguageModelV4DataContent data;
   final String mediaType;
+  final String? filename;
   final Map<String, dynamic>? providerOptions;
 }
 

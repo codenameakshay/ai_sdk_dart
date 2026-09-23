@@ -61,4 +61,76 @@ void main() {
     expect(model.streamCalls, isEmpty);
     expect(model.generateCalls, isEmpty);
   });
+
+  test(
+    'provider-executed replay is rejected before client tools run',
+    () async {
+      var executions = 0;
+      final model = MockLanguageModelV4(
+        response: [mockText('unexpected dispatch')],
+      );
+      final agent = ToolLoopAgent(
+        model: model,
+        approvalPolicy: ToolApprovalPolicy.always,
+        approvalPolicyRevision: 'v1',
+        tools: {
+          'write': tool<Map<String, dynamic>, String>(
+            inputSchema: Schema<Map<String, dynamic>>(
+              jsonSchema: const {'type': 'object'},
+              fromJson: (json) => json,
+            ),
+            execute: (_, _) async {
+              executions++;
+              return 'written';
+            },
+          ),
+        },
+      );
+      final requests = [
+        LanguageModelV4ToolApprovalRequestPart(
+          approvalId: 'approval-client',
+          policyRevision: 'v1',
+          argumentsFingerprint: '{"value":2}',
+          toolCall: const LanguageModelV4ToolCallPart(
+            toolCallId: 'call-client',
+            toolName: 'write',
+            input: {'value': 2},
+          ),
+        ),
+        LanguageModelV4ToolApprovalRequestPart(
+          approvalId: 'approval-hosted',
+          policyRevision: 'v1',
+          argumentsFingerprint: '{"value":1}',
+          toolCall: const LanguageModelV4ToolCallPart(
+            toolCallId: 'call-hosted',
+            toolName: 'write',
+            input: {'value': 1},
+            providerExecuted: true,
+          ),
+        ),
+      ];
+      final responses = [
+        for (final request in requests)
+          LanguageModelV4ToolApprovalResponse(
+            approvalId: request.approvalId,
+            approved: true,
+            toolCallId: request.toolCall.toolCallId,
+            toolName: request.toolCall.toolName,
+            argumentsFingerprint: request.argumentsFingerprint,
+            policyRevision: request.policyRevision,
+          ),
+      ];
+
+      await expectLater(
+        agent.resume(
+          replay: ToolApprovalReplay(messages: const [], requests: requests),
+          toolApprovalResponses: responses,
+        ),
+        throwsA(isA<ToolApprovalProviderExecutedError>()),
+      );
+      expect(executions, 0);
+      expect(model.streamCalls, isEmpty);
+      expect(model.generateCalls, isEmpty);
+    },
+  );
 }

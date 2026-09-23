@@ -145,22 +145,29 @@ class StreamTextStartStepEvent extends StreamTextEvent {
 }
 
 class StreamTextTextStartEvent extends StreamTextEvent {
-  const StreamTextTextStartEvent({required this.id});
+  const StreamTextTextStartEvent({required this.id, this.providerMetadata});
 
   final String id;
+  final ProviderMetadata? providerMetadata;
 }
 
 class StreamTextTextDeltaEvent extends StreamTextEvent {
-  const StreamTextTextDeltaEvent({required this.id, required this.delta});
+  const StreamTextTextDeltaEvent({
+    required this.id,
+    required this.delta,
+    this.providerMetadata,
+  });
 
   final String id;
   final String delta;
+  final ProviderMetadata? providerMetadata;
 }
 
 class StreamTextTextEndEvent extends StreamTextEvent {
-  const StreamTextTextEndEvent({required this.id});
+  const StreamTextTextEndEvent({required this.id, this.providerMetadata});
 
   final String id;
+  final ProviderMetadata? providerMetadata;
 }
 
 class StreamTextReasoningStartEvent extends StreamTextEvent {

@@ -35,6 +35,22 @@ class ToolApprovalRenewalRequiredError extends ArgumentError {
   final List<LanguageModelV4ToolApprovalRequestPart> requests;
 }
 
+/// Signals that an approval replay contains a provider-executed tool call.
+///
+/// Hosted calls cannot be resumed through the local tool executor. The whole
+/// replay is rejected before any client-owned tool is run.
+class ToolApprovalProviderExecutedError extends ArgumentError {
+  ToolApprovalProviderExecutedError({
+    required List<LanguageModelV4ToolApprovalRequestPart> requests,
+  }) : super(
+         'Cannot resume provider-executed tool approval through local tools.',
+       ) {
+    this.requests = List.unmodifiable(requests);
+  }
+
+  late final List<LanguageModelV4ToolApprovalRequestPart> requests;
+}
+
 /// Agent that runs tools in a loop to accomplish tasks.
 ///
 /// Mirrors `ToolLoopAgent` from the JS AI SDK v6. Handles the tool-call loop,
@@ -244,6 +260,12 @@ class ToolLoopAgent {
       throw ToolApprovalRenewalRequiredError(
         requests: List.unmodifiable(replay.requests),
       );
+    }
+    final providerExecuted = replay.requests
+        .where((request) => request.toolCall.providerExecuted)
+        .toList(growable: false);
+    if (providerExecuted.isNotEmpty) {
+      throw ToolApprovalProviderExecutedError(requests: providerExecuted);
     }
     final scope = OperationScope(
       abortSignal: abortSignal,

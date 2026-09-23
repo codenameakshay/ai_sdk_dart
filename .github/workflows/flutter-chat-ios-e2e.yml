@@ -1,0 +1,159 @@
+name: Flutter chat iOS E2E
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/flutter-chat-ios-e2e.yml'
+      - 'examples/flutter_chat/**'
+      - 'examples/remote_backend/js/**'
+      - 'packages/ai_sdk_conversation/**'
+      - 'packages/ai_sdk_flutter_ui/**'
+      - 'packages/ai_sdk_remote/**'
+      - '**/pubspec.yaml'
+      - 'pubspec.lock'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flutter-chat-ios-e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: 3.44.3
+  REMOTE_BACKEND_URL: http://127.0.0.1:8081/chat
+
+jobs:
+  conversation-simulator:
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter ${{ env.FLUTTER_VERSION }}
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+
+      - name: Verify pinned Flutter version
+        run: |
+          test "$(python3 -c 'import json; print(json.load(open(".fvmrc"))["flutter"])')" = "$FLUTTER_VERSION"
+          flutter --version
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: examples/remote_backend/js/package-lock.json
+
+      - name: Install workspace dependencies
+        run: flutter pub get
+
+      - name: Install pinned remote fixture dependencies
+        working-directory: examples/remote_backend/js
+        run: npm ci
+
+      - name: Select and boot an available iOS Simulator
+        run: |
+          set -euo pipefail
+          simulator_udid="$(python3 - <<'PY'
+          import json
+          import subprocess
+
+          devices = json.loads(
+              subprocess.check_output(['xcrun', 'simctl', 'list', 'devices', 'available', '-j'])
+          )['devices']
+          preferred = ('iPhone 16 Pro', 'iPhone 15 Pro', 'iPhone 14 Pro', 'iPhone 16')
+          candidates = []
+          for runtime, runtime_devices in devices.items():
+              if 'iOS' not in runtime:
+                  continue
+              for device in runtime_devices:
+                  if device.get('isAvailable'):
+                      candidates.append((device['name'], device['udid']))
+          for name in preferred:
+              for candidate_name, udid in candidates:
+                  if candidate_name == name:
+                      print(udid)
+                      raise SystemExit
+          if not candidates:
+              raise SystemExit('No available iOS Simulator found')
+          print(candidates[0][1])
+          PY
+          )"
+          echo "SIMULATOR_UDID=$simulator_udid" >> "$GITHUB_ENV"
+          device_state="$(xcrun simctl list devices | grep -F "$simulator_udid" || true)"
+          if [[ "$device_state" != *Booted* ]]; then
+            xcrun simctl boot "$simulator_udid"
+          fi
+          xcrun simctl bootstatus "$simulator_udid" -b
+
+      - name: Capture iOS test environment
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/flutter-chat-e2e-metadata"
+          flutter --version > "$RUNNER_TEMP/flutter-chat-e2e-metadata/flutter-version.txt"
+          xcodebuild -version > "$RUNNER_TEMP/flutter-chat-e2e-metadata/xcode-version.txt"
+          xcrun simctl list devices > "$RUNNER_TEMP/flutter-chat-e2e-metadata/simulators.txt"
+          printf 'SIMULATOR_UDID=%s\n' "$SIMULATOR_UDID" > "$RUNNER_TEMP/flutter-chat-e2e-metadata/simulator-env.txt"
+
+      - name: Start pinned remote fixture
+        working-directory: examples/remote_backend/js
+        run: |
+          node server.mjs > "$RUNNER_TEMP/flutter-chat-remote.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/flutter-chat-remote.pid"
+          for attempt in $(seq 1 30); do
+            if curl --silent --output /dev/null http://127.0.0.1:8081/; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/flutter-chat-remote.log"
+          exit 1
+
+      - name: Run conversation E2E twice
+        working-directory: examples/flutter_chat
+        run: |
+          set -euo pipefail
+          artifact_root="$GITHUB_WORKSPACE/flutter-chat-ios-e2e-artifacts"
+          mkdir -p "$artifact_root/run-1" "$artifact_root/run-2"
+          for run_number in 1 2; do
+            find . -maxdepth 1 -name 'conversation-*.png' -delete
+            set +e
+            flutter drive \
+              --no-pub \
+              --driver=test_driver/integration_test.dart \
+              --target=integration_test/conversation_e2e_test.dart \
+              -d "$SIMULATOR_UDID" \
+              --dart-define=REMOTE_BACKEND_URL="$REMOTE_BACKEND_URL" \
+              2>&1 | tee "$artifact_root/run-$run_number/flutter-drive.log"
+            drive_status="${PIPESTATUS[0]}"
+            set -e
+            find . -maxdepth 1 -name 'conversation-*.png' -exec cp {} "$artifact_root/run-$run_number/" \;
+            test "$drive_status" -eq 0
+            screenshot_count="$(find . -maxdepth 1 -name 'conversation-*.png' | wc -l | tr -d ' ')"
+            test "$screenshot_count" -ge 7
+            find . -maxdepth 1 -name 'conversation-*.png' -exec mv {} "$artifact_root/run-$run_number/" \;
+          done
+
+      - name: Stop pinned remote fixture
+        if: always()
+        run: |
+          if test -f "$RUNNER_TEMP/flutter-chat-remote.pid"; then
+            kill "$(cat "$RUNNER_TEMP/flutter-chat-remote.pid")" 2>/dev/null || true
+          fi
+
+      - name: Upload simulator screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-chat-ios-e2e-artifacts
+          path: |
+            flutter-chat-ios-e2e-artifacts
+            ${{ runner.temp }}/flutter-chat-remote.log
+            ${{ runner.temp }}/flutter-chat-e2e-metadata
+          if-no-files-found: warn

@@ -41,7 +41,8 @@ class AzureOpenAIProvider {
   /// The Azure OpenAI API key.
   final String? apiKey;
 
-  /// The API version to use for all requests.
+  /// The dated API version for Chat Completions and embedding requests.
+  /// Responses uses v1 without an `api-version` query parameter.
   final String apiVersion;
 
   final CredentialProvider _credentialProvider;
@@ -78,18 +79,15 @@ class AzureOpenAIProvider {
         ),
       );
 
-  /// Returns a model backed by Azure's Responses API.
+  /// Returns a model backed by Azure's v1 Responses API.
+  /// The deployment ID is sent as the model, rather than as a URL segment.
   LanguageModelV4 responses(String deploymentId) =>
       OpenAIResponsesLanguageModel(
         modelId: deploymentId,
         providerName: 'azure',
-        baseUrl: providerEndpoint(
-          endpoint,
-          '/openai/deployments/$deploymentId',
-        ),
+        baseUrl: providerEndpoint(endpoint, '/openai/v1'),
         headers: _headers,
         client: _client,
-        queryParameters: {'api-version': apiVersion},
       );
 
   /// Explicit Chat Completions escape hatch.

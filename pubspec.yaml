@@ -7,6 +7,16 @@ environment:
 
 dev_dependencies:
   test: ^1.31.0
+  ai_sdk_anthropic:
+    path: packages/ai_sdk_anthropic
+  ai_sdk_dart:
+    path: packages/ai_sdk_dart
+  ai_sdk_google:
+    path: packages/ai_sdk_google
+  ai_sdk_openai:
+    path: packages/ai_sdk_openai
+  ai_sdk_provider:
+    path: packages/ai_sdk_provider
 
 workspace:
   - packages/ai_sdk_provider

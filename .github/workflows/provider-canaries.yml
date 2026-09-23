@@ -1,0 +1,64 @@
+name: Provider canaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_canaries:
+        description: Run credentialed network canaries
+        required: true
+        default: false
+        type: boolean
+      openai_model:
+        description: Explicit OpenAI Responses model ID for this account
+        required: false
+        type: string
+      anthropic_model:
+        description: Explicit Anthropic model ID for this account
+        required: false
+        type: string
+      google_model:
+        description: Explicit Google model ID for this account
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: provider-canaries-${{ github.repository }}
+  cancel-in-progress: true
+
+jobs:
+  canary:
+    if: ${{ inputs.run_canaries }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OPENAI_API_KEY: ${{ inputs.openai_model != '' && secrets.OPENAI_API_KEY || '' }}
+      ANTHROPIC_API_KEY: ${{ inputs.anthropic_model != '' && secrets.ANTHROPIC_API_KEY || '' }}
+      GOOGLE_API_KEY: ${{ inputs.google_model != '' && secrets.GOOGLE_API_KEY || '' }}
+      OPENAI_CANARY_MODEL: ${{ inputs.openai_model }}
+      ANTHROPIC_CANARY_MODEL: ${{ inputs.anthropic_model }}
+      GOOGLE_CANARY_MODEL: ${{ inputs.google_model }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pinned Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.3
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Verify canary formatting
+        run: dart format --output=none --set-exit-if-changed tool/canaries
+
+      - name: Analyze canary harness
+        run: dart analyze tool/canaries
+
+      - name: Run opt-in provider canaries
+        run: dart run tool/canaries/provider_canaries.dart --live

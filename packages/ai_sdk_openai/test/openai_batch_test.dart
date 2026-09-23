@@ -35,13 +35,17 @@ void main() {
         baseUrl: 'https://api.openai.test/v1',
       ),
     );
-    final batch = await batches.create(const [
-      OpenAIBatchInput(customId: 'a', model: 'gpt-test', input: 'hello'),
-      OpenAIBatchInput(customId: 'b', model: 'gpt-test', input: 'world'),
-    ]);
+    final batch = await batches.create(
+      const [
+        OpenAIBatchInput(customId: 'a', model: 'gpt-test', input: 'hello'),
+        OpenAIBatchInput(customId: 'b', model: 'gpt-test', input: 'world'),
+      ],
+      metadata: {'source': 'test'},
+    );
     expect(batch.status, OpenAIBatchStatus.validating);
     expect(calls, hasLength(2));
     expect((calls.last.data as Map)['endpoint'], '/v1/responses');
+    expect((calls.last.data as Map)['metadata'], {'source': 'test'});
   });
 
   test(
@@ -310,6 +314,25 @@ void main() {
       batches.cancel('b'),
       throwsA(isA<OpenAIBatchException>()),
     );
+  });
+
+  test('rejects a paginated list without a last id', () async {
+    final dio = Dio()
+      ..httpClientAdapter = _Adapter((_) async {
+        return _json({'data': <Object>[], 'has_more': true});
+      });
+    final batches = OpenAIBatches(
+      client: dio,
+      headers: () async => const {},
+      baseUrl: 'https://api.openai.test/v1',
+      files: OpenAIFiles(
+        client: dio,
+        headers: () async => const {},
+        baseUrl: 'https://api.openai.test/v1',
+      ),
+    );
+
+    await expectLater(batches.list(), throwsA(isA<OpenAIBatchException>()));
   });
 
   test(

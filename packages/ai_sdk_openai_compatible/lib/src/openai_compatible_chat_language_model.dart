@@ -690,7 +690,7 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
       ToolResultOutputExecutionDenied(:final reason, :final approvalId) => {
         'type': 'execution-denied',
         'reason': reason,
-        if (approvalId != null) 'approvalId': approvalId,
+        'approvalId': ?approvalId,
       },
       ToolResultOutputContent(:final parts) => {
         'type': 'content',
@@ -718,7 +718,7 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
       return {
         'type': 'image',
         'mediaType': ?part.mediaType,
-        if (url != null) 'url': url,
+        'url': ?url,
         'base64': ?data,
       };
     }
@@ -735,8 +735,8 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
       return {
         'type': 'file',
         'mediaType': part.mediaType,
-        if (part.filename != null) 'filename': part.filename,
-        if (url != null) 'url': url,
+        'filename': ?part.filename,
+        'url': ?url,
         'base64': ?data,
       };
     }

@@ -6,6 +6,26 @@ import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('cancelTokenFor returns null without an abort signal', () {
+    expect(cancelTokenFor(null), isNull);
+  });
+
+  test('cancelTokenFor mirrors pre-cancelled and later cancellation', () async {
+    final preCancelled = _Signal()..cancel();
+    final preCancelledToken = cancelTokenFor(preCancelled);
+    expect(preCancelledToken, isNotNull);
+    expect(preCancelledToken!.isCancelled, isTrue);
+
+    final signal = _Signal();
+    final token = cancelTokenFor(signal);
+    expect(token, isNotNull);
+    expect(token!.isCancelled, isFalse);
+    signal.cancel();
+    await signal.onCancelled;
+    await Future<void>.delayed(Duration.zero);
+    expect(token.isCancelled, isTrue);
+  });
+
   for (final streaming in [false, true]) {
     test(
       'pre-cancelled compatible request skips auth (stream=$streaming)',

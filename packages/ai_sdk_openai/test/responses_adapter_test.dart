@@ -67,6 +67,183 @@ void main() {
     },
   );
 
+  test(
+    'Responses serializes optional request controls and native overrides',
+    () async {
+      Map<String, dynamic>? body;
+      final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
+        ..httpClientAdapter = _Adapter((request) async {
+          body = (request.data as Map).cast<String, dynamic>();
+          return _reply(request, {
+            'id': 'resp_options',
+            'status': 'completed',
+            'output': [],
+          });
+        });
+
+      await OpenAIProvider(apiKey: 'key', client: dio)
+          .responses('gpt-5')
+          .doGenerate(
+            LanguageModelV4CallOptions(
+              prompt: const LanguageModelV4Prompt(messages: []),
+              maxOutputTokens: 128,
+              temperature: 0.2,
+              topP: 0.8,
+              reasoning: LanguageModelV4Reasoning.high,
+              toolChoice: const ToolChoiceSpecific(toolName: 'weather'),
+              responseFormat: const LanguageModelV4JsonResponseFormat(
+                name: 'weather',
+                description: 'A weather response',
+                schema: {'type': 'object'},
+              ),
+              providerOptions: const {
+                'openai': {
+                  'previous_response_id': 'resp_previous',
+                  'reasoning_effort': 'medium',
+                  'reasoning_summary': 'detailed',
+                },
+              },
+            ),
+          );
+
+      expect(body!['max_output_tokens'], 128);
+      expect(body!['temperature'], 0.2);
+      expect(body!['top_p'], 0.8);
+      expect(body!['tool_choice'], {'type': 'function', 'name': 'weather'});
+      expect(body!['previous_response_id'], 'resp_previous');
+      expect(body!['reasoning'], {'effort': 'medium', 'summary': 'detailed'});
+      expect(body!['text'], {
+        'format': {
+          'type': 'json_schema',
+          'name': 'weather',
+          'description': 'A weather response',
+          'schema': {'type': 'object'},
+          'strict': true,
+        },
+      });
+    },
+  );
+
+  test(
+    'Responses places computer safety acknowledgements beside the output',
+    () async {
+      Map<String, dynamic>? body;
+      final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
+        ..httpClientAdapter = _Adapter((request) async {
+          body = (request.data as Map).cast<String, dynamic>();
+          return _reply(request, {
+            'id': 'resp-computer-output',
+            'status': 'completed',
+            'output': [],
+          });
+        });
+      final prompt = LanguageModelV4Prompt(
+        messages: [
+          LanguageModelV4Message(
+            role: LanguageModelV4Role.assistant,
+            content: [
+              const LanguageModelV4ToolCallPart(
+                toolCallId: 'call-computer',
+                toolName: 'computer',
+                input: {
+                  'actions': [],
+                  'pendingSafetyChecks': [],
+                  'status': 'completed',
+                },
+              ),
+              const LanguageModelV4ToolResultPart(
+                toolCallId: 'call-computer',
+                toolName: 'computer',
+                output: ToolResultOutputJson({
+                  'output': {
+                    'type': 'computer_screenshot',
+                    'fileId': 'file-screenshot',
+                    'detail': 'high',
+                  },
+                  'acknowledgedSafetyChecks': [
+                    {
+                      'id': 'safety-1',
+                      'code': 'external_side_effect',
+                      'message': 'Reviewed by the user',
+                    },
+                  ],
+                }),
+              ),
+            ],
+          ),
+        ],
+      );
+      await OpenAIProvider(apiKey: 'key', client: dio)
+          .responses('gpt-5')
+          .doGenerate(LanguageModelV4CallOptions(prompt: prompt));
+
+      expect(
+        (body!['input'] as List).singleWhere(
+          (item) => item is Map && item['type'] == 'computer_call_output',
+        ),
+        {
+          'type': 'computer_call_output',
+          'call_id': 'call-computer',
+          'output': {
+            'type': 'computer_screenshot',
+            'file_id': 'file-screenshot',
+            'detail': 'high',
+          },
+          'acknowledged_safety_checks': [
+            {
+              'id': 'safety-1',
+              'code': 'external_side_effect',
+              'message': 'Reviewed by the user',
+            },
+          ],
+        },
+      );
+    },
+  );
+
+  test(
+    'Responses rejects malformed computer safety acknowledgements',
+    () async {
+      final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
+        ..httpClientAdapter = _Adapter(
+          (request) async => _reply(request, {
+            'id': 'resp-computer-invalid',
+            'status': 'completed',
+            'output': [],
+          }),
+        );
+      const prompt = LanguageModelV4Prompt(
+        messages: [
+          LanguageModelV4Message(
+            role: LanguageModelV4Role.assistant,
+            content: [
+              LanguageModelV4ToolResultPart(
+                toolCallId: 'call-computer',
+                toolName: 'computer',
+                output: ToolResultOutputJson({
+                  'output': {
+                    'type': 'computer_screenshot',
+                    'imageUrl': 'https://example.test/screenshot.png',
+                  },
+                  'acknowledgedSafetyChecks': [
+                    {'code': 'missing-id'},
+                  ],
+                }),
+              ),
+            ],
+          ),
+        ],
+      );
+
+      await expectLater(
+        OpenAIProvider(apiKey: 'key', client: dio)
+            .responses('gpt-5')
+            .doGenerate(const LanguageModelV4CallOptions(prompt: prompt)),
+        throwsA(isA<FormatException>()),
+      );
+    },
+  );
+
   test('Responses adapter sends items and maps output/tool calls', () async {
     Map<String, dynamic>? requestBody;
     final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
@@ -764,28 +941,45 @@ void main() {
           LanguageModelV4CallOptions(
             prompt: const LanguageModelV4Prompt(messages: []),
             tools: [
-              OpenAIWebSearchTool(),
-              OpenAIFileSearchTool(vectorStoreIds: ['vs_1']),
-              OpenAICodeInterpreterTool(),
+              OpenAIWebSearchTool(userLocation: 'Paris'),
+              OpenAIFileSearchTool(vectorStoreIds: ['vs_1'], maxNumResults: 3),
+              OpenAICodeInterpreterTool(container: {'type': 'auto'}),
               OpenAIImageGenerationTool(args: {'size': '1024x1024'}),
-              OpenAIMCPTool(serverLabel: 'docs', serverUrl: 'https://mcp.test'),
+              OpenAIMCPTool(
+                serverLabel: 'docs',
+                serverUrl: 'https://mcp.test',
+                allowedTools: ['lookup'],
+                requireApproval: 'always',
+                headers: {'X-Key': 'value'},
+              ),
             ],
           ),
         );
     expect(
       body!['tools'],
       containsAll(<Object>[
-        {'type': 'web_search_preview', 'search_context_size': 'medium'},
+        {
+          'type': 'web_search_preview',
+          'search_context_size': 'medium',
+          'user_location': {'type': 'approximate', 'city': 'Paris'},
+        },
         {
           'type': 'file_search',
           'vector_store_ids': ['vs_1'],
+          'max_num_results': 3,
         },
-        {'type': 'code_interpreter'},
+        {
+          'type': 'code_interpreter',
+          'container': {'type': 'auto'},
+        },
         {'type': 'image_generation', 'size': '1024x1024'},
         {
           'type': 'mcp',
           'server_label': 'docs',
           'server_url': 'https://mcp.test',
+          'allowed_tools': ['lookup'],
+          'require_approval': 'always',
+          'headers': {'X-Key': 'value'},
         },
       ]),
     );
@@ -1034,6 +1228,105 @@ void main() {
   );
 
   test(
+    'Responses streams computer and MCP hosted items with annotations',
+    () async {
+      final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
+        ..httpClientAdapter = _Adapter(
+          (request) async => _streamReply(request, [
+            {
+              'type': 'response.created',
+              'response': {'id': 'resp_hosted_variants', 'model': 'gpt-5'},
+            },
+            {
+              'type': 'response.output_text.annotation.added',
+              'annotation': {
+                'type': 'url_citation',
+                'id': 'source-1',
+                'url': 'https://example.test/source',
+                'title': 'Source',
+              },
+            },
+            {
+              'type': 'response.output_text.annotation.added',
+              'annotation': {
+                'type': 'file_citation',
+                'file_id': 'file-1',
+                'filename': 'report.pdf',
+                'media_type': 'application/pdf',
+              },
+            },
+            {
+              'type': 'response.output_item.done',
+              'item': {
+                'type': 'computer_call',
+                'id': 'computer-1',
+                'status': 'completed',
+                'action': {'type': 'click', 'x': 10, 'y': 20},
+              },
+            },
+            {
+              'type': 'response.output_item.done',
+              'item': {
+                'type': 'mcp_call',
+                'id': 'mcp-1',
+                'name': 'lookup',
+                'server_label': 'docs',
+                'arguments': '{"query":"Dart"}',
+                'output': 'found',
+                'status': 'completed',
+              },
+            },
+            {
+              'type': 'response.completed',
+              'response': {
+                'id': 'resp_hosted_variants',
+                'model': 'gpt-5',
+                'status': 'completed',
+                'usage': {'input_tokens': 2, 'output_tokens': 3},
+              },
+            },
+          ]),
+        );
+      final result =
+          await OpenAIProvider(
+                apiKey: 'key',
+                baseUrl: 'https://api.openai.test/v1',
+                client: dio,
+              )
+              .responses('gpt-5')
+              .doStream(
+                const LanguageModelV4CallOptions(
+                  prompt: LanguageModelV4Prompt(messages: []),
+                  includeRawChunks: true,
+                ),
+              );
+
+      final parts = await result.stream.toList();
+      expect(parts.whereType<StreamPartRaw>(), hasLength(6));
+      expect(
+        parts.whereType<StreamPartSource>().single.source.url,
+        'https://example.test/source',
+      );
+      expect(
+        parts.whereType<StreamPartDocumentSource>().single.source.filename,
+        'report.pdf',
+      );
+      final calls = parts.whereType<StreamPartToolCall>().toList();
+      expect(calls.map((part) => part.toolCall.toolCallId), [
+        'computer-1',
+        'mcp-1',
+      ]);
+      expect(calls.first.toolCall.toolName, 'computer_use');
+      expect(calls.last.toolCall.input, '{"query":"Dart"}');
+      expect(parts.whereType<StreamPartToolResult>(), hasLength(2));
+      expect(
+        parts.whereType<StreamPartFinish>().single.usage.inputTokens.total,
+        2,
+      );
+    },
+  );
+
+  test(
     'core streamText response messages replay opaque Responses reasoning',
     () async {
       var calls = 0;
@@ -1113,6 +1406,227 @@ void main() {
               item['id'] == 'rs_replay',
         ),
         isNotEmpty,
+      );
+    },
+  );
+
+  test(
+    'core replays a citation alongside a client tool result across steps',
+    () async {
+      var calls = 0;
+      Map<String, dynamic>? secondBody;
+      final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
+        ..httpClientAdapter = _Adapter((request) async {
+          calls++;
+          if (calls == 2) {
+            secondBody = (request.data as Map).cast<String, dynamic>();
+          }
+          return _streamReply(request, [
+            {
+              'type': 'response.created',
+              'response': {'id': 'resp-$calls', 'model': 'gpt-5'},
+            },
+            if (calls == 1) ...[
+              {
+                'type': 'response.output_text.delta',
+                'item_id': 'message-citation',
+                'delta': 'According to the file,',
+              },
+              {
+                'type': 'response.output_text.annotation.added',
+                'item_id': 'message-citation',
+                'annotation': {
+                  'type': 'file_citation',
+                  'file_id': 'file-1',
+                  'filename': 'report.pdf',
+                },
+              },
+              {
+                'type': 'response.output_item.done',
+                'item': {'type': 'message', 'id': 'message-citation'},
+              },
+              {
+                'type': 'response.output_item.added',
+                'item': {
+                  'type': 'function_call',
+                  'id': 'item-lookup',
+                  'call_id': 'call-lookup',
+                  'name': 'lookup',
+                  'arguments': '',
+                },
+              },
+              {
+                'type': 'response.function_call_arguments.delta',
+                'item_id': 'item-lookup',
+                'delta': '{}',
+              },
+              {
+                'type': 'response.function_call_arguments.done',
+                'item_id': 'item-lookup',
+                'arguments': '{}',
+              },
+            ] else ...[
+              {
+                'type': 'response.output_text.delta',
+                'item_id': 'message-final',
+                'delta': 'done',
+              },
+              {
+                'type': 'response.output_item.done',
+                'item': {'type': 'message', 'id': 'message-final'},
+              },
+            ],
+            {
+              'type': 'response.completed',
+              'response': {
+                'id': 'resp-$calls',
+                'model': 'gpt-5',
+                'status': 'completed',
+                'usage': {'input_tokens': 1, 'output_tokens': 1},
+              },
+            },
+          ]);
+        });
+
+      final result = await streamText(
+        model: OpenAIProvider(
+          apiKey: 'key',
+          baseUrl: 'https://api.openai.test/v1',
+          client: dio,
+        ).responses('gpt-5'),
+        prompt: 'lookup',
+        maxSteps: 2,
+        tools: {
+          'lookup': tool<Map<String, dynamic>, String>(
+            inputSchema: Schema<Map<String, dynamic>>(
+              jsonSchema: const {'type': 'object'},
+              fromJson: (json) => json,
+            ),
+            execute: (_, _) async => 'result',
+          ),
+        },
+      );
+
+      expect(await result.text, 'done');
+      expect((await result.documentSources).single.id, 'file-1');
+      expect(calls, 2);
+      expect(secondBody, isNotNull);
+      expect(
+        (secondBody!['input'] as List).where(
+          (item) => item is Map && item['type'] == 'input_file',
+        ),
+        isEmpty,
+      );
+      expect(
+        (secondBody!['input'] as List)
+            .where((item) => item is Map && item['role'] == 'assistant')
+            .single,
+        {
+          'role': 'assistant',
+          'content': [
+            {'type': 'input_text', 'text': 'According to the file,'},
+          ],
+        },
+      );
+    },
+  );
+
+  test(
+    'core generateText replays a citation alongside a client tool result',
+    () async {
+      var calls = 0;
+      Map<String, dynamic>? secondBody;
+      final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
+        ..httpClientAdapter = _Adapter((request) async {
+          calls++;
+          if (calls == 2) {
+            secondBody = (request.data as Map).cast<String, dynamic>();
+          }
+          return _reply(request, {
+            'id': 'resp-$calls',
+            'status': 'completed',
+            'output': calls == 1
+                ? [
+                    {
+                      'type': 'message',
+                      'id': 'message-citation',
+                      'content': [
+                        {
+                          'type': 'output_text',
+                          'text': 'According to the file,',
+                          'annotations': [
+                            {
+                              'type': 'file_citation',
+                              'file_id': 'file-1',
+                              'filename': 'report.pdf',
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    {
+                      'type': 'function_call',
+                      'id': 'item-lookup',
+                      'call_id': 'call-lookup',
+                      'name': 'lookup',
+                      'arguments': '{}',
+                    },
+                  ]
+                : [
+                    {
+                      'type': 'message',
+                      'id': 'message-final',
+                      'content': [
+                        {
+                          'type': 'output_text',
+                          'text': 'done',
+                          'annotations': [],
+                        },
+                      ],
+                    },
+                  ],
+          });
+        });
+
+      final result = await generateText(
+        model: OpenAIProvider(
+          apiKey: 'key',
+          baseUrl: 'https://api.openai.test/v1',
+          client: dio,
+        ).responses('gpt-5'),
+        prompt: 'lookup',
+        maxSteps: 2,
+        tools: {
+          'lookup': tool<Map<String, dynamic>, String>(
+            inputSchema: Schema<Map<String, dynamic>>(
+              jsonSchema: const {'type': 'object'},
+              fromJson: (json) => json,
+            ),
+            execute: (_, _) async => 'result',
+          ),
+        },
+      );
+
+      expect(result.text, 'done');
+      expect(result.documentSources.single.filename, 'report.pdf');
+      expect(calls, 2);
+      expect(secondBody, isNotNull);
+      expect(
+        (secondBody!['input'] as List).where(
+          (item) => item is Map && item['type'] == 'input_file',
+        ),
+        isEmpty,
+      );
+      expect(
+        (secondBody!['input'] as List)
+            .where((item) => item is Map && item['role'] == 'assistant')
+            .single,
+        {
+          'role': 'assistant',
+          'content': [
+            {'type': 'input_text', 'text': 'According to the file,'},
+          ],
+        },
       );
     },
   );

@@ -745,17 +745,18 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
               'provider raw metadata.',
             );
           }
-        } else if (part case LanguageModelV4DocumentSourcePart document) {
+        } else if (part case LanguageModelV4DocumentSourcePart()) {
+          // Responses output citations are canonical content parts, but the
+          // API does not accept them as assistant input items. Keep the
+          // source in responseMessages for callers and omit it here, as the
+          // upstream Responses converter does.
           flushContent();
-          final raw = document.providerMetadata?[provider]?['raw'];
-          if (raw is Map) {
-            addRawItem(raw);
-          } else {
-            throw UnsupportedError(
-              'OpenAI Responses cannot replay a document source without '
-              'provider raw metadata.',
-            );
-          }
+          continue;
+        } else if (part case LanguageModelV4SourcePart()) {
+          // URL citations are output metadata and are omitted from the next
+          // Responses request for the same reason as document citations.
+          flushContent();
+          continue;
         }
       }
       flushContent();
@@ -769,7 +770,7 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
       return {
         'type': 'computer_call_output',
         'call_id': result.toolCallId,
-        'output': output,
+        ...output,
       };
     }
     final output = switch (result.output) {
@@ -813,7 +814,7 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
     );
   }
 
-  Map<String, dynamic>? _computerCallOutput(
+  Map<String, dynamic> _computerCallOutput(
     LanguageModelV4ToolResultOutput output,
   ) {
     if (output case ToolResultOutputJson(:final value)) {
@@ -831,9 +832,11 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
       }
       final reference = _responsesImageReference(images.single);
       return {
-        'type': 'computer_screenshot',
-        ...reference,
-        ..._imageDetail(images.single.providerOptions),
+        'output': {
+          'type': 'computer_screenshot',
+          ...reference,
+          ..._imageDetail(images.single.providerOptions),
+        },
       };
     }
     throw UnsupportedError(
@@ -845,12 +848,17 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
     if (value is! Map) {
       throw FormatException('Computer output must be a JSON object.');
     }
-    final output = value.cast<String, dynamic>();
-    if (output['type'] != 'computer_screenshot') {
+    final result = value.cast<String, dynamic>();
+    final rawScreenshot = result['output'];
+    if (rawScreenshot is! Map) {
+      throw FormatException('Computer output must include a screenshot.');
+    }
+    final screenshot = rawScreenshot.cast<String, dynamic>();
+    if (screenshot['type'] != 'computer_screenshot') {
       throw FormatException('Computer output must be a screenshot.');
     }
-    final imageUrl = output['image_url'];
-    final fileId = output['file_id'];
+    final imageUrl = screenshot['imageUrl'];
+    final fileId = screenshot['fileId'];
     if ((imageUrl is! String || imageUrl.isEmpty) &&
         (fileId is! String || fileId.isEmpty)) {
       throw FormatException(
@@ -861,15 +869,45 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
         (fileId != null && fileId is! String)) {
       throw FormatException('Computer screenshot references must be strings.');
     }
-    if (output['detail'] != null && output['detail'] is! String) {
+    if (screenshot['detail'] != null && screenshot['detail'] is! String) {
       throw FormatException('Computer screenshot detail must be a string.');
     }
-    if (output['acknowledged_safety_checks'] case final checks?) {
-      if (checks is! List || checks.any((check) => check is! Map)) {
-        throw FormatException('Computer safety checks must be JSON objects.');
+    final acknowledged = result['acknowledgedSafetyChecks'];
+    final acknowledgedChecks = <Map<String, dynamic>>[];
+    if (acknowledged != null) {
+      if (acknowledged is! List) {
+        throw FormatException('Computer safety checks must be a list.');
+      }
+      for (final check in acknowledged) {
+        if (check is! Map) {
+          throw FormatException('Computer safety checks must be JSON objects.');
+        }
+        final rawCheck = check.cast<String, dynamic>();
+        final id = rawCheck['id'];
+        if (id is! String || id.isEmpty) {
+          throw FormatException('Computer safety checks require an id.');
+        }
+        final code = rawCheck['code'];
+        final message = rawCheck['message'];
+        if ((code != null && code is! String) ||
+            (message != null && message is! String)) {
+          throw FormatException(
+            'Computer safety check code and message must be strings.',
+          );
+        }
+        acknowledgedChecks.add({'id': id, 'code': ?code, 'message': ?message});
       }
     }
-    return output;
+    return {
+      'output': {
+        'type': 'computer_screenshot',
+        if (imageUrl is String) 'image_url': imageUrl,
+        if (fileId is String) 'file_id': fileId,
+        if (screenshot['detail'] is String) 'detail': screenshot['detail'],
+      },
+      if (acknowledged != null)
+        'acknowledged_safety_checks': acknowledgedChecks,
+    };
   }
 
   Map<String, dynamic> _imageDetail(Map<String, dynamic>? providerOptions) {

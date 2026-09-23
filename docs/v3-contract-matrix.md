@@ -34,13 +34,13 @@ Compared with `packages/provider/src/language-model/v4/language-model-v4-call-op
 |---|---|---|
 | Text | `LanguageModelV4TextPart`, start/delta/end events | Retain matching segment IDs across all adapters |
 | Reasoning | Reasoning part and start/delta/end | Signature and metadata aggregation added; actual two-turn provider fixtures remain |
-| Custom content | No generic provider content variant | Define opaque extension data without dropping unknown content |
-| Reasoning file | No canonical reasoning-file variant | Required canonical-file migration and continuation qualification |
+| Custom content | `LanguageModelV4OpaquePart(provider, raw)` | Direct canonical variant implemented; provider namespace rejection is tested in Responses. Persisted replay qualification remains open |
+| Reasoning file | `LanguageModelV4ReasoningFilePart` and typed stream event | Direct variant implemented; metadata preservation across persisted conversation replay remains under repair |
 | Generated file | `LanguageModelV4FilePart` | Preserve generated media and provider references; distinguish reference from arbitrary URL |
 | Tool call | Parsed `input`, call ID/name | Dart adaptation from wire JSON; hosted/executed identity incomplete |
-| Tool result | Text or content output | Audit upstream structured/error/preliminary/denied output variants |
+| Tool result | Text, content, JSON, error-text, error-JSON and execution-denied variants; preliminary/dynamic flags | Canonical variants implemented; each provider still needs protocol-specific continuation qualification |
 | Approval request | Approval ID plus complete call | Exact call ID/name/input fingerprint/policy binding and replay prevalidation implemented; local persistence tests pass |
-| Source | URL/id/title/metadata | Document source variants and hosted citations not yet complete |
+| Source | URL source plus direct `LanguageModelV4DocumentSourcePart` | Both variants implemented. Responses citation-plus-tool continuation regression added; full persisted metadata fidelity remains open |
 | Redacted reasoning | Explicit Dart byte-content part | Deliberate adaptation; lossless provider replay needs fixtures |
 | Response metadata | ID/model/timestamp/headers/body | Present; high-level body inclusion defaults off, preserving IDs/headers/timing; provider-direct results remain explicit low-level access |
 | Finish | Enum plus separate raw string and nested usage | Dart representation differs from upstream unified/raw finish object |

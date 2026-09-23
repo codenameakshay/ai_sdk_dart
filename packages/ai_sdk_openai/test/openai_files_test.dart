@@ -53,6 +53,66 @@ void main() {
     );
   });
 
+  test('uploads a known-length stream with expiry metadata', () async {
+    FormData? form;
+    final dio = Dio()
+      ..httpClientAdapter = _Adapter((request) async {
+        form = request.data as FormData;
+        return ResponseBody.fromString(
+          '{"id":"file-stream","bytes":3,"created_at":1700000000,'
+          '"expires_at":1700003600,"filename":"a.jsonl",'
+          '"purpose":"batch","status":"processed"}',
+          200,
+          headers: {
+            'content-type': ['application/json'],
+          },
+        );
+      });
+    final file =
+        await OpenAIFiles(
+          client: dio,
+          headers: () async => const {},
+          baseUrl: 'https://api.openai.test/v1',
+        ).upload(
+          OpenAIFileUpload(
+            filename: 'a.jsonl',
+            purpose: 'batch',
+            stream: Stream<List<int>>.value([1, 2, 3]),
+            length: 3,
+            expiresAfter: const OpenAIFileExpiry(seconds: 3600),
+          ),
+        );
+
+    expect(
+      file.expiresAt,
+      DateTime.fromMillisecondsSinceEpoch(1700003600 * 1000, isUtc: true),
+    );
+    expect(file.status, 'processed');
+    final fields = {for (final field in form!.fields) field.key: field.value};
+    expect(fields, containsPair('purpose', 'batch'));
+    expect(fields, containsPair('expires_after[anchor]', 'created_at'));
+    expect(fields, containsPair('expires_after[seconds]', '3600'));
+    expect(form!.files.single.value.filename, 'a.jsonl');
+  });
+
+  test('rejects invalid file expiry settings', () {
+    for (final expiry in [
+      const OpenAIFileExpiry(anchor: 'updated_at', seconds: 1),
+      const OpenAIFileExpiry(seconds: 0),
+      const OpenAIFileExpiry(seconds: 2592001),
+    ]) {
+      expect(
+        () => OpenAIFileUpload(
+          filename: 'a.txt',
+          purpose: 'assistants',
+          bytes: Uint8List.fromList([1]),
+          expiresAfter: expiry,
+        ).validate(),
+        throwsA(isA<OpenAIFileException>()),
+      );
+    }
+  });
+
   test('validates stream length at runtime', () async {
     var requests = 0;
     final dio = Dio()

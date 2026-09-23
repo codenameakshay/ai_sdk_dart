@@ -9,4 +9,4 @@ dependencies:
   ai_sdk_provider: ^3.0.0
   web_socket_channel: ^3.0.3
 dev_dependencies:
-  test: ^1.31.0
+  test: ^1.25.0

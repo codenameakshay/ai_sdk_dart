@@ -1,5 +1,3 @@
-// ignore_for_file: use_null_aware_elements
-
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
 /// Typed provider options for OpenAI language models.
@@ -38,8 +36,8 @@ class OpenAILanguageModelOptions {
 
   /// Serialises this object to the map format expected by the OpenAI API.
   Map<String, dynamic> toMap() => {
-    if (reasoningEffort != null) 'reasoning_effort': reasoningEffort,
-    if (reasoningSummary != null) 'reasoning_summary': reasoningSummary,
+    'reasoning_effort': ?reasoningEffort,
+    'reasoning_summary': ?reasoningSummary,
   };
 }
 
@@ -51,8 +49,8 @@ class OpenAIWebSearchTool extends LanguageModelV4ProviderDefinedTool {
         name: 'web_search_preview',
         args: {
           'search_context_size': searchContextSize,
-          if (userLocation != null)
-            'user_location': {'type': 'approximate', 'city': userLocation},
+          if (userLocation case final location?)
+            'user_location': {'type': 'approximate', 'city': location},
         },
       );
 
@@ -69,7 +67,7 @@ class OpenAIFileSearchTool extends LanguageModelV4ProviderDefinedTool {
          name: 'file_search',
          args: {
            'vector_store_ids': vectorStoreIds,
-           if (maxNumResults != null) 'max_num_results': maxNumResults,
+           'max_num_results': ?maxNumResults,
          },
        );
 }
@@ -80,7 +78,7 @@ class OpenAICodeInterpreterTool extends LanguageModelV4ProviderDefinedTool {
     : super(
         id: 'code_interpreter',
         name: 'code_interpreter',
-        args: {if (container != null) 'container': container},
+        args: {'container': ?container},
       );
 }
 
@@ -104,9 +102,9 @@ class OpenAIMcpTool extends LanguageModelV4ProviderDefinedTool {
          args: {
            'server_label': serverLabel,
            'server_url': serverUrl,
-           if (allowedTools != null) 'allowed_tools': allowedTools,
-           if (requireApproval != null) 'require_approval': requireApproval,
-           if (headers != null) 'headers': headers,
+           'allowed_tools': ?allowedTools,
+           'require_approval': ?requireApproval,
+           'headers': ?headers,
          },
        );
 }

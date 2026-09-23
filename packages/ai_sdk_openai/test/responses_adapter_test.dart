@@ -1327,7 +1327,7 @@ void main() {
         ).responses('gpt-5'),
         prompt: 'hello',
       );
-      final eventsFuture = result.fullStream.toList();
+      final eventsFuture = result.stream.toList();
       final content = await result.content;
       expect(content.whereType<LanguageModelV4OpaquePart>(), hasLength(1));
       expect(
@@ -1501,7 +1501,7 @@ void main() {
         maxSteps: 1,
         providerDefinedTools: [OpenAIWebSearchTool()],
       );
-      final eventsFuture = result.fullStream.toList();
+      final eventsFuture = result.stream.toList();
       await result.text;
       expect(
         (await eventsFuture).whereType<StreamTextToolResultEvent>(),

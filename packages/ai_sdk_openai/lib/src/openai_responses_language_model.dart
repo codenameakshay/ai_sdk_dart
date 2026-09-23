@@ -717,56 +717,23 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
           :final provider,
           :final raw,
         )) {
-          if (provider == this.provider && raw is Map) {
-            flushContent();
-            addRawItem(raw);
+          if (provider != this.provider) {
+            throw UnsupportedError(
+              'OpenAI Responses cannot replay opaque content from provider '
+              '$provider.',
+            );
           }
-        } else if (part case LanguageModelV4ImagePart(
-          :final image,
-          :final mediaType,
-        )) {
-          final encoded = dataContentToBase64(image);
-          final url = image is DataContentUrl
-              ? (image).url.toString()
-              : (encoded == null
-                    ? null
-                    : 'data:${mediaType ?? 'image/png'};base64,$encoded');
-          if (url != null) {
-            content.add({'type': 'input_image', 'image_url': url});
+          if (raw is! Map) {
+            throw UnsupportedError(
+              'OpenAI Responses cannot replay non-map opaque content.',
+            );
           }
-        } else if (part case LanguageModelV4FilePart(
-          :final data,
-          :final mediaType,
-          :final filename,
-        )) {
-          if (data case DataContentProviderReference(
-            :final namespace,
-            :final id,
-          )) {
-            if (namespace != 'openai') {
-              throw ArgumentError.value(
-                namespace,
-                'namespace',
-                'OpenAI Responses cannot serialize another provider reference',
-              );
-            }
-            content.add({'type': 'input_file', 'file_id': id});
-            continue;
-          }
-          final encoded = dataContentToBase64(data);
-          final url = data is DataContentUrl
-              ? (data).url.toString()
-              : (encoded == null ? null : 'data:$mediaType;base64,$encoded');
-          if (url != null) {
-            content.add({
-              'type': 'input_file',
-              if (data is DataContentUrl) 'file_url': url,
-              if (data is! DataContentUrl) ...{
-                'file_data': url,
-                'filename': filename ?? 'data',
-              },
-            });
-          }
+          flushContent();
+          addRawItem(raw);
+        } else if (part case LanguageModelV4ImagePart()) {
+          content.add(_responsesMediaItem(part));
+        } else if (part case LanguageModelV4FilePart()) {
+          content.add(_responsesMediaItem(part));
         } else if (part case LanguageModelV4ReasoningFilePart reasoningFile) {
           flushContent();
           final raw = reasoningFile.providerOptions?[provider]?['raw'];
@@ -832,65 +799,14 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
     if (part case LanguageModelV4TextPart(:final text)) {
       return {'type': 'input_text', 'text': text};
     }
-    if (part case LanguageModelV4ImagePart image) {
-      final reference = _responsesImageReference(image);
-      if (reference == null) {
-        throw UnsupportedError(
-          'OpenAI Responses cannot serialize this tool image content.',
-        );
-      }
-      return {
-        'type': 'input_image',
-        ...reference,
-        ..._imageDetail(image.providerOptions),
-      };
+    if (part case LanguageModelV4ImagePart() || LanguageModelV4FilePart()) {
+      return _responsesMediaItem(part);
     }
-    if (part case LanguageModelV4FilePart file) {
-      final topLevel = file.mediaType.split('/').first;
-      if (topLevel == 'image') {
-        final reference = _responsesImageReference(
-          LanguageModelV4ImagePart(
-            image: file.data,
-            mediaType: file.mediaType,
-            providerOptions: file.providerOptions,
-          ),
-        );
-        if (reference == null) {
-          throw UnsupportedError(
-            'OpenAI Responses cannot serialize this tool image file.',
-          );
-        }
-        return {
-          'type': 'input_image',
-          ...reference,
-          ..._imageDetail(file.providerOptions),
-        };
-      }
-      final data = file.data;
-      if (data case DataContentProviderReference(:final namespace, :final id)) {
-        if (namespace != 'openai') {
-          throw ArgumentError.value(
-            namespace,
-            'namespace',
-            'OpenAI Responses cannot serialize another provider reference',
-          );
-        }
-        return {'type': 'input_file', 'file_id': id};
-      }
-      if (data case DataContentUrl(:final url)) {
-        return {'type': 'input_file', 'file_url': url.toString()};
-      }
-      final encoded = dataContentToBase64(data);
-      if (encoded == null) {
-        throw UnsupportedError(
-          'OpenAI Responses cannot serialize this tool file.',
-        );
-      }
-      return {
-        'type': 'input_file',
-        'file_data': 'data:${file.mediaType};base64,$encoded',
-        'filename': file.filename ?? 'data',
-      };
+    if (part case LanguageModelV4OpaquePart(:final provider)) {
+      throw UnsupportedError(
+        'OpenAI Responses cannot serialize opaque content from provider '
+        '$provider.',
+      );
     }
     throw UnsupportedError(
       'OpenAI Responses cannot serialize ${part.runtimeType} in tool content.',
@@ -914,11 +830,6 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
         );
       }
       final reference = _responsesImageReference(images.single);
-      if (reference == null) {
-        throw UnsupportedError(
-          'Computer screenshot image is not serializable.',
-        );
-      }
       return {
         'type': 'computer_screenshot',
         ...reference,
@@ -969,7 +880,7 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
     return detail is String ? {'detail': detail} : const {};
   }
 
-  Map<String, dynamic>? _responsesImageReference(
+  Map<String, dynamic> _responsesImageReference(
     LanguageModelV4ImagePart image,
   ) {
     final data = image.image;
@@ -977,13 +888,79 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
       return {'image_url': data.url.toString()};
     }
     if (data case DataContentProviderReference(:final namespace, :final id)) {
-      if (namespace == 'openai') return {'file_id': id};
-      return null;
+      if (namespace != 'openai') {
+        throw ArgumentError.value(
+          namespace,
+          'namespace',
+          'OpenAI Responses cannot serialize another provider reference',
+        );
+      }
+      return {'file_id': id};
     }
     final encoded = dataContentToBase64(data);
-    if (encoded == null) return null;
+    if (encoded == null) {
+      throw UnsupportedError(
+        'OpenAI Responses cannot serialize this image content.',
+      );
+    }
     return {
       'image_url': 'data:${image.mediaType ?? 'image/png'};base64,$encoded',
+    };
+  }
+
+  Map<String, dynamic> _responsesMediaItem(LanguageModelV4ContentPart part) {
+    if (part case LanguageModelV4ImagePart image) {
+      return {
+        'type': 'input_image',
+        ..._responsesImageReference(image),
+        ..._imageDetail(image.providerOptions),
+      };
+    }
+    if (part case LanguageModelV4FilePart file) {
+      if (file.mediaType.toLowerCase().startsWith('image/')) {
+        return {
+          'type': 'input_image',
+          ..._responsesImageReference(
+            LanguageModelV4ImagePart(
+              image: file.data,
+              mediaType: file.mediaType,
+              providerOptions: file.providerOptions,
+            ),
+          ),
+          ..._imageDetail(file.providerOptions),
+        };
+      }
+      return {'type': 'input_file', ..._responsesFileReference(file)};
+    }
+    throw UnsupportedError(
+      'OpenAI Responses cannot serialize ${part.runtimeType} as media.',
+    );
+  }
+
+  Map<String, dynamic> _responsesFileReference(LanguageModelV4FilePart file) {
+    final data = file.data;
+    if (data case DataContentProviderReference(:final namespace, :final id)) {
+      if (namespace != 'openai') {
+        throw ArgumentError.value(
+          namespace,
+          'namespace',
+          'OpenAI Responses cannot serialize another provider reference',
+        );
+      }
+      return {'file_id': id};
+    }
+    if (data case DataContentUrl(:final url)) {
+      return {'file_url': url.toString()};
+    }
+    final encoded = dataContentToBase64(data);
+    if (encoded == null) {
+      throw UnsupportedError(
+        'OpenAI Responses cannot serialize this file content.',
+      );
+    }
+    return {
+      'file_data': 'data:${file.mediaType};base64,$encoded',
+      'filename': file.filename ?? 'data',
     };
   }
 

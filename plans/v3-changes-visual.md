@@ -77,7 +77,7 @@ flowchart LR
   end
 ```
 
-Focused tests cover growing strings, trailing spaces, split escapes, nested immutability and invalid final syntax. The full core suite passes locally. A same-source [object-preview comparison](v3-research/evidence/benchmarks/README.md) measures 196.141 ms at the 1 MiB incremental median versus 93.734 ms for final-only parsing on a shared Mac. This added CPU cost buys earlier previews; the older Linux timing table above does not qualify this new cadence.
+Focused tests cover growing strings, trailing spaces, split escapes, nested immutability and invalid final syntax. The full core suite passes locally. A same-source [object-preview comparison](v3-research/evidence/benchmarks/README.md) measures 126.211 ms at the 1 MiB incremental median versus 63.066 ms for final-only parsing on a shared Mac. This added CPU cost buys earlier previews; the older Linux timing table above does not qualify this new cadence.
 
 ## What improves, and what costs more
 
@@ -109,4 +109,4 @@ flowchart TD
   I --> J[Release-qualified PR]
 ```
 
-The prior pushed iOS job failed in an animated send-button finder. The current local simulator passed the original six flows twice and the focused safe text-retry flow once. A new two-launch test uses the real local backend and a persisted pending approval, but only its write phase has passed locally: separate `flutter test` installs reset the app container. The updated CI job must prove distinct write and restore screenshots after one install. Aggregate coverage, native frame evidence, independent final-head review and live qualification remain open. No merge or publication is authorized by this checkpoint.
+The prior pushed iOS job failed in an animated send-button finder. The [exact-head native run](v3-research/evidence/ios/README.md) now passes both launches, with distinct pending-write and restored-approval screenshots plus safe text retry. It uses a scripted model, not a hosted provider. Aggregate coverage, native frame evidence, independent final-head review and live qualification remain open. No merge or publication is authorized by this checkpoint.

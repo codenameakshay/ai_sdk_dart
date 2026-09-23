@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_anthropic/ai_sdk_anthropic.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
@@ -177,6 +178,85 @@ void main() {
         'weather',
       );
     });
+
+    test(
+      'preserves signed and redacted thinking across tool continuation',
+      () async {
+        late Map<String, dynamic> captured;
+        final server = await _startServer((request) async {
+          captured =
+              (jsonDecode(await utf8.decoder.bind(request).join()) as Map)
+                  .cast<String, dynamic>();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'id': 'msg_2',
+              'model': 'claude-sonnet-4-5',
+              'stop_reason': 'end_turn',
+              'content': [
+                {'type': 'text', 'text': 'done'},
+              ],
+              'usage': {'input_tokens': 2, 'output_tokens': 1},
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+        final model = AnthropicProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('claude-sonnet-4-5');
+
+        await model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.assistant,
+                  content: [
+                    LanguageModelV4ReasoningPart(
+                      text: 'think',
+                      signature: 'sig-fragment-1sig-fragment-2',
+                    ),
+                    LanguageModelV4RedactedReasoningPart(
+                      data: Uint8List.fromList([1, 2, 3]),
+                    ),
+                    LanguageModelV4ToolCallPart(
+                      toolCallId: 'toolu_1',
+                      toolName: 'weather',
+                      input: {'city': 'Paris'},
+                    ),
+                  ],
+                ),
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.tool,
+                  content: [
+                    LanguageModelV4ToolResultPart(
+                      toolCallId: 'toolu_1',
+                      toolName: 'weather',
+                      output: ToolResultOutputText('sunny'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+        final messages = (captured['messages'] as List).cast<Map>();
+        final assistant = messages.firstWhere((m) => m['role'] == 'assistant');
+        final content = (assistant['content'] as List).cast<Map>();
+        expect(content[0], {
+          'type': 'thinking',
+          'thinking': 'think',
+          'signature': 'sig-fragment-1sig-fragment-2',
+        });
+        expect(content[1]['type'], 'redacted_thinking');
+        expect(content[2]['id'], 'toolu_1');
+        final tool = messages.firstWhere((m) => m['role'] == 'user');
+        expect((tool['content'] as List).single['tool_use_id'], 'toolu_1');
+      },
+    );
 
     test('doStream parses content and message delta events', () async {
       final server = await _startServer((request) async {
@@ -1068,6 +1148,16 @@ void main() {
         expect(map['thinking'], {'type': 'enabled', 'budget_tokens': 5000});
       });
 
+      test('toMap produces adaptive thinking object', () {
+        expect(
+          const AnthropicThinkingOptions(
+            adaptive: true,
+            budgetTokens: 5000,
+          ).toMap()['thinking'],
+          {'type': 'adaptive'},
+        );
+      });
+
       test('toMap produces disabled when enabled = false', () {
         final opts = const AnthropicThinkingOptions(enabled: false);
         final map = opts.toMap();
@@ -1092,9 +1182,66 @@ void main() {
       test('AnthropicLanguageModelOptions wraps thinking', () {
         final langOpts = const AnthropicLanguageModelOptions(
           thinking: AnthropicThinkingOptions(budgetTokens: 2000),
+          effort: 'high',
         );
         final map = langOpts.toMap();
         expect(map['thinking'], {'type': 'enabled', 'budget_tokens': 2000});
+        expect(map['effort'], 'high');
+      });
+
+      test('maps portable reasoning to current adaptive effort', () async {
+        late Map<String, dynamic> captured;
+        final server = await _startServer((request) async {
+          captured =
+              (jsonDecode(await utf8.decoder.bind(request).join()) as Map)
+                  .cast<String, dynamic>();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(jsonEncode({'content': []}));
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        await AnthropicProvider(apiKey: 'test', baseUrl: server.baseUrl)
+            .call('claude-sonnet-5')
+            .doGenerate(
+              LanguageModelV4CallOptions(
+                prompt: userPrompt('reason'),
+                reasoning: LanguageModelV4Reasoning.xhigh,
+              ),
+            );
+
+        expect(captured['thinking'], {'type': 'adaptive'});
+        expect((captured['output_config'] as Map)['effort'], 'max');
+      });
+
+      test('maps legacy reasoning to a bounded thinking budget', () async {
+        late Map<String, dynamic> captured;
+        final server = await _startServer((request) async {
+          captured =
+              (jsonDecode(await utf8.decoder.bind(request).join()) as Map)
+                  .cast<String, dynamic>();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(jsonEncode({'content': []}));
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        await AnthropicProvider(apiKey: 'test', baseUrl: server.baseUrl)
+            .call('claude-3-7-sonnet-20250219')
+            .doGenerate(
+              LanguageModelV4CallOptions(
+                prompt: userPrompt('reason'),
+                maxOutputTokens: 4096,
+                reasoning: LanguageModelV4Reasoning.high,
+              ),
+            );
+
+        expect(captured['thinking'], {
+          'type': 'enabled',
+          'budget_tokens': 2458,
+        });
       });
 
       test('serializes typed cache control options', () {
@@ -1200,6 +1347,40 @@ void main() {
         expect(captured['thinking'], {'type': 'disabled'});
         expect(captured.containsKey('speed'), isFalse);
       });
+
+      test(
+        'doGenerate sends native output_config format for JSON response format',
+        () async {
+          late Map<String, dynamic> captured;
+          final server = await _startServer((request) async {
+            captured =
+                (jsonDecode(await utf8.decoder.bind(request).join()) as Map)
+                    .cast<String, dynamic>();
+            request.response.statusCode = 200;
+            request.response.headers.contentType = ContentType.json;
+            request.response.write(jsonEncode({'content': []}));
+            await request.response.close();
+          });
+          addTearDown(server.close);
+          await AnthropicProvider(apiKey: 'test', baseUrl: server.baseUrl)
+              .call('claude-sonnet-4-5')
+              .doGenerate(
+                LanguageModelV4CallOptions(
+                  prompt: userPrompt('json'),
+                  responseFormat: const LanguageModelV4JsonResponseFormat(
+                    name: 'answer',
+                    schema: {'type': 'object'},
+                  ),
+                ),
+              );
+          expect(captured['output_config'], {
+            'format': {
+              'type': 'json_schema',
+              'schema': {'type': 'object'},
+            },
+          });
+        },
+      );
 
       test('sends typed cache control on requests and content parts', () async {
         late Map<String, dynamic> captured;
@@ -1542,7 +1723,7 @@ void main() {
       expect(assistantParts.single['input'], {'city': 'Paris'});
     });
 
-    test('serializes image/file/unsupported tool result parts', () async {
+    test('serializes image/file tool result parts', () async {
       late Map<String, dynamic> captured;
       final imageB64 = base64Encode(utf8.encode('img'));
       final fileB64 = base64Encode(utf8.encode('pdf'));
@@ -1588,10 +1769,6 @@ void main() {
                         data: DataContentBase64(fileB64),
                         mediaType: 'application/pdf',
                       ),
-                      LanguageModelV4SourcePart(
-                        id: 's1',
-                        url: 'https://example.com',
-                      ),
                     ]),
                   ),
                 ],
@@ -1613,11 +1790,41 @@ void main() {
       expect((parts[1]['source'] as Map)['data'], imageB64);
       expect(parts[2]['type'], 'document');
       expect((parts[2]['source'] as Map)['data'], fileB64);
-      // Unsupported part (source) falls back to a placeholder text.
-      expect(parts[3], {
-        'type': 'text',
-        'text': '[unsupported tool result content]',
-      });
+      expect(parts, hasLength(3));
+    });
+
+    test('rejects unsupported tool result content explicitly', () async {
+      final model = AnthropicProvider(
+        apiKey: 'test',
+        baseUrl: 'http://127.0.0.1:1',
+      ).call('claude-sonnet-4-5');
+
+      await expectLater(
+        model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.tool,
+                  content: [
+                    LanguageModelV4ToolResultPart(
+                      toolCallId: 'toolu_1',
+                      toolName: 'render',
+                      output: ToolResultOutputContent([
+                        LanguageModelV4SourcePart(
+                          id: 's1',
+                          url: 'https://example.com',
+                        ),
+                      ]),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        throwsUnsupportedError,
+      );
     });
 
     test('uses text tool result output directly', () async {
@@ -2243,6 +2450,131 @@ void main() {
         expect(content.single['is_error'], isTrue);
       },
     );
+
+    test('streams signed thinking continuation with tool response', () async {
+      late Map<String, dynamic> captured;
+      final server = await _startServer((request) async {
+        captured = (jsonDecode(await utf8.decoder.bind(request).join()) as Map)
+            .cast<String, dynamic>();
+        request.response.statusCode = 200;
+        request.response.headers.set('content-type', 'text/event-stream');
+        request.response.write(
+          'data: {"type":"message_start","message":{"id":"m2","model":"claude-sonnet-4-5","usage":{"input_tokens":1,"output_tokens":1}}}\n\n'
+          'data: {"type":"content_block_start","index":0,"content_block":{"type":"text"}}\n\n'
+          'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"done"}}\n\n'
+          'data: {"type":"message_stop"}\n\n',
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+      final model = AnthropicProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).call('claude-sonnet-4-5');
+      final result = await model.doStream(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
+            messages: [
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.assistant,
+                content: const [
+                  LanguageModelV4ReasoningPart(
+                    text: 'think',
+                    signature: 'sig-1',
+                  ),
+                ],
+              ),
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.tool,
+                content: [
+                  LanguageModelV4ToolResultPart(
+                    toolCallId: 'toolu-1',
+                    toolName: 'lookup',
+                    output: ToolResultOutputText('ok'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+      await result.stream.toList();
+      final messages = (captured['messages'] as List).cast<Map>();
+      final assistant = messages.firstWhere((m) => m['role'] == 'assistant');
+      expect((assistant['content'] as List).single['signature'], 'sig-1');
+      final tool = messages.firstWhere((m) => m['role'] == 'user');
+      expect((tool['content'] as List).single['tool_use_id'], 'toolu-1');
+    });
+
+    test('preserves fragmented signatures and IDs through a real streamText loop', () async {
+      final requests = <Map<String, dynamic>>[];
+      var requestCount = 0;
+      final server = await _startServer((request) async {
+        requests.add(
+          (jsonDecode(await utf8.decoder.bind(request).join()) as Map)
+              .cast<String, dynamic>(),
+        );
+        requestCount++;
+        request.response.statusCode = 200;
+        request.response.headers.set('content-type', 'text/event-stream');
+        if (requestCount == 1) {
+          request.response.write(
+            'data: {"type":"message_start","message":{"id":"m1","model":"claude-sonnet-4-5","usage":{"input_tokens":1,"output_tokens":1}}}\n\n'
+            'data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking"}}\n\n'
+            'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"think"}}\n\n'
+            'data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig-"}}\n\n'
+            'data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"a"}}\n\n'
+            'data: {"type":"content_block_stop","index":0}\n\n'
+            'data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu-a","name":"lookup"}}\n\n'
+            'data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\\"q\\":\\"x\\"}"}}\n\n'
+            'data: {"type":"content_block_stop","index":1}\n\n'
+            'data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}\n\n'
+            'data: {"type":"message_stop"}\n\n',
+          );
+        } else {
+          request.response.write(
+            'data: {"type":"message_start","message":{"id":"m2","model":"claude-sonnet-4-5","usage":{"input_tokens":1,"output_tokens":1}}}\n\n'
+            'data: {"type":"content_block_start","index":0,"content_block":{"type":"text"}}\n\n'
+            'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"done"}}\n\n'
+            'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n'
+            'data: {"type":"message_stop"}\n\n',
+          );
+        }
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = AnthropicProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).call('claude-sonnet-4-5');
+      final result = await streamText(
+        model: model,
+        prompt: 'lookup',
+        maxSteps: 2,
+        tools: {
+          'lookup': tool<Map<String, dynamic>, String>(
+            inputSchema: jsonSchema(const {'type': 'object'}),
+            execute: (_, _) async => 'ok',
+          ),
+        },
+      );
+
+      expect(await result.text, 'done');
+      expect(requests, hasLength(2));
+      final assistant = (requests[1]['messages'] as List)
+          .cast<Map>()
+          .firstWhere((m) => m['role'] == 'assistant');
+      final assistantContent = (assistant['content'] as List).cast<Map>();
+      expect(assistantContent[0]['signature'], 'sig-a');
+      expect(assistantContent[1]['id'], 'toolu-a');
+      final toolBody = (requests[1]['messages'] as List).cast<Map>().firstWhere(
+        (m) => (m['content'] as List).any(
+          (part) => (part as Map)['type'] == 'tool_result',
+        ),
+      );
+      expect((toolBody['content'] as List).single['tool_use_id'], 'toolu-a');
+    });
   });
 }
 

@@ -1,6 +1,6 @@
 # ai_sdk_mcp
 
-[Model Context Protocol (MCP)](https://modelcontextprotocol.io) client for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart). Connects to MCP servers over Streamable HTTP (protocol `2025-06-18`) or stdio and exposes their tools as a typed `ToolSet`.
+[Model Context Protocol (MCP)](https://modelcontextprotocol.io) client for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart). Connects to MCP servers over Streamable HTTP or stdio and exposes their tools as a typed `ToolSet`. The client has explicit legacy (`2025-06-18`) and modern (`2026-07-28`) protocol strategies.
 
 ## Installation
 
@@ -61,6 +61,37 @@ print(result.text);
 await client.close();
 ```
 
+For a modern stateless server, select the modern strategy. It probes
+`server/discover`, adds per-request protocol metadata, sends the required
+Streamable HTTP routing headers, and does not use MCP sessions or GET/DELETE
+lifecycle requests:
+
+```dart
+final client = MCPClient(
+  transport: transport,
+  protocolMode: MCPProtocolMode.modern,
+);
+await client.initialize();
+```
+
+Progress is opt-in per request. The host supplies a unique string or integer
+token and listens to validated monotonic updates:
+
+```dart
+final updates = client.progress.listen((update) {
+  print('${update.progress}/${update.total ?? '?'} ${update.message ?? ''}');
+});
+await client.callTool('long_task', {}, progressToken: 'task-1');
+await updates.cancel();
+```
+
+HTTP authorization is host-owned. Pass `MCPAuthConfiguration` with token and
+refresh callbacks; the transport sends bearer credentials on every request
+and retries a rejected 401 once after a refresh. It does not store tokens or
+open browser login flows. Use `validateAuthorizationIssuer` for RFC 9207
+issuer binding and `validateRedirectUri` before handing a callback URI to a
+host browser integration.
+
 `headers` are copied onto the transport's `POST`, optional `GET`, and `DELETE`
 requests. This is the place to put required credential or routing headers.
 Do not ship long-lived secrets inside browser or mobile client builds. Prefer
@@ -71,6 +102,19 @@ short-lived tokens minted by your backend or a trusted proxy.
 - `initialize()` negotiates MCP protocol version `2025-06-18`. Legacy
   HTTP+SSE servers that only speak older protocol versions are not supported
   by this transport.
+- `protocolMode: MCPProtocolMode.modern` selects MCP `2026-07-28`; modern
+  calls carry `_meta` protocol metadata and `tools/call` can return a typed
+  `MCPInputRequiredResult` for a multi-round-trip request. Its
+  `requestState` is an opaque server string: pass it back unchanged with the
+  matching `inputResponses` in a subsequent `callTool` invocation. Modern
+  result envelopes are validated before they reach the caller.
+- Modern progress notifications are exposed through `client.progress`. They
+  report progress only; MCP does not define arbitrary partial tool-output
+  chunks, so this package does not synthesize such a stream.
+- The official `io.modelcontextprotocol/tasks` extension is not implemented.
+  Long-running work must use the host's own task/polling adapter until a
+  versioned Tasks API is added. `ttlMs`/`cacheScope` cache hints are also not
+  interpreted or used for client-side caching.
 - If the server returns `Mcp-Session-Id` during initialize, the transport
   includes it on later requests and sends `DELETE` on `close()` to end the
   session. A server may reject `DELETE` with `405 Method Not Allowed`; that is

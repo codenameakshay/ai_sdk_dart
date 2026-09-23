@@ -1,0 +1,30 @@
+00:00 +0: loading packages/ai_sdk_realtime/test/realtime_test.dart
+00:00 +0: cancel and interrupt target the requested response ID
+00:00 +1: waits for session.created, configures, and deduplicates tool calls
+00:00 +2: bounds decoded audio and validates interruption duration
+00:00 +3: requires session ids and post-configuration matching updates
+00:00 +4: matching update wins after a mismatched update
+00:00 +5: speaks the Realtime handshake over a real loopback WebSocket
+00:00 +5 -1: speaks the Realtime handshake over a real loopback WebSocket [E]
+  Expected: null
+    Actual: 'realtime=v1'
+  Current GA wire configuration must not select the legacy beta protocol
+
+  package:matcher                                         expect
+  packages/ai_sdk_realtime/test/realtime_test.dart 218:7  main.<fn>
+
+00:00 +5 -1: validates response identities and discards late cancelled output
+00:00 +6 -1: readiness deadline is total while unknown events keep arriving
+00:00 +7 -1: a hanging configuration send is covered by the startup deadline
+00:00 +8 -1: close has one bounded shared cleanup future
+00:00 +9 -1: close preserves a cleanup failure observed before its deadline
+00:00 +10 -1: paused listeners receive a bounded queue and missing listeners drop audio
+00:00 +11 -1: canceling a paused audio subscriber releases its queued budget
+00:00 +12 -1: loopback peer close completes the event stream once
+00:00 +13 -1: Some tests failed.
+
+Failing tests:
+  packages/ai_sdk_realtime/test/realtime_test.dart: speaks the Realtime handshake over a real loopback WebSocket
+
+Consider enabling the flag chain-stack-traces to receive more detailed exceptions.
+For example, 'dart test --chain-stack-traces'.

@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'language_model_v4_data_content.dart';
+import '../shared/json_value.dart';
 
 /// A part of a language model message content.
 ///
@@ -18,6 +19,17 @@ class LanguageModelV4TextPart extends LanguageModelV4ContentPart {
 
   final String text;
   final Map<String, dynamic>? providerOptions;
+}
+
+/// Opaque provider content that the portable contract does not interpret.
+///
+/// Providers use this part to retain unknown response items for history
+/// replay without pretending they are user-visible text.
+class LanguageModelV4OpaquePart extends LanguageModelV4ContentPart {
+  const LanguageModelV4OpaquePart({required this.provider, required this.raw});
+
+  final String provider;
+  final Object raw;
 }
 
 /// An image content part.
@@ -52,6 +64,19 @@ class LanguageModelV4FilePart extends LanguageModelV4ContentPart {
   final String mediaType;
 
   final String? filename;
+  final Map<String, dynamic>? providerOptions;
+}
+
+/// A file produced as part of the model's reasoning trace.
+class LanguageModelV4ReasoningFilePart extends LanguageModelV4ContentPart {
+  const LanguageModelV4ReasoningFilePart({
+    required this.data,
+    required this.mediaType,
+    this.providerOptions,
+  });
+
+  final LanguageModelV4DataContent data;
+  final String mediaType;
   final Map<String, dynamic>? providerOptions;
 }
 
@@ -90,6 +115,7 @@ class LanguageModelV4ToolCallPart extends LanguageModelV4ContentPart {
     required this.toolName,
     required this.input,
     this.providerOptions,
+    this.providerExecuted = false,
   });
 
   final String toolCallId;
@@ -99,6 +125,10 @@ class LanguageModelV4ToolCallPart extends LanguageModelV4ContentPart {
   final Object input;
 
   final Map<String, dynamic>? providerOptions;
+
+  /// Whether the provider already ran this call and the core must not invoke
+  /// a same-named local tool.
+  final bool providerExecuted;
 }
 
 /// A tool execution approval request (needsApproval tools).
@@ -107,10 +137,14 @@ class LanguageModelV4ToolApprovalRequestPart
   const LanguageModelV4ToolApprovalRequestPart({
     required this.approvalId,
     required this.toolCall,
+    this.policyRevision,
+    this.argumentsFingerprint,
   });
 
   final String approvalId;
   final LanguageModelV4ToolCallPart toolCall;
+  final String? policyRevision;
+  final String? argumentsFingerprint;
 }
 
 // ─── Tool result content parts ────────────────────────────────────────────────
@@ -132,21 +166,63 @@ class ToolResultOutputContent extends LanguageModelV4ToolResultOutput {
   final List<LanguageModelV4ContentPart> parts;
 }
 
+/// A structured JSON tool result.
+class ToolResultOutputJson extends LanguageModelV4ToolResultOutput {
+  const ToolResultOutputJson(this.value);
+
+  final JsonValue value;
+}
+
+/// A structured JSON tool error result.
+class ToolResultOutputErrorJson extends LanguageModelV4ToolResultOutput {
+  const ToolResultOutputErrorJson(this.value);
+
+  final JsonValue value;
+}
+
+/// A text tool error result.
+class ToolResultOutputErrorText extends LanguageModelV4ToolResultOutput {
+  const ToolResultOutputErrorText(this.text);
+
+  final String text;
+}
+
+/// A tool result produced when execution was denied by policy.
+class ToolResultOutputExecutionDenied extends LanguageModelV4ToolResultOutput {
+  const ToolResultOutputExecutionDenied([
+    this.reason = 'Tool call execution denied.',
+    this.approvalId,
+  ]);
+
+  final String reason;
+  final String? approvalId;
+}
+
 /// A tool result message part.
 class LanguageModelV4ToolResultPart extends LanguageModelV4ContentPart {
   const LanguageModelV4ToolResultPart({
     required this.toolCallId,
     required this.toolName,
     required this.output,
-    this.isError = false,
+    bool isError = false,
+    this.preliminary = false,
+    this.isDynamic = false,
     this.providerOptions,
-  });
+  }) : isError =
+           isError ||
+           output is ToolResultOutputErrorJson ||
+           output is ToolResultOutputErrorText ||
+           output is ToolResultOutputExecutionDenied;
 
   final String toolCallId;
   final String toolName;
   final LanguageModelV4ToolResultOutput output;
   final bool isError;
+  final bool preliminary;
   final Map<String, dynamic>? providerOptions;
+
+  /// Dart spelling of the upstream `dynamic` discriminator.
+  final bool isDynamic;
 }
 
 /// A source reference (returned by web-search / RAG models).
@@ -162,6 +238,29 @@ class LanguageModelV4SourcePart extends LanguageModelV4ContentPart {
   final String url;
   final String? title;
   final Map<String, dynamic>? providerMetadata;
+
+  /// The upstream v4 source discriminator. URL sources are the legacy
+  /// constructor shape; document sources use [LanguageModelV4DocumentSourcePart].
+  String get sourceType => 'url';
+}
+
+/// A document citation that has no URL and carries its media identity.
+class LanguageModelV4DocumentSourcePart extends LanguageModelV4ContentPart {
+  const LanguageModelV4DocumentSourcePart({
+    required this.id,
+    required this.mediaType,
+    required this.title,
+    this.filename,
+    this.providerMetadata,
+  });
+
+  final String id;
+  final String mediaType;
+  final String title;
+  final String? filename;
+  final Map<String, dynamic>? providerMetadata;
+
+  String get sourceType => 'document';
 }
 
 /// A tool approval response (user approved or denied a tool call).
@@ -170,9 +269,17 @@ class LanguageModelV4ToolApprovalResponse extends LanguageModelV4ContentPart {
     required this.approvalId,
     required this.approved,
     this.reason,
+    this.toolCallId,
+    this.toolName,
+    this.argumentsFingerprint,
+    this.policyRevision,
   });
 
   final String approvalId;
   final bool approved;
   final String? reason;
+  final String? toolCallId;
+  final String? toolName;
+  final String? argumentsFingerprint;
+  final String? policyRevision;
 }

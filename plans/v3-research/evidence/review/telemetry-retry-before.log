@@ -1,0 +1,17 @@
+00:00 +0: loading packages/ai_sdk_telemetry/test/observation_identity_review_test.dart
+00:00 +0: redaction runs once at admission and retries preserve observation
+00:00 +0 -1: redaction runs once at admission and retries preserve observation [E]
+  Expected: <1>
+    Actual: <3>
+  Export and retry must not rerun user redaction
+
+  package:matcher                                                            expect
+  packages/ai_sdk_telemetry/test/observation_identity_review_test.dart 45:7  main.<fn>
+
+00:00 +0 -1: Some tests failed.
+
+Failing tests:
+  packages/ai_sdk_telemetry/test/observation_identity_review_test.dart: redaction runs once at admission and retries preserve observation
+
+Consider enabling the flag chain-stack-traces to receive more detailed exceptions.
+For example, 'dart test --chain-stack-traces'.

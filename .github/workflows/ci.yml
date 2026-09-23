@@ -36,6 +36,9 @@ jobs:
       - name: Test
         run: make test DART=dart FLUTTER=flutter
 
+      - name: Check provider catalog
+        run: make catalog-check DART=dart
+
       # Ratchet gate: prevents coverage regressions across the published packages.
       - name: Test with coverage (gate)
         run: make coverage-check DART=dart FLUTTER=flutter

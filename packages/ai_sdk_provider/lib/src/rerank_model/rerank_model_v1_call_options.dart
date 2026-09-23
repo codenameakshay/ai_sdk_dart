@@ -1,3 +1,4 @@
+import '../shared/abort_signal.dart';
 import '../shared/json_value.dart';
 
 /// Call options for reranking models.
@@ -8,6 +9,7 @@ class RerankModelV1CallOptions {
     this.topN,
     this.headers,
     this.providerOptions,
+    this.abortSignal,
   });
 
   /// The search query to rerank against.
@@ -21,4 +23,5 @@ class RerankModelV1CallOptions {
 
   final Map<String, String>? headers;
   final ProviderOptions? providerOptions;
+  final AbortSignal? abortSignal;
 }

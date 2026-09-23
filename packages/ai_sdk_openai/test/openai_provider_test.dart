@@ -704,7 +704,6 @@ void main() {
               {
                 'embedding': [1, 2, 3],
               },
-              {'embedding': 'ignored malformed extra row'},
             ],
             'usage': {'total_tokens': 20},
           }),

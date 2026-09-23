@@ -99,6 +99,39 @@ void main() {
       expect(stopped, isTrue);
     });
 
+    testWidgets('disabled composer disables stop physically and semantically', (
+      tester,
+    ) async {
+      var stopped = false;
+      final semantics = tester.ensureSemantics();
+      await tester.pumpWidget(
+        _wrap(
+          ChatComposer(
+            onSend: (_) {},
+            isLoading: true,
+            enabled: false,
+            onStop: () => stopped = true,
+          ),
+        ),
+      );
+      final button = tester.widget<IconButton>(
+        find.byKey(const ValueKey('chat-composer-stop')),
+      );
+      expect(button.onPressed, isNull);
+      final node = tester
+          .getSemantics(
+            find.byKey(const ValueKey('chat-composer-stop-semantics')),
+          )
+          .getSemanticsData();
+      expect(node.hasAction(ui.SemanticsAction.tap), isFalse);
+      await tester.tap(
+        find.byKey(const ValueKey('chat-composer-stop')),
+        warnIfMissed: false,
+      );
+      expect(stopped, isFalse);
+      semantics.dispose();
+    });
+
     testWidgets('submitting the field via the keyboard action sends', (
       tester,
     ) async {

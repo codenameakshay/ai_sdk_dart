@@ -42,6 +42,26 @@ void main() {
       },
     );
 
+    testWidgets('exposes selectable assistant text to semantics', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      await tester.pumpWidget(
+        _wrap(
+          const AssistantMessageView(
+            message: ModelMessage(
+              role: ModelMessageRole.assistant,
+              content: 'readable answer',
+            ),
+          ),
+        ),
+      );
+
+      expect(find.bySemanticsLabel('readable answer'), findsOneWidget);
+      expect(find.byType(SelectionArea), findsOneWidget);
+      semantics.dispose();
+    });
+
     testWidgets('falls back to message.content when there are no parts', (
       tester,
     ) async {

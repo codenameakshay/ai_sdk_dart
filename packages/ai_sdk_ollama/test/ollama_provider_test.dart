@@ -554,6 +554,16 @@ void main() {
           LanguageModelV4CallOptions(
             prompt: LanguageModelV4Prompt(
               messages: [
+                const LanguageModelV4Message(
+                  role: LanguageModelV4Role.assistant,
+                  content: [
+                    LanguageModelV4ToolCallPart(
+                      toolCallId: 'call_1',
+                      toolName: 'weather',
+                      input: {'city': 'Paris'},
+                    ),
+                  ],
+                ),
                 LanguageModelV4Message(
                   role: LanguageModelV4Role.tool,
                   content: [
@@ -563,6 +573,24 @@ void main() {
                       output: ToolResultOutputContent([
                         LanguageModelV4TextPart(text: 'sunny'),
                       ]),
+                    ),
+                    LanguageModelV4ToolResultPart(
+                      toolCallId: 'call_2',
+                      toolName: 'structured',
+                      output: ToolResultOutputJson({'temperature': 21}),
+                    ),
+                    LanguageModelV4ToolResultPart(
+                      toolCallId: 'call_3',
+                      toolName: 'failed',
+                      output: ToolResultOutputErrorJson({'message': 'nope'}),
+                    ),
+                    LanguageModelV4ToolResultPart(
+                      toolCallId: 'call_4',
+                      toolName: 'denied',
+                      output: ToolResultOutputExecutionDenied(
+                        'requires approval',
+                        'approval-4',
+                      ),
                     ),
                   ],
                 ),
@@ -589,10 +617,24 @@ void main() {
         final messages = (captured['messages'] as List)
             .cast<Map<String, dynamic>>();
         // ToolResultOutputContent flattened to its text parts.
-        expect(messages[0]['role'], 'tool');
-        expect(messages[0]['content'], 'sunny');
+        final assistant = messages.firstWhere(
+          (message) => message['role'] == 'assistant',
+        );
+        expect(assistant['tool_calls'], isA<List>());
+        final toolMessages = messages
+            .where((message) => message['role'] == 'tool')
+            .toList();
+        expect(toolMessages.map((message) => message['content']), [
+          'sunny',
+          '{"temperature":21}',
+          '{"message":"nope"}',
+          'requires approval',
+        ]);
         // Base64 image part + image file part both land in `images`.
-        final images = (messages[1]['images'] as List).cast<String>();
+        final user = messages.firstWhere(
+          (message) => message['role'] == 'user',
+        );
+        final images = (user['images'] as List).cast<String>();
         expect(images, [rawB64, rawB64]);
       },
     );
@@ -955,7 +997,7 @@ void main() {
       expect(result.embeddings[1].embedding, [0.3, 0.4]);
     });
 
-    test('tolerates a response without an embeddings list', () async {
+    test('rejects a response without an embeddings list', () async {
       final server = await _startServer((request) async {
         await utf8.decoder.bind(request).join();
         request.response.statusCode = 200;
@@ -969,49 +1011,44 @@ void main() {
         baseUrl: server.baseUrl,
       ).embedding('nomic-embed-text');
 
-      final result = await model.doEmbed(
-        const EmbeddingModelV2CallOptions<String>(values: ['only']),
+      await expectLater(
+        model.doEmbed(
+          const EmbeddingModelV2CallOptions<String>(values: ['only']),
+        ),
+        throwsA(isA<AiApiCallError>()),
       );
-      expect(result.embeddings, isEmpty);
     });
 
-    test(
-      'normalizes numeric vectors and ignores response rows beyond the input',
-      () async {
-        final server = await _startServer((request) async {
-          await utf8.decoder.bind(request).join();
-          request.response.statusCode = 200;
-          request.response.headers.contentType = ContentType.json;
-          request.response.write(
-            jsonEncode({
-              'embeddings': [
-                [1, 2.5],
-                [-3, 4],
-                [99],
-              ],
-            }),
+    test('normalizes numeric vectors', () async {
+      final server = await _startServer((request) async {
+        await utf8.decoder.bind(request).join();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'embeddings': [
+              [1, 2.5],
+              [-3, 4],
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final result = await OllamaProvider(baseUrl: server.baseUrl)
+          .embedding('nomic-embed-text')
+          .doEmbed(
+            const EmbeddingModelV2CallOptions<String>(values: ['a', 'b']),
           );
-          await request.response.close();
-        });
-        addTearDown(server.close);
 
-        final result = await OllamaProvider(baseUrl: server.baseUrl)
-            .embedding('nomic-embed-text')
-            .doEmbed(
-              const EmbeddingModelV2CallOptions<String>(values: ['a', 'b']),
-            );
-
-        expect(result.embeddings, hasLength(2));
-        expect(result.embeddings.map((embedding) => embedding.value), [
-          'a',
-          'b',
-        ]);
-        expect(result.embeddings.map((embedding) => embedding.embedding), [
-          [1.0, 2.5],
-          [-3.0, 4.0],
-        ]);
-      },
-    );
+      expect(result.embeddings, hasLength(2));
+      expect(result.embeddings.map((embedding) => embedding.value), ['a', 'b']);
+      expect(result.embeddings.map((embedding) => embedding.embedding), [
+        [1.0, 2.5],
+        [-3.0, 4.0],
+      ]);
+    });
   });
 }
 

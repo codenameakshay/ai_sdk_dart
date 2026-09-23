@@ -92,6 +92,12 @@ Dio _mistralDio({String? baseUrl}) => createProviderDio(
 // ---------------------------------------------------------------------------
 
 class _MistralEmbeddingModel implements EmbeddingModelV2<String> {
+  @override
+  int? get maxEmbeddingsPerCall => null;
+
+  @override
+  bool get supportsParallelCalls => true;
+
   _MistralEmbeddingModel({
     required this.modelId,
     required this.baseUrl,
@@ -115,7 +121,21 @@ class _MistralEmbeddingModel implements EmbeddingModelV2<String> {
   Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
     EmbeddingModelV2CallOptions<String> options,
   ) async {
-    final resolvedHeaders = await headers();
+    final cancellation = DioCancellationScope(options.abortSignal);
+    late final Map<String, String> resolvedHeaders;
+    try {
+      resolvedHeaders = await runWithAbortSignal(
+        () async => await headers(),
+        options.abortSignal,
+      );
+    } catch (_) {
+      await cancellation.dispose();
+      rethrow;
+    }
+    if (options.abortSignal?.isCancelled == true) {
+      await cancellation.dispose();
+      throw const AiOperationCancelledError();
+    }
     final providerOptions = options.providerOptions?['mistral'];
     final body = <String, dynamic>{
       'model': modelId,
@@ -129,31 +149,18 @@ class _MistralEmbeddingModel implements EmbeddingModelV2<String> {
         providerEndpoint(baseUrl ?? _defaultBaseUrl, '/embeddings'),
         data: body,
         options: Options(headers: {...?options.headers, ...resolvedHeaders}),
+        cancelToken: cancellation.token,
       );
     } on DioException catch (e) {
+      await cancellation.dispose();
       throw await apiErrorFromDioException(e, provider: provider);
     }
+    await cancellation.dispose();
     final data = response.data;
     if (data == null) {
       throw _invalidResponse(response);
     }
     try {
-      final rawData = data['data'];
-      if (rawData != null) {
-        if (rawData is! List) {
-          throw const FormatException(
-            'The embeddings data field is not a list.',
-          );
-        }
-        for (final item in rawData.take(options.values.length)) {
-          if (item is! Map || item['embedding'] is! List) {
-            throw const FormatException('An embedding item is malformed.');
-          }
-          if ((item['embedding'] as List).any((value) => value is! num)) {
-            throw const FormatException('An embedding vector is malformed.');
-          }
-        }
-      }
       return parseOpenAiEmbeddings(data, options.values);
     } on Object catch (error) {
       throw _invalidResponse(response, error);

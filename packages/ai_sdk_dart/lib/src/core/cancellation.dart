@@ -22,27 +22,41 @@ Future<T> raceWithCancellation<T>(
 
   final completer = Completer<T>();
   var settled = false;
+  StreamSubscription<void>? cancellationSubscription;
+
+  void detach() {
+    final subscription = cancellationSubscription;
+    cancellationSubscription = null;
+    if (subscription != null) unawaited(subscription.cancel());
+  }
 
   void completeError(Object error, StackTrace stackTrace) {
     if (settled) return;
     settled = true;
+    detach();
     completer.completeError(error, stackTrace);
   }
 
   operation.then((value) {
     if (settled) return;
     settled = true;
+    detach();
     completer.complete(value);
   }, onError: completeError);
 
-  abortSignal.onCancelled.then((_) {
+  void cancel() {
     if (settled) return;
     settled = true;
+    detach();
     completer.completeError(
       const AiOperationCancelledError(),
       StackTrace.current,
     );
-  });
+  }
+
+  cancellationSubscription = abortSignal.cancellationEvents.listen(
+    (_) => cancel(),
+  );
 
   return completer.future;
 }

@@ -1,0 +1,17 @@
+00:00 +0: loading packages/ai_sdk_realtime/test/realtime_test.dart
+00:00 +0: cancel and interrupt target the requested response ID
+00:00 +0 -1: cancel and interrupt target the requested response ID [E]
+  Expected: {'type': 'response.cancel', 'response_id': 'response-secondary'}
+    Actual: {'type': 'response.cancel'}
+     Which: has different length and is missing map key 'response_id'
+
+  package:matcher                                        expect
+  packages/ai_sdk_realtime/test/realtime_test.dart 23:5  main.<fn>
+
+00:00 +0 -1: Some tests failed.
+
+Failing tests:
+  packages/ai_sdk_realtime/test/realtime_test.dart: cancel and interrupt target the requested response ID
+
+Consider enabling the flag chain-stack-traces to receive more detailed exceptions.
+For example, 'dart test --chain-stack-traces'.

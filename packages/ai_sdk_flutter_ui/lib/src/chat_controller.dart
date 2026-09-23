@@ -249,10 +249,20 @@ class ChatController extends StreamingControllerBase {
     required bool approved,
     String? reason,
   }) {
+    final request = _pendingApprovalRequests
+        .cast<LanguageModelV4ToolApprovalRequestPart?>()
+        .firstWhere(
+          (value) => value?.approvalId == approvalId,
+          orElse: () => null,
+        );
     _pendingApprovals[approvalId] = LanguageModelV4ToolApprovalResponse(
       approvalId: approvalId,
       approved: approved,
       reason: reason,
+      toolCallId: request?.toolCall.toolCallId,
+      toolName: request?.toolCall.toolName,
+      argumentsFingerprint: request?.argumentsFingerprint,
+      policyRevision: request?.policyRevision,
     );
     _pendingApprovalRequests = _pendingApprovalRequests
         .where((request) => request.approvalId != approvalId)
@@ -329,7 +339,7 @@ class ChatController extends StreamingControllerBase {
       // Streaming errors surface on the full event stream (not the text
       // stream), so watch both: text for content, fullStream for errors and
       // live reasoning deltas.
-      _errorSubscription = streamResult.fullStream.listen((event) {
+      _errorSubscription = streamResult.stream.listen((event) {
         if (!isCurrentRequest(requestId)) return;
         if (event is StreamTextErrorEvent) {
           _handleError(event.error, requestId);

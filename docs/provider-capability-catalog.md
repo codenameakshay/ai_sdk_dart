@@ -28,5 +28,11 @@ fvm dart run tool/provider_capability_catalog.dart generate \
 The checker validates required fields, provider coverage, duplicate records,
 source URIs, lifecycle/confidence values, fixture paths, generated Markdown
 drift, future dates, and evidence age. It reports evidence older than 90 days
-as `STALE`; scheduled automation can run it without credentials, network access,
+as `STALE`. Add `--fail-on-stale` to return a nonzero status when evidence
+exceeds that limit. The weekly workflow uses this strict mode; ordinary local
+checks keep age warnings advisory.
+
+This check does not fetch new model catalogs or certify new model behavior.
+A failed freshness job requires reviewing current primary sources and updating
+the evidence and generated view. It runs without credentials, network access,
 API keys, or provider cost.

@@ -1,3 +1,4 @@
+import '../shared/abort_signal.dart';
 import '../shared/json_value.dart';
 
 /// Call options for text-to-speech models.
@@ -9,6 +10,7 @@ class SpeechModelV1CallOptions {
     this.speed,
     this.headers,
     this.providerOptions,
+    this.abortSignal,
   });
 
   final String text;
@@ -17,4 +19,5 @@ class SpeechModelV1CallOptions {
   final double? speed;
   final Map<String, String>? headers;
   final ProviderOptions? providerOptions;
+  final AbortSignal? abortSignal;
 }

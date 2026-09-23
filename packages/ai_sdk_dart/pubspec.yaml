@@ -13,6 +13,7 @@ dependencies:
   meta: ^1.16.0
 
 dev_dependencies:
+  fake_async: ^1.3.3
   ai_sdk_anthropic: ^2.0.0
   ai_sdk_google: ^2.0.0
   ai_sdk_openai: ^2.0.0

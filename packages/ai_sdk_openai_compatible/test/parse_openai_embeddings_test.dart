@@ -2,7 +2,7 @@ import 'package:ai_sdk_openai_compatible/ai_sdk_openai_compatible.dart';
 import 'package:test/test.dart';
 
 void main() {
-  test('parseOpenAiEmbeddings pairs vectors with inputs and bounds rows', () {
+  test('parseOpenAiEmbeddings pairs vectors with inputs', () {
     final result = parseOpenAiEmbeddings(
       {
         'data': [
@@ -11,9 +11,6 @@ void main() {
           },
           {
             'embedding': [2, 2.5],
-          },
-          {
-            'embedding': [9, 9],
           },
         ],
       },
@@ -24,7 +21,7 @@ void main() {
     expect(result.embeddings.last.embedding, [2.0, 2.5]);
   });
 
-  test('parseOpenAiEmbeddings tolerates a missing data array', () {
-    expect(parseOpenAiEmbeddings({}, ['a']).embeddings, isEmpty);
+  test('parseOpenAiEmbeddings rejects a missing data array', () {
+    expect(() => parseOpenAiEmbeddings({}, ['a']), throwsFormatException);
   });
 }

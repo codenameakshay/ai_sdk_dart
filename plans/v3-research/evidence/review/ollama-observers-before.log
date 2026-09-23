@@ -1,0 +1,37 @@
+00:00 +0: loading packages/ai_sdk_ollama/test/observer_lifetime_review_test.dart
+00:00 +0: generate releases observable cancellation after completion
+00:00 +0 -1: generate releases observable cancellation after completion [E]
+  Expected: <0>
+    Actual: <1>
+  Observable callers must use detachable subscriptions
+
+  package:matcher                                                       expect
+  packages/ai_sdk_ollama/test/observer_lifetime_review_test.dart 42:11  main.<fn>
+
+00:00 +0 -1: stream releases observable cancellation after completion
+00:00 +0 -2: stream releases observable cancellation after completion [E]
+  Expected: <0>
+    Actual: <1>
+  Observable callers must use detachable subscriptions
+
+  package:matcher                                                       expect
+  packages/ai_sdk_ollama/test/observer_lifetime_review_test.dart 42:11  main.<fn>
+
+00:00 +0 -2: embed releases observable cancellation after completion
+00:00 +0 -3: embed releases observable cancellation after completion [E]
+  Expected: <0>
+    Actual: <1>
+  Observable callers must use detachable subscriptions
+
+  package:matcher                                                       expect
+  packages/ai_sdk_ollama/test/observer_lifetime_review_test.dart 42:11  main.<fn>
+
+00:00 +0 -3: Some tests failed.
+
+Failing tests:
+  packages/ai_sdk_ollama/test/observer_lifetime_review_test.dart: embed releases observable cancellation after completion
+  packages/ai_sdk_ollama/test/observer_lifetime_review_test.dart: generate releases observable cancellation after completion
+  packages/ai_sdk_ollama/test/observer_lifetime_review_test.dart: stream releases observable cancellation after completion
+
+Consider enabling the flag chain-stack-traces to receive more detailed exceptions.
+For example, 'dart test --chain-stack-traces'.

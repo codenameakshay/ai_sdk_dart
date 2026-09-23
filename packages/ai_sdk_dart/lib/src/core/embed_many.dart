@@ -2,7 +2,10 @@ import 'dart:async';
 
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
-import 'timeout_helpers.dart';
+import 'shared/embedding_validation.dart';
+import '../tools/tool.dart';
+import 'cancellation.dart';
+import 'shared/operation_scope.dart';
 
 /// Result returned by [embedMany].
 ///
@@ -32,8 +35,8 @@ class EmbedManyEntry<VALUE> {
 /// similarity, or retrieval-augmented generation over a list of values.
 ///
 /// [maxParallelCalls] limits how many provider calls are in-flight at once.
-/// The default (null) sends all values in a single call when the provider
-/// supports it, or in parallel otherwise.
+/// The default concurrency is one. [maxEmbeddingsPerCall] limits values per
+/// request independently; a smaller provider limit always takes precedence.
 ///
 /// Example:
 /// ```dart
@@ -50,9 +53,11 @@ Future<EmbedManyResult<VALUE>> embedMany<VALUE>({
   required EmbeddingModelV2<VALUE> model,
   required List<VALUE> values,
   int? maxParallelCalls,
+  int? maxEmbeddingsPerCall,
   Map<String, String>? headers,
   ProviderOptions? providerOptions,
   Duration? timeout,
+  CancellationToken? abortSignal,
 }) async {
   if (maxParallelCalls != null && maxParallelCalls < 1) {
     throw ArgumentError.value(
@@ -61,72 +66,88 @@ Future<EmbedManyResult<VALUE>> embedMany<VALUE>({
       'must be greater than zero.',
     );
   }
+  final providerLimit = model.maxEmbeddingsPerCall;
+  for (final limit in [maxEmbeddingsPerCall, providerLimit]) {
+    if (limit != null && limit < 1) {
+      throw ArgumentError.value(
+        limit,
+        'maxEmbeddingsPerCall',
+        'must be positive.',
+      );
+    }
+  }
+  throwIfCancelled(abortSignal);
   if (values.isEmpty) {
     return const EmbedManyResult(embeddings: [], usage: null);
   }
+  var batchSize = maxEmbeddingsPerCall ?? providerLimit ?? values.length;
+  if (providerLimit != null && providerLimit < batchSize) {
+    batchSize = providerLimit;
+  }
+  final concurrency = model.supportsParallelCalls ? maxParallelCalls ?? 1 : 1;
+  int? dimensions;
+  final scope = OperationScope(abortSignal: abortSignal, timeout: timeout);
+  try {
+    Future<EmbeddingModelV2GenerateResult<VALUE>> doEmbed(List<VALUE> chunk) =>
+        scope.run(() async {
+          final result = await model.doEmbed(
+            EmbeddingModelV2CallOptions<VALUE>(
+              values: chunk,
+              headers: headers,
+              providerOptions: providerOptions,
+              abortSignal: scope.signal,
+            ),
+          );
+          dimensions = validateEmbeddings(
+            result,
+            chunk,
+            dimensions: dimensions,
+          );
+          return result;
+        }, raceCancellation: true);
 
-  Future<EmbeddingModelV2GenerateResult<VALUE>> doEmbed(List<VALUE> chunk) {
-    final call = model.doEmbed(
-      EmbeddingModelV2CallOptions<VALUE>(
-        values: chunk,
-        headers: headers,
-        providerOptions: providerOptions,
-      ),
+    final chunks = <List<VALUE>>[];
+    for (var i = 0; i < values.length; i += batchSize) {
+      final end = i + batchSize < values.length ? i + batchSize : values.length;
+      chunks.add(values.sublist(i, end));
+    }
+    final results = List<EmbeddingModelV2GenerateResult<VALUE>?>.filled(
+      chunks.length,
+      null,
     );
-    return withOptionalTimeout(call, timeout).then((result) {
-      if (result.embeddings.isEmpty) {
-        throw const AiNoContentGeneratedError('No embedding was generated.');
+    var next = 0;
+    var failed = false;
+    Future<void> worker() async {
+      while (!failed && next < chunks.length) {
+        final index = next++;
+        try {
+          results[index] = await doEmbed(chunks[index]);
+        } catch (_) {
+          failed = true;
+          rethrow;
+        }
       }
-      return result;
-    });
-  }
+    }
 
-  // If maxParallelCalls is null or >= values.length, send all at once.
-  final parallel =
-      (maxParallelCalls == null || maxParallelCalls >= values.length)
-      ? null
-      : maxParallelCalls;
-
-  if (parallel == null) {
-    // Single batch call.
-    final result = await doEmbed(values);
-    return EmbedManyResult<VALUE>(
-      embeddings: result.embeddings
-          .map(
-            (e) =>
-                EmbedManyEntry<VALUE>(value: e.value, embedding: e.embedding),
-          )
-          .toList(),
-      usage: result.usage,
+    final workerCount = concurrency < chunks.length
+        ? concurrency
+        : chunks.length;
+    await Future.wait(
+      List.generate(workerCount, (_) => worker()),
+      eagerError: true,
     );
-  }
 
-  // Split into chunks and run in parallel with limited concurrency.
-  final chunks = <List<VALUE>>[];
-  for (var i = 0; i < values.length; i += parallel) {
-    final end = (i + parallel) > values.length ? values.length : i + parallel;
-    chunks.add(values.sublist(i, end));
-  }
-
-  // Process chunks with maxParallelCalls concurrency.
-  final allEntries = <EmbedManyEntry<VALUE>>[];
-  int? totalInputTokens;
-  var hasUsage = false;
-
-  for (var chunkStart = 0; chunkStart < chunks.length; chunkStart += parallel) {
-    final batchEnd = (chunkStart + parallel) > chunks.length
-        ? chunks.length
-        : chunkStart + parallel;
-    final batch = chunks.sublist(chunkStart, batchEnd);
-
-    final results = await Future.wait(batch.map(doEmbed));
-
-    for (final result in results) {
-      for (final e in result.embeddings) {
-        allEntries.add(
-          EmbedManyEntry<VALUE>(value: e.value, embedding: e.embedding),
-        );
-      }
+    final allEntries = <EmbedManyEntry<VALUE>>[];
+    int? totalInputTokens;
+    var hasUsage = false;
+    for (final completed in results) {
+      final result = completed!;
+      allEntries.addAll(
+        result.embeddings.map(
+          (entry) =>
+              EmbedManyEntry(value: entry.value, embedding: entry.embedding),
+        ),
+      );
       if (result.usage case final usage?) {
         hasUsage = true;
         if (usage.tokens case final tokens?) {
@@ -134,10 +155,11 @@ Future<EmbedManyResult<VALUE>> embedMany<VALUE>({
         }
       }
     }
+    return EmbedManyResult<VALUE>(
+      embeddings: allEntries,
+      usage: hasUsage ? EmbeddingModelV2Usage(tokens: totalInputTokens) : null,
+    );
+  } finally {
+    scope.close();
   }
-
-  return EmbedManyResult<VALUE>(
-    embeddings: allEntries,
-    usage: hasUsage ? EmbeddingModelV2Usage(tokens: totalInputTokens) : null,
-  );
 }

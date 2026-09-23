@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
 import 'cancellation.dart';
+import 'body_inclusion.dart';
 import '../messages/model_message.dart';
 import '../output/output.dart';
 import '../stop_conditions/stop_conditions.dart';
@@ -12,6 +13,8 @@ import 'retry_helper.dart';
 import 'shared/common_helpers.dart';
 import 'shared/output_instruction.dart';
 import 'shared/tool_selection.dart';
+import 'shared/tool_concurrency.dart';
+import 'shared/operation_scope.dart';
 import 'streaming/structured_output.dart';
 import 'streaming/tool_execution.dart';
 import 'timeout_configuration.dart';
@@ -24,6 +27,8 @@ typedef GenerateTextOnStepFinish =
 /// Callback invoked when the full generation is complete.
 typedef GenerateTextOnFinish<TOutput> =
     void Function(GenerateTextFinishEvent<TOutput> event);
+typedef GenerateTextOnStepEnd = GenerateTextOnStepFinish;
+typedef GenerateTextOnEnd<TOutput> = GenerateTextOnFinish<TOutput>;
 
 /// Callback to prepare each step; can override model, tools, messages, etc.
 typedef GenerateTextPrepareStep =
@@ -58,7 +63,9 @@ class GenerateTextPrepareStepContext {
     required this.steps,
     required this.messages,
     required this.stopConditions,
+    required this.instructions,
     this.runtimeContext,
+    this.generationContext,
   });
 
   final LanguageModelV4 model;
@@ -66,7 +73,9 @@ class GenerateTextPrepareStepContext {
   final List<GenerateTextStep> steps;
   final List<LanguageModelV4Message> messages;
   final List<StopCondition> stopConditions;
+  final String? instructions;
   final Map<String, Object?>? runtimeContext;
+  final Object? generationContext;
 }
 
 /// Result from [GenerateTextPrepareStep]; overrides for the upcoming step.
@@ -80,6 +89,7 @@ class GenerateTextPrepareStepResult {
     this.activeTools,
     this.messages,
     this.providerOptions,
+    this.instructions,
   });
 
   final LanguageModelV4? model;
@@ -87,6 +97,7 @@ class GenerateTextPrepareStepResult {
   final List<String>? activeTools;
   final List<LanguageModelV4Message>? messages;
   final ProviderOptions? providerOptions;
+  final String? instructions;
 }
 
 /// Event passed to [GenerateTextOnStepFinish] when a step completes.
@@ -133,11 +144,13 @@ class GenerateTextFinishEvent<TOutput> {
 class GenerateTextRequest {
   const GenerateTextRequest({
     required this.system,
+    this.instructions,
     required this.messages,
     this.body,
   });
 
   final String? system;
+  final String? instructions;
   final List<LanguageModelV4Message> messages;
   final Object? body;
 }
@@ -162,14 +175,18 @@ class GenerateTextExperimentalStartEvent {
     required this.system,
     required this.prompt,
     required this.messages,
+    this.instructions,
     this.runtimeContext,
+    this.generationContext,
   });
 
   final LanguageModelV4 model;
   final String? system;
+  final String? instructions;
   final String? prompt;
   final List<LanguageModelV4Message> messages;
   final Map<String, Object?>? runtimeContext;
+  final Object? generationContext;
 }
 
 /// Event emitted before each step starts (experimental_onStepStart).
@@ -179,12 +196,16 @@ class GenerateTextExperimentalStepStartEvent {
     required this.model,
     required this.messages,
     required this.steps,
+    this.instructions,
+    this.generationContext,
   });
 
   final int stepNumber;
   final LanguageModelV4 model;
   final List<LanguageModelV4Message> messages;
   final List<GenerateTextStep> steps;
+  final String? instructions;
+  final Object? generationContext;
 }
 
 /// Event emitted before a tool executes (experimental_onToolCallStart).
@@ -232,6 +253,7 @@ class GenerateTextStep {
     required this.text,
     required this.finishReason,
     this.usage,
+    this.responseMessages = const [],
   });
 
   final int stepNumber;
@@ -243,6 +265,27 @@ class GenerateTextStep {
   final String text;
   final LanguageModelV4FinishReason finishReason;
   final LanguageModelV4Usage? usage;
+  final List<LanguageModelV4Message> responseMessages;
+
+  String? get rawFinishReason => response.rawFinishReason;
+  List<LanguageModelV4ReasoningPart> get reasoning =>
+      content.whereType<LanguageModelV4ReasoningPart>().toList(growable: false);
+  String get reasoningText => reasoning.map((part) => part.text).join();
+
+  List<LanguageModelV4SourcePart> get sources =>
+      content.whereType<LanguageModelV4SourcePart>().toList(growable: false);
+  List<LanguageModelV4DocumentSourcePart> get documentSources => content
+      .whereType<LanguageModelV4DocumentSourcePart>()
+      .toList(growable: false);
+  List<LanguageModelV4FilePart> get files =>
+      content.whereType<LanguageModelV4FilePart>().toList(growable: false);
+  List<LanguageModelV4ReasoningFilePart> get reasoningFiles => content
+      .whereType<LanguageModelV4ReasoningFilePart>()
+      .toList(growable: false);
+  List<LanguageModelV4Warning> get warnings => response.warnings;
+  LanguageModelV4RequestMetadata? get request => response.request;
+  LanguageModelV4ResponseMetadata? get responseMetadata => response.response;
+  ProviderMetadata? get providerMetadata => response.providerMetadata;
 }
 
 /// Result returned by [generateText].
@@ -260,7 +303,9 @@ class GenerateTextResult<TOutput> {
     required this.toolApprovalRequests,
     required this.steps,
     required this.sources,
+    required this.documentSources,
     required this.files,
+    required this.reasoningFiles,
     required this.reasoning,
     required this.reasoningText,
     required this.requestMessages,
@@ -284,7 +329,9 @@ class GenerateTextResult<TOutput> {
   final List<LanguageModelV4ToolApprovalRequestPart> toolApprovalRequests;
   final List<GenerateTextStep> steps;
   final List<LanguageModelV4SourcePart> sources;
+  final List<LanguageModelV4DocumentSourcePart> documentSources;
   final List<LanguageModelV4FilePart> files;
+  final List<LanguageModelV4ReasoningFilePart> reasoningFiles;
   final List<LanguageModelV4ReasoningPart> reasoning;
   final String reasoningText;
   final List<LanguageModelV4Message> requestMessages;
@@ -298,6 +345,9 @@ class GenerateTextResult<TOutput> {
   final String? rawFinishReason;
   final List<LanguageModelV4Warning> warnings;
   final ProviderMetadata? providerMetadata;
+
+  /// The last generated step, including its request, response and content.
+  GenerateTextStep get finalStep => steps.last;
 }
 
 /// Generates text for non-interactive use cases and agents with tools.
@@ -335,12 +385,15 @@ class GenerateTextResult<TOutput> {
 ///   and [stopConditions] govern stopping.
 /// - [maxSteps] – Max tool-call steps (default: 1). Ignored when [stopWhen]
 ///   fully controls stopping.
+/// - [maxToolConcurrency] – Maximum number of tool calls admitted at once
+///   (default: 1, preserving serial execution).
 /// - [stopConditions] – Additional stop conditions merged with [stopWhen].
 /// - [prepareStep] – Per-step overrides.
 /// - [onStepFinish] – Called after each step.
 /// - [onFinish] – Called when generation completes.
 Future<GenerateTextResult<TOutput>> generateText<TOutput>({
   required LanguageModelV4 model,
+  String? instructions,
   String? system,
   String? prompt,
   List<ModelMessage>? messages,
@@ -359,8 +412,12 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
   LanguageModelV4Reasoning reasoning = LanguageModelV4Reasoning.providerDefault,
   Output<TOutput>? output,
   ToolSet tools = const {},
+  ToolApprovalPolicy? approvalPolicy,
+  ToolApprovalPolicySelector? approvalPolicyFor,
+  String approvalPolicyRevision = 'default',
   List<LanguageModelV4ProviderDefinedTool> providerDefinedTools = const [],
   int maxSteps = 1,
+  int maxToolConcurrency = 1,
   List<StopCondition> stopConditions = const [],
   Object? stopWhen, // StopCondition | List<StopCondition>
   LanguageModelV4ToolChoice? toolChoice,
@@ -368,6 +425,14 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
   CancellationToken? abortSignal,
   TimeoutConfiguration? timeout,
   Map<String, Object?>? runtimeContext,
+  Object? generationContext,
+  bool allowSystemInMessages = false,
+  GenerateTextOnStepEnd? onStepEnd,
+  GenerateTextOnEnd<TOutput>? onEnd,
+  GenerateTextExperimentalOnStart? onStart,
+  GenerateTextExperimentalOnStepStart? onStepStart,
+  GenerateTextExperimentalOnToolCallStart? onToolExecutionStart,
+  GenerateTextExperimentalOnToolCallFinish? onToolExecutionEnd,
   GenerateTextOnStepFinish? onStepFinish,
   GenerateTextOnFinish<TOutput>? onFinish,
   GenerateTextPrepareStep? prepareStep,
@@ -376,20 +441,57 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
   GenerateTextExperimentalOnToolCallStart? experimentalOnToolCallStart,
   GenerateTextExperimentalOnToolCallFinish? experimentalOnToolCallFinish,
   TelemetrySettings? telemetry,
+  BodyInclusionPolicy bodyInclusion = const BodyInclusionPolicy.none(),
 }) async {
+  if (maxToolConcurrency < 1) {
+    throw ArgumentError.value(
+      maxToolConcurrency,
+      'maxToolConcurrency',
+      'must be positive',
+    );
+  }
   final telemetrySpan = startTelemetrySpan(
     telemetry,
     spanName: 'ai.generateText',
     attributes: {
-      'ai.model.provider': model.provider,
-      'ai.model.id': model.modelId,
-      'ai.prompt': ?prompt,
+      AiTelemetryKeys.modelProvider: model.provider,
+      AiTelemetryKeys.modelId: model.modelId,
+      if (telemetry?.captureInputs == true && prompt != null)
+        'ai.prompt': prompt,
     },
   );
+  final scope = OperationScope(
+    abortSignal: abortSignal,
+    timeout: timeout?.total,
+  );
+  final metricStopwatch = Stopwatch()..start();
+  var retryCount = 0;
+  var metricProvider = model.provider;
+  var metricModelId = model.modelId;
+  void recordMetric(
+    String name,
+    num value, {
+    Map<String, TelemetryAttributeValue> attributes = const {},
+  }) {
+    recordTelemetryMetric(
+      telemetry,
+      TelemetryMetric(
+        name: name,
+        value: value,
+        attributes: {
+          AiTelemetryKeys.modelProvider: metricProvider,
+          AiTelemetryKeys.modelId: metricModelId,
+          AiTelemetryKeys.operation: 'generateText',
+          ...attributes,
+        },
+      ),
+    );
+  }
 
   try {
     final overallStopwatch = Stopwatch()..start();
     final outputSpec = output ?? (Output.text() as Output<TOutput>);
+    final responseMessages = <LanguageModelV4Message>[];
     var normalizedMessages = <LanguageModelV4Message>[
       if (prompt != null)
         LanguageModelV4Message(
@@ -399,20 +501,25 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
       ...?messages?.map(toLanguageModelMessage),
     ];
 
-    final systemInstruction = buildOutputSystemInstruction(system, outputSpec);
-    final approvalById = {
-      for (final approval in toolApprovalResponses)
-        approval.approvalId: approval,
-    };
+    rejectSystemMessages(
+      messages ?? const [],
+      allowSystemInMessages: allowSystemInMessages,
+    );
+
+    var currentInstructions = instructions ?? system;
+    final initialInstructions = currentInstructions;
+    final approvalById = indexApprovalResponses(toolApprovalResponses);
 
     safeInvoke(
-      () => experimentalOnStart?.call(
+      () => (onStart ?? experimentalOnStart)?.call(
         GenerateTextExperimentalStartEvent(
           model: model,
-          system: systemInstruction,
+          system: buildOutputSystemInstruction(currentInstructions, outputSpec),
+          instructions: currentInstructions,
           prompt: prompt,
           messages: List.unmodifiable(normalizedMessages),
           runtimeContext: runtimeContext,
+          generationContext: generationContext,
         ),
       ),
     );
@@ -430,21 +537,42 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
     );
 
     for (var stepNumber = 0; stepNumber < totalSteps; stepNumber++) {
-      throwIfCancelled(abortSignal);
-      final prepareResult = await prepareStep?.call(
-        GenerateTextPrepareStepContext(
-          model: model,
-          stepNumber: stepNumber,
-          steps: List.unmodifiable(steps),
-          messages: List.unmodifiable(normalizedMessages),
-          stopConditions: allStopConditions,
-          runtimeContext: runtimeContext,
+      final responseMessageStart = responseMessages.length;
+      throwIfCancelled(scope.signal);
+      final prepareResult = await scope.run(
+        () async => prepareStep?.call(
+          GenerateTextPrepareStepContext(
+            model: model,
+            stepNumber: stepNumber,
+            steps: List.unmodifiable(steps),
+            messages: List.unmodifiable(normalizedMessages),
+            stopConditions: allStopConditions,
+            instructions: currentInstructions,
+            runtimeContext: runtimeContext,
+            generationContext: generationContext,
+          ),
         ),
+        raceCancellation: true,
       );
 
+      if (prepareResult?.instructions case final override?) {
+        currentInstructions = override;
+      }
+
       final stepModel = prepareResult?.model ?? model;
+      metricProvider = stepModel.provider;
+      metricModelId = stepModel.modelId;
       final stepToolChoice = prepareResult?.toolChoice ?? toolChoice;
       final stepMessages = prepareResult?.messages ?? normalizedMessages;
+      if (!allowSystemInMessages &&
+          stepMessages.any(
+            (message) => message.role == LanguageModelV4Role.system,
+          )) {
+        throw ArgumentError(
+          'System-role messages are rejected by default. Set '
+          'allowSystemInMessages: true for trusted legacy histories.',
+        );
+      }
       firstRequestMessages ??= List<LanguageModelV4Message>.from(stepMessages);
       final stepProviderOptions =
           prepareResult?.providerOptions ?? providerOptions;
@@ -459,19 +587,20 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
       );
 
       safeInvoke(
-        () => experimentalOnStepStart?.call(
+        () => (onStepStart ?? experimentalOnStepStart)?.call(
           GenerateTextExperimentalStepStartEvent(
             stepNumber: stepNumber,
             model: stepModel,
             messages: List.unmodifiable(stepMessages),
             steps: List.unmodifiable(steps),
+            instructions: currentInstructions,
           ),
         ),
       );
 
       final callOptions = LanguageModelV4CallOptions(
         prompt: LanguageModelV4Prompt(
-          system: systemInstruction,
+          system: buildOutputSystemInstruction(currentInstructions, outputSpec),
           messages: stepMessages,
         ),
         tools: [
@@ -500,21 +629,32 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
         headers: headers,
         providerOptions: stepProviderOptions,
         responseFormat: buildResponseFormat(outputSpec),
-        abortSignal: abortSignal,
+        abortSignal: scope.signal,
         reasoning: reasoning,
       );
-      final response = await withRetry(
-        maxRetries: maxRetries,
-        totalTimeout: remainingTimeout(
-          timeout: timeout?.total,
-          elapsed: overallStopwatch.elapsed,
+      final response = await scope.run(
+        () => withRetry(
+          maxRetries: maxRetries,
+          totalTimeout: remainingTimeout(
+            timeout: timeout?.total,
+            elapsed: overallStopwatch.elapsed,
+          ),
+          stepTimeout: timeout?.step,
+          abortSignal: scope.signal,
+          onRetry: () => retryCount++,
+          fn: (attemptTimeout) {
+            final call = stepModel.doGenerate(callOptions);
+            unawaited(call.then((_) {}, onError: (_) {}));
+            if (attemptTimeout == null) return call;
+            return call.timeout(
+              attemptTimeout,
+              onTimeout: () {
+                scheduleMicrotask(scope.signal.cancel);
+                throw TimeoutException('Model step timed out.', attemptTimeout);
+              },
+            );
+          },
         ),
-        stepTimeout: timeout?.step,
-        abortSignal: abortSignal,
-        fn: (attemptTimeout) {
-          final call = stepModel.doGenerate(callOptions);
-          return attemptTimeout != null ? call.timeout(attemptTimeout) : call;
-        },
       );
 
       validateToolChoiceForCalls(
@@ -527,6 +667,9 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
       lastResponse = response;
       final toolCalls = response.content
           .whereType<LanguageModelV4ToolCallPart>();
+      final providerToolResults = response.content
+          .whereType<LanguageModelV4ToolResultPart>()
+          .toList(growable: false);
       final toolResults = <LanguageModelV4ToolResultPart>[];
       final approvalRequests = <LanguageModelV4ToolApprovalRequestPart>[];
       final stepContent = <LanguageModelV4ContentPart>[...response.content];
@@ -535,19 +678,25 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
         ...stepMessages,
         LanguageModelV4Message(
           role: LanguageModelV4Role.assistant,
-          content: response.content,
+          content: stepContent,
         ),
       ];
+      responseMessages.add(normalizedMessages.last);
 
       if (toolCalls.isNotEmpty) {
-        for (final call in toolCalls) {
-          throwIfCancelled(abortSignal);
-          final execution = await executeToolCall(
+        final executableCalls = toolCalls
+            .where((call) => !isProviderExecutedToolCall(call))
+            .toList(growable: false);
+        final executions = await executeToolCallsBounded(
+          calls: executableCalls,
+          maxConcurrency: maxToolConcurrency,
+          abortSignal: scope.signal,
+          execute: (call) => executeToolCall(
             tools: toolSelection.exposedTools,
             call: call,
             messages: normalizedMessages,
             approvalById: approvalById,
-            abortSignal: abortSignal,
+            abortSignal: scope.signal,
             timeout: minTimeout(
               remainingTimeout(
                 timeout: timeout?.total,
@@ -555,10 +704,20 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
               ),
               timeout?.toolTimeoutFor(call.toolName),
             ),
+            approvalPolicy:
+                approvalPolicyFor?.call(call.toolName, call.input) ??
+                approvalPolicy,
+            policyRevision: approvalPolicyRevision,
+            generationContext: generationContext ?? runtimeContext,
             runtimeContext: runtimeContext,
-            onToolCallStart: experimentalOnToolCallStart,
-            onToolCallFinish: experimentalOnToolCallFinish,
-          );
+            requireExactApprovalBinding: true,
+            onToolCallStart:
+                onToolExecutionStart ?? experimentalOnToolCallStart,
+            onToolCallFinish:
+                onToolExecutionEnd ?? experimentalOnToolCallFinish,
+          ),
+        );
+        for (final execution in executions) {
           if (execution.approvalRequest != null) {
             approvalRequests.add(execution.approvalRequest!);
             stepContent.add(execution.approvalRequest!);
@@ -577,16 +736,21 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
             content: toolResults,
           ),
         ];
+        responseMessages.add(normalizedMessages.last);
       }
 
       final stepText = _contentToText(stepContent);
+      final publicResponse = _bodyFilteredResult(response, bodyInclusion);
       final step = GenerateTextStep(
         stepNumber: stepNumber,
         content: stepContent,
         toolCalls: toolCalls.toList(),
-        toolResults: toolResults,
+        toolResults: [...providerToolResults, ...toolResults],
         toolApprovalRequests: approvalRequests,
-        response: response,
+        response: publicResponse,
+        responseMessages: List.unmodifiable(
+          responseMessages.skip(responseMessageStart),
+        ),
         text: stepText,
         finishReason: response.finishReason,
         usage: response.usage,
@@ -594,7 +758,7 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
       steps.add(step);
 
       safeInvoke(
-        () => onStepFinish?.call(
+        () => (onStepEnd ?? onStepFinish)?.call(
           GenerateTextStepFinishEvent(
             stepNumber: stepNumber,
             text: stepText,
@@ -613,7 +777,7 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
         finishReason: response.finishReason,
       );
       final shouldStop = shouldStopAfterStep(
-        toolResultsEmpty: toolResults.isEmpty,
+        toolResultsEmpty: providerToolResults.isEmpty && toolResults.isEmpty,
         hasApprovalRequests: approvalRequests.isNotEmpty,
         snapshot: snapshot,
         conditions: allStopConditions,
@@ -624,46 +788,69 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
     }
 
     final text = _contentToText(lastContent);
+    throwIfCancelled(scope.signal);
+    scope.checkDeadline();
     final parsedOutput = parseOutputWithNoObjectError(
       output: outputSpec,
       text: text,
       usage: lastResponse?.usage,
       response: lastResponse?.response,
     );
+    scope.checkDeadline();
     final totalUsage = sumUsage(steps.map((step) => step.usage));
-    final responseMessages = normalizedMessages
-        .where(
-          (message) =>
-              message.role == LanguageModelV4Role.assistant ||
-              message.role == LanguageModelV4Role.tool,
-        )
+    final aggregateContent = steps
+        .expand((step) => step.content)
+        .toList(growable: false);
+    final aggregateToolCalls = steps
+        .expand((step) => step.toolCalls)
+        .toList(growable: false);
+    final aggregateToolResults = steps
+        .expand((step) => step.toolResults)
+        .toList(growable: false);
+    final aggregateSources = steps
+        .expand((step) => step.sources)
+        .toList(growable: false);
+    final aggregateFiles = steps
+        .expand((step) => step.files)
+        .toList(growable: false);
+    final aggregateWarnings = steps
+        .expand((step) => step.warnings)
         .toList(growable: false);
     final request = GenerateTextRequest(
-      system: systemInstruction,
+      system: buildOutputSystemInstruction(initialInstructions, outputSpec),
       messages: List.unmodifiable(firstRequestMessages ?? normalizedMessages),
-      body: lastResponse?.request?.body,
+      body: bodyInclusion.requestBody ? lastResponse?.request?.body : null,
     );
     final responseInfo = GenerateTextResponse(
       messages: List.unmodifiable(responseMessages),
-      body: lastResponse?.response?.body,
-      metadata: lastResponse?.response,
+      body: bodyInclusion.responseBody ? lastResponse?.response?.body : null,
+      metadata: _filteredResponseMetadata(
+        lastResponse?.response,
+        bodyInclusion,
+      ),
     );
 
     final result = GenerateTextResult<TOutput>(
       text: text,
       output: parsedOutput,
-      content: lastContent,
-      toolCalls: lastContent.whereType<LanguageModelV4ToolCallPart>().toList(),
-      toolResults: lastContent
-          .whereType<LanguageModelV4ToolResultPart>()
-          .toList(),
-      toolApprovalRequests: lastContent
-          .whereType<LanguageModelV4ToolApprovalRequestPart>()
-          .toList(),
+      content: List.unmodifiable(aggregateContent),
+      toolCalls: List.unmodifiable(aggregateToolCalls),
+      toolResults: List.unmodifiable(aggregateToolResults),
+      toolApprovalRequests: List.unmodifiable(
+        aggregateContent.whereType<LanguageModelV4ToolApprovalRequestPart>(),
+      ),
       steps: steps,
-      sources: lastContent.whereType<LanguageModelV4SourcePart>().toList(),
-      files: lastContent.whereType<LanguageModelV4FilePart>().toList(),
-      reasoning: lastContent.whereType<LanguageModelV4ReasoningPart>().toList(),
+      sources: List.unmodifiable(aggregateSources),
+      documentSources: List.unmodifiable(
+        steps.expand((step) => step.documentSources),
+      ),
+      files: List.unmodifiable(aggregateFiles),
+      reasoningFiles: List.unmodifiable(
+        steps.expand((step) => step.reasoningFiles),
+      ),
+      reasoning: List.unmodifiable(
+        lastContent.whereType<LanguageModelV4ReasoningPart>(),
+      ),
       reasoningText: lastContent
           .where(
             (part) =>
@@ -681,17 +868,19 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
       responseMessages: List.unmodifiable(responseMessages),
       request: request,
       responseInfo: responseInfo,
-      response: lastResponse,
-      usage: lastResponse?.usage,
+      response: lastResponse == null
+          ? null
+          : _bodyFilteredResult(lastResponse, bodyInclusion),
+      usage: totalUsage,
       totalUsage: totalUsage,
       finishReason: lastResponse?.finishReason,
       rawFinishReason: lastResponse?.rawFinishReason,
-      warnings: List.unmodifiable(lastResponse?.warnings ?? const []),
+      warnings: List.unmodifiable(aggregateWarnings),
       providerMetadata: lastResponse?.providerMetadata,
     );
 
     safeInvoke(
-      () => onFinish?.call(
+      () => (onEnd ?? onFinish)?.call(
         GenerateTextFinishEvent<TOutput>(
           text: result.text,
           output: result.output,
@@ -703,27 +892,98 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
         ),
       ),
     );
+    throwIfCancelled(scope.signal);
+    scope.checkDeadline();
 
     telemetrySpan
       ..setAttribute(
-        'ai.usage.promptTokens',
-        result.totalUsage?.inputTokens.total ?? 0,
+        AiTelemetryKeys.promptTokens,
+        result.totalUsage?.inputTokens.total,
       )
       ..setAttribute(
-        'ai.usage.completionTokens',
-        result.totalUsage?.outputTokens.total ?? 0,
-      )
+        AiTelemetryKeys.completionTokens,
+        result.totalUsage?.outputTokens.total,
+      );
+    telemetrySpan
+      ..setAttribute(AiTelemetryKeys.stepCount, result.steps.length)
       ..setAttribute('ai.finishReason', result.finishReason?.name ?? 'unknown')
       ..end();
+    recordMetric(
+      AiTelemetryMetrics.totalMs,
+      metricStopwatch.elapsedMicroseconds / 1000,
+      attributes: {AiTelemetryKeys.operationStatus: 'success'},
+    );
+    recordMetric(AiTelemetryMetrics.stepCount, result.steps.length);
+    recordMetric(AiTelemetryMetrics.toolCount, result.toolCalls.length);
+    recordMetric(AiTelemetryMetrics.retryCount, retryCount);
+    recordMetric(
+      AiTelemetryMetrics.usageKnown,
+      result.totalUsage == null ? 0 : 1,
+    );
+    recordMetric(AiTelemetryMetrics.success, 1);
 
     return result;
   } catch (e, st) {
+    final filtered = filterBodyBearingError(e, bodyInclusion);
+    final cancelled = scope.signal.isCancelled;
+    recordMetric(
+      AiTelemetryMetrics.totalMs,
+      metricStopwatch.elapsedMicroseconds / 1000,
+      attributes: {
+        AiTelemetryKeys.operationStatus: cancelled ? 'cancelled' : 'failure',
+      },
+    );
+    recordMetric(
+      cancelled ? AiTelemetryMetrics.cancelled : AiTelemetryMetrics.failure,
+      1,
+    );
     telemetrySpan
-      ..recordException(e, stackTrace: st)
-      ..end(error: e);
-    rethrow;
+      ..recordException(filtered, stackTrace: st)
+      ..end(error: filtered);
+    Error.throwWithStackTrace(filtered, st);
+  } finally {
+    scope.close();
   }
 }
+
+LanguageModelV4GenerateResult _bodyFilteredResult(
+  LanguageModelV4GenerateResult result,
+  BodyInclusionPolicy policy,
+) => LanguageModelV4GenerateResult(
+  content: result.content,
+  finishReason: result.finishReason,
+  rawFinishReason: result.rawFinishReason,
+  usage: result.usage,
+  warnings: result.warnings,
+  request: result.request == null
+      ? null
+      : LanguageModelV4RequestMetadata(
+          body: policy.requestBody ? result.request!.body : null,
+        ),
+  response: result.response == null
+      ? null
+      : LanguageModelV4ResponseMetadata(
+          id: result.response!.id,
+          modelId: result.response!.modelId,
+          timestamp: result.response!.timestamp,
+          headers: result.response!.headers,
+          body: policy.responseBody ? result.response!.body : null,
+        ),
+  providerMetadata: result.providerMetadata,
+);
+
+LanguageModelV4ResponseMetadata? _filteredResponseMetadata(
+  LanguageModelV4ResponseMetadata? metadata,
+  BodyInclusionPolicy policy,
+) => metadata == null
+    ? null
+    : LanguageModelV4ResponseMetadata(
+        id: metadata.id,
+        modelId: metadata.modelId,
+        timestamp: metadata.timestamp,
+        headers: metadata.headers,
+        body: policy.responseBody ? metadata.body : null,
+      );
 
 String _contentToText(List<LanguageModelV4ContentPart> content) {
   return content.whereType<LanguageModelV4TextPart>().map((p) => p.text).join();

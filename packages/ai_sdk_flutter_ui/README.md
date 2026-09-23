@@ -247,4 +247,28 @@ plus a custom `ChatComposer`, or a custom `messageBuilder` that renders `ToolCal
 
 ## License
 
+## Riverpod and Bloc lifecycle recipes
+
+The package stays framework-neutral at runtime. Concrete recipes live under
+`example/recipes` and use `flutter_riverpod` and `flutter_bloc` as development
+dependencies. Riverpod owns an injected backend through `autoDispose`; Bloc
+owns its stream subscription and can either dispose an injected backend or
+leave it to the caller. Both recipes support replacing a session by cancelling
+the old subscription before attaching the new backend.
+
+Persist `ConversationCodec.encode(controller.conversation)` and restore with
+`backend.restore(encoded)` before attaching the screen. Restore only decodes
+the snapshot and never executes tools. Call `interrupt()` before replacing or
+disposing a backend.
+
 MIT
+# Conversation backends
+
+Conversation-aware applications can use `ConversationController` with either
+`LocalConversationBackend` (a `ToolLoopAgent`) or
+`RemoteConversationBackend` (`RemoteConversationTransport`). Both expose the
+same typed `Conversation` snapshots and change stream, so widgets can render
+either backend through the same bridge. `ConversationCodec.decode` is used for
+restore and does not execute tools. Unknown parts are retained as
+`UnknownPart`; provider-specific file payloads should remain opaque unless the
+backend supplies a verified URI.

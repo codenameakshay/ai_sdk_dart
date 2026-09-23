@@ -10,6 +10,12 @@ abstract interface class EmbeddingModelV2<VALUE> {
   String get provider;
   String get modelId;
 
+  /// Maximum values per request, or null when no limit is declared.
+  int? get maxEmbeddingsPerCall;
+
+  /// Whether independent requests may run concurrently.
+  bool get supportsParallelCalls;
+
   Future<EmbeddingModelV2GenerateResult<VALUE>> doEmbed(
     EmbeddingModelV2CallOptions<VALUE> options,
   );

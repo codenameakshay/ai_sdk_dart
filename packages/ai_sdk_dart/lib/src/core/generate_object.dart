@@ -5,8 +5,9 @@ import '../output/output.dart';
 import '../tools/tool.dart';
 import 'shared/common_helpers.dart';
 import 'shared/output_instruction.dart';
-import 'streaming/structured_output.dart';
-import 'timeout_helpers.dart';
+import 'shared/operation_scope.dart';
+import 'shared/strict_json.dart';
+import 'body_inclusion.dart';
 
 /// Result returned by [generateObject].
 ///
@@ -44,6 +45,7 @@ class GenerateObjectResult<T> {
 Future<GenerateObjectResult<T>> generateObject<T>({
   required LanguageModelV4 model,
   required Schema<T> schema,
+  String? instructions,
   String? system,
   String? prompt,
   List<ModelMessage>? messages,
@@ -51,7 +53,14 @@ Future<GenerateObjectResult<T>> generateObject<T>({
   double? temperature,
   double? topP,
   Duration? timeout,
+  CancellationToken? abortSignal,
+  bool allowSystemInMessages = false,
+  BodyInclusionPolicy bodyInclusion = const BodyInclusionPolicy.none(),
 }) async {
+  rejectSystemMessages(
+    messages ?? const [],
+    allowSystemInMessages: allowSystemInMessages,
+  );
   final normalizedMessages = <LanguageModelV4Message>[
     if (prompt != null)
       LanguageModelV4Message(
@@ -63,42 +72,90 @@ Future<GenerateObjectResult<T>> generateObject<T>({
 
   final output = Output.object(schema: schema);
 
-  final generateCall = model.doGenerate(
-    LanguageModelV4CallOptions(
-      prompt: LanguageModelV4Prompt(
-        system: buildOutputSystemInstruction(system, output),
-        messages: normalizedMessages,
-      ),
-      maxOutputTokens: maxOutputTokens,
-      temperature: temperature,
-      topP: topP,
-      responseFormat: buildResponseFormat(output),
-    ),
-  );
-  final response = await withOptionalTimeout(generateCall, timeout);
-
-  final text = response.content
-      .whereType<LanguageModelV4TextPart>()
-      .map((part) => part.text)
-      .join();
-
-  late final Map<String, dynamic> jsonMap;
-  late final T object;
   try {
-    jsonMap = extractJsonObject(text);
-    object = schema.fromJson(jsonMap);
-  } catch (error) {
-    throw AiNoObjectGeneratedError(
-      message: 'Failed to generate a valid object.',
-      text: text,
-      response: response.response,
-      usage: response.usage,
-      cause: error,
+    return await runOperation(
+      abortSignal: abortSignal,
+      timeout: timeout,
+      operation: (signal) async {
+        final response = await model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              system: buildOutputSystemInstruction(
+                instructions ?? system,
+                output,
+              ),
+              messages: normalizedMessages,
+            ),
+            maxOutputTokens: maxOutputTokens,
+            temperature: temperature,
+            topP: topP,
+            responseFormat: buildResponseFormat(output),
+            abortSignal: signal,
+          ),
+        );
+        final text = response.content
+            .whereType<LanguageModelV4TextPart>()
+            .map((part) => part.text)
+            .join();
+        try {
+          final jsonMap = parseCompleteJsonObject(text);
+          return GenerateObjectResult<T>(
+            object: schema.fromJson(jsonMap),
+            response: _filterObjectResult(response, bodyInclusion),
+            rawJson: jsonMap,
+          );
+        } catch (error) {
+          throw AiNoObjectGeneratedError(
+            message: 'Failed to generate a valid object.',
+            text: text,
+            response: _filterObjectMetadata(response.response, bodyInclusion),
+            usage: response.usage,
+            cause: error,
+          );
+        }
+      },
     );
+  } catch (error, stackTrace) {
+    final filtered = filterBodyBearingError(error, bodyInclusion);
+    Error.throwWithStackTrace(filtered, stackTrace);
   }
-  return GenerateObjectResult<T>(
-    object: object,
-    response: response,
-    rawJson: jsonMap,
-  );
 }
+
+LanguageModelV4GenerateResult _filterObjectResult(
+  LanguageModelV4GenerateResult response,
+  BodyInclusionPolicy policy,
+) => LanguageModelV4GenerateResult(
+  content: response.content,
+  finishReason: response.finishReason,
+  rawFinishReason: response.rawFinishReason,
+  usage: response.usage,
+  warnings: response.warnings,
+  request: response.request == null
+      ? null
+      : LanguageModelV4RequestMetadata(
+          body: policy.requestBody ? response.request!.body : null,
+        ),
+  response: response.response == null
+      ? null
+      : LanguageModelV4ResponseMetadata(
+          id: response.response!.id,
+          modelId: response.response!.modelId,
+          timestamp: response.response!.timestamp,
+          headers: response.response!.headers,
+          body: policy.responseBody ? response.response!.body : null,
+        ),
+  providerMetadata: response.providerMetadata,
+);
+
+LanguageModelV4ResponseMetadata? _filterObjectMetadata(
+  LanguageModelV4ResponseMetadata? metadata,
+  BodyInclusionPolicy policy,
+) => metadata == null
+    ? null
+    : LanguageModelV4ResponseMetadata(
+        id: metadata.id,
+        modelId: metadata.modelId,
+        timestamp: metadata.timestamp,
+        headers: metadata.headers,
+        body: policy.responseBody ? metadata.body : null,
+      );

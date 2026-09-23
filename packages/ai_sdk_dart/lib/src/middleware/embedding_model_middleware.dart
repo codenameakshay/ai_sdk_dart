@@ -69,6 +69,12 @@ EmbeddingModelV2<VALUE> wrapEmbeddingModel<VALUE>({
 }
 
 class _WrappedEmbeddingModel<VALUE> implements EmbeddingModelV2<VALUE> {
+  @override
+  int? get maxEmbeddingsPerCall => inner.maxEmbeddingsPerCall;
+
+  @override
+  bool get supportsParallelCalls => inner.supportsParallelCalls;
+
   const _WrappedEmbeddingModel({required this.inner, required this.middleware});
 
   final EmbeddingModelV2<VALUE> inner;

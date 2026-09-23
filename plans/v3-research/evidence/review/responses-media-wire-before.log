@@ -1,0 +1,51 @@
+00:00 +0: loading packages/ai_sdk_openai/test/responses_media_wire_review_test.dart
+00:00 +0: tool file wire image=false url=false
+00:00 +0 -1: tool file wire image=false url=false [E]
+  Expected: {
+              'type': 'input_file',
+              'file_data': 'data:application/pdf;base64,AQID',
+              'filename': 'asset'
+            }
+    Actual: {'type': 'input_file', 'base64': 'AQID', 'filename': 'asset'}
+     Which: is missing map key 'file_data'
+
+  package:matcher                                                         expect
+  packages/ai_sdk_openai/test/responses_media_wire_review_test.dart 44:9  main.<fn>
+
+00:00 +0 -1: tool file wire image=false url=true
+00:00 +0 -2: tool file wire image=false url=true [E]
+  Expected: {'type': 'input_file', 'file_url': 'https://example.test/asset'}
+    Actual: {'type': 'input_file', 'url': 'https://example.test/asset', 'filename': 'asset'}
+     Which: has different length and is missing map key 'file_url'
+
+  package:matcher                                                         expect
+  packages/ai_sdk_openai/test/responses_media_wire_review_test.dart 44:9  main.<fn>
+
+00:00 +0 -2: tool file wire image=true url=false
+00:00 +0 -3: tool file wire image=true url=false [E]
+  Expected: {'type': 'input_image', 'image_url': 'data:image/png;base64,AQID'}
+    Actual: {'type': 'input_image', 'base64': 'AQID'}
+     Which: is missing map key 'image_url'
+
+  package:matcher                                                         expect
+  packages/ai_sdk_openai/test/responses_media_wire_review_test.dart 44:9  main.<fn>
+
+00:00 +0 -3: tool file wire image=true url=true
+00:00 +0 -4: tool file wire image=true url=true [E]
+  Expected: {'type': 'input_image', 'image_url': 'https://example.test/asset'}
+    Actual: {'type': 'input_image', 'url': 'https://example.test/asset'}
+     Which: is missing map key 'image_url'
+
+  package:matcher                                                         expect
+  packages/ai_sdk_openai/test/responses_media_wire_review_test.dart 44:9  main.<fn>
+
+00:00 +0 -4: Some tests failed.
+
+Failing tests:
+  packages/ai_sdk_openai/test/responses_media_wire_review_test.dart: tool file wire image=false url=false
+  packages/ai_sdk_openai/test/responses_media_wire_review_test.dart: tool file wire image=false url=true
+  packages/ai_sdk_openai/test/responses_media_wire_review_test.dart: tool file wire image=true url=false
+  packages/ai_sdk_openai/test/responses_media_wire_review_test.dart: tool file wire image=true url=true
+
+Consider enabling the flag chain-stack-traces to receive more detailed exceptions.
+For example, 'dart test --chain-stack-traces'.

@@ -1,6 +1,8 @@
-import 'package:ai_sdk_openai_compatible/ai_sdk_openai_compatible.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
+
+import 'package:ai_sdk_openai/ai_sdk_openai.dart';
+import 'package:ai_sdk_openai_compatible/ai_sdk_openai_compatible.dart';
 
 /// Azure OpenAI provider for language models and embeddings.
 ///
@@ -76,6 +78,23 @@ class AzureOpenAIProvider {
         ),
       );
 
+  /// Returns a model backed by Azure's Responses API.
+  LanguageModelV4 responses(String deploymentId) =>
+      OpenAIResponsesLanguageModel(
+        modelId: deploymentId,
+        providerName: 'azure',
+        baseUrl: providerEndpoint(
+          endpoint,
+          '/openai/deployments/$deploymentId',
+        ),
+        headers: _headers,
+        client: _client,
+        queryParameters: {'api-version': apiVersion},
+      );
+
+  /// Explicit Chat Completions escape hatch.
+  LanguageModelV4 chat(String deploymentId) => call(deploymentId);
+
   /// Returns an embedding model for the given Azure deployment [deploymentId].
   EmbeddingModelV2<String> embedding(String deploymentId) =>
       _AzureEmbeddingModel(
@@ -105,6 +124,12 @@ Dio _azureDio({required String endpoint}) => createProviderDio(
 // ---------------------------------------------------------------------------
 
 class _AzureEmbeddingModel implements EmbeddingModelV2<String> {
+  @override
+  int? get maxEmbeddingsPerCall => 2048;
+
+  @override
+  bool get supportsParallelCalls => true;
+
   _AzureEmbeddingModel({
     required this.deploymentId,
     required this.endpoint,
@@ -150,6 +175,7 @@ class _AzureEmbeddingModel implements EmbeddingModelV2<String> {
         queryParameters: {'api-version': apiVersion},
         data: body,
         options: Options(headers: {...?options.headers, ...resolvedHeaders}),
+        cancelToken: cancelTokenFor(options.abortSignal),
       );
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);

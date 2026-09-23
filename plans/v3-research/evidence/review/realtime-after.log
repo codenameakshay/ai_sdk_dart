@@ -1,0 +1,22 @@
+00:00 +0: loading packages/ai_sdk_realtime/test/event_queue_review_test.dart
+00:00 +0: packages/ai_sdk_realtime/test/event_queue_review_test.dart: paused queued text precedes done after peer EOF
+00:00 +1: packages/ai_sdk_realtime/test/event_queue_review_test.dart: paused queue overflow becomes an observable terminal error
+00:00 +2: loading packages/ai_sdk_realtime/test/startup_lifetime_review_test.dart
+00:00 +2: packages/ai_sdk_realtime/test/startup_lifetime_review_test.dart: late transport cleanup cannot leak a second error
+00:00 +3: packages/ai_sdk_realtime/test/startup_lifetime_review_test.dart: cancelled startup closes a late transport exactly once
+00:00 +4: loading packages/ai_sdk_realtime/test/realtime_test.dart
+00:00 +4: packages/ai_sdk_realtime/test/realtime_test.dart: cancel and interrupt target the requested response ID
+00:00 +5: packages/ai_sdk_realtime/test/realtime_test.dart: waits for session.created, configures, and deduplicates tool calls
+00:00 +6: packages/ai_sdk_realtime/test/realtime_test.dart: bounds decoded audio and validates interruption duration
+00:00 +7: packages/ai_sdk_realtime/test/realtime_test.dart: requires session ids and post-configuration matching updates
+00:00 +8: packages/ai_sdk_realtime/test/realtime_test.dart: matching update wins after a mismatched update
+00:00 +9: packages/ai_sdk_realtime/test/realtime_test.dart: speaks the Realtime handshake over a real loopback WebSocket
+00:00 +10: packages/ai_sdk_realtime/test/realtime_test.dart: validates response identities and discards late cancelled output
+00:00 +11: packages/ai_sdk_realtime/test/realtime_test.dart: readiness deadline is total while unknown events keep arriving
+00:00 +12: packages/ai_sdk_realtime/test/realtime_test.dart: a hanging configuration send is covered by the startup deadline
+00:00 +13: packages/ai_sdk_realtime/test/realtime_test.dart: close has one bounded shared cleanup future
+00:00 +14: packages/ai_sdk_realtime/test/realtime_test.dart: close preserves a cleanup failure observed before its deadline
+00:00 +15: packages/ai_sdk_realtime/test/realtime_test.dart: paused listeners receive a bounded queue and missing listeners drop audio
+00:00 +16: packages/ai_sdk_realtime/test/realtime_test.dart: canceling a paused audio subscriber releases its queued budget
+00:00 +17: packages/ai_sdk_realtime/test/realtime_test.dart: loopback peer close completes the event stream once
+00:00 +18: All tests passed!

@@ -85,3 +85,27 @@ Source for tenant discovery order: https://modelcontextprotocol.io/specification
 - The first Batch total-deadline test used a real 10 ms budget and 30 ms delay. This does not establish deterministic serialization-budget coverage and can fail before upload on a loaded host. Returned for controllable timing and separate pre-upload expiry proof.
 - Bloc deferred cancellation initially read a mutable subscription field from the later cleanup callback. The worker changed it to capture the subscription and await cleanup. The parent's concurrent replacement regression passed after that correction was already present: `fvm flutter test packages/ai_sdk_flutter_ui/test/bloc_replacement_review_test.dart`, 1 passed. The log is named `/tmp/v3-bloc-replacement-before.log`, but no production red state was observed in this run. Framework-wide verification remains pending.
 - Open PR state refreshed with `gh pr list`: draft #4 remains the only open PR. No new implementation PR has been raised at this checkpoint.
+- Parent realtime startup tests pass after the worker's correction was already present: late transports close once after cancellation and rejecting late cleanup does not escape as another error. `fvm dart test packages/ai_sdk_realtime/test/startup_lifetime_review_test.dart`: 2 passed, `/tmp/v3-realtime-late-cleanup-before.log`. The filename is historical; no reproduced-red claim. Readiness total budgets, close races, paused-consumer bounds and typed protocol semantics remain under separate review.
+- Parent media serializer regressions reproduce two actual failures: byte-backed files emit `url: null`; opaque provider references are sent as an invalid URL rather than rejected before dispatch. `fvm dart test packages/ai_sdk_remote/test/media_serialization_review_test.dart`: 2 failed, `/tmp/v3-remote-media-red.log`. Earlier fixture attempts lacked required response headers/finish; only the final corrected-fixture log is product failure evidence. Assigned remote mapping to the conversation owner.
+- Parent realtime event-queue regressions reproduce silent data loss: queued text disappears when the peer closes while a listener is paused, and a full paused queue drops further events without an observable overflow error. `fvm dart test packages/ai_sdk_realtime/test/event_queue_review_test.dart`: 2 failed, `/tmp/v3-realtime-queue-before.log`. Returned to the lifetime owner. A bounded queue's length alone does not prove correct delivery/terminal semantics.
+- W09/W10 prebuilt UI integration remains incomplete: `AiChatScaffold` still requires the old `ChatController` plus `ToolLoopAgent`; no widget in `lib/src/widgets` consumes `ConversationController` or `ConversationBackend`. Recipe snapshot displays and typed backend tests do not establish the approved same-widget local/remote path. Assign the actual widget bridge and keyless runnable example after the current conversation runtime proof is stable. Browser fixture screenshots only verify fixture callbacks.
+
+## Parent performance regression — lazy array snapshots
+
+The element-only consumer test previously asserted only zero snapshots/full-list copies, which did not prove zero structural-tree allocation. Adding assertions for `snapshotStructuralNodes` and `snapshotStructuralReferences` reproduces **expected 0, actual 3 nodes** for two elements. Command: `fvm dart test packages/ai_sdk_dart/test/conformance/array_snapshot_consumers_test.dart`; log `/tmp/v3-array-lazy-parent-red.log` (one failed, late-subscriber test passed). `stream_text.dart` constructs and updates its builder without a partial-output listener. W13 must make builder creation lazy and rebuild the complete prefix when a listener arrives, retaining immutable snapshots. Earlier core720 evidence predates this strengthened assertion; current core is deliberately red until corrected.
+
+Benchmark review: the current harness performs one warmup and three measured array runs, with a fixed copy-then-structural order; it does not satisfy the approved 30-run distributions or UI frame/memory/cancellation measurements. Do not present its median as the final release benchmark.
+
+### Lazy snapshot correction
+
+The snapshot builder is now created only when a partial-output listener needs a snapshot, and it imports all values since its previous update. Parent focused tests now pass **2/2** (`/tmp/v3-array-lazy-parent-after.log`): zero structural nodes/references for element-only consumption and complete immutable prefixes for a late subscriber. This eliminates measured internal node allocation for the fixture; it is not yet a latency or total-memory benchmark. Tradeoff: the first late snapshot subscriber pays the cost of importing the accumulated prefix.
+
+```diff
+ on(arrayElements)
+   decode and emit elements
+-  update persistent snapshot tree
+   if snapshot listener exists
++    create tree if absent
++    append values since its last update
+     emit immutable snapshot
+```

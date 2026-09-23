@@ -6,14 +6,50 @@ void main(List<String> arguments) {
   const sizes = [('1KiB', 1024), ('64KiB', 64 * 1024), ('1MiB', 1024 * 1024)];
   final results = <Map<String, Object>>[];
 
+  const warmups = 3;
+  const samples = 30;
   for (final (label, targetBytes) in sizes) {
-    final objectResult = _runObjectBenchmark(_buildObjectPayload(targetBytes));
-    _assertLinear(objectResult);
-    results.add(objectResult.toJson(label));
-
-    final arrayResult = _runArrayBenchmark(_buildArrayPayload(targetBytes));
-    _assertLinear(arrayResult);
-    results.add(arrayResult.toJson(label));
+    final objectPayload = _buildObjectPayload(targetBytes);
+    final arrayPayload = _buildArrayPayload(targetBytes);
+    final cases = <_BenchmarkResult Function()>[
+      () => _runObjectBenchmark(objectPayload),
+      () => _runArrayBenchmark(arrayPayload, structural: false),
+      () => _runArrayBenchmark(arrayPayload, structural: true),
+    ];
+    final observations = List.generate(
+      cases.length,
+      (_) => <_BenchmarkResult>[],
+    );
+    for (var iteration = 0; iteration < warmups + samples; iteration++) {
+      for (var offset = 0; offset < cases.length; offset++) {
+        final index = (iteration + offset) % cases.length;
+        final result = cases[index]();
+        _assertParseBudget(result);
+        if (iteration >= warmups) observations[index].add(result);
+      }
+    }
+    for (final runs in observations) {
+      final sorted = [
+        ...runs,
+      ]..sort((a, b) => a.elapsedMicroseconds.compareTo(b.elapsedMicroseconds));
+      int percentile(double fraction) =>
+          sorted[(samples * fraction).ceil() - 1].elapsedMicroseconds;
+      results.add({
+        ...sorted[(samples * .5).ceil() - 1].toJson(label),
+        'fixtureVersion': 1,
+        'warmupRuns': warmups,
+        'sampleCount': samples,
+        'percentileMethod': 'nearest-rank',
+        'p50Microseconds': percentile(.5),
+        'p95Microseconds': percentile(.95),
+        'p99Microseconds': percentile(.99),
+        'minMicroseconds': sorted.first.elapsedMicroseconds,
+        'maxMicroseconds': sorted.last.elapsedMicroseconds,
+        'samplesMicroseconds': runs
+            .map((run) => run.elapsedMicroseconds)
+            .toList(),
+      });
+    }
   }
 
   if (arguments.contains('--json')) {
@@ -56,18 +92,24 @@ _BenchmarkResult _runObjectBenchmark(String payload) {
     decodeAttempts: counters.decodeAttempts,
     snapshotCount: counters.snapshotCount,
     snapshotElementsCopied: counters.snapshotElementsCopied,
+    snapshotStructuralNodes: counters.snapshotStructuralNodes,
+    snapshotStructuralReferences: counters.snapshotStructuralReferences,
     elements: 0,
     elapsedMicroseconds: stopwatch.elapsedMicroseconds,
   );
 }
 
-_BenchmarkResult _runArrayBenchmark(String payload) {
+_BenchmarkResult _runArrayBenchmark(
+  String payload, {
+  required bool structural,
+}) {
   final previousCounters = partialJsonDebugCounters;
   final counters = PartialJsonDebugCounters();
   partialJsonDebugCounters = counters;
 
   final tracker = PartialJsonArrayTracker();
   final partialValues = <Object?>[];
+  final builder = structural ? ImmutableArraySnapshotBuilder<Object?>() : null;
   var elements = 0;
   final stopwatch = Stopwatch()..start();
 
@@ -81,7 +123,12 @@ _BenchmarkResult _runArrayBenchmark(String payload) {
       if (update.newElements.isNotEmpty) {
         partialValues.addAll(update.newElements);
         elements += update.newElements.length;
-        createTrackedImmutableSnapshot(partialValues);
+        if (structural) {
+          builder!.addAll(update.newElements);
+          builder.snapshot();
+        } else {
+          createTrackedImmutableSnapshot(partialValues);
+        }
       }
     }
   } finally {
@@ -90,31 +137,34 @@ _BenchmarkResult _runArrayBenchmark(String payload) {
   }
 
   return _BenchmarkResult(
-    kind: 'array',
+    kind: structural ? 'array-structural' : 'array-copy',
     bytes: payload.length,
     parseAttempts: counters.parseAttempts,
     decodeAttempts: counters.decodeAttempts,
     snapshotCount: counters.snapshotCount,
     snapshotElementsCopied: counters.snapshotElementsCopied,
+    snapshotStructuralNodes: counters.snapshotStructuralNodes,
+    snapshotStructuralReferences: counters.snapshotStructuralReferences,
     elements: elements,
     elapsedMicroseconds: stopwatch.elapsedMicroseconds,
   );
 }
 
-void _assertLinear(_BenchmarkResult result) {
+void _assertParseBudget(_BenchmarkResult result) {
   final maxAttempts = switch (result.kind) {
     'object' => 1,
-    'array' => result.elements + 1,
+    'array-copy' || 'array-structural' => result.elements + 1,
     _ => throw StateError('Unknown benchmark kind: ${result.kind}'),
   };
   final maxSnapshotCount = switch (result.kind) {
     'object' => 0,
-    'array' => result.elements,
+    'array-copy' || 'array-structural' => result.elements,
     _ => throw StateError('Unknown benchmark kind: ${result.kind}'),
   };
   final maxSnapshotElementsCopied = switch (result.kind) {
     'object' => 0,
-    'array' => result.elements * (result.elements + 1) ~/ 2,
+    'array-copy' => result.elements * (result.elements + 1) ~/ 2,
+    'array-structural' => 0,
     _ => throw StateError('Unknown benchmark kind: ${result.kind}'),
   };
 
@@ -193,6 +243,8 @@ class _BenchmarkResult {
     required this.decodeAttempts,
     required this.snapshotCount,
     required this.snapshotElementsCopied,
+    required this.snapshotStructuralNodes,
+    required this.snapshotStructuralReferences,
     required this.elements,
     required this.elapsedMicroseconds,
   });
@@ -203,6 +255,8 @@ class _BenchmarkResult {
   final int decodeAttempts;
   final int snapshotCount;
   final int snapshotElementsCopied;
+  final int snapshotStructuralNodes;
+  final int snapshotStructuralReferences;
   final int elements;
   final int elapsedMicroseconds;
 
@@ -214,6 +268,8 @@ class _BenchmarkResult {
     'decodeAttempts': decodeAttempts,
     'snapshotCount': snapshotCount,
     'snapshotElementsCopied': snapshotElementsCopied,
+    'snapshotStructuralNodes': snapshotStructuralNodes,
+    'snapshotStructuralReferences': snapshotStructuralReferences,
     'elements': elements,
     'elapsedMicroseconds': elapsedMicroseconds,
   };
@@ -224,6 +280,8 @@ class _BenchmarkResult {
         'decodeAttempts=${result['decodeAttempts']} '
         'snapshotCount=${result['snapshotCount']} '
         'snapshotElementsCopied=${result['snapshotElementsCopied']} '
+        'snapshotStructuralNodes=${result['snapshotStructuralNodes']} '
+        'snapshotStructuralReferences=${result['snapshotStructuralReferences']} '
         'elements=${result['elements']} '
         'elapsedMs=${(result['elapsedMicroseconds'] as int) / 1000}';
   }

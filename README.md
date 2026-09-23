@@ -110,7 +110,7 @@ for the exact renames and contract changes.
 - `Output.array(schema)` — parse model output into a typed Dart list
 - `Output.choice(options)` — constrain output to a fixed set of string values
 - `Output.json()` — raw JSON without schema validation
-- Automatic code-fence stripping (` ```json ... ``` `)
+- Final structured output requires complete JSON; use `extractJsonMiddleware` when a model needs code-fence normalization
 
 ### 🔧 Type-Safe Tools & Multi-Step Agents
 - `tool<Input, Output>()` — fully typed tool definitions with JSON schema
@@ -172,7 +172,7 @@ for the exact renames and contract changes.
 - Comprehensive Dart and Flutter tests across every package and both example apps
 - A **99% line-coverage gate** for published package libraries enforced in CI
 - Provider wire-format conformance tests for every provider (plus a typed-error conformance test per provider)
-- `MockEmbeddingModelV3` testing utility for embedding model conformance
+- `MockEmbeddingModelV2` testing utility for embedding model conformance
 
 ---
 
@@ -196,6 +196,8 @@ for the exact renames and contract changes.
 | [`ai_sdk_json_schema`](packages/ai_sdk_json_schema) | v3 companion | Optional local JSON Schema validation before decoding tool inputs or final structured output |
 | [`ai_sdk_conversation`](packages/ai_sdk_conversation) | v3 companion | Immutable typed conversation snapshots and a versioned persistence codec; no model or tool execution |
 | [`ai_sdk_remote`](packages/ai_sdk_remote) | v3 companion | Optional transport for a trusted backend's Vercel UI-message stream, with cancellation and conversation reduction |
+| [`ai_sdk_telemetry`](packages/ai_sdk_telemetry) | v3 companion, in qualification | Optional native Dart OTLP/HTTP metrics exporter; no browser transport |
+| [`ai_sdk_realtime`](packages/ai_sdk_realtime) | Unpublished preview | Realtime session and event transport; protocol and device qualification remain in progress |
 
 > `ai_sdk_provider` and `ai_sdk_openai_compatible` are transitive dependencies — you **do not** need to add them directly.
 
@@ -203,7 +205,7 @@ for the exact renames and contract changes.
 
 ## 🚀 Quick Start
 
-### Dart CLI
+### Local development and trusted Dart servers
 
 ```sh
 dart pub add ai_sdk_dart ai_sdk_openai
@@ -222,11 +224,15 @@ Future<void> main() async {
   }
 
   final provider = OpenAIProvider(apiKey: apiKey);
-  final result = await generateText(
-    model: provider('gpt-4.1-mini'),
-    prompt: 'Say hello from AI SDK Dart!',
-  );
-  print(result.text);
+  try {
+    final result = await generateText(
+      model: provider('gpt-4.1-mini'),
+      prompt: 'Say hello from AI SDK Dart!',
+    );
+    print(result.text);
+  } finally {
+    provider.dispose();
+  }
 }
 ```
 
@@ -235,6 +241,45 @@ environment and passing `apiKey:` yourself, as shown above. The convenience
 factories like `openai('...')`, `anthropic('...')`, and `google('...')` read
 compile-time defines such as `OPENAI_API_KEY`, so they are best paired with
 `dart run --define=...` or Flutter `--dart-define=...`.
+
+### Production Flutter through a trusted backend
+
+The optional v3 remote package sends application messages to your backend.
+The backend owns provider credentials, authorization, and tool execution.
+Use an application session token to authenticate the client.
+
+```dart
+import 'package:ai_sdk_conversation/ai_sdk_conversation.dart';
+import 'package:ai_sdk_remote/ai_sdk_remote.dart';
+
+Stream<Conversation> sendChatTurn({
+  required Uri endpoint,
+  required Conversation conversation,
+  required Future<String> Function() sessionToken,
+}) async* {
+  final transport = RemoteConversationTransport(
+    endpoint: endpoint,
+    authHeaders: () async => {
+      'Authorization': 'Bearer ${await sessionToken()}',
+    },
+  );
+  try {
+    yield* transport.send(conversation);
+  } finally {
+    transport.dispose();
+  }
+}
+```
+
+A Flutter `StreamBuilder<Conversation>` can render these snapshots. Cancelling
+the subscription cancels its active request and runs the cleanup above. Store
+snapshots with `ConversationCodec`; decoding a snapshot does not execute tools.
+
+The backend must implement the pinned UI-message stream protocol. The
+[reference backend](examples/remote_backend) and
+[runnable Dart client](packages/ai_sdk_remote/example/example.dart) demonstrate
+the request and response flow without provider credentials. The adapter does
+not retry or resume a disconnected turn automatically.
 
 ### Streaming
 
@@ -482,6 +527,13 @@ secrets in shipped browser or mobile clients. The HTTP transport is web-safe —
 `dart:io` is only pulled in by `StdioMCPTransport` on native platforms, behind
 a conditional import — so the client also runs on Flutter web.
 
+The client also has an explicit `MCPProtocolMode.modern` strategy for
+protocol `2026-07-28`, including per-request metadata, MRTR input-required
+results, typed progress, and `subscriptions/listen`. MCP Tasks, cache-hint
+interpretation, and arbitrary partial tool-output streams are outside the
+current package surface; progress notifications do not represent partial
+results.
+
 ---
 
 ## 🗺️ Roadmap
@@ -510,7 +562,7 @@ a conditional import — so the client also runs on Flutter web.
 
 ### 🔜 Planned
 
-- 🔜 Streaming MCP tool outputs
+- 🔜 Versioned MCP Tasks/polling adapter and richer extension support
 - 🔜 Richer attachment widgets (file/image pickers, audio capture)
 - 🔜 Dart Edge / Cloudflare Workers support
 - 🔜 WebSocket transport for MCP

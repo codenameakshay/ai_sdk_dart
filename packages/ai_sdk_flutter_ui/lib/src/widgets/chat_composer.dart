@@ -109,6 +109,7 @@ class _ChatComposerState extends State<ChatComposer> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final showStop = widget.isLoading && widget.onStop != null;
+    final stopEnabled = widget.enabled && showStop;
     final sendEnabled = widget.enabled && !widget.isLoading;
 
     return SafeArea(
@@ -170,12 +171,13 @@ class _ChatComposerState extends State<ChatComposer> {
                         container: true,
                         button: true,
                         label: 'Stop response',
-                        onTap: _stop,
+                        enabled: stopEnabled,
+                        onTap: stopEnabled ? _stop : null,
                         child: ExcludeSemantics(
                           child: IconButton.filled(
                             key: const ValueKey('chat-composer-stop'),
                             tooltip: 'Stop response',
-                            onPressed: _stop,
+                            onPressed: stopEnabled ? _stop : null,
                             icon: const Icon(Icons.stop_rounded),
                           ),
                         ),

@@ -1,0 +1,2 @@
+Error: Expected one assistant row, found 2
+    at /home/ubuntu/.t3/worktrees/ai_sdk_dart/t3code-411b09df/plans/v3-research/evidence/browser/conversation-smoke.cjs:42:38

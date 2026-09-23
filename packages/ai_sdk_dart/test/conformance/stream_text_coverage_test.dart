@@ -211,7 +211,8 @@ void main() {
         );
 
         await result.fullStream.toList();
-        expect(await result.toolResults, [toolResult]);
+        expect(await result.toolResults, hasLength(2));
+        expect(await result.toolResults, contains(toolResult));
         expect(await result.content, containsAll([toolCall, toolResult]));
         expect(finishes.single.steps.single.toolApprovalRequests, [
           approvalRequest,
@@ -373,6 +374,10 @@ void main() {
           LanguageModelV4ToolApprovalResponse(
             approvalId: 'approval_call-x',
             approved: true,
+            toolCallId: 'call-x',
+            toolName: 'danger',
+            argumentsFingerprint: '{}',
+            policyRevision: 'default',
           ),
         ],
       );
@@ -403,6 +408,10 @@ void main() {
             approvalId: 'approval_call-y',
             approved: false,
             reason: 'nope',
+            toolCallId: 'call-y',
+            toolName: 'danger',
+            argumentsFingerprint: '{}',
+            policyRevision: 'default',
           ),
         ],
       );

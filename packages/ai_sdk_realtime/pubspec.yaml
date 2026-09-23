@@ -1,0 +1,12 @@
+name: ai_sdk_realtime
+description: Experimental OpenAI Realtime WebSocket session adapter.
+publish_to: none
+version: 2.0.0
+resolution: workspace
+environment:
+  sdk: ^3.11.1
+dependencies:
+  ai_sdk_provider: ^2.0.0
+  web_socket_channel: ^3.0.3
+dev_dependencies:
+  test: ^1.31.0

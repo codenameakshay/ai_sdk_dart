@@ -41,13 +41,15 @@ class CodeBlock extends StatelessWidget {
         color: background ?? scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(8),
       ),
-      child: SelectableText(
-        text,
-        style: TextStyle(
-          fontFamily: 'monospace',
-          fontSize: 12,
-          height: 1.4,
-          color: foreground ?? scheme.onSurface,
+      child: SelectionArea(
+        child: Text(
+          text,
+          style: TextStyle(
+            fontFamily: 'monospace',
+            fontSize: 12,
+            height: 1.4,
+            color: foreground ?? scheme.onSurface,
+          ),
         ),
       ),
     );

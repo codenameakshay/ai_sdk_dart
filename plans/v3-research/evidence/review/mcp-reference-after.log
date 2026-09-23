@@ -1,0 +1,12 @@
+npm ci --ignore-scripts --prefix examples/mcp_reference/js
+
+added 94 packages, and audited 95 packages in 5s
+
+34 packages are looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+AI_SDK_MCP_REFERENCE=1 fvm dart test packages/ai_sdk_mcp/test/typescript_reference_test.dart
+00:00 +0: loading packages/ai_sdk_mcp/test/typescript_reference_test.dart
+00:00 +0: legacy client interoperates with pinned TypeScript SDK over stdio
+00:00 +1: All tests passed!

@@ -16,6 +16,17 @@ class ModelMessage {
     required List<LanguageModelV4ContentPart> this.parts,
   }) : content = null;
 
+  factory ModelMessage.fromProvider(LanguageModelV4Message message) =>
+      ModelMessage.parts(
+        role: switch (message.role) {
+          LanguageModelV4Role.system => ModelMessageRole.system,
+          LanguageModelV4Role.user => ModelMessageRole.user,
+          LanguageModelV4Role.assistant => ModelMessageRole.assistant,
+          LanguageModelV4Role.tool => ModelMessageRole.tool,
+        },
+        parts: List.unmodifiable(message.content),
+      );
+
   final ModelMessageRole role;
   final String? content;
   final List<LanguageModelV4ContentPart>? parts;

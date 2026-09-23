@@ -6,9 +6,13 @@ import '../messages/model_message.dart';
 import '../output/output.dart';
 import '../tools/tool.dart';
 import 'partial_json.dart';
+import 'body_inclusion.dart';
 import 'shared/common_helpers.dart';
 import 'shared/output_instruction.dart';
-import 'timeout_helpers.dart';
+import 'shared/operation_scope.dart';
+import 'shared/strict_json.dart';
+import 'shared/stream_outcome.dart';
+import '../telemetry/telemetry.dart';
 
 /// A JSON Patch-style operation for incremental object updates.
 ///
@@ -42,7 +46,9 @@ class StreamObjectResult<T> {
   });
 
   final Stream<T> stream;
-  final Stream<T> partialObjectStream;
+
+  /// Unvalidated JSON snapshots; only [object] and [stream] contain final T values.
+  final Stream<Map<String, dynamic>> partialObjectStream;
   final Stream<List<StreamObjectPatchOperation>> patchStream;
   final Stream<LanguageModelV4StreamPart> rawStream;
   final Stream<String> textStream;
@@ -69,11 +75,20 @@ class StreamObjectResult<T> {
 Future<StreamObjectResult<T>> streamObject<T>({
   required LanguageModelV4 model,
   required Schema<T> schema,
+  String? instructions,
   String? system,
   String? prompt,
   List<ModelMessage>? messages,
   Duration? timeout,
+  CancellationToken? abortSignal,
+  bool allowSystemInMessages = false,
+  BodyInclusionPolicy bodyInclusion = const BodyInclusionPolicy.none(),
+  TelemetrySettings? telemetry,
 }) async {
+  rejectSystemMessages(
+    messages ?? const [],
+    allowSystemInMessages: allowSystemInMessages,
+  );
   final normalizedMessages = <LanguageModelV4Message>[
     if (prompt != null)
       LanguageModelV4Message(
@@ -85,37 +100,153 @@ Future<StreamObjectResult<T>> streamObject<T>({
 
   final output = Output.object(schema: schema);
 
-  final streamCall = model.doStream(
-    LanguageModelV4CallOptions(
-      prompt: LanguageModelV4Prompt(
-        system: buildOutputSystemInstruction(system, output),
-        messages: normalizedMessages,
-      ),
-      responseFormat: buildResponseFormat(output),
-    ),
+  final telemetrySpan = startTelemetrySpan(
+    telemetry,
+    spanName: 'ai.streamObject',
+    attributes: {
+      AiTelemetryKeys.modelProvider: model.provider,
+      AiTelemetryKeys.modelId: model.modelId,
+      if (telemetry?.captureInputs == true && prompt != null)
+        'ai.prompt': prompt,
+    },
   );
-  final response = await withOptionalTimeout(streamCall, timeout);
+  final metricStopwatch = Stopwatch()..start();
+  var terminalMetricRecorded = false;
+  void recordMetric(
+    String name,
+    num value, {
+    Map<String, TelemetryAttributeValue> attributes = const {},
+  }) {
+    recordTelemetryMetric(
+      telemetry,
+      TelemetryMetric(
+        name: name,
+        value: value,
+        attributes: {
+          AiTelemetryKeys.modelProvider: model.provider,
+          AiTelemetryKeys.modelId: model.modelId,
+          AiTelemetryKeys.operation: 'streamObject',
+          ...attributes,
+        },
+      ),
+    );
+  }
+
+  void recordTerminal({required bool success, required bool cancelled}) {
+    if (terminalMetricRecorded) return;
+    terminalMetricRecorded = true;
+    recordMetric(
+      AiTelemetryMetrics.totalMs,
+      metricStopwatch.elapsedMicroseconds / 1000,
+      attributes: {
+        AiTelemetryKeys.operationStatus: cancelled
+            ? 'cancelled'
+            : (success ? 'success' : 'failure'),
+      },
+    );
+    recordMetric(
+      success
+          ? AiTelemetryMetrics.success
+          : (cancelled
+                ? AiTelemetryMetrics.cancelled
+                : AiTelemetryMetrics.failure),
+      1,
+    );
+    telemetrySpan.end();
+  }
+
+  final scope = OperationScope(abortSignal: abortSignal, timeout: timeout);
+  final LanguageModelV4StreamResult response;
+  try {
+    response = await scope.run(() {
+      final pending = model.doStream(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
+            system: buildOutputSystemInstruction(
+              instructions ?? system,
+              output,
+            ),
+            messages: normalizedMessages,
+          ),
+          responseFormat: buildResponseFormat(output),
+          abortSignal: scope.signal,
+        ),
+      );
+      unawaited(
+        pending.then((lateResponse) async {
+          if (scope.signal.isCancelled) {
+            try {
+              final subscription = lateResponse.stream.listen(
+                (_) {},
+                onError: (_, _) {},
+              );
+              await subscription.cancel();
+            } catch (_) {}
+          }
+        }, onError: (_) {}),
+      );
+      return pending;
+    }, raceCancellation: true);
+  } catch (error, stackTrace) {
+    scope.close();
+    final filtered = filterBodyBearingError(error, bodyInclusion);
+    telemetrySpan.recordException(filtered, stackTrace: stackTrace);
+    recordTerminal(success: false, cancelled: scope.signal.isCancelled);
+    Error.throwWithStackTrace(filtered, stackTrace);
+  }
   final responseMetadata = response.response;
 
-  final broadcast = response.stream.asBroadcastStream();
-  final textStream = broadcast
-      .where((part) => part is StreamPartTextDelta)
-      .map((part) => (part as StreamPartTextDelta).delta);
+  final rawController = StreamController<LanguageModelV4StreamPart>.broadcast();
+  final textController = StreamController<String>.broadcast();
 
-  final objectController = StreamController<T>.broadcast();
+  final objectController = StreamController<Map<String, dynamic>>.broadcast();
   final patchController =
       StreamController<List<StreamObjectPatchOperation>>.broadcast();
   final objectCompleter = Completer<T>();
   unawaited(() async {
     final buffer = StringBuffer();
     final partialJsonTracker = PartialJsonTracker();
+    LanguageModelV4Usage? reportedUsage;
+    var firstMeaningfulRecorded = false;
     Map<String, dynamic>? previousJson;
     String? lastPartialFingerprint;
-    T? lastObject;
-    Object? streamError;
+    final iterator = StreamIterator(captureStreamErrors(response.stream));
     try {
-      await for (final part in broadcast) {
+      while (await scope.run(iterator.moveNext, raceCancellation: true)) {
+        final part = iterator.current.unwrap();
+        if (part case StreamPartFinish(:final usage)) {
+          reportedUsage = usage;
+        }
+        final meaningful = switch (part) {
+          StreamPartTextDelta(:final delta) => delta.isNotEmpty,
+          _ => false,
+        };
+        if (!firstMeaningfulRecorded && meaningful) {
+          firstMeaningfulRecorded = true;
+          recordMetric(
+            AiTelemetryMetrics.firstMeaningfulMs,
+            metricStopwatch.elapsedMicroseconds / 1000,
+          );
+        }
+        if (part is StreamPartRaw && !bodyInclusion.rawChunks) {
+          continue;
+        }
+        if (part is StreamPartError) {
+          final filtered = filterBodyBearingError(part.error, bodyInclusion);
+          rawController.add(StreamPartError(error: filtered));
+          throw filtered;
+        }
+        if (part is StreamPartResponseMetadata) {
+          rawController.add(
+            StreamPartResponseMetadata(
+              metadata: _filterObjectMetadata(part.metadata, bodyInclusion),
+            ),
+          );
+        } else {
+          rawController.add(part);
+        }
         if (part is StreamPartTextDelta) {
+          textController.add(part.delta);
           buffer.write(part.delta);
           final cadence = partialJsonTracker.append(part.delta);
           if (!cadence.shouldAttemptValue) {
@@ -124,15 +255,15 @@ Future<StreamObjectResult<T>> streamObject<T>({
 
           final parsedJson = _tryParseObjectJson(buffer.toString());
           if (parsedJson != null) {
-            final parsed = schema.fromJson(parsedJson);
             final fingerprint = partialJsonFingerprint(parsedJson);
             if (fingerprint == lastPartialFingerprint) {
               continue;
             }
 
             lastPartialFingerprint = fingerprint;
-            lastObject = parsed;
-            objectController.add(parsed);
+            objectController.add(
+              _freezeJson(parsedJson) as Map<String, dynamic>,
+            );
 
             final patch = _diffObjectPatch(previousJson, parsedJson);
             if (patch.isNotEmpty) {
@@ -141,29 +272,53 @@ Future<StreamObjectResult<T>> streamObject<T>({
             previousJson = Map<String, dynamic>.from(parsedJson);
           }
         }
-        if (part is StreamPartError) {
-          streamError ??= part.error;
-          objectController.addError(part.error);
-          patchController.addError(part.error);
-        }
       }
 
-      if (streamError != null) {
-        objectCompleter.completeError(streamError);
-      } else if (lastObject != null) {
-        objectCompleter.complete(lastObject);
-      } else {
-        final error = AiNoObjectGeneratedError(
-          message: 'Failed to generate a valid structured object.',
-          text: buffer.toString(),
-          response: responseMetadata,
-          usage: null,
-        );
-        objectCompleter.completeError(error);
-      }
+      final object = await scope.run(() async {
+        late final Map<String, dynamic> finalJson;
+        try {
+          finalJson = parseCompleteJsonObject(buffer.toString());
+        } catch (error) {
+          throw AiNoObjectGeneratedError(
+            message: 'Failed to generate a valid structured object.',
+            text: buffer.toString(),
+            response: responseMetadata == null
+                ? null
+                : _filterObjectMetadata(responseMetadata, bodyInclusion),
+            usage: null,
+            cause: error,
+          );
+        }
+        return schema.fromJson(finalJson);
+      }, raceCancellation: true);
+      objectCompleter.complete(object);
+      recordMetric(
+        AiTelemetryMetrics.usageKnown,
+        sumUsage([reportedUsage]) == null ? 0 : 1,
+      );
+      recordTerminal(success: true, cancelled: false);
+    } catch (error, stackTrace) {
+      final filtered = filterBodyBearingError(error, bodyInclusion);
+      final wasCancelled = scope.signal.isCancelled;
+      scope.signal.cancel();
+      objectCompleter.completeError(filtered, stackTrace);
+      objectController.addError(filtered, stackTrace);
+      patchController.addError(filtered, stackTrace);
+      rawController.addError(filtered, stackTrace);
+      textController.addError(filtered, stackTrace);
+      telemetrySpan.recordException(filtered, stackTrace: stackTrace);
+      recordTerminal(success: false, cancelled: wasCancelled);
     } finally {
-      await objectController.close();
-      await patchController.close();
+      scope.close();
+      unawaited(() async {
+        try {
+          await iterator.cancel();
+        } catch (_) {}
+      }());
+      unawaited(objectController.close());
+      unawaited(patchController.close());
+      unawaited(rawController.close());
+      unawaited(textController.close());
     }
   }());
 
@@ -171,11 +326,22 @@ Future<StreamObjectResult<T>> streamObject<T>({
     stream: objectCompleter.future.asStream(),
     partialObjectStream: objectController.stream,
     patchStream: patchController.stream,
-    rawStream: broadcast,
-    textStream: textStream,
+    rawStream: rawController.stream,
+    textStream: textController.stream,
     object: objectCompleter.future,
   );
 }
+
+LanguageModelV4ResponseMetadata _filterObjectMetadata(
+  LanguageModelV4ResponseMetadata metadata,
+  BodyInclusionPolicy policy,
+) => LanguageModelV4ResponseMetadata(
+  id: metadata.id,
+  modelId: metadata.modelId,
+  timestamp: metadata.timestamp,
+  headers: metadata.headers,
+  body: policy.responseBody ? metadata.body : null,
+);
 
 Map<String, dynamic>? _tryParseObjectJson(String text) {
   final parsed = tryParsePartialJsonValue(
@@ -196,7 +362,11 @@ List<StreamObjectPatchOperation> _diffObjectPatch(
 ) {
   if (previous == null) {
     return [
-      StreamObjectPatchOperation(op: 'replace', path: '', value: current),
+      StreamObjectPatchOperation(
+        op: 'replace',
+        path: '',
+        value: _freezeJson(current),
+      ),
     ];
   }
 
@@ -223,7 +393,7 @@ void _diffJson(
           StreamObjectPatchOperation(
             op: 'add',
             path: nextPath,
-            value: entry.value,
+            value: _freezeJson(entry.value),
           ),
         );
         continue;
@@ -256,7 +426,7 @@ void _diffJson(
         StreamObjectPatchOperation(
           op: 'add',
           path: '$path/$i',
-          value: current[i],
+          value: _freezeJson(current[i]),
         ),
       );
     }
@@ -268,7 +438,11 @@ void _diffJson(
 
   if (previous != current) {
     out.add(
-      StreamObjectPatchOperation(op: 'replace', path: path, value: current),
+      StreamObjectPatchOperation(
+        op: 'replace',
+        path: path,
+        value: _freezeJson(current),
+      ),
     );
   }
 }
@@ -276,3 +450,11 @@ void _diffJson(
 String _escapeJsonPointerToken(String token) {
   return token.replaceAll('~', '~0').replaceAll('/', '~1');
 }
+
+Object? _freezeJson(Object? value) => switch (value) {
+  Map<String, dynamic>() => Map<String, dynamic>.unmodifiable(
+    value.map((key, child) => MapEntry(key, _freezeJson(child))),
+  ),
+  List() => List<Object?>.unmodifiable(value.map(_freezeJson)),
+  _ => value,
+};

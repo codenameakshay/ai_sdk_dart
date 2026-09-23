@@ -51,9 +51,14 @@ class StreamPartReasoningDelta extends LanguageModelV4StreamPart {
 }
 
 class StreamPartReasoningEnd extends LanguageModelV4StreamPart {
-  const StreamPartReasoningEnd({required this.id, this.providerMetadata});
+  const StreamPartReasoningEnd({
+    required this.id,
+    this.providerMetadata,
+    this.signature,
+  });
   final String id;
   final ProviderMetadata? providerMetadata;
+  final String? signature;
 }
 
 class StreamPartSource extends LanguageModelV4StreamPart {
@@ -62,10 +67,29 @@ class StreamPartSource extends LanguageModelV4StreamPart {
   final LanguageModelV4SourcePart source;
 }
 
+class StreamPartDocumentSource extends LanguageModelV4StreamPart {
+  const StreamPartDocumentSource({required this.source});
+
+  final LanguageModelV4DocumentSourcePart source;
+}
+
 class StreamPartFile extends LanguageModelV4StreamPart {
   const StreamPartFile({required this.file});
 
   final LanguageModelV4FilePart file;
+}
+
+class StreamPartReasoningFile extends LanguageModelV4StreamPart {
+  const StreamPartReasoningFile({required this.file});
+
+  final LanguageModelV4ReasoningFilePart file;
+}
+
+/// An opaque provider item preserved for replay and inspection.
+class StreamPartOpaque extends LanguageModelV4StreamPart {
+  const StreamPartOpaque({required this.opaque});
+
+  final LanguageModelV4OpaquePart opaque;
 }
 
 class StreamPartToolInputStart extends LanguageModelV4StreamPart {

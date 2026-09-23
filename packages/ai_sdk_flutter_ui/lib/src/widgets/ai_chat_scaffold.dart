@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:flutter/material.dart';
 
 import '../chat_controller.dart';
+import '../conversation_controller.dart';
 import 'assistant_message_view.dart';
 import 'chat_composer.dart';
 import 'chat_error_view.dart';
@@ -62,8 +65,9 @@ typedef ChatScaffoldStatusBuilder =
 class AiChatScaffold extends StatefulWidget {
   const AiChatScaffold({
     super.key,
-    required this.controller,
-    required this.agent,
+    this.controller,
+    this.agent,
+    this.conversationController,
     this.messageBuilder,
     this.errorBuilder,
     this.approvalBuilder,
@@ -72,13 +76,43 @@ class AiChatScaffold extends StatefulWidget {
     this.hintText = 'Message…',
     this.emptyState,
     this.listPadding = const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-  });
+    this.disposeConversationController = false,
+  }) : assert(
+         controller != null && agent != null && conversationController == null,
+         'Pass controller and agent, or use AiChatScaffold.conversation.',
+       );
+
+  /// Builds the same scaffold from a persisted local or remote conversation.
+  ///
+  /// The backend remains behind [ConversationController]; this constructor
+  /// only adapts its snapshots to the existing widgets and approval cards.
+  const AiChatScaffold.conversation({
+    super.key,
+    required this.conversationController,
+    this.messageBuilder,
+    this.errorBuilder,
+    this.approvalBuilder,
+    this.statusBuilder,
+    this.onAttach,
+    this.hintText = 'Message…',
+    this.emptyState,
+    this.listPadding = const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    this.disposeConversationController = true,
+  }) : controller = null,
+       agent = null;
 
   /// The chat controller backing the conversation.
-  final ChatController controller;
+  final ChatController? controller;
 
   /// The agent used to generate responses.
-  final ToolLoopAgent agent;
+  final ToolLoopAgent? agent;
+
+  /// Conversation controller used by [AiChatScaffold.conversation].
+  final ConversationController? conversationController;
+
+  /// Whether the conversation adapter should dispose its controller when the
+  /// scaffold is removed from the tree.
+  final bool disposeConversationController;
 
   /// Optional custom row builder forwarded to [ChatMessageList].
   final ChatMessageBuilder? messageBuilder;
@@ -110,9 +144,39 @@ class AiChatScaffold extends StatefulWidget {
 
 class _AiChatScaffoldState extends State<AiChatScaffold> {
   final ScrollController _scrollController = ScrollController();
+  ConversationChatController? _conversationAdapter;
+
+  ChatController get _controller => widget.controller ?? _conversationAdapter!;
+
+  @override
+  void initState() {
+    super.initState();
+    _createConversationAdapter();
+  }
+
+  @override
+  void didUpdateWidget(covariant AiChatScaffold oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.conversationController == widget.conversationController) {
+      return;
+    }
+    _conversationAdapter?.dispose();
+    _conversationAdapter = null;
+    _createConversationAdapter();
+  }
+
+  void _createConversationAdapter() {
+    final conversation = widget.conversationController;
+    if (conversation == null) return;
+    _conversationAdapter = ConversationChatController(
+      conversation,
+      disposeConversationController: widget.disposeConversationController,
+    );
+  }
 
   @override
   void dispose() {
+    _conversationAdapter?.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -125,7 +189,7 @@ class _AiChatScaffoldState extends State<AiChatScaffold> {
           child: Stack(
             children: [
               ChatMessageList(
-                controller: widget.controller,
+                controller: _controller,
                 messageBuilder: widget.messageBuilder,
                 padding: widget.listPadding,
                 scrollController: _scrollController,
@@ -140,7 +204,7 @@ class _AiChatScaffoldState extends State<AiChatScaffold> {
           ),
         ),
         ListenableBuilder(
-          listenable: widget.controller.contentListenable,
+          listenable: _controller.contentListenable,
           builder: (context, _) {
             final metadata = _buildMetadataFallback(context);
             if (metadata == null) return const SizedBox.shrink();
@@ -151,7 +215,7 @@ class _AiChatScaffoldState extends State<AiChatScaffold> {
           },
         ),
         ListenableBuilder(
-          listenable: widget.controller.statusListenable,
+          listenable: _controller.statusListenable,
           builder: (context, _) {
             final panels = _buildStatePanels(context);
             if (panels.isEmpty) return const SizedBox.shrink();
@@ -171,20 +235,17 @@ class _AiChatScaffoldState extends State<AiChatScaffold> {
           },
         ),
         ListenableBuilder(
-          listenable: widget.controller.statusListenable,
+          listenable: _controller.statusListenable,
           builder: (context, _) {
             final awaitingApproval =
-                widget.controller.status == ChatStatus.awaitingApproval;
+                _controller.status == ChatStatus.awaitingApproval;
             return ChatComposer(
-              isLoading: widget.controller.isLoading,
+              isLoading: _controller.isLoading,
               enabled: !awaitingApproval,
               hintText: widget.hintText,
               onAttach: widget.onAttach,
-              onStop: widget.controller.stop,
-              onSend: (text) => widget.controller.sendMessage(
-                agent: widget.agent,
-                text: text,
-              ),
+              onStop: _controller.stop,
+              onSend: _sendText,
             );
           },
         ),
@@ -193,7 +254,7 @@ class _AiChatScaffoldState extends State<AiChatScaffold> {
   }
 
   List<Widget> _buildStatePanels(BuildContext context) {
-    final controller = widget.controller;
+    final controller = _controller;
     final panels = <Widget>[];
 
     final error = controller.error;
@@ -220,17 +281,17 @@ class _AiChatScaffoldState extends State<AiChatScaffold> {
     if (builder != null) {
       return builder(
         context,
-        widget.controller,
+        _controller,
         error,
         _retryLastRequest,
-        widget.controller.clearError,
+        _controller.clearError,
       );
     }
 
     return ChatErrorView(
       error: error,
       onRetry: _retryLastRequest,
-      onDismiss: widget.controller.clearError,
+      onDismiss: _controller.clearError,
     );
   }
 
@@ -240,7 +301,7 @@ class _AiChatScaffoldState extends State<AiChatScaffold> {
   ) {
     final builder = widget.approvalBuilder;
     if (builder != null) {
-      return builder(context, widget.controller, request);
+      return builder(context, _controller, request);
     }
 
     return ToolApprovalCard(
@@ -259,7 +320,7 @@ class _AiChatScaffoldState extends State<AiChatScaffold> {
 
     final builder = widget.statusBuilder;
     if (builder != null) {
-      return builder(context, widget.controller, status);
+      return builder(context, _controller, status);
     }
 
     final label = switch (status) {
@@ -299,11 +360,11 @@ class _AiChatScaffoldState extends State<AiChatScaffold> {
 
   Widget? _buildMetadataFallback(BuildContext context) {
     if (widget.messageBuilder != null ||
-        widget.controller.status != ChatStatus.ready) {
+        _controller.status != ChatStatus.ready) {
       return null;
     }
 
-    final assistantMessage = _lastAssistantMessage(widget.controller.messages);
+    final assistantMessage = _lastAssistantMessage(_controller.messages);
     if (assistantMessage == null) return null;
 
     final parts =
@@ -316,8 +377,8 @@ class _AiChatScaffoldState extends State<AiChatScaffold> {
     );
 
     final metadataParts = <LanguageModelV4ContentPart>[
-      if (!hasInlineToolCalls) ...widget.controller.lastToolCalls,
-      if (!hasInlineSources) ...widget.controller.lastSources,
+      if (!hasInlineToolCalls) ..._controller.lastToolCalls,
+      if (!hasInlineSources) ..._controller.lastSources,
     ];
     if (metadataParts.isEmpty) return null;
 
@@ -326,7 +387,7 @@ class _AiChatScaffoldState extends State<AiChatScaffold> {
         role: ModelMessageRole.assistant,
         parts: metadataParts,
       ),
-      toolResults: widget.controller.lastToolResults,
+      toolResults: _controller.lastToolResults,
     );
   }
 
@@ -342,7 +403,7 @@ class _AiChatScaffoldState extends State<AiChatScaffold> {
     required bool approved,
     String? reason,
   }) {
-    widget.controller.addToolApprovalResponse(
+    _controller.addToolApprovalResponse(
       approvalId: request.approvalId,
       approved: approved,
       reason: reason,
@@ -350,6 +411,15 @@ class _AiChatScaffoldState extends State<AiChatScaffold> {
   }
 
   void _retryLastRequest() {
-    widget.controller.reload();
+    _controller.reload();
+  }
+
+  void _sendText(String text) {
+    final adapter = _conversationAdapter;
+    if (adapter != null) {
+      unawaited(adapter.sendText(text));
+      return;
+    }
+    unawaited(_controller.sendMessage(agent: widget.agent!, text: text));
   }
 }

@@ -2,6 +2,7 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
 import '../../output/output.dart';
 import '../partial_json.dart';
+import '../shared/strict_json.dart';
 
 int emitTrackedArrayElements({
   required ArrayOutput<dynamic> output,
@@ -31,15 +32,23 @@ TOutput? tryParsePartialOutput<TOutput>(Output<TOutput> output, String text) {
   }
 }
 
-TOutput parseOutput<TOutput>(Output<TOutput> output, String text) {
+TOutput parseOutput<TOutput>(
+  Output<TOutput> output,
+  String text, {
+  bool strict = false,
+}) {
   switch (output) {
     case TextOutput():
       return text as TOutput;
     case ObjectOutput<TOutput>(:final schema):
-      final jsonMap = extractJsonObject(text);
+      final jsonMap = strict
+          ? parseCompleteJsonObject(text)
+          : extractJsonObject(text);
       return schema.fromJson(jsonMap);
     case ArrayOutput(:final element):
-      final jsonValue = extractJsonValue(text);
+      final jsonValue = strict
+          ? parseCompleteJsonValue(text)
+          : extractJsonValue(text);
       if (jsonValue is! List) {
         throw AiInvalidToolInputError(
           'Model did not return a JSON array: $text',
@@ -73,7 +82,8 @@ TOutput parseOutput<TOutput>(Output<TOutput> output, String text) {
       }
       return value as TOutput;
     case JsonOutput():
-      return extractJsonValue(text) as TOutput;
+      return (strict ? parseCompleteJsonValue(text) : extractJsonValue(text))
+          as TOutput;
   }
 }
 
@@ -84,7 +94,7 @@ TOutput parseOutputWithNoObjectError<TOutput>({
   required LanguageModelV4ResponseMetadata? response,
 }) {
   try {
-    return parseOutput(output, text);
+    return parseOutput(output, text, strict: true);
   } catch (error) {
     if (output is TextOutput) {
       rethrow;

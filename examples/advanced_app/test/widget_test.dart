@@ -347,8 +347,8 @@ StreamTextResult<Object?> _completedStreamResult({
   required String finalText,
 }) {
   return StreamTextResult<Object?>(
-    stream: const Stream<LanguageModelV4StreamPart>.empty(),
-    fullStream: Stream<StreamTextEvent>.fromIterable(events),
+    stream: Stream<StreamTextEvent>.fromIterable(events),
+    providerStream: const Stream<LanguageModelV4StreamPart>.empty(),
     textStream: const Stream<String>.empty(),
     partialOutputStream: const Stream<Object?>.empty(),
     elementStream: const Stream<Object?>.empty(),
@@ -371,6 +371,9 @@ StreamTextResult<Object?> _completedStreamResult({
     totalUsage: Future<LanguageModelV4Usage?>.value(null),
     warnings: Future.value(const <LanguageModelV4Warning>[]),
     steps: Future<List<GenerateTextStep>>.value(const []),
+    finalStep: Future<GenerateTextStep>.error(
+      StateError('finalStep is not used by this widget fixture'),
+    ),
     request: Future<GenerateTextRequest>.value(
       const GenerateTextRequest(system: null, messages: []),
     ),

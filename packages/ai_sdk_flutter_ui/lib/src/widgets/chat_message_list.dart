@@ -170,6 +170,9 @@ class _ChatMessageListState extends State<ChatMessageList> {
         final streaming = widget.controller.streamingContent;
         final status = widget.controller.status;
         final hasCustomBuilder = widget.messageBuilder != null;
+        final lastMessage = messages.isEmpty ? null : messages.last;
+        final hasRenderedAssistant =
+            lastMessage?.role == ModelMessageRole.assistant;
 
         // A custom builder keeps the simple contract (a pending row only when
         // there is streaming text). The default composition also surfaces a
@@ -178,7 +181,7 @@ class _ChatMessageListState extends State<ChatMessageList> {
             ? streaming.isNotEmpty
             : streaming.isNotEmpty ||
                   status == ChatStatus.submitted ||
-                  status == ChatStatus.streaming;
+                  (status == ChatStatus.streaming && !hasRenderedAssistant);
 
         final itemCount = messages.length + (pendingActive ? 1 : 0);
 

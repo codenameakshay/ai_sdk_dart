@@ -161,6 +161,7 @@ void main() {
           toolName: 'danger',
           input: {'value': 'x'},
         );
+        const fingerprint = '{"value":"x"}';
 
         final result = await agent.resume(
           replay: ToolApprovalReplay(
@@ -175,6 +176,8 @@ void main() {
               LanguageModelV4ToolApprovalRequestPart(
                 approvalId: approvalId,
                 toolCall: toolCall,
+                policyRevision: 'default',
+                argumentsFingerprint: fingerprint,
               ),
             ],
           ),
@@ -182,6 +185,10 @@ void main() {
             LanguageModelV4ToolApprovalResponse(
               approvalId: approvalId,
               approved: true,
+              toolCallId: toolCallId,
+              toolName: 'danger',
+              argumentsFingerprint: fingerprint,
+              policyRevision: 'default',
             ),
           ],
           timeout: const TimeoutConfiguration(tool: Duration(seconds: 1)),

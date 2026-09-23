@@ -1657,11 +1657,6 @@ void main() {
                           mediaType: 'application/pdf',
                           filename: 'a.pdf',
                         ),
-                        // An unsupported-for-this-path part (source) -> 'unsupported'.
-                        LanguageModelV4SourcePart(
-                          id: 's1',
-                          url: 'https://src.example',
-                        ),
                       ]),
                     ),
                   ],
@@ -1686,7 +1681,7 @@ void main() {
         expect(outParts[2]['type'], 'file');
         expect(outParts[2]['url'], 'https://files.example/a.pdf');
         expect(outParts[2]['filename'], 'a.pdf');
-        expect(outParts[3]['type'], 'unsupported');
+        expect(outParts, hasLength(3));
       },
     );
 

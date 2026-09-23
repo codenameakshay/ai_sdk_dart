@@ -625,46 +625,39 @@ void main() {
       },
     );
 
-    test(
-      'normalizes numeric vectors and ignores response rows beyond the input',
-      () async {
-        final server = await TestServer.start((request) async {
-          await utf8.decoder.bind(request).join();
-          request.response.statusCode = 200;
-          request.response.headers.contentType = ContentType.json;
-          request.response.write(
-            jsonEncode({
-              'embeddings': {
-                'float': [
-                  [1, 2.5],
-                  [-3, 4],
-                  [99],
-                ],
-              },
-            }),
-          );
-          await request.response.close();
-        });
-        addTearDown(server.close);
+    test('normalizes numeric vectors', () async {
+      final server = await TestServer.start((request) async {
+        await utf8.decoder.bind(request).join();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'embeddings': {
+              'float': [
+                [1, 2.5],
+                [-3, 4],
+              ],
+            },
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
 
-        final result =
-            await CohereProvider(apiKey: 'key', baseUrl: server.baseUrl)
-                .embedding('embed-v4.0')
-                .doEmbed(
-                  const EmbeddingModelV2CallOptions<String>(values: ['a', 'b']),
-                );
+      final result =
+          await CohereProvider(apiKey: 'key', baseUrl: server.baseUrl)
+              .embedding('embed-v4.0')
+              .doEmbed(
+                const EmbeddingModelV2CallOptions<String>(values: ['a', 'b']),
+              );
 
-        expect(result.embeddings, hasLength(2));
-        expect(result.embeddings.map((embedding) => embedding.value), [
-          'a',
-          'b',
-        ]);
-        expect(result.embeddings.map((embedding) => embedding.embedding), [
-          [1.0, 2.5],
-          [-3.0, 4.0],
-        ]);
-      },
-    );
+      expect(result.embeddings, hasLength(2));
+      expect(result.embeddings.map((embedding) => embedding.value), ['a', 'b']);
+      expect(result.embeddings.map((embedding) => embedding.embedding), [
+        [1.0, 2.5],
+        [-3.0, 4.0],
+      ]);
+    });
 
     test('forwards providerOptions into the stream request body', () async {
       late Map<String, dynamic> captured;

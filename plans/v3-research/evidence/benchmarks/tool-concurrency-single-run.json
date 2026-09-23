@@ -1,0 +1,22 @@
+{
+  "callCount": 12,
+  "perCallDelayMilliseconds": 25,
+  "boundedConcurrency": 4,
+  "serial": {
+    "elapsedMicroseconds": 317719,
+    "peakConcurrency": 1
+  },
+  "bounded": {
+    "elapsedMicroseconds": 77580,
+    "peakConcurrency": 4
+  },
+  "wallClockSpeedup": 4.095372518690384,
+  "caveat": "Measures scheduler-controlled local I/O futures; no provider or network is used.",
+  "capturedAt": "2026-09-23T13:31:37.060767+00:00",
+  "samplesPerMode": 1,
+  "sourceSha256": {
+    "packages/ai_sdk_dart/benchmark/tool_concurrency_benchmark.dart": "dd5b7be5e93ca985cfa6948adfa647e219821983079c9898a6c8b42569d63688",
+    "packages/ai_sdk_dart/lib/src/core/shared/tool_concurrency.dart": "c56b691b0954deea32b7ea5ad0d8184c4f0819cef719d159a7d97e4157e522e0"
+  },
+  "limitations": "Single synthetic timer-controlled scheduler sample; no network, provider, warmup, tail latency or real workload throughput claim."
+}

@@ -100,11 +100,13 @@ class _ReasoningViewState extends State<ReasoningView> {
             child: _expanded
                 ? Padding(
                     padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                    child: SelectableText(
-                      widget.text,
-                      style: textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                        height: 1.5,
+                    child: SelectionArea(
+                      child: Text(
+                        widget.text,
+                        style: textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                          height: 1.5,
+                        ),
                       ),
                     ),
                   )

@@ -31,7 +31,7 @@ if [ ! -f "$PKG_CONFIG" ]; then
 fi
 
 # Pure-Dart packages (run with `dart test --coverage`).
-DART_PKGS="ai_sdk_dart ai_sdk_provider ai_sdk_openai ai_sdk_openai_compatible ai_sdk_anthropic ai_sdk_google ai_sdk_azure ai_sdk_cohere ai_sdk_groq ai_sdk_mistral ai_sdk_ollama ai_sdk_mcp"
+DART_PKGS="ai_sdk_telemetry ai_sdk_realtime ai_sdk_remote ai_sdk_conversation ai_sdk_json_schema ai_sdk_dart ai_sdk_provider ai_sdk_openai ai_sdk_openai_compatible ai_sdk_anthropic ai_sdk_google ai_sdk_azure ai_sdk_cohere ai_sdk_groq ai_sdk_mistral ai_sdk_ollama ai_sdk_mcp"
 
 # Flutter packages (run with `flutter test --coverage`, which emits lcov directly).
 FLUTTER_PKGS="ai_sdk_flutter_ui"

@@ -103,7 +103,7 @@ void main() {
       },
     );
 
-    test('handles a missing embeddings field as an empty result', () async {
+    test('rejects a missing embeddings field', () async {
       final server = await TestServer.start((request) async {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
@@ -117,11 +117,12 @@ void main() {
         baseUrl: server.baseUrl,
       ).embedding('embed-english-v4.0');
 
-      final result = await model.doEmbed(
-        const EmbeddingModelV2CallOptions<String>(values: ['only']),
+      await expectLater(
+        model.doEmbed(
+          const EmbeddingModelV2CallOptions<String>(values: ['only']),
+        ),
+        throwsA(isA<AiApiCallError>()),
       );
-
-      expect(result.embeddings, isEmpty);
     });
   });
 

@@ -5,6 +5,8 @@ import 'package:ai_sdk_dart/test.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
 
+import 'helpers/fake_models.dart';
+
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
@@ -17,6 +19,13 @@ class _SpanRecord {
   bool ended = false;
 
   _SpanRecord(this.name, this.startAttributes);
+}
+
+class _MetricSink implements TelemetryMetricSink {
+  final metrics = <TelemetryMetric>[];
+
+  @override
+  void record(TelemetryMetric metric) => metrics.add(metric);
 }
 
 class _TestSpan implements TelemetrySpan {
@@ -167,7 +176,11 @@ void main() {
       await generateText(
         model: model,
         prompt: 'Hi',
-        telemetry: TelemetrySettings(isEnabled: true, recorder: recorder),
+        telemetry: TelemetrySettings(
+          isEnabled: true,
+          recorder: recorder,
+          captureInputs: true,
+        ),
       );
 
       final attrs = recorder.spans.first.startAttributes;
@@ -248,6 +261,120 @@ void main() {
       );
     });
   });
+
+  test('metric sink receives content-free operation measurements', () async {
+    final sink = _MetricSink();
+    final result = await generateText(
+      model: MockLanguageModelV4(response: [mockText('Done')]),
+      prompt: 'Hi',
+      telemetry: TelemetrySettings(isEnabled: true, metricSink: sink),
+    );
+    expect(result.text, 'Done');
+    final names = sink.metrics.map((metric) => metric.name).toSet();
+    expect(names, contains(AiTelemetryMetrics.totalMs));
+    expect(names, contains(AiTelemetryMetrics.stepCount));
+    expect(names, contains(AiTelemetryMetrics.toolCount));
+    expect(names, contains(AiTelemetryMetrics.usageKnown));
+    expect(
+      sink.metrics.every(
+        (metric) => metric.attributes['ai.metric.name'] == metric.name,
+      ),
+      isTrue,
+    );
+  });
+
+  test('metric sink is silent when telemetry is disabled', () async {
+    final sink = _MetricSink();
+    final result = await generateText(
+      model: MockLanguageModelV4(response: [mockText('Done')]),
+      telemetry: TelemetrySettings(metricSink: sink),
+    );
+    expect(result.text, 'Done');
+    expect(sink.metrics, isEmpty);
+  });
+
+  test(
+    'metrics carry actual model and operation attributes and one outcome',
+    () async {
+      final sink = _MetricSink();
+      await generateText(
+        model: MockLanguageModelV4(response: [mockText('Done')]),
+        prompt: 'Hi',
+        telemetry: TelemetrySettings(isEnabled: true, metricSink: sink),
+      );
+      final outcome = sink.metrics
+          .where((metric) => metric.name == AiTelemetryMetrics.success)
+          .toList();
+      expect(outcome, hasLength(1));
+      expect(outcome.single.attributes[AiTelemetryKeys.modelProvider], 'mock');
+      expect(
+        outcome.single.attributes[AiTelemetryKeys.modelId],
+        'mock-language-model',
+      );
+      expect(
+        outcome.single.attributes[AiTelemetryKeys.operation],
+        'generateText',
+      );
+    },
+  );
+
+  test(
+    'first meaningful stream metric ignores structural and empty events',
+    () async {
+      final sink = _MetricSink();
+      final model = FakeStreamModel([
+        const StreamPartStreamStart(),
+        const StreamPartTextStart(id: 'text'),
+        const StreamPartTextDelta(id: 'text', delta: ''),
+        const StreamPartTextDelta(id: 'text', delta: 'hello'),
+        const StreamPartTextEnd(id: 'text'),
+        const StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
+      ]);
+      final result = await streamText(
+        model: model,
+        telemetry: TelemetrySettings(isEnabled: true, metricSink: sink),
+      );
+      await result.stream.toList();
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        sink.metrics.where(
+          (m) => m.name == AiTelemetryMetrics.firstMeaningfulMs,
+        ),
+        hasLength(1),
+      );
+      expect(
+        sink.metrics.where((m) => m.name == AiTelemetryMetrics.success),
+        hasLength(1),
+      );
+    },
+  );
+
+  test(
+    'streamObject emits one success metric with operation attributes',
+    () async {
+      final sink = _MetricSink();
+      final schema = Schema<Map<String, dynamic>>(
+        jsonSchema: const {'type': 'object'},
+        fromJson: (json) => json,
+      );
+      final result = await streamObject(
+        model: textDeltaStream(['{"ok":true}']),
+        schema: schema,
+        telemetry: TelemetrySettings(isEnabled: true, metricSink: sink),
+      );
+      await result.object;
+      expect(
+        sink.metrics.where((m) => m.name == AiTelemetryMetrics.success),
+        hasLength(1),
+      );
+      expect(
+        sink.metrics
+            .firstWhere((m) => m.name == AiTelemetryMetrics.success)
+            .attributes[AiTelemetryKeys.operation],
+        'streamObject',
+      );
+    },
+  );
 
   group('streamText telemetry integration', () {
     test('records span when telemetry is enabled', () async {

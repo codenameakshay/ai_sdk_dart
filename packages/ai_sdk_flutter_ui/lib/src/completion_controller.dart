@@ -111,7 +111,7 @@ class CompletionController extends StreamingControllerBase {
 
       // Streaming errors surface on the full event stream (not the text
       // stream), so watch both: text for content, fullStream for errors.
-      _errorSubscription = streamResult.fullStream.listen((event) {
+      _errorSubscription = streamResult.stream.listen((event) {
         if (!isCurrentRequest(requestId)) return;
         if (event is StreamTextErrorEvent) _handleError(event.error, requestId);
       }, onError: (Object err) => _handleError(err, requestId));

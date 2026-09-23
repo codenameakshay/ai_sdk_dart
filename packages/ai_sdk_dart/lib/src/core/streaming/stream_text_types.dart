@@ -8,6 +8,8 @@ typedef StreamTextOnChunk = void Function(StreamTextChunk chunk);
 typedef StreamTextOnError = void Function(Object error);
 typedef StreamTextOnFinish<TOutput> =
     void Function(StreamTextFinishEvent<TOutput> event);
+typedef StreamTextOnEnd<TOutput> = StreamTextOnFinish<TOutput>;
+typedef StreamTextOnStepEnd = GenerateTextOnStepFinish;
 typedef StreamTextOnAbort = void Function();
 typedef StreamTextOnInputStart =
     void Function(StreamTextToolInputStartEvent event);
@@ -80,10 +82,22 @@ class StreamTextSourceChunk extends StreamTextChunk {
   final LanguageModelV4SourcePart source;
 }
 
+class StreamTextDocumentSourceChunk extends StreamTextChunk {
+  const StreamTextDocumentSourceChunk({required this.source});
+
+  final LanguageModelV4DocumentSourcePart source;
+}
+
 class StreamTextFileChunk extends StreamTextChunk {
   const StreamTextFileChunk({required this.file});
 
   final LanguageModelV4FilePart file;
+}
+
+class StreamTextReasoningFileChunk extends StreamTextChunk {
+  const StreamTextReasoningFileChunk({required this.file});
+
+  final LanguageModelV4ReasoningFilePart file;
 }
 
 class StreamTextToolInputStartChunk extends StreamTextChunk {
@@ -150,22 +164,37 @@ class StreamTextTextEndEvent extends StreamTextEvent {
 }
 
 class StreamTextReasoningStartEvent extends StreamTextEvent {
-  const StreamTextReasoningStartEvent({required this.id});
+  const StreamTextReasoningStartEvent({
+    required this.id,
+    this.providerMetadata,
+  });
 
   final String id;
+  final ProviderMetadata? providerMetadata;
 }
 
 class StreamTextReasoningDeltaEvent extends StreamTextEvent {
-  const StreamTextReasoningDeltaEvent({required this.id, required this.delta});
+  const StreamTextReasoningDeltaEvent({
+    required this.id,
+    required this.delta,
+    this.providerMetadata,
+  });
 
   final String id;
   final String delta;
+  final ProviderMetadata? providerMetadata;
 }
 
 class StreamTextReasoningEndEvent extends StreamTextEvent {
-  const StreamTextReasoningEndEvent({required this.id});
+  const StreamTextReasoningEndEvent({
+    required this.id,
+    this.providerMetadata,
+    this.signature,
+  });
 
   final String id;
+  final ProviderMetadata? providerMetadata;
+  final String? signature;
 }
 
 class StreamTextSourceEvent extends StreamTextEvent {
@@ -174,10 +203,28 @@ class StreamTextSourceEvent extends StreamTextEvent {
   final LanguageModelV4SourcePart source;
 }
 
+class StreamTextDocumentSourceEvent extends StreamTextEvent {
+  const StreamTextDocumentSourceEvent({required this.source});
+
+  final LanguageModelV4DocumentSourcePart source;
+}
+
 class StreamTextFileEvent extends StreamTextEvent {
   const StreamTextFileEvent({required this.file});
 
   final LanguageModelV4FilePart file;
+}
+
+class StreamTextReasoningFileEvent extends StreamTextEvent {
+  const StreamTextReasoningFileEvent({required this.file});
+
+  final LanguageModelV4ReasoningFilePart file;
+}
+
+class StreamTextOpaqueEvent extends StreamTextEvent {
+  const StreamTextOpaqueEvent({required this.opaque});
+
+  final LanguageModelV4OpaquePart opaque;
 }
 
 class StreamTextToolInputStartEvent extends StreamTextEvent {
@@ -273,10 +320,13 @@ class StreamTextFinishEvent<TOutput> extends StreamTextEvent {
     required this.reasoning,
     required this.reasoningText,
     required this.sources,
+    required this.documentSources,
     required this.files,
+    required this.reasoningFiles,
     required this.responseMessages,
     required this.request,
     required this.response,
+    required this.finalStep,
     this.rawFinishReason,
     this.usage,
     this.totalUsage,
@@ -295,17 +345,20 @@ class StreamTextFinishEvent<TOutput> extends StreamTextEvent {
   final List<LanguageModelV4ReasoningPart> reasoning;
   final String reasoningText;
   final List<LanguageModelV4SourcePart> sources;
+  final List<LanguageModelV4DocumentSourcePart> documentSources;
   final List<LanguageModelV4FilePart> files;
+  final List<LanguageModelV4ReasoningFilePart> reasoningFiles;
   final List<LanguageModelV4Message> responseMessages;
   final GenerateTextRequest request;
   final GenerateTextResponse response;
+  final GenerateTextStep finalStep;
   final List<LanguageModelV4Warning> warnings;
 }
 
 class StreamTextResult<TOutput> {
   const StreamTextResult({
     required this.stream,
-    required this.fullStream,
+    required this.providerStream,
     required this.textStream,
     required this.partialOutputStream,
     required this.elementStream,
@@ -315,7 +368,9 @@ class StreamTextResult<TOutput> {
     required this.reasoning,
     required this.reasoningText,
     required this.files,
+    required this.reasoningFiles,
     required this.sources,
+    required this.documentSources,
     required this.toolCalls,
     required this.toolResults,
     required this.finishReason,
@@ -328,10 +383,22 @@ class StreamTextResult<TOutput> {
     required this.response,
     required this.providerMetadata,
     required this.finish,
+    required this.finalStep,
   });
 
-  final Stream<LanguageModelV4StreamPart> stream;
-  final Stream<StreamTextEvent> fullStream;
+  /// Exhaustive high-level lifecycle events for this generation.
+  final Stream<StreamTextEvent> stream;
+
+  /// Provider-native stream parts, exposed for adapters and diagnostics.
+  final Stream<LanguageModelV4StreamPart> providerStream;
+
+  /// Deprecated migration alias for [stream].
+  ///
+  /// This getter intentionally returns the canonical stream instance. It is
+  /// kept as a source migration aid and does not create a second broadcast
+  /// subscription or event producer.
+  @Deprecated('Use stream instead.')
+  Stream<StreamTextEvent> get fullStream => stream;
   final Stream<String> textStream;
   final Stream<Object?> partialOutputStream;
   final Stream<Object?> elementStream;
@@ -341,7 +408,9 @@ class StreamTextResult<TOutput> {
   final Future<List<LanguageModelV4ReasoningPart>> reasoning;
   final Future<String> reasoningText;
   final Future<List<LanguageModelV4FilePart>> files;
+  final Future<List<LanguageModelV4ReasoningFilePart>> reasoningFiles;
   final Future<List<LanguageModelV4SourcePart>> sources;
+  final Future<List<LanguageModelV4DocumentSourcePart>> documentSources;
   final Future<List<LanguageModelV4ToolCallPart>> toolCalls;
   final Future<List<LanguageModelV4ToolResultPart>> toolResults;
   final Future<LanguageModelV4FinishReason?> finishReason;
@@ -354,4 +423,5 @@ class StreamTextResult<TOutput> {
   final Future<GenerateTextResponse> response;
   final Future<ProviderMetadata?> providerMetadata;
   final Future<StreamPartFinish?> finish;
+  final Future<GenerateTextStep> finalStep;
 }

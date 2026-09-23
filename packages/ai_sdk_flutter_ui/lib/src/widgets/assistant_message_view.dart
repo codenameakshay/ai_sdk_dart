@@ -30,6 +30,7 @@ typedef ToolApprovalCallback =
 /// - tool-approval request → [ToolApprovalCard] (when approval callbacks are set)
 /// - image → [MessageImage]
 /// - file → [MessageAttachment]
+/// - reasoning file → [MessageReasoningFileAttachment]
 /// - source → collected into a single trailing [SourceCitations]
 ///
 /// When the message has no `parts` (plain text path), its `content` is rendered
@@ -106,6 +107,11 @@ class AssistantMessageView extends StatelessWidget {
                 remoteImageProviderBuilder: remoteImageProviderBuilder,
               ),
             );
+          case LanguageModelV4ReasoningFilePart():
+            // Reasoning files have a distinct provider contract from user
+            // attachments. Keep that distinction in the UI instead of
+            // adapting the part to LanguageModelV4FilePart.
+            children.add(MessageReasoningFileAttachment(file: part));
           case LanguageModelV4FilePart():
             children.add(
               MessageAttachment(
@@ -115,9 +121,12 @@ class AssistantMessageView extends StatelessWidget {
             );
           case LanguageModelV4SourcePart():
             sources.add(part);
+          case LanguageModelV4DocumentSourcePart():
+            children.add(_documentSource(part));
           case LanguageModelV4RedactedReasoningPart():
           case LanguageModelV4ToolResultPart():
           case LanguageModelV4ToolApprovalResponse():
+          case LanguageModelV4OpaquePart():
             break; // not rendered inline
         }
       }
@@ -146,7 +155,18 @@ class AssistantMessageView extends StatelessWidget {
     // Bubbleless assistant prose reads as the body of the turn; give it a
     // comfortable reading line-height.
     final style = Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.5);
-    return SelectableText(text, style: style);
+    // Flutter web exposes SelectableText as a disabled textbox and can throw
+    // while that editing semantics node is reconfigured during a state change.
+    // SelectionArea keeps prose selectable without creating that textbox;
+    // expose the answer as one read-only text node for screen readers and
+    // browser automation.
+    return Semantics(
+      container: true,
+      excludeSemantics: true,
+      label: text,
+      readOnly: true,
+      child: SelectionArea(child: Text(text, style: style)),
+    );
   }
 
   Widget _approval(LanguageModelV4ToolApprovalRequestPart part) {
@@ -157,6 +177,23 @@ class AssistantMessageView extends StatelessWidget {
       request: part,
       onApprove: (reason) => onToolApprove?.call(part, reason),
       onDeny: (reason) => onToolDeny?.call(part, reason),
+    );
+  }
+
+  Widget _documentSource(LanguageModelV4DocumentSourcePart source) {
+    final mediaType = source.mediaType;
+    final detail = mediaType.isEmpty ? null : mediaType;
+    return Semantics(
+      container: true,
+      label: 'Document source: ${source.title}',
+      value: detail,
+      child: Tooltip(
+        message: detail == null ? source.title : '$detail document',
+        child: Chip(
+          avatar: const Icon(Icons.description_outlined, size: 16),
+          label: Text(source.title),
+        ),
+      ),
     );
   }
 

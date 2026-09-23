@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:collection';
 
 enum PartialJsonParsePhase {
   streamTextPartial,
@@ -13,6 +14,8 @@ class PartialJsonDebugCounters {
   int decodeAttempts = 0;
   int snapshotCount = 0;
   int snapshotElementsCopied = 0;
+  int snapshotStructuralNodes = 0;
+  int snapshotStructuralReferences = 0;
 
   final Map<PartialJsonParsePhase, int> _parseAttemptsByPhase = {};
   final Map<PartialJsonParseTrigger, int> _parseAttemptsByTrigger = {};
@@ -41,6 +44,16 @@ class PartialJsonDebugCounters {
   void recordSnapshotCopy(int elementCount) {
     snapshotCount++;
     snapshotElementsCopied += elementCount;
+  }
+
+  void recordStructuralNode() => snapshotStructuralNodes++;
+
+  void recordStructuralReferences(int count) =>
+      snapshotStructuralReferences += count;
+
+  void recordStructuralSnapshot(int references) {
+    snapshotCount++;
+    recordStructuralReferences(references);
   }
 
   int parseAttemptsFor(PartialJsonParsePhase phase) {
@@ -375,6 +388,117 @@ String partialJsonFingerprint(Object? value) {
 List<T> createTrackedImmutableSnapshot<T>(List<T> values) {
   partialJsonDebugCounters?.recordSnapshotCopy(values.length);
   return List<T>.unmodifiable(values);
+}
+
+/// An append-only immutable array snapshot builder.
+///
+/// Each append creates a persistent balanced forest. Existing snapshots retain
+/// their exact contents and share tree nodes with later snapshots; no mutable
+/// list is exposed. Indexing is logarithmic in the number of appended values.
+class ImmutableArraySnapshotBuilder<T> {
+  final List<_PersistentArrayNode<T>?> _forest = [];
+  var _length = 0;
+
+  int get length => _length;
+
+  void add(T value) {
+    var node = _PersistentArrayNode<T>.leaf(value);
+    partialJsonDebugCounters?.recordStructuralNode();
+    var rank = 0;
+    while (rank < _forest.length && _forest[rank] != null) {
+      node = _PersistentArrayNode<T>.branch(_forest[rank]!, node);
+      partialJsonDebugCounters?.recordStructuralNode();
+      _forest[rank] = null;
+      rank++;
+    }
+    if (rank == _forest.length) {
+      _forest.add(node);
+    } else {
+      _forest[rank] = node;
+    }
+    _length++;
+  }
+
+  void addAll(Iterable<T> values) {
+    for (final value in values) {
+      add(value);
+    }
+  }
+
+  List<T> snapshot() {
+    partialJsonDebugCounters?.recordStructuralSnapshot(
+      _forest.whereType<_PersistentArrayNode<T>>().length,
+    );
+    return _PersistentArraySnapshot<T>._(
+      _forest.whereType<_PersistentArrayNode<T>>().toList(growable: false),
+      _length,
+    );
+  }
+}
+
+class _PersistentArrayNode<T> {
+  _PersistentArrayNode.leaf(this.value) : left = null, right = null, size = 1;
+
+  _PersistentArrayNode.branch(this.left, this.right)
+    : value = null,
+      size = left!.size + right!.size;
+
+  final T? value;
+  final _PersistentArrayNode<T>? left;
+  final _PersistentArrayNode<T>? right;
+  final int size;
+}
+
+class _PersistentArraySnapshot<T> extends ListBase<T> {
+  _PersistentArraySnapshot._(this._forest, this._length);
+
+  final List<_PersistentArrayNode<T>> _forest;
+  final int _length;
+
+  @override
+  int get length => _length;
+
+  @override
+  set length(int value) => throw UnsupportedError('Immutable snapshot');
+
+  @override
+  T operator [](int index) {
+    if (index < 0 || index >= _length) throw RangeError.index(index, this);
+    var offset = index;
+    for (final root in _forest.reversed) {
+      if (offset < root.size) return _at(root, offset);
+      offset -= root.size;
+    }
+    throw StateError('Snapshot index out of bounds');
+  }
+
+  @override
+  void operator []=(int index, T value) =>
+      throw UnsupportedError('Immutable snapshot');
+
+  @override
+  Iterator<T> get iterator => _iterable().iterator;
+
+  Iterable<T> _iterable() sync* {
+    for (final root in _forest.reversed) {
+      yield* _values(root);
+    }
+  }
+
+  static Iterable<T> _values<T>(_PersistentArrayNode<T> node) sync* {
+    if (node.left == null) {
+      yield node.value as T;
+      return;
+    }
+    yield* _values(node.left!);
+    yield* _values(node.right!);
+  }
+
+  static T _at<T>(_PersistentArrayNode<T> node, int index) {
+    if (node.left == null) return node.value as T;
+    if (index < node.left!.size) return _at(node.left!, index);
+    return _at(node.right!, index - node.left!.size);
+  }
 }
 
 Object? _tryParsePartialJsonValue(String text, {String? fallbackCandidate}) {

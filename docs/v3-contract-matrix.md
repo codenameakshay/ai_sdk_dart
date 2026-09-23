@@ -20,7 +20,7 @@ Compared with `packages/provider/src/language-model/v4/language-model-v4-call-op
 | seed | seed | Present; not a universal determinism guarantee |
 | tools | Function/provider-defined subclasses | Present; hosted lifecycle semantics incomplete |
 | toolChoice | `LanguageModelV4ToolChoice` | Present |
-| includeRawChunks | includeRawChunks | Present at provider seam; high-level inclusion policy still pending |
+| includeRawChunks | includeRawChunks | Present at provider seam; high-level `BodyInclusionPolicy` gates raw events, default off |
 | abortSignal | shared `AbortSignal` | Dart adaptation: token interface; no DOM dependency |
 | headers | `Map<String, String>?` | Dart adaptation: omit keys instead of JS undefined values |
 | reasoning | `LanguageModelV4Reasoning` enum | providerDefault/none/minimal/low/medium/high/xhigh; enum existence does not prove every adapter honors it |
@@ -39,12 +39,12 @@ Compared with `packages/provider/src/language-model/v4/language-model-v4-call-op
 | Generated file | `LanguageModelV4FilePart` | Preserve generated media and provider references; distinguish reference from arbitrary URL |
 | Tool call | Parsed `input`, call ID/name | Dart adaptation from wire JSON; hosted/executed identity incomplete |
 | Tool result | Text or content output | Audit upstream structured/error/preliminary/denied output variants |
-| Approval request | Approval ID plus complete call | Request policy and exact-call/policy binding still pending |
+| Approval request | Approval ID plus complete call | Exact call ID/name/input fingerprint/policy binding and replay prevalidation implemented; local persistence tests pass |
 | Source | URL/id/title/metadata | Document source variants and hosted citations not yet complete |
 | Redacted reasoning | Explicit Dart byte-content part | Deliberate adaptation; lossless provider replay needs fixtures |
-| Response metadata | ID/model/timestamp/headers/body | Present; high-level body minimization still pending |
+| Response metadata | ID/model/timestamp/headers/body | Present; high-level body inclusion defaults off, preserving IDs/headers/timing; provider-direct results remain explicit low-level access |
 | Finish | Enum plus separate raw string and nested usage | Dart representation differs from upstream unified/raw finish object |
-| Stream error/raw/start | Typed provider stream variants | Core must settle every surface on error and honor raw opt-in |
+| Stream error/raw/start | Typed provider stream variants | Canonical high-level `stream`, raw `providerStream`, deprecated `fullStream` getter alias; focused settlement/privacy tests pass, full adapter qualification remains |
 
 A `LanguageModelV4` suffix is not a promise of structural TypeScript interoperability. Dart tests must establish each mapped behavior. Unknown future models remain constructible even when their specific capabilities are not yet qualified.
 
@@ -68,3 +68,5 @@ A `LanguageModelV4` suffix is not a promise of structural TypeScript interoperab
 - Final-step and aggregate views agree across streaming and non-streaming generation.
 - Per-provider capability tables distinguish implemented, fixture-tested, live-tested and unsupported behavior.
 - Update this matrix as missing variants land; do not change a gap to complete based solely on an API declaration.
+
+Parent verification checkpoint (2026-09-23): core suite 720 passed after canonical stream alias and body/metric changes. Flutter approval/persistence and duplicate/Bloc race suites 12 passed. These results support the updated rows only; unresolved content variants, hosted tools, provider lifecycle and live qualification above remain open.

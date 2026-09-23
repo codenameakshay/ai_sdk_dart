@@ -3,7 +3,8 @@ import 'dart:typed_data';
 
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
-import 'timeout_helpers.dart';
+import '../tools/tool.dart';
+import 'shared/operation_scope.dart';
 
 /// Result returned by [generateImage].
 ///
@@ -44,19 +45,24 @@ Future<GenerateImageResult> generateImage({
   Map<String, String>? headers,
   ProviderOptions? providerOptions,
   Duration? timeout,
+  CancellationToken? abortSignal,
 }) async {
-  final call = model.doGenerate(
-    ImageModelV3CallOptions(
-      prompt: prompt,
-      n: n,
-      size: size,
-      aspectRatio: aspectRatio,
-      seed: seed,
-      headers: headers,
-      providerOptions: providerOptions,
+  final result = await runOperation(
+    abortSignal: abortSignal,
+    timeout: timeout,
+    operation: (signal) => model.doGenerate(
+      ImageModelV3CallOptions(
+        prompt: prompt,
+        n: n,
+        size: size,
+        aspectRatio: aspectRatio,
+        seed: seed,
+        headers: headers,
+        providerOptions: providerOptions,
+        abortSignal: signal,
+      ),
     ),
   );
-  final result = await withOptionalTimeout(call, timeout);
 
   if (result.images.isEmpty) {
     throw const AiNoImageGeneratedError(message: 'No image was generated.');

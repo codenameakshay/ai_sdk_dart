@@ -31,13 +31,13 @@ DART_APP     := examples/basic
 
 # Pure-Dart packages (test/analyze order). Publish order is separate below
 # since publish order matters (dependencies before dependents).
-DART_PKGS    := ai_sdk_dart ai_sdk_provider ai_sdk_openai_compatible ai_sdk_openai \
+DART_PKGS    := ai_sdk_telemetry ai_sdk_remote ai_sdk_realtime ai_sdk_conversation ai_sdk_json_schema ai_sdk_dart ai_sdk_provider ai_sdk_openai_compatible ai_sdk_openai \
                 ai_sdk_anthropic ai_sdk_google ai_sdk_azure ai_sdk_cohere ai_sdk_groq \
                 ai_sdk_mistral ai_sdk_ollama ai_sdk_mcp
 FLUTTER_PKGS := ai_sdk_flutter_ui
 PUBLISH_PKGS := ai_sdk_provider ai_sdk_openai_compatible ai_sdk_openai ai_sdk_anthropic \
                 ai_sdk_google ai_sdk_azure ai_sdk_cohere ai_sdk_groq ai_sdk_mistral \
-                ai_sdk_ollama ai_sdk_dart ai_sdk_mcp
+                ai_sdk_ollama ai_sdk_dart ai_sdk_json_schema ai_sdk_conversation ai_sdk_remote ai_sdk_mcp ai_sdk_telemetry
 
 # Build --dart-define flags from env vars (only included when the var is set)
 DART_DEFINES :=
@@ -67,7 +67,7 @@ endif
 
 .PHONY: all get run run-web run-advanced run-advanced-web run-basic run-mcp \
         test analyze format format-check dry-run publish help \
-        coverage coverage-check benchmark
+        coverage coverage-check benchmark catalog-check test-mcp-reference
 
 all: help
 
@@ -114,6 +114,7 @@ run-mcp:
 
 ## Run tests across all packages
 test:
+	$(DART) test tool/provider_capability_catalog_test.dart
 	$(foreach p,$(DART_PKGS),$(DART) test packages/$(p)/test/ &&) true
 	$(foreach p,$(FLUTTER_PKGS),$(FLUTTER) test packages/$(p)/ &&) true
 	$(FLUTTER) test $(FLUTTER_APP)/
@@ -121,6 +122,7 @@ test:
 
 ## Run dart analyze across all packages
 analyze:
+	$(DART) analyze tool/provider_capability_catalog.dart tool/provider_capability_catalog_test.dart
 	$(DART) analyze $(DART_APP)/
 	$(foreach p,$(DART_PKGS),$(DART) analyze packages/$(p)/ &&) true
 	$(foreach p,$(FLUTTER_PKGS),$(FLUTTER) analyze packages/$(p)/ &&) true
@@ -130,6 +132,15 @@ analyze:
 ## Run the structured-stream benchmark and print JSON results
 benchmark:
 	$(DART) run packages/ai_sdk_dart/benchmark/structured_stream_benchmark.dart --json
+
+## Validate the advisory model catalog and generated documentation offline
+catalog-check:
+	$(DART) run tool/provider_capability_catalog.dart check docs/provider-capability-catalog.json
+
+## Verify legacy MCP interoperability against the pinned TypeScript SDK
+test-mcp-reference:
+	npm ci --ignore-scripts --prefix examples/mcp_reference/js
+	AI_SDK_MCP_REFERENCE=1 $(DART) test packages/ai_sdk_mcp/test/typescript_reference_test.dart
 
 ## Run tests with coverage across all packages and print a summary
 coverage:

@@ -5,9 +5,17 @@ publish_to: none
 environment:
   sdk: ^3.11.1
 
+dev_dependencies:
+  test: ^1.31.0
+
 workspace:
   - packages/ai_sdk_provider
   - packages/ai_sdk_dart
+  - packages/ai_sdk_json_schema
+  - packages/ai_sdk_conversation
+  - packages/ai_sdk_remote
+  - packages/ai_sdk_realtime
+  - packages/ai_sdk_telemetry
   - packages/ai_sdk_openai_compatible
   - packages/ai_sdk_openai
   - packages/ai_sdk_anthropic

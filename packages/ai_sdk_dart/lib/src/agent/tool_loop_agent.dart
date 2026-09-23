@@ -1,10 +1,13 @@
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
 import '../core/generate_text.dart';
+import '../core/body_inclusion.dart';
 import '../core/stream_text.dart';
 import '../core/streaming/tool_execution.dart';
 import '../core/timeout_configuration.dart';
 import '../core/shared/common_helpers.dart';
+import '../core/shared/operation_scope.dart';
+import '../core/timeout_helpers.dart';
 import '../messages/model_message.dart';
 import '../stop_conditions/stop_conditions.dart';
 import '../tools/tool.dart';
@@ -18,6 +21,17 @@ class ToolApprovalReplay {
   const ToolApprovalReplay({required this.messages, required this.requests});
 
   final List<ModelMessage> messages;
+  final List<LanguageModelV4ToolApprovalRequestPart> requests;
+}
+
+/// Signals that a replayed approval no longer authorizes its exact call.
+///
+/// Callers should present [requests] as a fresh pending approval and collect a
+/// new bound response. No tool or provider call is made before this error.
+class ToolApprovalRenewalRequiredError extends ArgumentError {
+  ToolApprovalRenewalRequiredError({required this.requests})
+    : super('Tool approval binding changed; renewal is required.');
+
   final List<LanguageModelV4ToolApprovalRequestPart> requests;
 }
 
@@ -41,14 +55,34 @@ class ToolLoopAgent {
     this.instructions,
     this.tools = const {},
     this.maxSteps = 1,
+    this.maxToolConcurrency = 1,
     this.stopConditions = const [],
-  });
+    this.approvalPolicy,
+    this.approvalPolicyFor,
+    this.approvalPolicyRevision = 'default',
+    this.generationContext,
+  }) {
+    if (maxToolConcurrency < 1) {
+      throw ArgumentError.value(
+        maxToolConcurrency,
+        'maxToolConcurrency',
+        'must be positive',
+      );
+    }
+  }
 
   final LanguageModelV4 model;
   final String? instructions;
   final ToolSet tools;
   final int maxSteps;
+
+  /// Maximum number of tool calls admitted concurrently for each step.
+  final int maxToolConcurrency;
   final List<StopCondition> stopConditions;
+  final ToolApprovalPolicy? approvalPolicy;
+  final ToolApprovalPolicySelector? approvalPolicyFor;
+  final String approvalPolicyRevision;
+  final Object? generationContext;
 
   /// Runs the agent in non-streaming mode.
   Future<GenerateTextResult> generate({
@@ -56,17 +90,47 @@ class ToolLoopAgent {
     List<ModelMessage>? messages,
     CancellationToken? abortSignal,
     TimeoutConfiguration? timeout,
+    bool allowSystemInMessages = false,
+    GenerateTextExperimentalOnStart? onStart,
+    GenerateTextExperimentalOnStepStart? onStepStart,
+    GenerateTextExperimentalOnToolCallStart? onToolExecutionStart,
+    GenerateTextExperimentalOnToolCallFinish? onToolExecutionEnd,
+    GenerateTextOnEnd? onEnd,
+    GenerateTextOnStepEnd? onStepEnd,
+    GenerateTextPrepareStep? prepareStep,
+    List<LanguageModelV4ToolApprovalResponse> toolApprovalResponses = const [],
+    ToolApprovalPolicy? approvalPolicy,
+    ToolApprovalPolicySelector? approvalPolicyFor,
+    String? approvalPolicyRevision,
+    Object? generationContext,
+    BodyInclusionPolicy bodyInclusion = const BodyInclusionPolicy.none(),
   }) {
     return generateText(
       model: model,
-      system: instructions,
+      instructions: instructions,
       prompt: prompt,
       messages: messages,
       tools: tools,
       maxSteps: maxSteps,
+      maxToolConcurrency: maxToolConcurrency,
       stopConditions: stopConditions,
       abortSignal: abortSignal,
       timeout: timeout,
+      allowSystemInMessages: allowSystemInMessages,
+      onStart: onStart,
+      onStepStart: onStepStart,
+      onToolExecutionStart: onToolExecutionStart,
+      onToolExecutionEnd: onToolExecutionEnd,
+      onEnd: onEnd,
+      onStepEnd: onStepEnd,
+      prepareStep: prepareStep,
+      toolApprovalResponses: toolApprovalResponses,
+      approvalPolicy: approvalPolicy ?? this.approvalPolicy,
+      approvalPolicyFor: approvalPolicyFor ?? this.approvalPolicyFor,
+      approvalPolicyRevision:
+          approvalPolicyRevision ?? this.approvalPolicyRevision,
+      generationContext: generationContext ?? this.generationContext,
+      bodyInclusion: bodyInclusion,
     );
   }
 
@@ -78,20 +142,50 @@ class ToolLoopAgent {
     String? prompt,
     List<ModelMessage>? messages,
     List<LanguageModelV4ToolApprovalResponse> toolApprovalResponses = const [],
+    ToolApprovalPolicy? approvalPolicy,
+    ToolApprovalPolicySelector? approvalPolicyFor,
+    String? approvalPolicyRevision,
+    Object? generationContext,
     CancellationToken? abortSignal,
     TimeoutConfiguration? timeout,
+    bool allowSystemInMessages = false,
+    GenerateTextExperimentalOnStart? onStart,
+    GenerateTextExperimentalOnStepStart? onStepStart,
+    GenerateTextExperimentalOnToolCallStart? onToolExecutionStart,
+    GenerateTextExperimentalOnToolCallFinish? onToolExecutionEnd,
+    StreamTextOnEnd? onEnd,
+    StreamTextOnStepEnd? onStepEnd,
+    GenerateTextPrepareStep? prepareStep,
+    StreamTextOnChunk? onChunk,
+    BodyInclusionPolicy bodyInclusion = const BodyInclusionPolicy.none(),
   }) {
     return streamText(
       model: model,
-      system: instructions,
+      instructions: instructions,
       prompt: prompt,
       messages: messages,
       tools: tools,
       maxSteps: maxSteps,
+      maxToolConcurrency: maxToolConcurrency,
       stopConditions: stopConditions,
       toolApprovalResponses: toolApprovalResponses,
+      approvalPolicy: approvalPolicy ?? this.approvalPolicy,
+      approvalPolicyFor: approvalPolicyFor ?? this.approvalPolicyFor,
+      approvalPolicyRevision:
+          approvalPolicyRevision ?? this.approvalPolicyRevision,
+      generationContext: generationContext ?? this.generationContext,
       abortSignal: abortSignal,
       timeout: timeout,
+      allowSystemInMessages: allowSystemInMessages,
+      onStart: onStart,
+      onStepStart: onStepStart,
+      onToolExecutionStart: onToolExecutionStart,
+      onToolExecutionEnd: onToolExecutionEnd,
+      onEnd: onEnd,
+      onStepEnd: onStepEnd,
+      prepareStep: prepareStep,
+      onChunk: onChunk,
+      bodyInclusion: bodyInclusion,
     );
   }
 
@@ -105,14 +199,27 @@ class ToolLoopAgent {
     required ToolApprovalReplay replay,
     List<ModelMessage>? messages,
     List<LanguageModelV4ToolApprovalResponse> toolApprovalResponses = const [],
+    ToolApprovalPolicy? approvalPolicy,
+    ToolApprovalPolicySelector? approvalPolicyFor,
+    String? approvalPolicyRevision,
+    Object? generationContext,
     CancellationToken? abortSignal,
     TimeoutConfiguration? timeout,
+    bool allowSystemInMessages = false,
+    GenerateTextExperimentalOnStart? onStart,
+    GenerateTextExperimentalOnStepStart? onStepStart,
+    GenerateTextExperimentalOnToolCallStart? onToolExecutionStart,
+    GenerateTextExperimentalOnToolCallFinish? onToolExecutionEnd,
+    StreamTextOnEnd? onEnd,
+    StreamTextOnStepEnd? onStepEnd,
+    GenerateTextPrepareStep? prepareStep,
+    BodyInclusionPolicy bodyInclusion = const BodyInclusionPolicy.none(),
   }) async {
-    final replayMessages = <ModelMessage>[...?messages, ...replay.messages];
-    final approvalById = {
-      for (final response in toolApprovalResponses)
-        response.approvalId: response,
-    };
+    final effectivePolicy = approvalPolicy ?? this.approvalPolicy;
+    final effectiveSelector = approvalPolicyFor ?? this.approvalPolicyFor;
+    final effectiveRevision =
+        approvalPolicyRevision ?? this.approvalPolicyRevision;
+    final approvalById = indexApprovalResponses(toolApprovalResponses);
     final missingApprovalIds = replay.requests
         .map((request) => request.approvalId)
         .where((approvalId) => !approvalById.containsKey(approvalId))
@@ -123,39 +230,110 @@ class ToolLoopAgent {
         '${missingApprovalIds.join(', ')}',
       );
     }
-    final providerMessages = replayMessages
-        .map(toLanguageModelMessage)
-        .toList(growable: true);
-    final results = <LanguageModelV4ToolResultPart>[];
+    final invalidBindings = <String>[];
+    final seenCallIds = <String>{};
     for (final request in replay.requests) {
-      final execution = await executeToolCall(
-        tools: tools,
-        call: request.toolCall,
-        messages: providerMessages,
-        approvalById: approvalById,
-        approvalId: request.approvalId,
-        abortSignal: abortSignal,
-        timeout: timeout?.toolTimeoutFor(request.toolCall.toolName),
-      );
-      if (execution.toolResult case final result?) {
-        results.add(result);
+      final response = approvalById[request.approvalId]!;
+      if (!seenCallIds.add(request.toolCall.toolCallId) ||
+          request.policyRevision != effectiveRevision ||
+          !approvalMatchesToolCall(response, request: request)) {
+        invalidBindings.add(request.approvalId);
       }
     }
-    if (results.isNotEmpty) {
-      replayMessages.add(
-        ModelMessage.parts(role: ModelMessageRole.tool, parts: results),
+    if (invalidBindings.isNotEmpty) {
+      throw ToolApprovalRenewalRequiredError(
+        requests: List.unmodifiable(replay.requests),
       );
     }
-    return streamText(
-      model: model,
-      system: instructions,
-      messages: replayMessages,
-      tools: tools,
-      maxSteps: maxSteps,
-      stopConditions: stopConditions,
-      toolApprovalResponses: const [],
+    final scope = OperationScope(
       abortSignal: abortSignal,
-      timeout: timeout,
+      timeout: timeout?.total,
     );
+    var handedOff = false;
+    try {
+      final replayMessages = <ModelMessage>[...?messages, ...replay.messages];
+      final providerMessages = replayMessages
+          .map(toLanguageModelMessage)
+          .toList(growable: true);
+      final results = <LanguageModelV4ToolResultPart>[];
+      for (final request in replay.requests) {
+        final execution = await scope.run(
+          () => executeToolCall(
+            tools: tools,
+            call: request.toolCall,
+            messages: providerMessages,
+            approvalById: approvalById,
+            approvalId: request.approvalId,
+            abortSignal: scope.signal,
+            timeout: timeout?.toolTimeoutFor(request.toolCall.toolName),
+            approvalPolicy:
+                effectiveSelector?.call(
+                  request.toolCall.toolName,
+                  request.toolCall.input,
+                ) ??
+                effectivePolicy,
+            policyRevision: request.policyRevision ?? effectiveRevision,
+            generationContext: generationContext ?? this.generationContext,
+            requireExactApprovalBinding: true,
+          ),
+        );
+        if (execution.approvalRequest != null) {
+          throw ToolApprovalRenewalRequiredError(
+            requests: [execution.approvalRequest!],
+          );
+        }
+        if (execution.toolResult case final result?) {
+          results.add(result);
+        }
+      }
+      if (results.isNotEmpty) {
+        replayMessages.add(
+          ModelMessage.parts(role: ModelMessageRole.tool, parts: results),
+        );
+      }
+      final remainingTotal = remainingTimeout(
+        timeout: timeout?.total,
+        elapsed: scope.elapsed,
+      );
+      final result = await streamText(
+        model: model,
+        instructions: instructions,
+        messages: replayMessages,
+        tools: tools,
+        maxSteps: maxSteps,
+        maxToolConcurrency: maxToolConcurrency,
+        stopConditions: stopConditions,
+        toolApprovalResponses: const [],
+        abortSignal: scope.signal,
+        timeout: timeout == null
+            ? null
+            : TimeoutConfiguration(
+                total: remainingTotal,
+                step: timeout.step,
+                firstChunk: timeout.firstChunk,
+                chunk: timeout.chunk,
+                tool: timeout.tool,
+                tools: timeout.tools,
+              ),
+        approvalPolicy: effectivePolicy,
+        approvalPolicyFor: effectiveSelector,
+        approvalPolicyRevision: effectiveRevision,
+        generationContext: generationContext ?? this.generationContext,
+        allowSystemInMessages: allowSystemInMessages,
+        onStart: onStart,
+        onStepStart: onStepStart,
+        onToolExecutionStart: onToolExecutionStart,
+        onToolExecutionEnd: onToolExecutionEnd,
+        onEnd: onEnd,
+        onStepEnd: onStepEnd,
+        prepareStep: prepareStep,
+        bodyInclusion: bodyInclusion,
+      );
+      handedOff = true;
+      result.finish.whenComplete(scope.close).ignore();
+      return result;
+    } finally {
+      if (!handedOff) scope.close();
+    }
   }
 }

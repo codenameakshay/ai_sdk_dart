@@ -95,3 +95,7 @@ exception during those transitions. The formal script now monitors console
 errors too. These intermediate images are diagnostic evidence, not a passing
 five-flow browser report. `before-conversation-*` preserves the earlier
 duplicate-row state for comparison.
+
+### PR 15 reproducible failure checkpoint
+
+The release build completed in126.5seconds. The five-flow script still fails in its first local keyboard-approval scenario with a Flutter web text-input configuration null check. The answer is accessible and exactly one assistant row exists before the console-error assertion fails. `conversation-smoke.json` now explicitly records `passed: false`, the exception, completed scenario evidence, and build/source hashes; it must not be read as a successful five-flow run. The harness now saves failed runs rather than leaving an older successful JSON file in place. Widget fixes remain under investigation.

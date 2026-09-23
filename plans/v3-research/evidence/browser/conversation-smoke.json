@@ -1,10 +1,12 @@
 {
-  "capturedAt": "2026-09-23T12:59:17.116Z",
+  "capturedAt": "2026-09-23T14:07:52.378Z",
   "browser": "154.0.8037.0",
+  "passed": false,
+  "failure": "Error: Null check operator used on a null value\n    at alT.HQ (http://127.0.0.1:8083/main.dart.js:37754:11)\n    at anK.jL (http://127.0.0.1:8083/main.dart.js:38174:3)\n    at anr.asJ (http://127.0.0.1:8083/main.dart.js:38244:10)\n    at NF.aku (http://127.0.0.1:8083/main.dart.js:33650:38)\n    at arZ.D5 (http://127.0.0.1:8083/main.dart.js:77340:8)\n    at http://127.0.0.1:8083/main.dart.js:77822:11\n    at aBi.a (http://127.0.0.1:8083/main.dart.js:5234:63)\n    at aBi.$2 (http://127.0.0.1:8083/main.dart.js:41840:14)\n    at Object.D (http://127.0.0.1:8083/main.dart.js:5220:10)\n    at hs.afP (http://127.0.0.1:8083/main.dart.js:77832:10)",
   "hashes": {
-    "examples/flutter_chat/build/web/main.dart.js": "64b456c693e8a48fba9f19ccf4fb1a8bc1fa1a6efd38f1c37aa11c9e655d3113",
+    "examples/flutter_chat/build/web/main.dart.js": "e453361f98a6e9a9db4310010a407b1b13b62b5410f6d94943d2168cd388197d",
     "examples/flutter_chat/lib/pages/conversation_page.dart": "610a1e654146f77f6b90d3b46f931f92d86a535b7ea050cebd5d8e372982d790",
-    "examples/remote_backend/js/server.mjs": "4ff23e488d254d49e4d0e7c3604c75b789572488f8b5a28a0dc293380845c345",
+    "examples/remote_backend/js/server.mjs": "a01abfd4b369ea2d9c16ae7d6c1d4b739e0dd77b55807c42b5083a92d3ea7c25",
     "examples/remote_backend/js/package-lock.json": "b739df309f9945cd221582dae72f51f35b43b99a7d0cca20a85b989fc953328c"
   },
   "results": [
@@ -15,31 +17,13 @@
       "expected": "Tool result: deleted /tmp/example",
       "width": 1280,
       "height": 900,
-      "pending": "- button \"Back\"\n- heading \"Local conversation\" [level=2]\n- group:\n  - text: User message Run the example\n  - group \"Assistant message\":\n    - 'group \"Tool call: deleteFile\"':\n      - textbox \"deleteFile\" [disabled]\n- group \"Tool approval required for deleteFile\":\n  - textbox \"Approve tool call? deleteFile\" [disabled]\n  - button \"Deny\"\n  - button \"Approve\"\n- text: Approve the tool call to continue.\n- textbox \"Message…\" [disabled]\n- button \"Send message\" [disabled]\n- text: Send message",
-      "final": "- button \"Back\"\n- heading \"Local conversation\" [level=2]\n- group:\n  - text: User message Run the example\n  - group \"Assistant message\":\n    - 'group \"Tool call: deleteFile\"':\n      - textbox \"deleteFile\" [disabled]\n    - textbox [disabled]\n  - group \"Assistant message\": \"Tool result: deleted /tmp/example\"\n- textbox \"Message…\"\n- button \"Send message\"\n- text: Send message",
-      "errors": [],
+      "pending": "- button \"Back\"\n- heading \"Local conversation\" [level=2]\n- group:\n  - text: User message Run the example\n  - group \"Assistant message\":\n    - 'group \"Tool call: deleteFile\"':\n      - 'group \"deleteFile { \\\"path\\\": \\\"/tmp/example\\\" }\"'\n- group \"Tool approval required for deleteFile\":\n  - 'group \"Approve tool call? deleteFile { \\\"path\\\": \\\"/tmp/example\\\" }\"':\n    - button \"Deny\"\n    - button \"Approve\"\n- text: Approve the tool call to continue.\n- textbox \"Message…\" [disabled]\n- button \"Send message\" [disabled]\n- text: Send message",
+      "final": "- button \"Back\"\n- heading \"Local conversation\" [level=2]\n- group:\n  - text: User message Run the example\n  - group \"Assistant message\":\n    - 'group \"Tool call: deleteFile\"':\n      - 'group \"deleteFile { \\\"path\\\": \\\"/tmp/example\\\" }\"'\n    - text: \"Tool result: deleted /tmp/example\"\n- textbox \"Message…\"\n- button \"Send message\"\n- text: Send message",
+      "errors": [
+        "Null check operator used on a null value",
+        "    at alT.HQ (http://127.0.0.1:8083/main.dart.js:37754:11)\n    at anK.jL (http://127.0.0.1:8083/main.dart.js:38174:3)\n    at anr.asJ (http://127.0.0.1:8083/main.dart.js:38244:10)\n    at NF.aku (http://127.0.0.1:8083/main.dart.js:33650:38)\n    at arZ.D5 (http://127.0.0.1:8083/main.dart.js:77340:8)\n    at http://127.0.0.1:8083/main.dart.js:77822:11\n    at aBi.a (http://127.0.0.1:8083/main.dart.js:5234:63)\n    at aBi.$2 (http://127.0.0.1:8083/main.dart.js:41840:14)\n    at Object.D (http://127.0.0.1:8083/main.dart.js:5220:10)\n    at hs.afP (http://127.0.0.1:8083/main.dart.js:77832:10)"
+      ],
       "screenshot": "conversation-Approve.png"
-    },
-    {
-      "route": "conversation",
-      "action": "Deny",
-      "keyboard": false,
-      "expected": "Tool denied; no local action ran.",
-      "width": 390,
-      "height": 844,
-      "pending": "- button \"Back\"\n- heading \"Local conversation\" [level=2]\n- group:\n  - text: User message Run the example\n  - group \"Assistant message\":\n    - 'group \"Tool call: deleteFile\"':\n      - textbox \"deleteFile\" [disabled]\n- group \"Tool approval required for deleteFile\":\n  - textbox \"Approve tool call? deleteFile\" [disabled]\n  - button \"Deny\"\n  - button \"Approve\"\n- text: Approve the tool call to continue.\n- textbox \"Message…\" [disabled]\n- button \"Send message\" [disabled]\n- text: Send message",
-      "final": "- button \"Back\"\n- heading \"Local conversation\" [level=2]\n- group:\n  - text: User message Run the example\n  - group \"Assistant message\":\n    - 'group \"Tool call: deleteFile\"':\n      - textbox \"deleteFile\" [disabled]\n    - textbox [disabled]\n  - group \"Assistant message\": Tool denied; no local action ran.\n- textbox \"Message…\"\n- button \"Send message\"",
-      "errors": [],
-      "screenshot": "conversation-Deny.png"
-    },
-    {
-      "route": "remote",
-      "expected": "Hello from the pinned AI SDK backend.",
-      "width": 1280,
-      "height": 900,
-      "final": "- button \"Back\"\n- heading \"Remote conversation\" [level=2]\n- group:\n  - text: User message Run the example\n  - group \"Assistant message\":\n    - textbox [disabled]\n  - group \"Assistant message\": Hello from the pinned AI SDK backend.\n- textbox \"Message…\"\n- button \"Send message\"\n- text: Send message",
-      "errors": [],
-      "screenshot": "conversation-remote.png"
     }
   ],
   "limitations": "Scripted local model checks actual tool execution/result and denial; remote text uses pinned JavaScript AI SDK server. No live provider, persisted reload, remote tool execution, native device, or screen reader qualification. Semantics activated programmatically."

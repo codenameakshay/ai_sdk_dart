@@ -15,6 +15,17 @@ async function waitForAccessibleText(page, expected) {
 (async () => {
   const browser = await chromium.launch({ headless: true, chromiumSandbox: false });
   const results = [];
+  function saveEvidence(passed, failure) {
+    const root = path.resolve(__dirname, '../../../..');
+    const hashes = {};
+    for (const file of ['examples/flutter_chat/build/web/main.dart.js', 'examples/flutter_chat/lib/pages/conversation_page.dart', 'examples/remote_backend/js/server.mjs', 'examples/remote_backend/js/package-lock.json']) {
+      hashes[file] = crypto.createHash('sha256').update(fs.readFileSync(path.join(root, file))).digest('hex');
+    }
+    const output = { capturedAt: new Date().toISOString(), browser: browser.version(), passed, failure, hashes, results,
+      limitations: 'Scripted local model checks actual tool execution/result and denial; remote text uses pinned JavaScript AI SDK server. No live provider, persisted reload, remote tool execution, native device, or screen reader qualification. Semantics activated programmatically.' };
+    fs.writeFileSync(path.join(__dirname, 'conversation-smoke.json'), JSON.stringify(output, null, 2) + '\n');
+    return output;
+  }
   try {
     for (const scenario of [
       { route: 'conversation', action: 'Approve', keyboard: true, expected: 'Tool result: deleted /tmp/example', width: 1280, height: 900 },
@@ -63,15 +74,10 @@ async function waitForAccessibleText(page, expected) {
       await page.close();
       if (errors.length) throw new Error(errors.join('\n'));
     }
-    const root = path.resolve(__dirname, '../../../..');
-    const hashes = {};
-    for (const file of ['examples/flutter_chat/build/web/main.dart.js', 'examples/flutter_chat/lib/pages/conversation_page.dart', 'examples/remote_backend/js/server.mjs', 'examples/remote_backend/js/package-lock.json']) {
-      hashes[file] = crypto.createHash('sha256').update(fs.readFileSync(path.join(root, file))).digest('hex');
-    }
-    const output = { capturedAt: new Date().toISOString(), browser: browser.version(), hashes, results,
-      limitations: 'Scripted local model checks actual tool execution/result and denial; remote text uses pinned JavaScript AI SDK server. No live provider, persisted reload, remote tool execution, native device, or screen reader qualification. Semantics activated programmatically.' };
-    fs.writeFileSync(path.join(__dirname, 'conversation-smoke.json'), JSON.stringify(output, null, 2) + '\n');
-    console.log(JSON.stringify(output));
+    console.log(JSON.stringify(saveEvidence(true)));
+  } catch (error) {
+    saveEvidence(false, String(error));
+    throw error;
   } finally {
     await browser.close();
   }

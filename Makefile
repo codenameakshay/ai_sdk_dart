@@ -28,6 +28,7 @@ DART      ?= fvm dart
 FLUTTER_APP  := examples/flutter_chat
 ADVANCED_APP := examples/advanced_app
 DART_APP     := examples/basic
+DART_EXAMPLES := examples/remote_backend
 
 # Pure-Dart packages (test/analyze order). Publish order is separate below
 # since publish order matters (dependencies before dependents).
@@ -120,6 +121,7 @@ test:
 	$(foreach p,$(FLUTTER_PKGS),$(FLUTTER) test packages/$(p)/test/ &&) true
 	$(FLUTTER) test $(FLUTTER_APP)/test/
 	$(FLUTTER) test $(ADVANCED_APP)/test/
+	$(DART) test $(DART_EXAMPLES)/test/
 
 ## Run dart analyze across all packages
 analyze:
@@ -129,6 +131,7 @@ analyze:
 	$(foreach p,$(FLUTTER_PKGS),$(FLUTTER) analyze packages/$(p)/ &&) true
 	$(FLUTTER) analyze $(FLUTTER_APP)/
 	$(FLUTTER) analyze $(ADVANCED_APP)/
+	$(DART) analyze $(DART_EXAMPLES)/
 
 ## Run the structured-stream benchmark and print JSON results
 benchmark:

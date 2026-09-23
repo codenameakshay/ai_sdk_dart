@@ -40,3 +40,4 @@ workspace:
   - examples/basic
   - examples/flutter_chat
   - examples/advanced_app
+  - examples/remote_backend

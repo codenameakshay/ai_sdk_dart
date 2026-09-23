@@ -1,0 +1,22 @@
+00:00 +0: loading packages/ai_sdk_provider/test/abort_signal_observation_test.dart
+00:00 +0: cleanup failure preserves operation outcome: false
+00:00 +0 -1: cleanup failure preserves operation outcome: false [E]
+  Bad state: cleanup failed
+  
+00:00 +0 -1: cleanup failure preserves operation outcome: true
+00:00 +0 -2: cleanup failure preserves operation outcome: true [E]
+  Bad state: cleanup failed
+  
+00:00 +0 -2: runs without an abort signal and rejects a pre-cancelled signal
+00:00 +1 -2: observes a non-streaming signal and detaches after cancellation
+00:00 +2 -2: request observers detach after repeated success and failure
+00:00 +3 -2: observable cancellation events invoke the callback once
+00:00 +4 -2: Dio cancellation scope mirrors signal state and disposes its observer
+00:00 +5 -2: Some tests failed.
+
+Failing tests:
+  packages/ai_sdk_provider/test/abort_signal_observation_test.dart: cleanup failure preserves operation outcome: false
+  packages/ai_sdk_provider/test/abort_signal_observation_test.dart: cleanup failure preserves operation outcome: true
+
+Consider enabling the flag chain-stack-traces to receive more detailed exceptions.
+For example, 'dart test --chain-stack-traces'.

@@ -27,7 +27,7 @@ Future<T> raceWithCancellation<T>(
   void detach() {
     final subscription = cancellationSubscription;
     cancellationSubscription = null;
-    if (subscription != null) unawaited(subscription.cancel());
+    if (subscription != null) Future<void>.sync(subscription.cancel).ignore();
   }
 
   void completeError(Object error, StackTrace stackTrace) {

@@ -1,0 +1,21 @@
+00:00 +0: loading packages/ai_sdk_provider/test/abort_signal_observation_test.dart
+00:00 +0: packages/ai_sdk_provider/test/abort_signal_observation_test.dart: cleanup failure preserves operation outcome: false
+00:00 +1: packages/ai_sdk_provider/test/abort_signal_observation_test.dart: cleanup failure preserves operation outcome: true
+00:00 +2: packages/ai_sdk_provider/test/abort_signal_observation_test.dart: runs without an abort signal and rejects a pre-cancelled signal
+00:00 +3: packages/ai_sdk_provider/test/abort_signal_observation_test.dart: observes a non-streaming signal and detaches after cancellation
+00:00 +4: packages/ai_sdk_provider/test/abort_signal_observation_test.dart: request observers detach after repeated success and failure
+00:00 +5: packages/ai_sdk_provider/test/abort_signal_observation_test.dart: observable cancellation events invoke the callback once
+00:00 +6: packages/ai_sdk_provider/test/abort_signal_observation_test.dart: Dio cancellation scope mirrors signal state and disposes its observer
+00:00 +7: loading packages/ai_sdk_dart/test/conformance/operation_scope_lifetime_test.dart
+00:00 +7: packages/ai_sdk_dart/test/conformance/operation_scope_lifetime_test.dart: embedding result survives caller subscription cleanup failure
+00:00 +8: packages/ai_sdk_dart/test/conformance/operation_scope_lifetime_test.dart: completed operations detach from a reusable caller token
+00:00 +9: loading packages/ai_sdk_dart/test/conformance/text_operation_scope_test.dart
+00:00 +9: packages/ai_sdk_dart/test/conformance/text_operation_scope_test.dart: step deadline remains active after stream acquisition
+00:00 +10: packages/ai_sdk_dart/test/conformance/text_operation_scope_test.dart: stream-start metadata does not satisfy first meaningful chunk deadline
+00:00 +11: packages/ai_sdk_dart/test/conformance/text_operation_scope_test.dart: caller cancellation interrupts a stalled prepareStep callback
+00:00 +12: packages/ai_sdk_dart/test/conformance/text_operation_scope_test.dart: synchronous final decoder cannot return success after total deadline
+00:00 +13: packages/ai_sdk_dart/test/conformance/text_operation_scope_test.dart: generateText step timeout cancels provider work
+00:00 +14: packages/ai_sdk_dart/test/conformance/text_operation_scope_test.dart: streamText first chunk deadline includes provider acquisition
+00:00 +15: packages/ai_sdk_dart/test/conformance/text_operation_scope_test.dart: generateText timeout cancels owned provider signal only
+00:00 +16: packages/ai_sdk_dart/test/conformance/text_operation_scope_test.dart: streamText timeout cancels owned provider signal only
+00:00 +17: All tests passed!

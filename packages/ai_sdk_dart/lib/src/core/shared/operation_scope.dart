@@ -134,7 +134,9 @@ class OperationScope {
     if (_closed) return;
     _closed = true;
     _timer?.cancel();
-    unawaited(_callerSubscription?.cancel());
+    if (_callerSubscription case final subscription?) {
+      Future<void>.sync(subscription.cancel).ignore();
+    }
     unawaited(_terminal.close());
   }
 }

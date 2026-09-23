@@ -53,7 +53,11 @@ class AbortSignalObservation {
     _activeCallback = null;
     final subscription = _subscription;
     _subscription = null;
-    await subscription?.cancel();
+    try {
+      await subscription?.cancel();
+    } catch (_) {
+      // Detachment must not replace the request outcome.
+    }
   }
 }
 

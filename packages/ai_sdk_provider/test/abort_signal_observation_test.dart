@@ -4,6 +4,27 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
 
 void main() {
+  for (final failOperation in [false, true]) {
+    test(
+      'cleanup failure preserves operation outcome: $failOperation',
+      () async {
+        final signal = _FailingCleanupSignal();
+        final primary = StateError('primary');
+        final operation = runWithAbortSignal(() async {
+          if (failOperation) throw primary;
+          return 42;
+        }, signal);
+        if (failOperation) {
+          await expectLater(operation, throwsA(same(primary)));
+        } else {
+          expect(await operation, 42);
+        }
+        await Future<void>.delayed(Duration.zero);
+        expect(signal.events.hasListener, isFalse);
+      },
+    );
+  }
+
   test(
     'runs without an abort signal and rejects a pre-cancelled signal',
     () async {
@@ -142,4 +163,16 @@ class _FutureAbortSignal implements AbortSignal {
     _isCancelled = true;
     _cancelled.complete();
   }
+}
+
+class _FailingCleanupSignal implements ObservableAbortSignal {
+  final events = StreamController<void>(
+    onCancel: () => Future<void>.error(StateError('cleanup failed')),
+  );
+  @override
+  bool get isCancelled => false;
+  @override
+  Future<void> get onCancelled => Completer<void>().future;
+  @override
+  Stream<void> get cancellationEvents => events.stream;
 }

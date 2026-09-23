@@ -19,7 +19,30 @@ class _ObservedToken extends CancellationToken {
   Stream<void> get cancellationEvents => events.stream;
 }
 
+class _FailingCleanupToken extends CancellationToken {
+  final events = StreamController<void>(
+    onCancel: () => Future<void>.error(StateError('cleanup failed')),
+  );
+  @override
+  Stream<void> get cancellationEvents => events.stream;
+}
+
 void main() {
+  test(
+    'embedding result survives caller subscription cleanup failure',
+    () async {
+      final token = _FailingCleanupToken();
+      final result = await embed(
+        model: FakeEmbeddingModel([1.0, 2.0]),
+        value: 'test',
+        abortSignal: token,
+      );
+      expect(result.embedding, [1.0, 2.0]);
+      await Future<void>.delayed(Duration.zero);
+      expect(token.events.hasListener, isFalse);
+    },
+  );
+
   test('completed operations detach from a reusable caller token', () async {
     final token = _ObservedToken();
     addTearDown(token.events.close);

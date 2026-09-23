@@ -248,95 +248,106 @@ void main() {
     );
   });
 
-  test('round trips v4 typed provider parts and tool output discriminators', () {
-    final conversation = Conversation(
-      id: 'lossless',
-      messages: [
-        ConversationMessage(
-          id: 'assistant-1',
-          role: ConversationRole.assistant,
-          parts: [
-            ToolCallPart(
-              id: 'call-part',
-              callId: 'call-1',
-              name: 'search',
-              arguments: {'q': 'dart'},
-              providerExecuted: true,
-              providerOptions: {'vendor': {'trace': 't-1'}},
-            ),
-            ReasoningFilePart(
-              id: 'reasoning-file',
-              data: ConversationFileBytes(Uint8List.fromList([0, 1, 255])),
-              mimeType: 'application/octet-stream',
-              providerOptions: {'vendor': {'encrypted': true}},
-            ),
-            DocumentSourcePart(
-              id: 'doc-source',
-              mediaType: 'application/pdf',
-              title: 'Research paper',
-              name: 'paper.pdf',
-              providerMetadata: {'vendor': {'documentId': 'doc-7'}},
-            ),
-            UnknownPart(
-              id: 'opaque-1',
-              type: 'opaque',
-              raw: {
-                'id': 'opaque-1',
-                'type': 'opaque',
-                'provider': 'vendor-x',
-                'raw': ['scalar', 7, true],
-              },
-            ),
-            ToolResultPart(
-              id: 'result-1',
-              callId: 'call-1',
-              toolName: 'search',
-              output: {'ok': true},
-              outputKind: 'json',
-              preliminary: true,
-              isDynamic: true,
-              providerOptions: {'vendor': {'requestId': 'r-1'}},
-            ),
-            ToolResultPart(
-              id: 'result-error',
-              callId: 'call-1',
-              toolName: 'search',
-              output: {'code': 'denied'},
-              isError: true,
-              outputKind: 'error_json',
-            ),
-            ToolResultPart(
-              id: 'result-denied',
-              callId: 'call-1',
-              toolName: 'search',
-              output: null,
-              isError: true,
-              outputKind: 'execution_denied',
-              executionDeniedReason: 'Needs approval',
-              executionDeniedApprovalId: 'approval-1',
-            ),
-          ],
-        ),
-      ],
-    );
+  test(
+    'round trips v4 typed provider parts and tool output discriminators',
+    () {
+      final conversation = Conversation(
+        id: 'lossless',
+        messages: [
+          ConversationMessage(
+            id: 'assistant-1',
+            role: ConversationRole.assistant,
+            parts: [
+              ToolCallPart(
+                id: 'call-part',
+                callId: 'call-1',
+                name: 'search',
+                arguments: {'q': 'dart'},
+                providerExecuted: true,
+                providerOptions: {
+                  'vendor': {'trace': 't-1'},
+                },
+              ),
+              ReasoningFilePart(
+                id: 'reasoning-file',
+                data: ConversationFileBytes(Uint8List.fromList([0, 1, 255])),
+                mimeType: 'application/octet-stream',
+                providerOptions: {
+                  'vendor': {'encrypted': true},
+                },
+              ),
+              DocumentSourcePart(
+                id: 'doc-source',
+                mediaType: 'application/pdf',
+                title: 'Research paper',
+                name: 'paper.pdf',
+                providerMetadata: {
+                  'vendor': {'documentId': 'doc-7'},
+                },
+              ),
+              UnknownPart(
+                id: 'opaque-1',
+                type: 'opaque',
+                raw: {
+                  'id': 'opaque-1',
+                  'type': 'opaque',
+                  'provider': 'vendor-x',
+                  'raw': ['scalar', 7, true],
+                },
+              ),
+              ToolResultPart(
+                id: 'result-1',
+                callId: 'call-1',
+                toolName: 'search',
+                output: {'ok': true},
+                outputKind: 'json',
+                preliminary: true,
+                isDynamic: true,
+                providerOptions: {
+                  'vendor': {'requestId': 'r-1'},
+                },
+              ),
+              ToolResultPart(
+                id: 'result-error',
+                callId: 'call-1',
+                toolName: 'search',
+                output: {'code': 'denied'},
+                isError: true,
+                outputKind: 'error_json',
+              ),
+              ToolResultPart(
+                id: 'result-denied',
+                callId: 'call-1',
+                toolName: 'search',
+                output: null,
+                isError: true,
+                outputKind: 'execution_denied',
+                executionDeniedReason: 'Needs approval',
+                executionDeniedApprovalId: 'approval-1',
+              ),
+            ],
+          ),
+        ],
+      );
 
-    final encoded = ConversationCodec.encode(conversation);
-    final restored = ConversationCodec.decode(encoded);
-    expect(restored, conversation);
-    expect(
-      (restored.messages.single.parts[1] as ReasoningFilePart).data,
-      isA<ConversationFileBytes>(),
-    );
-    expect(
-      ((restored.messages.single.parts[1] as ReasoningFilePart).data!
-              as ConversationFileBytes)
-          .bytes,
-      [0, 1, 255],
-    );
-    final denied = restored.messages.single.parts.last as ToolResultPart;
-    expect(denied.executionDeniedReason, 'Needs approval');
-    expect(denied.executionDeniedApprovalId, 'approval-1');
-  });
+      final encoded = ConversationCodec.encode(conversation);
+      final restored = ConversationCodec.decode(encoded);
+      expect(restored, conversation);
+      expect(
+        (restored.messages.single.parts[1] as ReasoningFilePart).data,
+        isA<ConversationFileBytes>(),
+      );
+      expect(
+        ((restored.messages.single.parts[1] as ReasoningFilePart).data!
+                as ConversationFileBytes)
+            .bytes,
+        [0, 1, 255],
+      );
+      final denied = restored.messages.single.parts.last as ToolResultPart;
+      expect(denied.executionDeniedReason, 'Needs approval');
+      expect(denied.executionDeniedApprovalId, 'approval-1');
+    },
+  );
 
   test('rejects empty provider file reference fields at construction', () {
     expect(

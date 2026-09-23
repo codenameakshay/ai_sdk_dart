@@ -109,3 +109,23 @@ The snapshot builder is now created only when a partial-output listener needs a 
 +    append values since its last update
      emit immutable snapshot
 ```
+
+## PR 15 independent review checkpoint
+
+Reviewed baseline `b702929811281ac6be4c5ea2c10004b412b74924` through `e561f59`, with later working-tree evidence called out separately.
+
+### Standards
+
+The independent reviewer found no documented-standard violations outside tooling. Three heuristic findings remain: realtime combines protocol/session/buffering responsibilities; the Flutter conversation controller combines local/remote backends and wire conversion; Responses duplicates media serialization between prompt and tool paths. The latter has caused reproduced incorrect wire fields and is assigned for a shared serializer. Module decomposition remains open; it is not a release-readiness claim.
+
+### Spec
+
+The independent reviewer found incomplete exhaustive event fixtures, browser accessibility proof, localization/IME/RTL/reduced-motion behavior, and Flutter frame/realtime device evidence. The exhaustive fixture omission was corrected in `e561f59`; core tests737passed and analysis is clean. Parent pinned-remote rerun24passed and UI231passed establish those checkpoints. The browser console exception persists after the fresh build, and native-device/live-provider proof remains unavailable. W14 implementation and full qualification remain open.
+
+### Comment review
+
+Portable Comment Sicko review found a newly added file-wide `use_null_aware_elements` suppression in OpenAI options and speculative Flutter workaround narration. Both are assigned for removal with their owning work. Useful public API and protocol/lifecycle documentation remains. No dedicated Comment Sicko executable was installed.
+
+### Full gate checkpoint
+
+The complete `make test` run passed all pure-Dart packages, then reached Flutter sources during active edits and failed to compile them. `make analyze` reached the advanced example and found two required result fields missing in its fixture; parent added them. `make format-check` reproduced the same15files as GitHub CI. All pure-Dart package dry-runs passed; Flutter's dry-run stopped on active edits and an analyzer warning. These are incomplete gates, not whole-workspace passes.

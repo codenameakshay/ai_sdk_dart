@@ -360,7 +360,13 @@ StreamTextResult<Object?> _completedStreamResult({
     reasoning: Future<List<LanguageModelV4ReasoningPart>>.value(const []),
     reasoningText: Future<String>.value(''),
     files: Future<List<LanguageModelV4FilePart>>.value(const []),
+    reasoningFiles: Future<List<LanguageModelV4ReasoningFilePart>>.value(
+      const [],
+    ),
     sources: Future<List<LanguageModelV4SourcePart>>.value(const []),
+    documentSources: Future<List<LanguageModelV4DocumentSourcePart>>.value(
+      const [],
+    ),
     toolCalls: Future<List<LanguageModelV4ToolCallPart>>.value(const []),
     toolResults: Future<List<LanguageModelV4ToolResultPart>>.value(const []),
     finishReason: Future<LanguageModelV4FinishReason?>.value(

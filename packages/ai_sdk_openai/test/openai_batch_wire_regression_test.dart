@@ -28,10 +28,7 @@ void main() {
             'id': 'batch_req_1',
             'custom_id': 'input-1',
             'response': null,
-            'error': {
-              'code': 'batch_expired',
-              'message': 'This request could not be executed before expiry.',
-            },
+            'error': {'code': 'batch_expired', 'message': 'This request could not be executed before expiry.'},
           })}\n',
         ),
       ),
@@ -41,24 +38,27 @@ void main() {
     expect(rows.single.response, isNull);
   });
 
-  test('complete final JSONL row does not require a trailing newline', () async {
-    final rows = await decodeOpenAIBatchResults(
-      Stream.value(
-        utf8.encode(
-          jsonEncode({
-            'id': 'batch_req_2',
-            'custom_id': 'input-2',
-            'response': {
-              'status_code': 200,
-              'request_id': 'req_2',
-              'body': {'output': []},
-            },
-            'error': null,
-          }),
+  test(
+    'complete final JSONL row does not require a trailing newline',
+    () async {
+      final rows = await decodeOpenAIBatchResults(
+        Stream.value(
+          utf8.encode(
+            jsonEncode({
+              'id': 'batch_req_2',
+              'custom_id': 'input-2',
+              'response': {
+                'status_code': 200,
+                'request_id': 'req_2',
+                'body': {'output': []},
+              },
+              'error': null,
+            }),
+          ),
         ),
-      ),
-    ).toList();
-    expect(rows.single.customId, 'input-2');
-    expect(rows.single.statusCode, 200);
-  });
+      ).toList();
+      expect(rows.single.customId, 'input-2');
+      expect(rows.single.statusCode, 200);
+    },
+  );
 }

@@ -601,14 +601,14 @@ class _ConversationReducer {
     }
     if (error) {
       _parts.add(
-      ToolResultPart(
-        id: 'tool-error-$callId',
-        callId: callId,
-        output: _string(e, 'errorText'),
-        isError: true,
-        toolName: name,
-        outputKind: 'error_text',
-      ),
+        ToolResultPart(
+          id: 'tool-error-$callId',
+          callId: callId,
+          output: _string(e, 'errorText'),
+          isError: true,
+          toolName: name,
+          outputKind: 'error_text',
+        ),
       );
     }
   }
@@ -667,7 +667,8 @@ class _ConversationReducer {
         output: error ? _freeze(e['errorText']) : _freeze(e['output']),
         isError: error,
         toolName: e['toolName'] as String?,
-        outputKind: e['outputKind'] as String? ?? (error ? 'error_text' : 'json'),
+        outputKind:
+            e['outputKind'] as String? ?? (error ? 'error_text' : 'json'),
         preliminary: e['preliminary'] == true,
         isDynamic: e['isDynamic'] == true,
         providerOptions: _optionalMap(e, 'providerOptions'),

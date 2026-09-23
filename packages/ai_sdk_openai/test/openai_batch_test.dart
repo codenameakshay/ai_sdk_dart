@@ -44,144 +44,160 @@ void main() {
     expect((calls.last.data as Map)['endpoint'], '/v1/responses');
   });
 
-  test('applies the total deadline to upload and skips expired submission', () async {
-    Duration? uploadTimeout;
-    final stopwatch = _FakeStopwatch(const Duration(milliseconds: 1));
-    var submissions = 0;
-    final files = _DelayedFiles((timeout) async {
-      uploadTimeout = timeout;
-      stopwatch.value = const Duration(milliseconds: 10);
-      return OpenAIFileMetadata(
-        id: DataContentProviderReference(namespace: 'openai', id: 'file-in'),
-        bytes: 1,
-        createdAt: DateTime.utc(1970),
-        filename: 'batch.jsonl',
-        purpose: 'batch',
-      );
-    });
-    final dio = Dio()
-      ..httpClientAdapter = _Adapter((request) async {
-        submissions++;
-        return _json({'id': 'batch-1', 'status': 'validating'});
-      });
-    final batches = OpenAIBatches(
-      client: dio,
-      headers: () async => const {},
-      baseUrl: 'https://api.openai.test/v1',
-      files: files,
-      stopwatchFactory: () => stopwatch,
-    );
-
-    await expectLater(
-      batches.create(
-        const [OpenAIBatchInput(customId: 'a', model: 'm', input: 'x')],
-        timeout: const Duration(milliseconds: 10),
-      ),
-      throwsA(isA<OpenAIBatchSubmissionException>()),
-    );
-    expect(uploadTimeout, isNotNull);
-    expect(uploadTimeout!, lessThan(const Duration(milliseconds: 10)));
-    expect(submissions, 0);
-  });
-
-  test('rejects an expired pre-upload deadline without invoking upload', () async {
-    final stopwatch = _FakeStopwatch(const Duration(milliseconds: 10));
-    var uploads = 0;
-    final files = _DelayedFiles((_) async {
-      uploads++;
-      throw StateError('upload should not run');
-    });
-    final batches = OpenAIBatches(
-      client: Dio(),
-      headers: () async => const {},
-      baseUrl: 'https://api.openai.test/v1',
-      files: files,
-      stopwatchFactory: () => stopwatch,
-    );
-    await expectLater(
-      batches.create(
-        const [OpenAIBatchInput(customId: 'a', model: 'm', input: 'x')],
-        timeout: const Duration(milliseconds: 10),
-      ),
-      throwsA(isA<OpenAIFileTimeoutException>()),
-    );
-    expect(uploads, 0);
-  });
-
-  test('surfaces post-upload create failure with the uploaded reference', () async {
-    var submissions = 0;
-    final files = _DelayedFiles((_) async => OpenAIFileMetadata(
-      id: const DataContentProviderReference(namespace: 'openai', id: 'file-in'),
-      bytes: 1,
-      createdAt: DateTime.utc(1970),
-      filename: 'batch.jsonl',
-      purpose: 'batch',
-    ));
-    final dio = Dio()
-      ..httpClientAdapter = _Adapter((request) async {
-        submissions++;
-        return ResponseBody.fromString(
-          '{"error":{"message":"rejected"}}',
-          400,
-          headers: const {'content-type': ['application/json']},
+  test(
+    'applies the total deadline to upload and skips expired submission',
+    () async {
+      Duration? uploadTimeout;
+      final stopwatch = _FakeStopwatch(const Duration(milliseconds: 1));
+      var submissions = 0;
+      final files = _DelayedFiles((timeout) async {
+        uploadTimeout = timeout;
+        stopwatch.value = const Duration(milliseconds: 10);
+        return OpenAIFileMetadata(
+          id: DataContentProviderReference(namespace: 'openai', id: 'file-in'),
+          bytes: 1,
+          createdAt: DateTime.utc(1970),
+          filename: 'batch.jsonl',
+          purpose: 'batch',
         );
       });
-    final batches = OpenAIBatches(
-      client: dio,
-      headers: () async => const {},
-      baseUrl: 'https://api.openai.test/v1',
-      files: files,
-    );
-
-    OpenAIBatchSubmissionException? failure;
-    try {
-      await batches.create(const [
-        OpenAIBatchInput(customId: 'a', model: 'm', input: 'x'),
-      ]);
-    } catch (error) {
-      failure = error as OpenAIBatchSubmissionException;
-    }
-    expect(failure, isNotNull);
-    expect(failure!.inputFile.id, 'file-in');
-    expect(submissions, 1);
-  });
-
-  test('cancellation during upload auth does not submit or cancel a batch', () async {
-    final auth = Completer<Map<String, String>>();
-    final signal = _TestAbortSignal();
-    final paths = <String>[];
-    final dio = Dio()
-      ..httpClientAdapter = _Adapter((request) async {
-        paths.add(request.uri.path);
-        return _json({
-          'id': 'file-in',
-          'bytes': 1,
-          'created_at': 1,
-          'filename': 'batch.jsonl',
-          'purpose': 'batch',
+      final dio = Dio()
+        ..httpClientAdapter = _Adapter((request) async {
+          submissions++;
+          return _json({'id': 'batch-1', 'status': 'validating'});
         });
+      final batches = OpenAIBatches(
+        client: dio,
+        headers: () async => const {},
+        baseUrl: 'https://api.openai.test/v1',
+        files: files,
+        stopwatchFactory: () => stopwatch,
+      );
+
+      await expectLater(
+        batches.create(const [
+          OpenAIBatchInput(customId: 'a', model: 'm', input: 'x'),
+        ], timeout: const Duration(milliseconds: 10)),
+        throwsA(isA<OpenAIBatchSubmissionException>()),
+      );
+      expect(uploadTimeout, isNotNull);
+      expect(uploadTimeout!, lessThan(const Duration(milliseconds: 10)));
+      expect(submissions, 0);
+    },
+  );
+
+  test(
+    'rejects an expired pre-upload deadline without invoking upload',
+    () async {
+      final stopwatch = _FakeStopwatch(const Duration(milliseconds: 10));
+      var uploads = 0;
+      final files = _DelayedFiles((_) async {
+        uploads++;
+        throw StateError('upload should not run');
       });
-    final files = OpenAIFiles(
-      client: dio,
-      headers: () => auth.future,
-      baseUrl: 'https://api.openai.test/v1',
-    );
-    final batches = OpenAIBatches(
-      client: dio,
-      headers: () => auth.future,
-      baseUrl: 'https://api.openai.test/v1',
-      files: files,
-    );
-    final pending = batches.create(
-      const [OpenAIBatchInput(customId: 'a', model: 'm', input: 'x')],
-      abortSignal: signal,
-    );
-    signal.cancel();
-    await expectLater(pending, throwsA(isA<AiOperationCancelledError>()));
-    auth.complete(const {});
-    await Future<void>.delayed(Duration.zero);
-    expect(paths, isEmpty);
-  });
+      final batches = OpenAIBatches(
+        client: Dio(),
+        headers: () async => const {},
+        baseUrl: 'https://api.openai.test/v1',
+        files: files,
+        stopwatchFactory: () => stopwatch,
+      );
+      await expectLater(
+        batches.create(const [
+          OpenAIBatchInput(customId: 'a', model: 'm', input: 'x'),
+        ], timeout: const Duration(milliseconds: 10)),
+        throwsA(isA<OpenAIFileTimeoutException>()),
+      );
+      expect(uploads, 0);
+    },
+  );
+
+  test(
+    'surfaces post-upload create failure with the uploaded reference',
+    () async {
+      var submissions = 0;
+      final files = _DelayedFiles(
+        (_) async => OpenAIFileMetadata(
+          id: const DataContentProviderReference(
+            namespace: 'openai',
+            id: 'file-in',
+          ),
+          bytes: 1,
+          createdAt: DateTime.utc(1970),
+          filename: 'batch.jsonl',
+          purpose: 'batch',
+        ),
+      );
+      final dio = Dio()
+        ..httpClientAdapter = _Adapter((request) async {
+          submissions++;
+          return ResponseBody.fromString(
+            '{"error":{"message":"rejected"}}',
+            400,
+            headers: const {
+              'content-type': ['application/json'],
+            },
+          );
+        });
+      final batches = OpenAIBatches(
+        client: dio,
+        headers: () async => const {},
+        baseUrl: 'https://api.openai.test/v1',
+        files: files,
+      );
+
+      OpenAIBatchSubmissionException? failure;
+      try {
+        await batches.create(const [
+          OpenAIBatchInput(customId: 'a', model: 'm', input: 'x'),
+        ]);
+      } catch (error) {
+        failure = error as OpenAIBatchSubmissionException;
+      }
+      expect(failure, isNotNull);
+      expect(failure!.inputFile.id, 'file-in');
+      expect(submissions, 1);
+    },
+  );
+
+  test(
+    'cancellation during upload auth does not submit or cancel a batch',
+    () async {
+      final auth = Completer<Map<String, String>>();
+      final signal = _TestAbortSignal();
+      final paths = <String>[];
+      final dio = Dio()
+        ..httpClientAdapter = _Adapter((request) async {
+          paths.add(request.uri.path);
+          return _json({
+            'id': 'file-in',
+            'bytes': 1,
+            'created_at': 1,
+            'filename': 'batch.jsonl',
+            'purpose': 'batch',
+          });
+        });
+      final files = OpenAIFiles(
+        client: dio,
+        headers: () => auth.future,
+        baseUrl: 'https://api.openai.test/v1',
+      );
+      final batches = OpenAIBatches(
+        client: dio,
+        headers: () => auth.future,
+        baseUrl: 'https://api.openai.test/v1',
+        files: files,
+      );
+      final pending = batches.create(const [
+        OpenAIBatchInput(customId: 'a', model: 'm', input: 'x'),
+      ], abortSignal: signal);
+      signal.cancel();
+      await expectLater(pending, throwsA(isA<AiOperationCancelledError>()));
+      auth.complete(const {});
+      await Future<void>.delayed(Duration.zero);
+      expect(paths, isEmpty);
+    },
+  );
 
   test('rejects duplicate IDs and mixed models', () async {
     final batches = OpenAIBatches(
@@ -288,14 +304,8 @@ void main() {
         baseUrl: 'https://api.openai.test/v1',
       ),
     );
-    await expectLater(
-      batches.list(),
-      throwsA(isA<OpenAIBatchException>()),
-    );
-    await expectLater(
-      batches.get('b'),
-      throwsA(isA<OpenAIBatchException>()),
-    );
+    await expectLater(batches.list(), throwsA(isA<OpenAIBatchException>()));
+    await expectLater(batches.get('b'), throwsA(isA<OpenAIBatchException>()));
     await expectLater(
       batches.cancel('b'),
       throwsA(isA<OpenAIBatchException>()),

@@ -144,104 +144,114 @@ void main() {
     expect(unknown.raw['data'], {'temperature': 20});
   });
 
-  test('retains typed files, document sources, opaque frames, and result flags', () async {
-    server.listen((request) async {
-      request.response
-        ..statusCode = 200
-        ..headers.contentType = ContentType('text', 'event-stream')
-        ..headers.set('x-vercel-ai-ui-message-stream', 'v1');
-      final events = [
-        {'type': 'start', 'messageId': 'assistant-lossless'},
-        {
-          'type': 'tool-input-available',
-          'toolCallId': 'call-json',
-          'toolName': 'search',
-          'input': {'q': 'dart'},
-          'providerExecuted': true,
-          'providerOptions': {'vendor': {'trace': 't-1'}},
-        },
-        {
-          'type': 'tool-output-available',
-          'toolCallId': 'call-json',
-          'toolName': 'search',
-          'output': {'ok': true},
-          'outputKind': 'json',
-          'preliminary': true,
-          'isDynamic': true,
-          'providerOptions': {'vendor': {'requestId': 'r-1'}},
-        },
-        {
-          'type': 'tool-input-available',
-          'toolCallId': 'call-denied',
-          'toolName': 'delete',
-          'input': {'path': '/tmp/a'},
-        },
-        {
-          'type': 'tool-output-denied',
-          'toolCallId': 'call-denied',
-          'toolName': 'delete',
-          'reason': 'Needs approval',
-          'approvalId': 'approval-9',
-        },
-        {
-          'type': 'source-document',
-          'sourceId': 'doc-1',
-          'mediaType': 'application/pdf',
-          'title': 'Research paper',
-          'filename': 'paper.pdf',
-          'providerMetadata': {'vendor': {'documentId': 'doc-7'}},
-        },
-        {
-          'type': 'reasoning-file',
-          'url': 'data:application/octet-stream;base64,AAH/',
-          'mediaType': 'application/octet-stream',
-          'providerOptions': {'vendor': {'encrypted': true}},
-        },
-        {
-          'type': 'opaque',
-          'provider': 'vendor-x',
-          'raw': ['scalar', 7, true],
-          'id': 'opaque-1',
-        },
-        {'type': 'finish'},
-      ];
-      for (final event in events) {
-        request.response.write('data: ${jsonEncode(event)}\n\n');
-      }
-      request.response.write('data: [DONE]\n\n');
-      await request.response.close();
-    });
+  test(
+    'retains typed files, document sources, opaque frames, and result flags',
+    () async {
+      server.listen((request) async {
+        request.response
+          ..statusCode = 200
+          ..headers.contentType = ContentType('text', 'event-stream')
+          ..headers.set('x-vercel-ai-ui-message-stream', 'v1');
+        final events = [
+          {'type': 'start', 'messageId': 'assistant-lossless'},
+          {
+            'type': 'tool-input-available',
+            'toolCallId': 'call-json',
+            'toolName': 'search',
+            'input': {'q': 'dart'},
+            'providerExecuted': true,
+            'providerOptions': {
+              'vendor': {'trace': 't-1'},
+            },
+          },
+          {
+            'type': 'tool-output-available',
+            'toolCallId': 'call-json',
+            'toolName': 'search',
+            'output': {'ok': true},
+            'outputKind': 'json',
+            'preliminary': true,
+            'isDynamic': true,
+            'providerOptions': {
+              'vendor': {'requestId': 'r-1'},
+            },
+          },
+          {
+            'type': 'tool-input-available',
+            'toolCallId': 'call-denied',
+            'toolName': 'delete',
+            'input': {'path': '/tmp/a'},
+          },
+          {
+            'type': 'tool-output-denied',
+            'toolCallId': 'call-denied',
+            'toolName': 'delete',
+            'reason': 'Needs approval',
+            'approvalId': 'approval-9',
+          },
+          {
+            'type': 'source-document',
+            'sourceId': 'doc-1',
+            'mediaType': 'application/pdf',
+            'title': 'Research paper',
+            'filename': 'paper.pdf',
+            'providerMetadata': {
+              'vendor': {'documentId': 'doc-7'},
+            },
+          },
+          {
+            'type': 'reasoning-file',
+            'url': 'data:application/octet-stream;base64,AAH/',
+            'mediaType': 'application/octet-stream',
+            'providerOptions': {
+              'vendor': {'encrypted': true},
+            },
+          },
+          {
+            'type': 'opaque',
+            'provider': 'vendor-x',
+            'raw': ['scalar', 7, true],
+            'id': 'opaque-1',
+          },
+          {'type': 'finish'},
+        ];
+        for (final event in events) {
+          request.response.write('data: ${jsonEncode(event)}\n\n');
+        }
+        request.response.write('data: [DONE]\n\n');
+        await request.response.close();
+      });
 
-    final conversation = (await RemoteConversationTransport(endpoint: endpoint)
-            .send(Conversation(id: 'c1', messages: const []))
-            .toList())
-        .last;
-    final parts = conversation.messages.single.parts;
-    final call = parts.whereType<ToolCallPart>().first;
-    expect(call.providerExecuted, isTrue);
-    expect(call.providerOptions['vendor'], {'trace': 't-1'});
-    final result = parts
-        .whereType<ToolResultPart>()
-        .firstWhere((part) => part.callId == 'call-json');
-    expect(result.output, {'ok': true});
-    expect(result.preliminary, isTrue);
-    expect(result.isDynamic, isTrue);
-    expect(result.providerOptions['vendor'], {'requestId': 'r-1'});
-    final denied = parts
-        .whereType<ToolResultPart>()
-        .firstWhere((part) => part.callId == 'call-denied');
-    expect(denied.outputKind, 'execution_denied');
-    expect(denied.executionDeniedReason, 'Needs approval');
-    expect(denied.executionDeniedApprovalId, 'approval-9');
-    final doc = parts.whereType<DocumentSourcePart>().single;
-    expect(doc.providerMetadata['vendor'], {'documentId': 'doc-7'});
-    final reasoning = parts.whereType<ReasoningFilePart>().single;
-    expect((reasoning.data! as ConversationFileBytes).bytes, [0, 1, 255]);
-    expect(reasoning.providerOptions['vendor'], {'encrypted': true});
-    final opaque = parts.whereType<UnknownPart>().single;
-    expect(opaque.raw['provider'], 'vendor-x');
-    expect(opaque.raw['raw'], ['scalar', 7, true]);
-  });
+      final conversation = (await RemoteConversationTransport(
+        endpoint: endpoint,
+      ).send(Conversation(id: 'c1', messages: const [])).toList()).last;
+      final parts = conversation.messages.single.parts;
+      final call = parts.whereType<ToolCallPart>().first;
+      expect(call.providerExecuted, isTrue);
+      expect(call.providerOptions['vendor'], {'trace': 't-1'});
+      final result = parts.whereType<ToolResultPart>().firstWhere(
+        (part) => part.callId == 'call-json',
+      );
+      expect(result.output, {'ok': true});
+      expect(result.preliminary, isTrue);
+      expect(result.isDynamic, isTrue);
+      expect(result.providerOptions['vendor'], {'requestId': 'r-1'});
+      final denied = parts.whereType<ToolResultPart>().firstWhere(
+        (part) => part.callId == 'call-denied',
+      );
+      expect(denied.outputKind, 'execution_denied');
+      expect(denied.executionDeniedReason, 'Needs approval');
+      expect(denied.executionDeniedApprovalId, 'approval-9');
+      final doc = parts.whereType<DocumentSourcePart>().single;
+      expect(doc.providerMetadata['vendor'], {'documentId': 'doc-7'});
+      final reasoning = parts.whereType<ReasoningFilePart>().single;
+      expect((reasoning.data! as ConversationFileBytes).bytes, [0, 1, 255]);
+      expect(reasoning.providerOptions['vendor'], {'encrypted': true});
+      final opaque = parts.whereType<UnknownPart>().single;
+      expect(opaque.raw['provider'], 'vendor-x');
+      expect(opaque.raw['raw'], ['scalar', 7, true]);
+    },
+  );
 
   test('rejects bad headers and truncated streams', () async {
     server.listen((request) async {

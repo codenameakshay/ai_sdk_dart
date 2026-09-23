@@ -389,7 +389,6 @@ void main() {
     },
   );
 
-
   test('timeout during hung auth does not dispatch HTTP', () async {
     var requests = 0;
     final auth = Completer<Map<String, String>>();

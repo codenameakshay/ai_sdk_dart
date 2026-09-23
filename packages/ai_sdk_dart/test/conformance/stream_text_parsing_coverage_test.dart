@@ -138,26 +138,23 @@ void main() {
       expect((elements.last as Map)['i'], 3);
     });
 
-    test(
-      'array surrounded by extra prose is rejected',
-      () async {
-        final model = chunkedText('Here you go: [{"i":1}, {"i":2}] done.');
-        final result = await streamText<List<dynamic>>(
-          model: model,
-          prompt: 'json',
-          output: Output.array(element: objectSchema()),
-        );
-        final outputExpectation = expectLater(
-          result.output,
-          throwsA(isA<AiNoObjectGeneratedError>()),
-        );
-        await expectLater(
-          result.fullStream.toList(),
-          throwsA(isA<AiNoObjectGeneratedError>()),
-        );
-        await outputExpectation;
-      },
-    );
+    test('array surrounded by extra prose is rejected', () async {
+      final model = chunkedText('Here you go: [{"i":1}, {"i":2}] done.');
+      final result = await streamText<List<dynamic>>(
+        model: model,
+        prompt: 'json',
+        output: Output.array(element: objectSchema()),
+      );
+      final outputExpectation = expectLater(
+        result.output,
+        throwsA(isA<AiNoObjectGeneratedError>()),
+      );
+      await expectLater(
+        result.fullStream.toList(),
+        throwsA(isA<AiNoObjectGeneratedError>()),
+      );
+      await outputExpectation;
+    });
 
     test(
       'malformed array element is skipped by the manual tokenizer',

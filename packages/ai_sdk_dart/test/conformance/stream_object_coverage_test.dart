@@ -10,13 +10,30 @@ void main() {
   );
   final snapshots = textDeltaStream;
 
-  for (final fixture in <({String name, String text, Map<String, dynamic> value})>[
-    (name: 'adds a new key', text: '{"a":1,"b":2}', value: {'a': 1, 'b': 2}),
-    (name: 'removes a key', text: '{"a":1}', value: {'a': 1}),
-    (name: 'replaces a scalar', text: '{"a":2}', value: {'a': 2}),
-    (name: 'diffs nested lists', text: '{"xs":[1,9,3]}', value: {'xs': [1, 9, 3]}),
-    (name: 'diffs nested maps', text: '{"o":{"a":1,"b":2}}', value: {'o': {'a': 1, 'b': 2}}),
-  ]) {
+  for (final fixture
+      in <({String name, String text, Map<String, dynamic> value})>[
+        (
+          name: 'adds a new key',
+          text: '{"a":1,"b":2}',
+          value: {'a': 1, 'b': 2},
+        ),
+        (name: 'removes a key', text: '{"a":1}', value: {'a': 1}),
+        (name: 'replaces a scalar', text: '{"a":2}', value: {'a': 2}),
+        (
+          name: 'diffs nested lists',
+          text: '{"xs":[1,9,3]}',
+          value: {
+            'xs': [1, 9, 3],
+          },
+        ),
+        (
+          name: 'diffs nested maps',
+          text: '{"o":{"a":1,"b":2}}',
+          value: {
+            'o': {'a': 1, 'b': 2},
+          },
+        ),
+      ]) {
     test('streamObject patch diffing ${fixture.name}', () async {
       final result = await streamObject(
         model: snapshots([fixture.text]),

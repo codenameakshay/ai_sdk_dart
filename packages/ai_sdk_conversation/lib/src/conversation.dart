@@ -469,6 +469,7 @@ class ToolResultPart extends ConversationPart {
   final Object? output;
   final bool isError;
   final String? toolName;
+
   /// One of text, content, json, error_json, error_text, execution_denied.
   final String? outputKind;
   final bool preliminary;
@@ -751,10 +752,7 @@ class ConversationCodec {
           outputKind: _optionalString(json, 'outputKind'),
           preliminary: json['preliminary'] == true,
           isDynamic: json['isDynamic'] == true,
-          executionDeniedReason: _optionalString(
-            json,
-            'executionDeniedReason',
-          ),
+          executionDeniedReason: _optionalString(json, 'executionDeniedReason'),
           executionDeniedApprovalId: _optionalString(
             json,
             'executionDeniedApprovalId',
@@ -842,7 +840,9 @@ ConversationFileData? _decodeFileData(Object? wireData, String label) {
   switch (wireData['kind']) {
     case 'bytes':
       if (wireData['base64'] is! String) {
-        throw ConversationValidationException('$label byte data requires base64');
+        throw ConversationValidationException(
+          '$label byte data requires base64',
+        );
       }
       try {
         return ConversationFileBytes(

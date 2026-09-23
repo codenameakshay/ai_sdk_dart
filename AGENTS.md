@@ -2,7 +2,10 @@
 
 ## Repository instructions
 
-This is a Dart/Flutter monorepo (AI SDK Dart) with 13 library packages and 3 example apps. No Docker, databases, or backend services are required — it is a pure client-side SDK.
+This is a Dart/Flutter monorepo (AI SDK Dart) with 18 library packages,
+3 example apps, and a remote-backend example. No Docker or database is
+required. Protocol interoperability tests use local Node.js fixtures with
+pinned JavaScript SDK dependencies; ordinary unit tests use fake providers.
 
 ### Toolchain
 
@@ -33,11 +36,17 @@ make test
 ```
 
 For a focused run, use the package's `test/` directory. The `make test` target
-is the source of truth for the full package and example matrix.
+is the source of truth for the ordinary package and example test matrix.
+The separate Flutter chat iOS E2E workflow runs the device integration target
+twice and retains screenshots and launch diagnostics.
 
 ### Gotchas
 
 - `make test` / `make analyze` enumerate every package and example path. They
   use fake/mock models and JSON fixtures, so no API keys are needed.
-- API keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`) are only needed for running the example apps with real AI providers.
+- API keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`) are needed
+  for live example requests and explicitly enabled provider canaries.
+- CI installs and starts the pinned remote fixture before tests and coverage,
+  and enables the pinned MCP reference test. See `make test-mcp-reference` and
+  `docs/provider-canaries.md` for the separate qualification commands.
 - To build and serve the Flutter web app: `cd examples/flutter_chat && fvm flutter build web` then serve `build/web/` with any HTTP server.

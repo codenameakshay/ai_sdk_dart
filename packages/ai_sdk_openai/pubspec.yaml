@@ -1,6 +1,6 @@
 name: ai_sdk_openai
 description: OpenAI provider for the AI SDK Dart port.
-version: 2.0.0
+version: 3.0.0
 homepage: https://github.com/codenameakshay/ai_sdk_dart
 repository: https://github.com/codenameakshay/ai_sdk_dart
 resolution: workspace
@@ -9,11 +9,11 @@ environment:
   sdk: ^3.11.1
 
 dependencies:
-  ai_sdk_openai_compatible: ^2.0.0
-  ai_sdk_provider: ^2.0.0
+  ai_sdk_openai_compatible: ^3.0.0
+  ai_sdk_provider: ^3.0.0
   dio: ^5.9.0
 
 dev_dependencies:
-  ai_sdk_dart: ^2.0.0
+  ai_sdk_dart: ^3.0.0
   lints: ^6.1.0
   test: ^1.25.0

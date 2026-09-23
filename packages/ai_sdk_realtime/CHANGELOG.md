@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.0.0-dev.1
+
+- Preview release only; realtime remains unpublished until transport, device, and lifecycle qualification is complete.
+
 ## Unreleased
 
 - Added typed GA session function tools and server/semantic turn detection.

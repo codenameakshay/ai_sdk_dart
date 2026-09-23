@@ -9,7 +9,7 @@ environment:
   sdk: ^3.11.1
 
 dependencies:
-  ai_sdk_dart: ^2.0.0
+  ai_sdk_dart: ^3.0.0
 
 dev_dependencies:
   fake_async: ^1.3.3

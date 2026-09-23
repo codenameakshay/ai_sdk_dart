@@ -1,4 +1,4 @@
-## 2.0.0
+## 3.0.0
 
 - **Breaking:** migrated the shared language model to the V4 provider contract
   with unified tools, typed response formats, nested usage, and full stream

@@ -1,4 +1,4 @@
-## 2.0.0
+## 3.0.0
 
 - Migrated Mistral chat models to the shared V4 language-model contract,
   including unified tools, response formats, lifecycle metadata, and nested

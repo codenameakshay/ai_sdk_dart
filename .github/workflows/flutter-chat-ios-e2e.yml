@@ -116,6 +116,7 @@ jobs:
           exit 1
 
       - name: Run conversation E2E twice
+        timeout-minutes: 15
         working-directory: examples/flutter_chat
         run: |
           set -euo pipefail
@@ -125,6 +126,7 @@ jobs:
             find . -maxdepth 1 -name 'conversation-*.png' -delete
             set +e
             flutter drive \
+              --verbose \
               --no-pub \
               --driver=test_driver/integration_test.dart \
               --target=integration_test/conversation_e2e_test.dart \
@@ -139,6 +141,17 @@ jobs:
             test "$screenshot_count" -ge 7
             find . -maxdepth 1 -name 'conversation-*.png' -exec mv {} "$artifact_root/run-$run_number/" \;
           done
+
+      - name: Capture simulator diagnostics
+        if: always()
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/flutter-chat-ios-e2e-artifacts/diagnostics"
+          diagnostic_root="$GITHUB_WORKSPACE/flutter-chat-ios-e2e-artifacts/diagnostics"
+          xcrun simctl io "$SIMULATOR_UDID" screenshot "$diagnostic_root/simulator.png" || true
+          xcrun simctl spawn "$SIMULATOR_UDID" log show --last 20m --style compact \
+            --predicate 'process == "Runner" OR process == "SpringBoard"' \
+            > "$diagnostic_root/simulator.log" 2>&1 || true
+          xcrun simctl listapps "$SIMULATOR_UDID" > "$diagnostic_root/apps.plist" 2>&1 || true
 
       - name: Stop pinned remote fixture
         if: always()

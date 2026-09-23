@@ -1,6 +1,8 @@
 name: Provider canaries
 
 on:
+  schedule:
+    - cron: '17 4 * * *'
   workflow_dispatch:
     inputs:
       run_canaries:
@@ -30,16 +32,18 @@ concurrency:
 
 jobs:
   canary:
-    if: ${{ inputs.run_canaries }}
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.run_canaries) ||
+      (github.event_name == 'schedule' && vars.AI_SDK_ENABLE_SCHEDULED_CANARIES == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      OPENAI_API_KEY: ${{ inputs.openai_model != '' && secrets.OPENAI_API_KEY || '' }}
-      ANTHROPIC_API_KEY: ${{ inputs.anthropic_model != '' && secrets.ANTHROPIC_API_KEY || '' }}
-      GOOGLE_API_KEY: ${{ inputs.google_model != '' && secrets.GOOGLE_API_KEY || '' }}
-      OPENAI_CANARY_MODEL: ${{ inputs.openai_model }}
-      ANTHROPIC_CANARY_MODEL: ${{ inputs.anthropic_model }}
-      GOOGLE_CANARY_MODEL: ${{ inputs.google_model }}
+      OPENAI_API_KEY: ${{ ((github.event_name == 'schedule' && vars.OPENAI_CANARY_MODEL != '') || (github.event_name == 'workflow_dispatch' && inputs.openai_model != '')) && secrets.OPENAI_API_KEY || '' }}
+      ANTHROPIC_API_KEY: ${{ ((github.event_name == 'schedule' && vars.ANTHROPIC_CANARY_MODEL != '') || (github.event_name == 'workflow_dispatch' && inputs.anthropic_model != '')) && secrets.ANTHROPIC_API_KEY || '' }}
+      GOOGLE_API_KEY: ${{ ((github.event_name == 'schedule' && vars.GOOGLE_CANARY_MODEL != '') || (github.event_name == 'workflow_dispatch' && inputs.google_model != '')) && secrets.GOOGLE_API_KEY || '' }}
+      OPENAI_CANARY_MODEL: ${{ github.event_name == 'schedule' && vars.OPENAI_CANARY_MODEL || inputs.openai_model }}
+      ANTHROPIC_CANARY_MODEL: ${{ github.event_name == 'schedule' && vars.ANTHROPIC_CANARY_MODEL || inputs.anthropic_model }}
+      GOOGLE_CANARY_MODEL: ${{ github.event_name == 'schedule' && vars.GOOGLE_CANARY_MODEL || inputs.google_model }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

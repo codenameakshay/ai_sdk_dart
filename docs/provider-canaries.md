@@ -79,15 +79,23 @@ content; it reports only provider names, explicit model IDs, and failure types.
 
 ## GitHub Actions
 
-The `Provider canaries` workflow is manual only. Dispatch it with
-`run_canaries` enabled, enter the explicit model ID for each secret that is
-available, and leave other providers blank. The workflow maps only the three
-API key secrets and the three model inputs to the harness environment. It has
-no schedule, so a credentialed network request cannot start from a pull
-request or a timer.
+The `Provider canaries` workflow supports a manual dispatch and a daily
+scheduled run. Manual runs require `run_canaries` and an explicit model ID for
+each provider secret that is available. Scheduled runs are disabled unless the
+repository variable `AI_SDK_ENABLE_SCHEDULED_CANARIES` is exactly `true`.
 
-The dispatch form becomes available after this workflow is present on the
-repository's default branch. Until then, use the local command above.
+When scheduled runs are enabled, model IDs come from the repository variables
+`OPENAI_CANARY_MODEL`, `ANTHROPIC_CANARY_MODEL`, and `GOOGLE_CANARY_MODEL`.
+The workflow reads the matching API keys from repository secrets. A scheduled
+run with no complete key/model pair reports `NOT RUN` and fails, so enabling the
+schedule cannot silently claim a qualification result. When the repository
+variable is not `true`, the scheduled job is skipped.
+
+Each provider report includes UTC start and completion timestamps, elapsed
+milliseconds, provider name, and explicit model ID. The harness bounds each
+request with `maxOutputTokens` and a two-minute total timeout; the reasoning
+check uses a 4,096-token output limit. These limits keep scheduled runs
+reviewable and prevent an unbounded request loop.
 
 The workflow uses the pinned Flutter 3.44.3 toolchain and runs the same
 analysis and `--live` command shown above. No live canary run has been

@@ -112,13 +112,28 @@ Future<void> main(List<String> arguments) async {
 
   var failures = 0;
   for (final provider in providers) {
+    final startedAt = DateTime.now().toUtc();
+    final stopwatch = Stopwatch()..start();
+    stdout.writeln(
+      'RUN startedAt=${startedAt.toIso8601String()} '
+      'provider=${provider.name} model=${provider.model}',
+    );
     try {
       await runProviderCanary(provider);
-      stdout.writeln('PASS ${provider.name} model=${provider.model}');
+      stopwatch.stop();
+      stdout.writeln(
+        'PASS completedAt=${DateTime.now().toUtc().toIso8601String()} '
+        'elapsedMs=${stopwatch.elapsedMilliseconds} '
+        'provider=${provider.name} model=${provider.model}',
+      );
     } catch (error) {
+      stopwatch.stop();
       failures++;
       stderr.writeln(
-        'FAIL ${provider.name} model=${provider.model} error=${error.runtimeType}',
+        'FAIL completedAt=${DateTime.now().toUtc().toIso8601String()} '
+        'elapsedMs=${stopwatch.elapsedMilliseconds} '
+        'provider=${provider.name} model=${provider.model} '
+        'error=${error.runtimeType}',
       );
     }
   }

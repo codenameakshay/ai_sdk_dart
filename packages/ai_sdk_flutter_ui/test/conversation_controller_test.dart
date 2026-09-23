@@ -142,6 +142,119 @@ class _ControllableModel extends LanguageModelV4 {
   }
 }
 
+class _MetadataReasoningModel extends LanguageModelV4 {
+  @override
+  String get provider => 'test';
+
+  @override
+  String get modelId => 'metadata-reasoning';
+
+  @override
+  String get specificationVersion => 'v4';
+
+  @override
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
+  ) => throw UnimplementedError();
+
+  @override
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
+  ) async => LanguageModelV4StreamResult(
+    stream: Stream.fromIterable([
+      const StreamPartReasoningStart(
+        id: 'reasoning-1',
+        providerMetadata: {
+          'vendor': {'start': true, 'shared': 'start'},
+        },
+      ),
+      const StreamPartReasoningDelta(
+        id: 'reasoning-1',
+        delta: 'trace',
+        providerMetadata: {
+          'vendor': {'delta': true, 'shared': 'delta'},
+        },
+      ),
+      const StreamPartReasoningEnd(
+        id: 'reasoning-1',
+        signature: 'signature-1',
+        providerMetadata: {
+          'vendor': {'end': true, 'shared': 'end'},
+        },
+      ),
+      const StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
+    ]),
+  );
+}
+
+class _MetadataTextSequenceModel extends LanguageModelV4 {
+  final seenMessages = <List<LanguageModelV4Message>>[];
+  int calls = 0;
+
+  @override
+  String get provider => 'test';
+
+  @override
+  String get modelId => 'metadata-text';
+
+  @override
+  String get specificationVersion => 'v4';
+
+  @override
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
+  ) => throw UnimplementedError();
+
+  @override
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
+  ) async {
+    seenMessages.add(List.unmodifiable(options.prompt.messages));
+    final first = calls++ == 0;
+    final parts = first
+        ? <LanguageModelV4StreamPart>[
+            const StreamPartTextStart(
+              id: 'text-1',
+              providerMetadata: {
+                'vendor': {'start': true, 'shared': 'start'},
+              },
+            ),
+            const StreamPartTextDelta(
+              id: 'text-1',
+              delta: 'first',
+              providerMetadata: {
+                'vendor': {'delta': true, 'shared': 'delta'},
+              },
+            ),
+            const StreamPartTextEnd(
+              id: 'text-1',
+              providerMetadata: {
+                'vendor': {'end': true, 'shared': 'end'},
+              },
+            ),
+          ]
+        : <LanguageModelV4StreamPart>[
+            const StreamPartTextStart(id: 'text-2'),
+            const StreamPartTextDelta(id: 'text-2', delta: 'second'),
+            const StreamPartTextEnd(id: 'text-2'),
+          ];
+    return LanguageModelV4StreamResult(
+      stream: Stream.fromIterable([
+        ...parts,
+        const StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
+      ]),
+    );
+  }
+}
+
+class _UnsupportedConversationPart extends ConversationPart {
+  _UnsupportedConversationPart()
+    : super(id: 'unsupported-part', type: 'custom');
+
+  @override
+  Map<String, dynamic> toJson() => {'id': id, 'type': type};
+}
+
 ToolLoopAgent _textAgent(String text) =>
     ToolLoopAgent(model: MockLanguageModelV4(response: [mockText(text)]));
 
@@ -192,89 +305,186 @@ void main() {
     },
   );
 
-  test('local backend carries lossless typed history into the next turn', () async {
-    final model = _ApprovalSequenceModel([
-      [const LanguageModelV4TextPart(text: 'next answer')],
-    ]);
-    final initial = Conversation(
-      id: 'lossless-local',
-      messages: [
-        ConversationMessage(
-          id: 'assistant-1',
-          role: ConversationRole.assistant,
-          parts: [
-            ToolCallPart(
-              id: 'call-part',
-              callId: 'call-1',
-              name: 'search',
-              arguments: {'q': 'dart'},
-              providerExecuted: true,
-              providerOptions: {'vendor': {'trace': 't-1'}},
-            ),
-            ToolResultPart(
-              id: 'result-part',
-              callId: 'call-1',
-              toolName: 'search',
-              output: {'ok': true},
-              outputKind: 'json',
-              preliminary: true,
-              isDynamic: true,
-              providerOptions: {'vendor': {'requestId': 'r-1'}},
-            ),
-            ReasoningFilePart(
-              id: 'reasoning-file',
-              data: ConversationFileBytes(Uint8List.fromList([1, 2, 255])),
-              mimeType: 'application/octet-stream',
-            ),
-            DocumentSourcePart(
-              id: 'doc-source',
-              mediaType: 'application/pdf',
-              title: 'Paper',
-              providerMetadata: {'vendor': {'documentId': 'doc-1'}},
-            ),
-            UnknownPart(
-              id: 'opaque-part',
-              type: 'opaque',
-              raw: {
-                'id': 'opaque-part',
-                'type': 'opaque',
-                'provider': 'vendor-x',
-                'raw': ['opaque', 3],
-              },
+  test(
+    'local backend carries lossless typed history into the next turn',
+    () async {
+      final model = _ApprovalSequenceModel([
+        [const LanguageModelV4TextPart(text: 'next answer')],
+      ]);
+      final initial = Conversation(
+        id: 'lossless-local',
+        messages: [
+          ConversationMessage(
+            id: 'assistant-1',
+            role: ConversationRole.assistant,
+            parts: [
+              ToolCallPart(
+                id: 'call-part',
+                callId: 'call-1',
+                name: 'search',
+                arguments: {'q': 'dart'},
+                providerExecuted: true,
+                providerOptions: {
+                  'vendor': {'trace': 't-1'},
+                },
+              ),
+              ToolResultPart(
+                id: 'result-part',
+                callId: 'call-1',
+                toolName: 'search',
+                output: {'ok': true},
+                outputKind: 'json',
+                preliminary: true,
+                isDynamic: true,
+                providerOptions: {
+                  'vendor': {'requestId': 'r-1'},
+                },
+              ),
+              ReasoningFilePart(
+                id: 'reasoning-file',
+                data: ConversationFileBytes(Uint8List.fromList([1, 2, 255])),
+                mimeType: 'application/octet-stream',
+                name: 'trace.bin',
+              ),
+              DocumentSourcePart(
+                id: 'doc-source',
+                mediaType: 'application/pdf',
+                title: 'Paper',
+                providerMetadata: {
+                  'vendor': {'documentId': 'doc-1'},
+                },
+              ),
+              UnknownPart(
+                id: 'opaque-part',
+                type: 'opaque',
+                raw: {
+                  'id': 'opaque-part',
+                  'type': 'opaque',
+                  'provider': 'vendor-x',
+                  'raw': ['opaque', 3],
+                },
+              ),
+            ],
+          ),
+        ],
+      );
+      final backend = LocalConversationBackend(
+        agent: ToolLoopAgent(model: model),
+        initial: initial,
+      );
+
+      await backend.send('continue');
+
+      final assistant = model.seenMessages.single.singleWhere(
+        (message) => message.role == LanguageModelV4Role.assistant,
+      );
+      final parts = assistant.content;
+      final call = parts.whereType<LanguageModelV4ToolCallPart>().single;
+      expect(call.toolCallId, 'call-1');
+      expect(call.providerExecuted, isTrue);
+      expect(call.providerOptions?['vendor'], {'trace': 't-1'});
+      final result = parts.whereType<LanguageModelV4ToolResultPart>().single;
+      expect(result.output, isA<ToolResultOutputJson>());
+      expect(result.preliminary, isTrue);
+      expect(result.isDynamic, isTrue);
+      expect(result.providerOptions?['vendor'], {'requestId': 'r-1'});
+      final file = parts.whereType<LanguageModelV4ReasoningFilePart>().single;
+      expect((file.data as DataContentBytes).bytes, [1, 2, 255]);
+      expect(file.filename, 'trace.bin');
+      final document = parts
+          .whereType<LanguageModelV4DocumentSourcePart>()
+          .single;
+      expect(document.id, 'doc-source');
+      expect(document.providerMetadata?['vendor'], {'documentId': 'doc-1'});
+      final opaque = parts.whereType<LanguageModelV4OpaquePart>().single;
+      expect(opaque.provider, 'vendor-x');
+      expect(opaque.raw, ['opaque', 3]);
+      await backend.dispose();
+    },
+  );
+
+  test(
+    'accumulates reasoning provider metadata across stream events',
+    () async {
+      final backend = LocalConversationBackend(
+        agent: ToolLoopAgent(model: _MetadataReasoningModel()),
+        initial: _empty(),
+      );
+
+      await backend.send('trace');
+
+      final reasoning = backend.conversation.messages
+          .expand((message) => message.parts)
+          .whereType<ReasoningPart>()
+          .single;
+      expect(reasoning.text, 'trace');
+      expect(reasoning.signature, 'signature-1');
+      expect(reasoning.metadata, {
+        'vendor': {'start': true, 'delta': true, 'end': true, 'shared': 'end'},
+      });
+      expect(reasoning.providerOptions, reasoning.metadata);
+      await backend.dispose();
+    },
+  );
+
+  test('persists text provider metadata into the next local request', () async {
+    final model = _MetadataTextSequenceModel();
+    final backend = LocalConversationBackend(
+      agent: ToolLoopAgent(model: model),
+      initial: _empty(),
+    );
+
+    await backend.send('first');
+    final firstText = backend.conversation.messages
+        .where((message) => message.role == ConversationRole.assistant)
+        .expand((message) => message.parts)
+        .whereType<TextPart>()
+        .singleWhere((part) => part.text == 'first');
+    expect(firstText.providerOptions, {
+      'vendor': {'start': true, 'delta': true, 'end': true, 'shared': 'end'},
+    });
+
+    await backend.send('second');
+    final replayedAssistant = model.seenMessages[1].singleWhere(
+      (message) => message.role == LanguageModelV4Role.assistant,
+    );
+    final replayedText = replayedAssistant.content
+        .whereType<LanguageModelV4TextPart>()
+        .single;
+    expect(replayedText.providerOptions, firstText.providerOptions);
+    await backend.dispose();
+  });
+
+  test(
+    'unsupported conversation parts fail before provider dispatch',
+    () async {
+      final model = _ApprovalSequenceModel([
+        [const LanguageModelV4TextPart(text: 'unexpected')],
+      ]);
+      final backend = LocalConversationBackend(
+        agent: ToolLoopAgent(model: model),
+        initial: Conversation(
+          id: 'unsupported-history',
+          messages: [
+            ConversationMessage(
+              id: 'assistant-1',
+              role: ConversationRole.assistant,
+              parts: [_UnsupportedConversationPart()],
             ),
           ],
         ),
-      ],
-    );
-    final backend = LocalConversationBackend(
-      agent: ToolLoopAgent(model: model),
-      initial: initial,
-    );
+      );
 
-    await backend.send('continue');
+      await backend.send('continue');
 
-    final assistant = model.seenMessages.single
-        .singleWhere((message) => message.role == LanguageModelV4Role.assistant);
-    final parts = assistant.content;
-    final call = parts.whereType<LanguageModelV4ToolCallPart>().single;
-    expect(call.toolCallId, 'call-1');
-    expect(call.providerExecuted, isTrue);
-    expect(call.providerOptions?['vendor'], {'trace': 't-1'});
-    final result = parts.whereType<LanguageModelV4ToolResultPart>().single;
-    expect(result.output, isA<ToolResultOutputJson>());
-    expect(result.preliminary, isTrue);
-    expect(result.isDynamic, isTrue);
-    expect(result.providerOptions?['vendor'], {'requestId': 'r-1'});
-    final file = parts.whereType<LanguageModelV4ReasoningFilePart>().single;
-    expect((file.data as DataContentBytes).bytes, [1, 2, 255]);
-    final document = parts.whereType<LanguageModelV4DocumentSourcePart>().single;
-    expect(document.id, 'doc-source');
-    expect(document.providerMetadata?['vendor'], {'documentId': 'doc-1'});
-    final opaque = parts.whereType<LanguageModelV4OpaquePart>().single;
-    expect(opaque.provider, 'vendor-x');
-    expect(opaque.raw, ['opaque', 3]);
-    await backend.dispose();
-  });
+      expect(model.streamCalls, 0);
+      expect(
+        backend.conversation.messages.last.status,
+        ConversationMessageStatus.failed,
+      );
+      await backend.dispose();
+    },
+  );
 
   test(
     'remote approval resumes once and preserves the conversation history',
@@ -635,6 +845,245 @@ void main() {
       );
       await first.dispose();
       await second.dispose();
+    },
+  );
+
+  test(
+    'restored approval replays the complete provider content tree',
+    () async {
+      final continuation = _ApprovalSequenceModel([
+        [const LanguageModelV4TextPart(text: 'resumed')],
+      ]);
+      var executions = 0;
+      final backend = LocalConversationBackend(
+        agent: ToolLoopAgent(
+          model: continuation,
+          maxSteps: 2,
+          approvalPolicyRevision: 'v1',
+          tools: {'delete': _countedApprovalTool(() => executions++)},
+        ),
+        initial: _empty(),
+      );
+      final snapshot = Conversation(
+        id: 'rich-replay',
+        messages: [
+          ConversationMessage(
+            id: 'user-1',
+            role: ConversationRole.user,
+            parts: [TextPart(id: 'user-text', text: 'delete it')],
+          ),
+          ConversationMessage(
+            id: 'assistant-1',
+            role: ConversationRole.assistant,
+            status: ConversationMessageStatus.pendingApproval,
+            parts: [
+              TextPart(
+                id: 'assistant-text',
+                text: 'I will delete it',
+                providerOptions: {
+                  'vendor': {'segment': 'answer'},
+                },
+              ),
+              ReasoningPart(
+                id: 'assistant-reasoning',
+                text: 'checking permissions',
+                signature: 'sig-replay',
+                providerOptions: {
+                  'vendor': {'trace': 'trace-1'},
+                },
+              ),
+              ImagePart(
+                id: 'assistant-image',
+                data: ConversationFileBytes(Uint8List.fromList([1, 2, 3])),
+                mimeType: 'image/png',
+                providerOptions: {
+                  'vendor': {'image': 'img-1'},
+                },
+              ),
+              RedactedReasoningPart(
+                id: 'assistant-redacted',
+                data: Uint8List.fromList([4, 5, 6]),
+                providerOptions: {
+                  'vendor': {'redacted': true},
+                },
+              ),
+              FilePart(
+                id: 'assistant-file',
+                data: ConversationFileProviderReference(
+                  namespace: 'vendor',
+                  id: 'file-1',
+                ),
+                mimeType: 'application/pdf',
+                name: 'report.pdf',
+                providerOptions: {
+                  'vendor': {'file': 'file-1'},
+                },
+              ),
+              SourcePart(
+                id: 'assistant-source',
+                uri: 'https://example.com/source',
+                title: 'Source',
+                providerMetadata: {
+                  'vendor': {'citation': 'cite-1'},
+                },
+              ),
+              UnknownPart(
+                id: 'assistant-opaque',
+                type: 'opaque',
+                raw: {
+                  'id': 'assistant-opaque',
+                  'type': 'opaque',
+                  'provider': 'vendor',
+                  'raw': {'token': 'opaque-1'},
+                },
+              ),
+              ToolCallPart(
+                id: 'old-call-part',
+                callId: 'old-call',
+                name: 'lookup',
+                arguments: {'id': 'old'},
+                providerOptions: {
+                  'vendor': {'call': 'old'},
+                },
+                providerExecuted: true,
+              ),
+              ToolResultPart(
+                id: 'old-result-part',
+                callId: 'old-call',
+                toolName: 'lookup',
+                output: [
+                  {
+                    'type': 'text',
+                    'text': 'lookup result',
+                    'providerOptions': {
+                      'vendor': {'result': 'old'},
+                    },
+                  },
+                ],
+                outputKind: 'content',
+                providerOptions: {
+                  'vendor': {'result': 'old'},
+                },
+              ),
+              ToolCallPart(
+                id: 'pending-call-part',
+                callId: 'pending-call',
+                name: 'delete',
+                arguments: const {},
+                providerOptions: {
+                  'vendor': {'call': 'pending'},
+                },
+              ),
+              ApprovalPart(
+                id: 'approval-delete',
+                callId: 'pending-call',
+                approvalId: 'approval-delete',
+                toolName: 'delete',
+                argumentsFingerprint: '{}',
+                policyVersion: 'v1',
+                status: ApprovalStatus.pending,
+              ),
+            ],
+          ),
+        ],
+      );
+
+      await backend.restore(ConversationCodec.encode(snapshot));
+      await backend.respondToApproval(
+        approvalId: 'approval-delete',
+        approved: true,
+      );
+      await pumpUntil(
+        () => backend.conversation.messages.any(
+          (message) =>
+              message.status == ConversationMessageStatus.complete &&
+              message.parts.whereType<TextPart>().any(
+                (part) => part.text == 'resumed',
+              ),
+        ),
+      );
+
+      final prompt = continuation.seenMessages.single;
+      final assistant = prompt.singleWhere(
+        (message) => message.role == LanguageModelV4Role.assistant,
+      );
+      final assistantParts = assistant.content;
+      expect(
+        assistantParts
+            .whereType<LanguageModelV4TextPart>()
+            .single
+            .providerOptions,
+        {
+          'vendor': {'segment': 'answer'},
+        },
+      );
+      final reasoning = assistantParts
+          .whereType<LanguageModelV4ReasoningPart>()
+          .single;
+      expect(reasoning.signature, 'sig-replay');
+      expect(reasoning.providerOptions, {
+        'vendor': {'trace': 'trace-1'},
+      });
+      final image = assistantParts.whereType<LanguageModelV4ImagePart>().single;
+      expect(image.mediaType, 'image/png');
+      expect(image.providerOptions, {
+        'vendor': {'image': 'img-1'},
+      });
+      expect((image.image as DataContentBytes).bytes, [1, 2, 3]);
+      final redacted = assistantParts
+          .whereType<LanguageModelV4RedactedReasoningPart>()
+          .single;
+      expect(redacted.providerOptions, {
+        'vendor': {'redacted': true},
+      });
+      expect(redacted.data, [4, 5, 6]);
+      final file = assistantParts.whereType<LanguageModelV4FilePart>().single;
+      expect(file.filename, 'report.pdf');
+      expect(file.providerOptions, {
+        'vendor': {'file': 'file-1'},
+      });
+      expect(file.data, isA<DataContentProviderReference>());
+      final source = assistantParts
+          .whereType<LanguageModelV4SourcePart>()
+          .single;
+      expect(source.providerMetadata, {
+        'vendor': {'citation': 'cite-1'},
+      });
+      final opaque = assistantParts
+          .whereType<LanguageModelV4OpaquePart>()
+          .single;
+      expect(opaque.provider, 'vendor');
+      expect(opaque.raw, {'token': 'opaque-1'});
+      final oldCall = assistantParts
+          .whereType<LanguageModelV4ToolCallPart>()
+          .singleWhere((part) => part.toolCallId == 'old-call');
+      expect(oldCall.providerOptions, {
+        'vendor': {'call': 'old'},
+      });
+      expect(oldCall.providerExecuted, isTrue);
+      final pendingCall = assistantParts
+          .whereType<LanguageModelV4ToolCallPart>()
+          .singleWhere((part) => part.toolCallId == 'pending-call');
+      expect(pendingCall.providerOptions, {
+        'vendor': {'call': 'pending'},
+      });
+      expect(pendingCall.providerExecuted, isFalse);
+
+      final oldResult = prompt
+          .where((message) => message.role == LanguageModelV4Role.tool)
+          .expand((message) => message.content)
+          .whereType<LanguageModelV4ToolResultPart>()
+          .singleWhere((part) => part.toolCallId == 'old-call');
+      expect(oldResult.providerOptions, {
+        'vendor': {'result': 'old'},
+      });
+      final content = oldResult.output as ToolResultOutputContent;
+      final contentText = content.parts.single as LanguageModelV4TextPart;
+      expect(contentText.providerOptions, {
+        'vendor': {'result': 'old'},
+      });
+      expect(executions, 1);
+      await backend.dispose();
     },
   );
 

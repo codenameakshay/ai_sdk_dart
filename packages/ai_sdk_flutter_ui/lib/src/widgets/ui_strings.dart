@@ -1,5 +1,13 @@
 import 'package:flutter/widgets.dart';
 
+typedef AiSdkUiFormatter = String Function(String value);
+
+String _toolApprovalRequired(String toolName) =>
+    'Tool approval required for $toolName';
+String _documentSource(String title) => 'Document source: $title';
+String _document(String mediaType) => '$mediaType document';
+String _toolCall(String toolName) => 'Tool call: $toolName';
+
 /// Built-in labels used by the prebuilt chat widgets.
 ///
 /// Apps can provide translated labels by placing an
@@ -33,6 +41,18 @@ class AiSdkUiStrings {
     this.attachment = 'Attachment',
     this.openAttachment = 'Open attachment',
     this.reasoningAttachment = 'Reasoning attachment',
+    this.copyMessage = 'Copy message',
+    this.regenerateResponse = 'Regenerate response',
+    this.goodResponse = 'Good response',
+    this.badResponse = 'Bad response',
+    this.toolError = 'Tool error',
+    this.toolResult = 'Tool result',
+    this.error = 'Error',
+    this.result = 'Result',
+    this.toolApprovalRequired = _toolApprovalRequired,
+    this.documentSource = _documentSource,
+    this.document = _document,
+    this.toolCall = _toolCall,
   });
 
   final String messageHint;
@@ -60,6 +80,18 @@ class AiSdkUiStrings {
   final String attachment;
   final String openAttachment;
   final String reasoningAttachment;
+  final String copyMessage;
+  final String regenerateResponse;
+  final String goodResponse;
+  final String badResponse;
+  final String toolError;
+  final String toolResult;
+  final String error;
+  final String result;
+  final AiSdkUiFormatter toolApprovalRequired;
+  final AiSdkUiFormatter documentSource;
+  final AiSdkUiFormatter document;
+  final AiSdkUiFormatter toolCall;
 }
 
 /// Inherited localization scope for the built-in Flutter UI labels.

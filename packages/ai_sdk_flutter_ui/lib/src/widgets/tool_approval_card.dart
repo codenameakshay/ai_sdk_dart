@@ -100,7 +100,7 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
 
     return Semantics(
       container: true,
-      label: 'Tool approval required for ${call.toolName}',
+      label: strings.toolApprovalRequired(call.toolName),
       child: Card(
         margin: const EdgeInsets.symmetric(vertical: 4),
         elevation: 0,

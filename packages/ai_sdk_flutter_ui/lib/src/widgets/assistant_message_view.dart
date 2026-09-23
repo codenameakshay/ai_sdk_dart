@@ -7,6 +7,7 @@ import 'reasoning_view.dart';
 import 'source_citations.dart';
 import 'tool_approval_card.dart';
 import 'tool_call_card.dart';
+import 'ui_strings.dart';
 
 /// Signature for rendering a text segment of an assistant message. Use it to
 /// plug in a markdown renderer of your choice — the package stays dependency
@@ -122,7 +123,7 @@ class AssistantMessageView extends StatelessWidget {
           case LanguageModelV4SourcePart():
             sources.add(part);
           case LanguageModelV4DocumentSourcePart():
-            children.add(_documentSource(part));
+            children.add(_documentSource(context, part));
           case LanguageModelV4RedactedReasoningPart():
           case LanguageModelV4ToolResultPart():
           case LanguageModelV4ToolApprovalResponse():
@@ -173,15 +174,19 @@ class AssistantMessageView extends StatelessWidget {
     );
   }
 
-  Widget _documentSource(LanguageModelV4DocumentSourcePart source) {
+  Widget _documentSource(
+    BuildContext context,
+    LanguageModelV4DocumentSourcePart source,
+  ) {
+    final strings = AiSdkUiStringsScope.of(context);
     final mediaType = source.mediaType;
     final detail = mediaType.isEmpty ? null : mediaType;
     return Semantics(
       container: true,
-      label: 'Document source: ${source.title}',
+      label: strings.documentSource(source.title),
       value: detail,
       child: Tooltip(
-        message: detail == null ? source.title : '$detail document',
+        message: detail == null ? source.title : strings.document(detail),
         child: Chip(
           avatar: const Icon(Icons.description_outlined, size: 16),
           label: Text(source.title),

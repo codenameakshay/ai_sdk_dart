@@ -129,7 +129,7 @@ class _ScrollToBottomButtonState extends State<ScrollToBottomButton> {
         child: IconButton.filledTonal(
           key: const ValueKey('scroll-to-bottom'),
           onPressed: _scrollToBottom,
-          tooltip: 'Scroll to latest message',
+          tooltip: AiSdkUiStringsScope.of(context).scrollToLatest,
           constraints: const BoxConstraints.tightFor(width: 48, height: 48),
           icon: Icon(widget.icon),
         ),

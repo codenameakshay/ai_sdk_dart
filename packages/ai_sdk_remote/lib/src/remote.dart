@@ -786,6 +786,13 @@ class _ConversationReducer {
     if (!_toolIndexes.containsKey(callId)) {
       throw RemoteProtocolException('Approval without tool input $callId');
     }
+    if (_parts.whereType<ToolResultPart>().any(
+      (result) => result.callId == callId,
+    )) {
+      throw RemoteProtocolException(
+        'Approval after completed tool call $callId',
+      );
+    }
     _approvalCalls[approvalId] = callId;
     _addPart(
       ApprovalPart(

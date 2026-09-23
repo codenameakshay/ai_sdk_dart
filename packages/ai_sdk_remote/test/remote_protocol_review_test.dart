@@ -10,6 +10,21 @@ import 'package:test/test.dart';
 
 void main() {
   test(
+    'rejects an approval request after a terminal tool input error',
+    () async {
+      await _expectSendError(
+        'data: {"type":"start"}\n\n'
+        'data: {"type":"tool-input-error","toolCallId":"call-1",'
+        '"toolName":"search","input":{},"errorText":"invalid"}\n\n'
+        'data: {"type":"tool-approval-request","approvalId":"approval-1",'
+        '"toolCallId":"call-1"}\n\n'
+        'data: [DONE]\n\n',
+        isA<RemoteProtocolException>(),
+      );
+    },
+  );
+
+  test(
     'merges static and async authentication headers before dispatch',
     () async {
       late http.BaseRequest sent;
@@ -515,12 +530,14 @@ void main() {
         return _response(
           'data: {"type":"start","messageId":"assistant-1",'
           '"messageMetadata":{"phase":"one"}}\n\n'
-          'data: {"type":"tool-input-start","toolCallId":"call-1",'
+          'data: {"type":"tool-input-start","toolCallId":"failed-call",'
           '"toolName":"search"}\n\n'
-          'data: {"type":"tool-input-delta","toolCallId":"call-1",'
+          'data: {"type":"tool-input-delta","toolCallId":"failed-call",'
           '"inputTextDelta":"{\\"q\\":\\"dart\\"}"}\n\n'
-          'data: {"type":"tool-input-error","toolCallId":"call-1",'
+          'data: {"type":"tool-input-error","toolCallId":"failed-call",'
           '"toolName":"search","input":{},"errorText":"bad input"}\n\n'
+          'data: {"type":"tool-input-available","toolCallId":"call-1",'
+          '"toolName":"search","input":{"q":"dart"}}\n\n'
           'data: {"type":"tool-approval-request","approvalId":"approval-1",'
           '"toolCallId":"call-1"}\n\n'
           'data: {"type":"tool-approval-response","approvalId":"approval-1",'

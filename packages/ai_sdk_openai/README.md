@@ -110,6 +110,41 @@ final result = await generateObject(
 print(result.object); // {city: Paris, country: France}
 ```
 
+### Computer tool output
+
+Computer screenshots use a provider-neutral, camelCase result shape at the
+public `LanguageModelV4` boundary. Supply the screenshot under `output` and
+include safety acknowledgements under `acknowledgedSafetyChecks`:
+
+```dart
+import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+
+const computerToolResult = LanguageModelV4ToolResultPart(
+  toolCallId: 'call-computer',
+  toolName: 'computer',
+  output: ToolResultOutputJson({
+    'output': {
+      'type': 'computer_screenshot',
+      'imageUrl': 'https://example.test/screenshot.png',
+      'detail': 'high',
+    },
+    'acknowledgedSafetyChecks': [
+      {
+        'id': 'safety-1',
+        'code': 'external_side_effect',
+        'message': 'Reviewed by the user',
+      },
+    ],
+  }),
+);
+```
+
+The OpenAI Responses adapter converts this public shape to the wire shape
+(`image_url`, `acknowledged_safety_checks`, and related fields) when it sends
+the computer result. Older provisional integrations that put `type` and
+`image_url` directly at the top level should migrate to the wrapper above and
+use `imageUrl`/`fileId` and `acknowledgedSafetyChecks` at the public boundary.
+
 ### Custom API key / base URL
 
 ```dart

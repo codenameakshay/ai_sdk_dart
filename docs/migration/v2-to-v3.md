@@ -103,10 +103,127 @@ The [runnable migration example](../../packages/ai_sdk_dart/example/migration/v3
 uses canonical callbacks and reuses returned messages in a second call. It runs
 as part of the core test suite.
 
-## Pending migration sections
+## Canonical streams and body inclusion
 
-Canonical file/reference types, request-level approval policy, context
-separation, canonical streams, raw/body inclusion, and persisted-conversation
-remote transport examples are still being implemented. Their required semantics
-are fixed in ADR 0005. Each section must gain a compiling example and behavioral
-test before this guide is release-ready.
+`stream` is the exhaustive core event stream. `providerStream` exposes the
+provider-part stream for adapter integrations, and `fullStream` remains a
+deprecated alias of `stream` during v3. It does not create a second producer.
+
+```dart
+final result = await streamText(
+  model: model,
+  prompt: 'Say hello.',
+  bodyInclusion: const BodyInclusionPolicy.all(),
+);
+final events = result.stream;
+final providerParts = result.providerStream;
+assert(identical(events, result.fullStream));
+```
+
+Request and response bodies, plus raw chunks, remain omitted by default. Use a
+typed `BodyInclusionPolicy` only when an integration has a reason to retain
+those payloads and can protect their contents. The compiling contract example
+is [`v3_contracts.dart`](../../packages/ai_sdk_dart/example/migration/v3_contracts.dart),
+covered by `v3_contracts_example_test.dart`.
+
+## Context and request approval
+
+Use `toolWithContext` when a tool needs typed application context. The context
+is delivered to the executor and is kept out of provider messages and
+persistence. Put approval at the request or agent boundary:
+
+```dart
+final tool = toolWithContext<Map<String, dynamic>, String, String>(
+  context: 'tenant-1',
+  inputSchema: jsonSchema({'type': 'object'}),
+  execute: (input, tenant, _) async => '$tenant:${input['value']}',
+);
+
+final result = await generateText(
+  model: model,
+  prompt: 'Use the tenant tool.',
+  tools: {'lookup': tool},
+  approvalPolicy: ToolApprovalPolicy.always,
+);
+```
+
+An approval request is not an executed result. On restore, bind a response to
+the exact call ID, arguments and policy revision before executing it. The
+example and test exercise construction and execution without a provider key;
+device and hosted approval UX remain separate qualification work.
+
+## Files and provider references
+
+Use canonical file parts for bytes, URLs and opaque provider references. Keep a
+provider reference namespaced so another adapter cannot mistake an ID for a
+URL:
+
+```dart
+const file = LanguageModelV4FilePart(
+  data: DataContentProviderReference(namespace: 'openai', id: 'file-1'),
+  mediaType: 'application/pdf',
+  filename: 'contract.pdf',
+);
+final message = ModelMessage.parts(
+  role: ModelMessageRole.user,
+  parts: [file],
+);
+```
+
+The receiving provider decides whether it can serialize that namespace. It
+must reject an unrelated provider reference rather than downloading or
+reinterpreting it as a URL. Byte and URL examples are covered by provider and
+conversation fixtures; live hosted-file qualification is still outstanding.
+
+## Persisted conversations and remote transport
+
+Conversation persistence is independent of package version. Encode and decode
+the immutable snapshot with `ConversationCodec`, then send the restored state
+through the remote transport when the application has an authenticated
+backend:
+
+```dart
+final wire = ConversationCodec.encode(conversation);
+final restored = ConversationCodec.decode(wire);
+final transport = RemoteConversationTransport(
+  endpoint: Uri.parse('https://example.test/api/chat'),
+);
+await for (final update in transport.send(restored)) {
+  // Render immutable snapshots; the remote adapter does not execute tools.
+}
+await transport.dispose();
+```
+
+The runnable persistence example is
+[`packages/ai_sdk_conversation/example/example.dart`](../../packages/ai_sdk_conversation/example/example.dart).
+The remote example and pinned backend are
+[`packages/ai_sdk_remote/example/example.dart`](../../packages/ai_sdk_remote/example/example.dart)
+and [`examples/remote_backend`](../../examples/remote_backend). They prove
+offline codec and scripted transport behavior. They do not certify browser
+resumption, production authorization, provider-key isolation, or device
+qualification.
+
+## Aggregate results and final-step reasoning
+
+`usage`, `content`, `toolCalls`, `toolResults`, `sources`, `files`, warnings,
+and reasoning aggregate successful steps in chronological order. `text`,
+structured `output`, and `finalStep` describe the last successful step. Read
+`finalStep.reasoning` when the application needs reasoning from only the final
+step; read `result.reasoning` when it needs the aggregate. A failed or
+interrupted operation does not invent a final step.
+
+The migration example in
+[`v3_contracts.dart`](../../packages/ai_sdk_dart/example/migration/v3_contracts.dart)
+and its focused test compile these public boundaries. Overall v3 release
+qualification remains incomplete until live provider, platform, hosted-file,
+and production remote evidence is collected; these examples document the
+contract and do not replace that evidence.
+
+## Realtime preview packaging
+
+`ai_sdk_realtime` is versioned as `3.0.0-dev.1` and remains
+`publish_to: none`. It is intentionally excluded from the stable package
+publication set until authenticated transport, bounded lifetime, mobile and
+desktop device behavior, and typed event qualification are complete. The
+preview package can track the v3 contracts in the workspace without making a
+stable realtime support claim.

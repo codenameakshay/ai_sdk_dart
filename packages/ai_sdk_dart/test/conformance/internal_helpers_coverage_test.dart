@@ -41,6 +41,20 @@ void main() {
         expect(partialJsonFingerprint(_Unencodable()), 'Unencodable()');
       },
     );
+
+    test('tracks immutable list snapshot copies', () {
+      final counters = PartialJsonDebugCounters();
+      final previous = partialJsonDebugCounters;
+      partialJsonDebugCounters = counters;
+      try {
+        final snapshot = createTrackedImmutableSnapshot([1, 2, 3]);
+        expect(snapshot, [1, 2, 3]);
+        expect(counters.snapshotCount, 1);
+        expect(counters.snapshotElementsCopied, 3);
+      } finally {
+        partialJsonDebugCounters = previous;
+      }
+    });
   });
 
   group('structured output helpers', () {

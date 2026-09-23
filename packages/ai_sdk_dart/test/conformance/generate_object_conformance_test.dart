@@ -155,6 +155,20 @@ void main() {
       },
     );
 
+    test('includes response metadata on structured output errors', () async {
+      final model = _MetadataObjectModel('not json');
+      await expectLater(
+        generateObject(model: model, schema: schema, prompt: 'name?'),
+        throwsA(
+          isA<AiNoObjectGeneratedError>().having(
+            (error) => error.response?.id,
+            'response id',
+            'response-1',
+          ),
+        ),
+      );
+    });
+
     test('recovers JSON from ```json``` fences', () async {
       final model = FakeTextModel('```json\n{"name":"Bob"}\n```');
       final result = await generateObject(

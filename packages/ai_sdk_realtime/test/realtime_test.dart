@@ -6,6 +6,89 @@ import 'package:ai_sdk_realtime/ai_sdk_realtime.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('rejects invalid GA session controls before sending them', () {
+    expect(
+      () => const RealtimeFunctionTool(name: '', parameters: {}).toJson(),
+      throwsArgumentError,
+    );
+    expect(
+      () => const RealtimeFunctionTool(
+        name: 'lookup',
+        parameters: {'type': 'array'},
+      ).toJson(),
+      throwsArgumentError,
+    );
+    for (final config in [
+      const RealtimeServerVad(idleTimeoutMs: -1),
+      const RealtimeServerVad(prefixPaddingMs: -1),
+      const RealtimeServerVad(silenceDurationMs: -1),
+      const RealtimeServerVad(threshold: -0.1),
+      const RealtimeServerVad(threshold: 1.1),
+    ]) {
+      expect(config.toJson, throwsArgumentError);
+    }
+    expect(
+      () => const RealtimeSemanticVad(eagerness: 'immediate').toJson(),
+      throwsArgumentError,
+    );
+    expect(const RealtimeAudioFormat(type: 'audio/pcmu').toJson(), {
+      'type': 'audio/pcmu',
+    });
+  });
+
+  test(
+    'types transcript and speech events and keeps unknown events opaque',
+    () {
+      expect(
+        () => RealtimeEvent.fromJson({}),
+        throwsA(isA<RealtimeException>()),
+      );
+      final delta =
+          RealtimeEvent.fromJson({
+                'type': 'conversation.item.input_audio_transcription.delta',
+                'delta': 'hello',
+                'item_id': 'item-1',
+                'content_index': 2,
+                'logprobs': [
+                  {'token': 'hello'},
+                ],
+              })
+              as RealtimeTranscriptDelta;
+      expect(delta.delta, 'hello');
+      expect(delta.itemId, 'item-1');
+      expect(delta.contentIndex, 2);
+      expect(delta.logprobs, [
+        {'token': 'hello'},
+      ]);
+      final failed =
+          RealtimeEvent.fromJson({
+                'type': 'conversation.item.input_audio_transcription.failed',
+                'error': {'code': 'bad_audio'},
+              })
+              as RealtimeTranscriptFailed;
+      expect(failed.error, {'code': 'bad_audio'});
+      final spoken =
+          RealtimeEvent.fromJson({
+                'type': 'response.output_audio_transcript.done',
+                'transcript': 'hello back',
+                'response_id': 'response-1',
+              })
+              as RealtimeOutputTranscriptDone;
+      expect(spoken.transcript, 'hello back');
+      expect(spoken.responseId, 'response-1');
+      expect(
+        RealtimeEvent.fromJson({'type': 'input_audio_buffer.speech_started'}),
+        isA<RealtimeSpeechEvent>(),
+      );
+      final unknown = RealtimeEvent.fromJson({
+        'type': 'future.event',
+        'provider': {'opaque': true},
+      });
+      expect(unknown, isA<RealtimeUnknownEvent>());
+      expect(unknown.raw['provider'], {'opaque': true});
+    },
+  );
+
   test('serializes typed GA session tools and turn detection', () {
     const config = RealtimeSessionConfig(
       outputModalities: ['audio', 'text'],

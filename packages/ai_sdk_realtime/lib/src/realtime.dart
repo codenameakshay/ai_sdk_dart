@@ -291,8 +291,12 @@ class RealtimeTextDelta extends RealtimeEvent {
 class RealtimeAudioDelta extends RealtimeEvent {
   RealtimeAudioDelta(Map<String, dynamic> raw)
     : super('response.output_audio.delta', raw);
-  Uint8List get audio =>
-      Uint8List.fromList(base64.decode(raw['delta'] as String? ?? ''));
+  Uint8List get audio {
+    final encoded = raw['delta'] as String? ?? '';
+    final padded = '$encoded${'=' * ((4 - encoded.length % 4) % 4)}';
+    return Uint8List.fromList(base64.decode(padded));
+  }
+
   String? get itemId => raw['item_id'] as String?;
   String? get responseId => raw['response_id'] as String?;
 }

@@ -718,4 +718,196 @@ void main() {
       );
     }
   });
+
+  test('preserves source metadata and serializes provider references', () {
+    final value = Conversation(
+      id: 'sources',
+      messages: [
+        ConversationMessage(
+          id: 'm1',
+          role: ConversationRole.assistant,
+          parts: [
+            SourcePart(
+              id: 'source',
+              uri: 'https://example.test/article',
+              metadata: {'position': 2},
+              providerMetadata: {
+                'search': {'rank': 1},
+              },
+            ),
+            ImagePart(
+              id: 'image',
+              data: ConversationFileProviderReference(
+                namespace: 'images',
+                id: 'image-1',
+              ),
+            ),
+            FilePart(
+              id: 'file',
+              mimeType: 'application/pdf',
+              data: ConversationFileProviderReference(
+                namespace: 'storage',
+                id: 'asset-1',
+              ),
+            ),
+            ReasoningFilePart(
+              id: 'reasoning-file',
+              mimeType: 'application/octet-stream',
+              data: ConversationFileProviderReference(
+                namespace: 'reasoning',
+                id: 'trace-1',
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+
+    final encoded = ConversationCodec.encode(value);
+    final parts = (encoded['messages'] as List).single['parts'] as List;
+    expect(parts[0]['metadata'], {'position': 2});
+    expect(parts[0]['providerMetadata'], {
+      'search': {'rank': 1},
+    });
+    expect(parts[1]['data'], {
+      'kind': 'provider_reference',
+      'namespace': 'images',
+      'id': 'image-1',
+    });
+    expect(parts[2]['data'], {
+      'kind': 'provider_reference',
+      'namespace': 'storage',
+      'id': 'asset-1',
+    });
+    expect(parts[3]['data'], {
+      'kind': 'provider_reference',
+      'namespace': 'reasoning',
+      'id': 'trace-1',
+    });
+    expect(ConversationCodec.decode(encoded), value);
+  });
+
+  test('rejects malformed unknown envelopes and field types', () {
+    Map<String, dynamic> envelope(Object? part) => {
+      'schemaVersion': 1,
+      'id': 'c1',
+      'messages': [
+        {
+          'id': 'm1',
+          'role': 'assistant',
+          'status': 'complete',
+          'parts': [part],
+        },
+      ],
+    };
+    final malformed = <Object?>[
+      {'id': 'p1', 'type': 'future', 4: 'bad-key'},
+      {'id': 'p1', 'type': 'source', 'uri': 3},
+      {'id': 'p1', 'type': 'source', 'uri': 'u', 'title': 3},
+      {'id': 'p1', 'type': 'source', 'uri': 'u', 'metadata': []},
+      {'id': 'p1', 'type': 'source', 'uri': 'u', 'providerMetadata': []},
+      {
+        'id': 'p1',
+        'type': 'file',
+        'mimeType': 'application/pdf',
+        'data': {'kind': 'bytes'},
+      },
+      {
+        'id': 'p1',
+        'type': 'file',
+        'mimeType': 'application/pdf',
+        'data': {'kind': 'unknown'},
+      },
+      {
+        'id': 'p1',
+        'type': 'tool_call',
+        'callId': 'c1',
+        'name': 'tool',
+        'arguments': [],
+      },
+      {
+        'id': 'p1',
+        'type': 'file',
+        'mimeType': 'application/pdf',
+        'data': {
+          'kind': 'provider_reference',
+          'namespace': 'storage',
+          'id': '',
+        },
+      },
+      {
+        'id': 'p1',
+        'type': 'redacted_reasoning',
+        'data': {'kind': 'bytes', 'base64': '%%%bad%%%'},
+      },
+      {
+        'id': 'p1',
+        'type': 'redacted_reasoning',
+        'data': {'kind': 'bytes'},
+      },
+    ];
+    for (final part in malformed) {
+      expect(
+        () => ConversationCodec.decode(envelope(part)),
+        throwsA(isA<ConversationValidationException>()),
+        reason: '$part',
+      );
+    }
+  });
+
+  test('rejects unsupported values in tool results', () {
+    expect(
+      () => ConversationMessage(
+        id: 'm1',
+        role: ConversationRole.assistant,
+        parts: [
+          ToolCallPart(
+            id: 'call-part',
+            callId: 'call-1',
+            name: 'tool',
+            arguments: const {},
+          ),
+          ToolResultPart(
+            id: 'result-part',
+            callId: 'call-1',
+            output: DateTime.utc(2026),
+          ),
+        ],
+      ),
+      throwsA(isA<ConversationValidationException>()),
+    );
+  });
+
+  test('exposes codec and constructor validation failures', () {
+    expect(
+      const ConversationSchemaException('bad version').toString(),
+      'ConversationSchemaException: bad version',
+    );
+    expect(
+      const ConversationValidationException('bad value').toString(),
+      'ConversationValidationException: bad value',
+    );
+    expect(
+      () => Conversation(id: 'c1', schemaVersion: 2, messages: const []),
+      throwsA(isA<ConversationSchemaException>()),
+    );
+    expect(
+      () => UnknownPart(
+        id: 'part-1',
+        type: 'future',
+        raw: {'id': 'part-2', 'type': 'future'},
+      ),
+      throwsA(isA<ConversationValidationException>()),
+    );
+    expect(
+      () => ConversationCodec.decode({
+        'schemaVersion': 1,
+        'id': 'c1',
+        'messages': [
+          {'id': 'm1', 'role': 'invalid', 'status': 'complete', 'parts': []},
+        ],
+      }),
+      throwsA(isA<ConversationValidationException>()),
+    );
+  });
 }

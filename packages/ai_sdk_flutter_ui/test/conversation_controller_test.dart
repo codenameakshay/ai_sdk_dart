@@ -260,6 +260,59 @@ ToolLoopAgent _textAgent(String text) =>
 
 Conversation _empty() => Conversation(id: 'chat-1', messages: const []);
 
+class _NoRetryBackend implements ConversationBackend {
+  _NoRetryBackend(this.conversation);
+  @override
+  Conversation conversation;
+  final _changes = StreamController<Conversation>.broadcast();
+
+  @override
+  Stream<Conversation> get changes => _changes.stream;
+
+  @override
+  Future<void> send(String text) async => throw StateError('send failed');
+
+  @override
+  Future<void> interrupt() async {}
+
+  @override
+  Future<void> restore(Map<String, dynamic> encoded) async {}
+
+  @override
+  Future<void> respondToApproval({
+    required String approvalId,
+    required bool approved,
+    String? reason,
+  }) async {}
+
+  @override
+  Future<void> dispose() async {
+    await _changes.close();
+  }
+}
+
+class _StreamPartsModel extends LanguageModelV4 {
+  _StreamPartsModel(this.parts);
+  final List<LanguageModelV4StreamPart> parts;
+
+  @override
+  String get provider => 'test';
+  @override
+  String get modelId => 'stream-parts';
+  @override
+  String get specificationVersion => 'v4';
+
+  @override
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
+  ) => throw UnimplementedError();
+
+  @override
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
+  ) async => LanguageModelV4StreamResult(stream: Stream.fromIterable(parts));
+}
+
 void main() {
   test(
     'local and remote adapters normalize a scripted text turn equally',
@@ -959,6 +1012,46 @@ void main() {
                       'vendor': {'result': 'old'},
                     },
                   },
+                  {'type': 'reasoning', 'text': 'verified', 'signature': 'sig'},
+                  {
+                    'type': 'redacted_reasoning',
+                    'data': {'kind': 'bytes', 'base64': 'AQI='},
+                  },
+                  {
+                    'type': 'image',
+                    'data': {'kind': 'base64', 'base64': 'AQI='},
+                    'mediaType': 'image/png',
+                  },
+                  {
+                    'type': 'file',
+                    'data': {'kind': 'url', 'url': 'https://example.com/a.pdf'},
+                    'mediaType': 'application/pdf',
+                  },
+                  {
+                    'type': 'reasoning_file',
+                    'data': {
+                      'kind': 'provider_reference',
+                      'namespace': 'vendor',
+                      'id': 'reasoning-1',
+                    },
+                    'mediaType': 'application/octet-stream',
+                  },
+                  {
+                    'type': 'source',
+                    'id': 'source-1',
+                    'url': 'https://example.com/source',
+                  },
+                  {
+                    'type': 'source-document',
+                    'id': 'document-1',
+                    'mediaType': 'application/pdf',
+                    'title': 'Document',
+                  },
+                  {
+                    'type': 'opaque',
+                    'provider': 'vendor',
+                    'raw': {'id': 'opaque-1'},
+                  },
                 ],
                 outputKind: 'content',
                 providerOptions: {
@@ -1078,9 +1171,34 @@ void main() {
         'vendor': {'result': 'old'},
       });
       final content = oldResult.output as ToolResultOutputContent;
-      final contentText = content.parts.single as LanguageModelV4TextPart;
+      final contentText = content.parts.first as LanguageModelV4TextPart;
       expect(contentText.providerOptions, {
         'vendor': {'result': 'old'},
+      });
+      expect(
+        (content.parts[1] as LanguageModelV4ReasoningPart).signature,
+        'sig',
+      );
+      expect((content.parts[2] as LanguageModelV4RedactedReasoningPart).data, [
+        1,
+        2,
+      ]);
+      expect(
+        (content.parts[3] as LanguageModelV4ImagePart).image,
+        isA<DataContentBase64>(),
+      );
+      expect(
+        (content.parts[4] as LanguageModelV4FilePart).data,
+        isA<DataContentUrl>(),
+      );
+      expect(
+        (content.parts[5] as LanguageModelV4ReasoningFilePart).data,
+        isA<DataContentProviderReference>(),
+      );
+      expect(content.parts[6], isA<LanguageModelV4SourcePart>());
+      expect(content.parts[7], isA<LanguageModelV4DocumentSourcePart>());
+      expect((content.parts[8] as LanguageModelV4OpaquePart).raw, {
+        'id': 'opaque-1',
       });
       expect(executions, 1);
       await backend.dispose();
@@ -1503,6 +1621,177 @@ void main() {
       ),
       everyElement(ApprovalStatus.approved),
     );
+    await backend.dispose();
+  });
+
+  test('controller retry is unsupported unless the backend opts in', () async {
+    final backend = _NoRetryBackend(_empty());
+    final controller = ConversationController(backend, disposeBackend: false);
+    expect(controller.retryInfo.isAvailable, isFalse);
+    expect(
+      controller.retryInfo.availability,
+      ConversationRetryAvailability.unsupported,
+    );
+    expect(ConversationRetryError('retry failed').toString(), 'retry failed');
+    await expectLater(
+      controller.retryLastTurn(),
+      throwsA(isA<RetryUnsupportedError>()),
+    );
+    await controller.interrupt();
+    await controller.restore({
+      'schemaVersion': 1,
+      'id': 'chat-1',
+      'messages': [],
+    });
+    await controller.dispose();
+    await backend.dispose();
+  });
+
+  test('chat adapter reports send failures and stop interrupts', () async {
+    final backend = _NoRetryBackend(_empty());
+    final controller = ConversationController(backend);
+    final chat = ConversationChatController(controller);
+    await chat.sendText('hi');
+    expect(chat.error, isA<StateError>());
+    expect(chat.status, ChatStatus.error);
+    expect(chat.isStreaming, isFalse);
+    chat.clearError();
+    expect(chat.error, isNull);
+    await chat.stop();
+    chat.dispose();
+  });
+
+  test('local backend records live media, sources, and tool output', () async {
+    final backend = LocalConversationBackend(
+      agent: ToolLoopAgent(
+        model: _StreamPartsModel([
+          StreamPartFile(
+            file: LanguageModelV4FilePart(
+              data: DataContentBytes(Uint8List.fromList([1, 2])),
+              mediaType: 'application/pdf',
+              filename: 'a.pdf',
+            ),
+          ),
+          StreamPartFile(
+            file: LanguageModelV4FilePart(
+              data: const DataContentBase64('AQI='),
+              mediaType: 'image/png',
+            ),
+          ),
+          StreamPartFile(
+            file: LanguageModelV4FilePart(
+              data: DataContentUrl(Uri.parse('https://example.com/b.bin')),
+              mediaType: 'application/octet-stream',
+            ),
+          ),
+          const StreamPartReasoningFile(
+            file: LanguageModelV4ReasoningFilePart(
+              data: DataContentProviderReference(
+                namespace: 'vendor',
+                id: 'trace-1',
+              ),
+              mediaType: 'application/octet-stream',
+            ),
+          ),
+          const StreamPartSource(
+            source: LanguageModelV4SourcePart(
+              id: 'source-1',
+              url: 'https://example.com/source',
+              title: 'Source',
+            ),
+          ),
+          const StreamPartDocumentSource(
+            source: LanguageModelV4DocumentSourcePart(
+              id: 'doc-1',
+              mediaType: 'application/pdf',
+              title: 'Document',
+            ),
+          ),
+          const StreamPartOpaque(
+            opaque: LanguageModelV4OpaquePart(
+              provider: 'vendor',
+              raw: {'id': 'opaque-1'},
+            ),
+          ),
+          const StreamPartFinish(
+            finishReason: LanguageModelV4FinishReason.stop,
+          ),
+        ]),
+      ),
+      initial: _empty(),
+    );
+    await backend.send('media');
+    final parts = backend.conversation.messages.last.parts;
+    expect(parts.whereType<FilePart>(), hasLength(3));
+    expect(parts.whereType<ReasoningFilePart>(), hasLength(1));
+    expect(parts.whereType<SourcePart>(), hasLength(1));
+    expect(parts.whereType<DocumentSourcePart>(), hasLength(1));
+    expect(parts.whereType<UnknownPart>(), hasLength(1));
+    await backend.dispose();
+  });
+
+  test('local backend persists rich tool results and tool errors', () async {
+    final backend = LocalConversationBackend(
+      agent: ToolLoopAgent(
+        model: _StreamPartsModel([
+          const StreamPartToolInputStart(id: 'call-rich', toolName: 'lookup'),
+          const StreamPartToolInputEnd(id: 'call-rich'),
+          StreamPartToolCall(
+            toolCall: mockToolCall(
+              toolName: 'lookup',
+              input: const {},
+              toolCallId: 'call-rich',
+            ),
+          ),
+          StreamPartToolResult(
+            toolResult: LanguageModelV4ToolResultPart(
+              toolCallId: 'call-rich',
+              toolName: 'lookup',
+              output: ToolResultOutputContent([
+                const LanguageModelV4TextPart(text: 'ok'),
+                const LanguageModelV4ReasoningPart(
+                  text: 'why',
+                  signature: 'sig',
+                ),
+                const LanguageModelV4ImagePart(
+                  image: DataContentBase64('AQI='),
+                  mediaType: 'image/png',
+                ),
+                LanguageModelV4FilePart(
+                  data: DataContentUrl(Uri.parse('https://example.com/a.pdf')),
+                  mediaType: 'application/pdf',
+                ),
+                const LanguageModelV4SourcePart(
+                  id: 'source-1',
+                  url: 'https://example.com/source',
+                ),
+                const LanguageModelV4DocumentSourcePart(
+                  id: 'doc-1',
+                  mediaType: 'application/pdf',
+                  title: 'Document',
+                ),
+                const LanguageModelV4OpaquePart(
+                  provider: 'vendor',
+                  raw: {'id': 'opaque-1'},
+                ),
+              ]),
+            ),
+          ),
+          const StreamPartFinish(
+            finishReason: LanguageModelV4FinishReason.stop,
+          ),
+        ]),
+      ),
+      initial: _empty(),
+    );
+    await backend.send('lookup');
+    final result = backend.conversation.messages
+        .expand((message) => message.parts)
+        .whereType<ToolResultPart>()
+        .single;
+    expect(result.outputKind, 'content');
+    expect(result.output, isA<List>());
+    expect((result.output as List), hasLength(7));
     await backend.dispose();
   });
 }

@@ -1,0 +1,71 @@
+{
+  "date_utc": "2026-09-23T05:30:55.397286+00:00",
+  "repository_commit": "b702929811281ac6be4c5ea2c10004b412b74924",
+  "toolchain": {
+    "flutter": "3.44.3",
+    "dart": "3.12.2",
+    "method": "FVM"
+  },
+  "make_test": {
+    "exit_code": 0,
+    "group_counts": [
+      613,
+      30,
+      61,
+      47,
+      55,
+      53,
+      21,
+      43,
+      8,
+      17,
+      29,
+      106,
+      201,
+      4,
+      10
+    ],
+    "total": 1298,
+    "groups": [
+      "ai_sdk_dart",
+      "ai_sdk_provider",
+      "ai_sdk_openai_compatible",
+      "ai_sdk_openai",
+      "ai_sdk_anthropic",
+      "ai_sdk_google",
+      "ai_sdk_azure",
+      "ai_sdk_cohere",
+      "ai_sdk_groq",
+      "ai_sdk_mistral",
+      "ai_sdk_ollama",
+      "ai_sdk_mcp",
+      "ai_sdk_flutter_ui",
+      "examples/flutter_chat",
+      "examples/advanced_app"
+    ]
+  },
+  "make_analyze": {
+    "exit_code": 0,
+    "no_issue_markers": 16
+  },
+  "make_format_check": {
+    "exit_code": 0,
+    "files": 254,
+    "changed": 0
+  },
+  "reproduction_command": "timeout 20s fvm dart run plans/v3-research/core_reliability_repro.dart",
+  "reproduction_output": [
+    "unhandled source error: Bad state: transport boom",
+    "streamObject object: TIMEOUT (source error did not settle object)",
+    "embedMany values=2 returned=1",
+    "schema-invalid input step tool results: [accepted: {unexpected: 1}], text=done",
+    "responseMessages after assistant history: 2"
+  ],
+  "benchmark_command": "fvm dart run packages/ai_sdk_dart/benchmark/structured_stream_benchmark.dart --json",
+  "limits": [
+    "No authenticated provider model smoke tests",
+    "No release-mode real-device performance runs",
+    "No full coverage rerun",
+    "No package publication or PR changes"
+  ]
+}

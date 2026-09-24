@@ -1,0 +1,130 @@
+{
+  "date": "2026-09-23",
+  "qualification": "exploratory only; three array samples, fixed order, concurrent worker load; not release benchmark",
+  "machine": {
+    "os": "Linux aarch64",
+    "cpu": "Neoverse-N1",
+    "logicalCpus": 2,
+    "dart": "3.12.2"
+  },
+  "command": "fvm dart run packages/ai_sdk_dart/benchmark/structured_stream_benchmark.dart --json",
+  "results": [
+    {
+      "kind": "object",
+      "size": "1KiB",
+      "bytes": 1139,
+      "parseAttempts": 1,
+      "decodeAttempts": 1,
+      "snapshotCount": 0,
+      "snapshotElementsCopied": 0,
+      "snapshotStructuralNodes": 0,
+      "snapshotStructuralReferences": 0,
+      "elements": 0,
+      "elapsedMicroseconds": 36310
+    },
+    {
+      "kind": "array-copy",
+      "size": "1KiB",
+      "bytes": 1073,
+      "parseAttempts": 4,
+      "decodeAttempts": 4,
+      "snapshotCount": 4,
+      "snapshotElementsCopied": 10,
+      "snapshotStructuralNodes": 0,
+      "snapshotStructuralReferences": 0,
+      "elements": 4,
+      "elapsedMicroseconds": 5667
+    },
+    {
+      "kind": "array-structural",
+      "size": "1KiB",
+      "bytes": 1073,
+      "parseAttempts": 4,
+      "decodeAttempts": 4,
+      "snapshotCount": 4,
+      "snapshotElementsCopied": 0,
+      "snapshotStructuralNodes": 7,
+      "snapshotStructuralReferences": 5,
+      "elements": 4,
+      "elapsedMicroseconds": 2034
+    },
+    {
+      "kind": "object",
+      "size": "64KiB",
+      "bytes": 65595,
+      "parseAttempts": 1,
+      "decodeAttempts": 1,
+      "snapshotCount": 0,
+      "snapshotElementsCopied": 0,
+      "snapshotStructuralNodes": 0,
+      "snapshotStructuralReferences": 0,
+      "elements": 0,
+      "elapsedMicroseconds": 44308
+    },
+    {
+      "kind": "array-copy",
+      "size": "64KiB",
+      "bytes": 65771,
+      "parseAttempts": 244,
+      "decodeAttempts": 244,
+      "snapshotCount": 244,
+      "snapshotElementsCopied": 29890,
+      "snapshotStructuralNodes": 0,
+      "snapshotStructuralReferences": 0,
+      "elements": 244,
+      "elapsedMicroseconds": 11479
+    },
+    {
+      "kind": "array-structural",
+      "size": "64KiB",
+      "bytes": 65771,
+      "parseAttempts": 244,
+      "decodeAttempts": 244,
+      "snapshotCount": 244,
+      "snapshotElementsCopied": 0,
+      "snapshotStructuralNodes": 483,
+      "snapshotStructuralReferences": 953,
+      "elements": 244,
+      "elapsedMicroseconds": 12870
+    },
+    {
+      "kind": "object",
+      "size": "1MiB",
+      "bytes": 1048593,
+      "parseAttempts": 1,
+      "decodeAttempts": 1,
+      "snapshotCount": 0,
+      "snapshotElementsCopied": 0,
+      "snapshotStructuralNodes": 0,
+      "snapshotStructuralReferences": 0,
+      "elements": 0,
+      "elapsedMicroseconds": 163155
+    },
+    {
+      "kind": "array-copy",
+      "size": "1MiB",
+      "bytes": 1048745,
+      "parseAttempts": 3874,
+      "decodeAttempts": 3874,
+      "snapshotCount": 3874,
+      "snapshotElementsCopied": 7505875,
+      "snapshotStructuralNodes": 0,
+      "snapshotStructuralReferences": 0,
+      "elements": 3874,
+      "elapsedMicroseconds": 189001
+    },
+    {
+      "kind": "array-structural",
+      "size": "1MiB",
+      "bytes": 1048745,
+      "parseAttempts": 3874,
+      "decodeAttempts": 3874,
+      "snapshotCount": 3874,
+      "snapshotElementsCopied": 0,
+      "snapshotStructuralNodes": 7742,
+      "snapshotStructuralReferences": 22753,
+      "elements": 3874,
+      "elapsedMicroseconds": 125432
+    }
+  ]
+}

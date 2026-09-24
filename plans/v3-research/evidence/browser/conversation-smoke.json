@@ -1,0 +1,78 @@
+{
+  "capturedAt": "2026-09-23T16:07:43.482Z",
+  "browser": "154.0.8037.0",
+  "passed": true,
+  "hashes": {
+    "examples/flutter_chat/build/web/main.dart.js": "77144fe01b57eb66413a872839f051b7c97440ac3064fab948bb63dd910c0bf5",
+    "examples/flutter_chat/lib/pages/conversation_page.dart": "610a1e654146f77f6b90d3b46f931f92d86a535b7ea050cebd5d8e372982d790",
+    "examples/remote_backend/js/server.mjs": "a01abfd4b369ea2d9c16ae7d6c1d4b739e0dd77b55807c42b5083a92d3ea7c25",
+    "examples/remote_backend/js/package-lock.json": "b739df309f9945cd221582dae72f51f35b43b99a7d0cca20a85b989fc953328c",
+    "packages/ai_sdk_flutter_ui/lib/src/widgets/chat_composer.dart": "5cb6b9ac8c1670b04067b001b2240e0447164dd9be52475e240518b0017c7b84",
+    "packages/ai_sdk_flutter_ui/lib/src/widgets/chat_message_bubble.dart": "9c8dd001ee6dccd7991a99392cc61cef5c6be116f56cce0a21ae0329d6116c24",
+    "packages/ai_sdk_flutter_ui/lib/src/widgets/assistant_message_view.dart": "2b058e15f4fac3995552b822bb98a3048b3fbbbdf1765d32d51f6df63509a689",
+    "packages/ai_sdk_flutter_ui/lib/src/widgets/ai_chat_scaffold.dart": "2b1602f988fdd1add501d375122b21960f4b3548b992bfe1345dd733040b9ae0",
+    "packages/ai_sdk_flutter_ui/lib/src/conversation_controller.dart": "76a56852ab8357aea10149caf7c0171efeaa5af86b6b189363cfbcea3d946395",
+    "packages/ai_sdk_conversation/lib/src/conversation.dart": "e5aa93ac6a486a9c569f78532b167d87b75565608290cd43a20b65c2b3d7e148",
+    "packages/ai_sdk_remote/lib/src/remote.dart": "fca071a2f2e5942d4ed927a59b47b102194bec718c510f7dbb5f4d742be79bfd"
+  },
+  "results": [
+    {
+      "route": "conversation",
+      "action": "Approve",
+      "keyboard": true,
+      "expected": "Tool result: deleted /tmp/example",
+      "width": 1280,
+      "height": 900,
+      "pending": "- button \"Back\"\n- heading \"Local conversation\" [level=2]\n- group:\n  - text: User message Run the example\n  - group \"Assistant message\":\n    - 'group \"Tool call: deleteFile\"':\n      - 'group \"deleteFile { \\\"path\\\": \\\"/tmp/example\\\" }\"'\n- group \"Tool approval required for deleteFile\":\n  - 'group \"Approve tool call? deleteFile { \\\"path\\\": \\\"/tmp/example\\\" }\"':\n    - button \"Deny\"\n    - button \"Approve\"\n- text: Approve the tool call to continue.\n- textbox \"Message…\" [disabled]\n- button \"Send message\" [disabled]\n- text: Send message",
+      "final": "- button \"Back\"\n- heading \"Local conversation\" [level=2]\n- group:\n  - text: User message Run the example\n  - group \"Assistant message\":\n    - 'group \"Tool call: deleteFile\"':\n      - 'group \"deleteFile { \\\"path\\\": \\\"/tmp/example\\\" }\"'\n    - text: \"Tool result: deleted /tmp/example\"\n- textbox \"Message…\"\n- button \"Send message\"\n- text: Send message",
+      "errors": [],
+      "screenshot": "conversation-Approve.png"
+    },
+    {
+      "route": "conversation",
+      "action": "Deny",
+      "keyboard": false,
+      "expected": "Tool denied; no local action ran.",
+      "width": 390,
+      "height": 844,
+      "pending": "- button \"Back\"\n- heading \"Local conversation\" [level=2]\n- group:\n  - text: User message Run the example\n  - group \"Assistant message\":\n    - 'group \"Tool call: deleteFile\"':\n      - 'group \"deleteFile { \\\"path\\\": \\\"/tmp/example\\\" }\"'\n- group \"Tool approval required for deleteFile\":\n  - 'group \"Approve tool call? deleteFile { \\\"path\\\": \\\"/tmp/example\\\" }\"':\n    - button \"Deny\"\n    - button \"Approve\"\n- text: Approve the tool call to continue.\n- textbox \"Message…\" [disabled]\n- button \"Send message\" [disabled]\n- text: Send message",
+      "final": "- text: Assistant is responding…\n- button \"Back\"\n- heading \"Local conversation\" [level=2]\n- group:\n  - text: User message Run the example\n  - group \"Assistant message\":\n    - 'group \"Tool call: deleteFile\"':\n      - 'group \"deleteFile { \\\"path\\\": \\\"/tmp/example\\\" }\"'\n    - text: Tool denied; no local action ran.\n- textbox \"Message…\"\n- button \"Send message\"",
+      "errors": [],
+      "screenshot": "conversation-Deny.png"
+    },
+    {
+      "route": "remote",
+      "expected": "Hello from the pinned AI SDK backend.",
+      "width": 1280,
+      "height": 900,
+      "final": "- button \"Back\"\n- heading \"Remote conversation\" [level=2]\n- group:\n  - text: User message Run the example\n  - group \"Assistant message\": Hello from the pinned AI SDK backend.\n- textbox \"Message…\"\n- button \"Send message\"\n- text: Send message",
+      "errors": [],
+      "screenshot": "conversation-remote.png"
+    },
+    {
+      "route": "remote",
+      "prompt": "Request approval",
+      "action": "Approve",
+      "expected": "The scripted tool call was approved and resumed.",
+      "width": 1280,
+      "height": 900,
+      "pending": "- button \"Back\"\n- heading \"Remote conversation\" [level=2]\n- group:\n  - text: User message Request approval\n  - group \"Assistant message\":\n    - 'group \"Tool call: delete\"':\n      - 'group \"delete { \\\"path\\\": \\\"/tmp/reference\\\" }\"'\n- group \"Tool approval required for delete\":\n  - 'group \"Approve tool call? delete { \\\"path\\\": \\\"/tmp/reference\\\" }\"':\n    - button \"Deny\"\n    - button \"Approve\"\n- text: Approve the tool call to continue.\n- textbox \"Message…\" [disabled]\n- button \"Send message\" [disabled]\n- text: Send message",
+      "final": "- button \"Back\"\n- heading \"Remote conversation\" [level=2]\n- group:\n  - text: User message Request approval\n  - group \"Assistant message\":\n    - 'group \"Tool call: delete\"':\n      - 'group \"delete { \\\"path\\\": \\\"/tmp/reference\\\" }\"'\n    - text: The scripted tool call was approved and resumed.\n- textbox \"Message…\"\n- button \"Send message\"",
+      "errors": [],
+      "screenshot": "conversation-remote-Approve.png"
+    },
+    {
+      "route": "remote",
+      "prompt": "Request approval",
+      "action": "Deny",
+      "expected": "The scripted tool call was denied and resumed safely.",
+      "width": 390,
+      "height": 844,
+      "pending": "- button \"Back\"\n- heading \"Remote conversation\" [level=2]\n- group:\n  - text: User message Request approval\n  - group \"Assistant message\":\n    - 'group \"Tool call: delete\"':\n      - 'group \"delete { \\\"path\\\": \\\"/tmp/reference\\\" }\"'\n- group \"Tool approval required for delete\":\n  - 'group \"Approve tool call? delete { \\\"path\\\": \\\"/tmp/reference\\\" }\"':\n    - button \"Deny\"\n    - button \"Approve\"\n- text: Approve the tool call to continue.\n- textbox \"Message…\" [disabled]\n- button \"Send message\" [disabled]\n- text: Send message",
+      "final": "- button \"Back\"\n- heading \"Remote conversation\" [level=2]\n- group:\n  - text: User message Request approval\n  - group \"Assistant message\":\n    - 'group \"Tool call: delete\"':\n      - 'group \"delete { \\\"path\\\": \\\"/tmp/reference\\\" }\"'\n    - text: The scripted tool call was denied and resumed safely.\n- textbox \"Message…\"\n- button \"Send message\"",
+      "errors": [],
+      "screenshot": "conversation-remote-Deny.png"
+    }
+  ],
+  "limitations": "Scripted local model checks actual tool execution/result and denial; remote text uses pinned JavaScript AI SDK server. No live provider, persisted reload, remote tool execution, native device, or screen reader qualification. Semantics activated programmatically."
+}

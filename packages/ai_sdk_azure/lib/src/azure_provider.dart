@@ -1,6 +1,8 @@
-import 'package:ai_sdk_openai_compatible/ai_sdk_openai_compatible.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
+
+import 'package:ai_sdk_openai/ai_sdk_openai.dart';
+import 'package:ai_sdk_openai_compatible/ai_sdk_openai_compatible.dart';
 
 /// Azure OpenAI provider for language models and embeddings.
 ///
@@ -39,7 +41,8 @@ class AzureOpenAIProvider {
   /// The Azure OpenAI API key.
   final String? apiKey;
 
-  /// The API version to use for all requests.
+  /// The dated API version for Chat Completions and embedding requests.
+  /// Responses uses v1 without an `api-version` query parameter.
   final String apiVersion;
 
   final CredentialProvider _credentialProvider;
@@ -76,6 +79,20 @@ class AzureOpenAIProvider {
         ),
       );
 
+  /// Returns a model backed by Azure's v1 Responses API.
+  /// The deployment ID is sent as the model, rather than as a URL segment.
+  LanguageModelV4 responses(String deploymentId) =>
+      OpenAIResponsesLanguageModel(
+        modelId: deploymentId,
+        providerName: 'azure',
+        baseUrl: providerEndpoint(endpoint, '/openai/v1'),
+        headers: _headers,
+        client: _client,
+      );
+
+  /// Explicit Chat Completions escape hatch.
+  LanguageModelV4 chat(String deploymentId) => call(deploymentId);
+
   /// Returns an embedding model for the given Azure deployment [deploymentId].
   EmbeddingModelV2<String> embedding(String deploymentId) =>
       _AzureEmbeddingModel(
@@ -105,6 +122,12 @@ Dio _azureDio({required String endpoint}) => createProviderDio(
 // ---------------------------------------------------------------------------
 
 class _AzureEmbeddingModel implements EmbeddingModelV2<String> {
+  @override
+  int? get maxEmbeddingsPerCall => 2048;
+
+  @override
+  bool get supportsParallelCalls => true;
+
   _AzureEmbeddingModel({
     required this.deploymentId,
     required this.endpoint,
@@ -150,6 +173,7 @@ class _AzureEmbeddingModel implements EmbeddingModelV2<String> {
         queryParameters: {'api-version': apiVersion},
         data: body,
         options: Options(headers: {...?options.headers, ...resolvedHeaders}),
+        cancelToken: cancelTokenFor(options.abortSignal),
       );
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);

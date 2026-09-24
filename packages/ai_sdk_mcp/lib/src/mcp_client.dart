@@ -14,11 +14,19 @@ export 'json_rpc.dart'
         JsonRpcNotification,
         MCPTransport,
         MCPException,
+        MCPAmbiguousToolCompletionException,
         MCPTransportException,
         MCPSessionExpiredException;
 
 // Web-safe HTTP transport (no dart:io).
-export 'http_transport.dart' show StreamableHttpClientTransport;
+export 'http_transport.dart'
+    show
+        StreamableHttpClientTransport,
+        MCPAuthConfiguration,
+        MCPAccessTokenProvider,
+        MCPProtectedResourceMetadata,
+        MCPAuthorizationServerMetadata,
+        MCPAuthDiscovery;
 
 // Stdio transport: real (dart:io) on native, throwing stub on web. The
 // top-level library never imports `dart:io` directly — it is reachable only
@@ -26,6 +34,13 @@ export 'http_transport.dart' show StreamableHttpClientTransport;
 export 'stdio_transport_stub.dart'
     if (dart.library.io) 'stdio_transport_io.dart'
     show StdioMCPTransport;
+
+/// Protocol eras supported by [MCPClient].
+enum MCPProtocolMode { legacy, modern }
+
+class _MCPModernProtocolException extends MCPException {
+  const _MCPModernProtocolException(super.message);
+}
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -150,6 +165,35 @@ class MCPResourceContent {
   }
 }
 
+/// An MCP modern-era multi-round-trip result requesting additional input.
+class MCPInputRequiredResult {
+  const MCPInputRequiredResult({
+    required this.inputRequests,
+    this.requestState,
+    this.meta,
+  });
+
+  /// Server-assigned request IDs mapped to protocol input requests.
+  final Map<String, dynamic> inputRequests;
+  final Object? requestState;
+  final Map<String, dynamic>? meta;
+}
+
+/// A validated MCP `notifications/progress` update.
+class MCPProgressUpdate {
+  const MCPProgressUpdate({
+    required this.progressToken,
+    required this.progress,
+    this.total,
+    this.message,
+  });
+
+  final Object progressToken;
+  final num progress;
+  final num? total;
+  final String? message;
+}
+
 // ---------------------------------------------------------------------------
 // MCPClient
 // ---------------------------------------------------------------------------
@@ -208,6 +252,7 @@ class MCPClient {
   MCPClient({
     required this.transport,
     this.reconnectPolicy,
+    this.protocolMode = MCPProtocolMode.legacy,
     MCPTransportFactory? transportFactory,
   }) : _transportFactory = transportFactory {
     _listenToTransport();
@@ -217,6 +262,12 @@ class MCPClient {
 
   /// When set, the client will automatically try to reconnect on failures.
   final MCPReconnectPolicy? reconnectPolicy;
+
+  /// Selects the explicit legacy handshake or modern stateless strategy.
+  final MCPProtocolMode protocolMode;
+
+  static const modernProtocolVersion = '2026-07-28';
+  static const legacyProtocolVersion = '2025-06-18';
 
   /// Factory used to create fresh transports during reconnection.
   ///
@@ -234,10 +285,15 @@ class MCPClient {
   final _resourceSubscriptions =
       <String, StreamController<MCPResourceContent>>{};
   final _resourceRefreshStates = <String, _ResourceRefreshState>{};
+  final _modernSubscriptionRequestIds = <String, int>{};
+  final _progress = StreamController<MCPProgressUpdate>.broadcast();
+  final _activeProgress = <Object, num>{};
+  final _progressTotals = <Object, num?>{};
 
   /// Subscription to the active transport's server-initiated message stream.
   StreamSubscription<Map<String, dynamic>>? _notificationSub;
   bool _closed = false;
+  final _closedSignal = Completer<void>();
 
   // ---------------------------------------------------------------------------
   // Transport notifications (server push)
@@ -263,6 +319,37 @@ class MCPClient {
   }
 
   void _handleServerMessage(Map<String, dynamic> json) {
+    if (json['method'] == 'notifications/progress') {
+      final params = json['params'];
+      if (params is! Map) return;
+      final token = params['progressToken'];
+      final value = params['progress'];
+      if ((token is! String && token is! int) || value is! num) return;
+      final total = params['total'];
+      if (!value.isFinite ||
+          (total is num && (!total.isFinite || total < 0 || value > total))) {
+        return;
+      }
+      final previous = _activeProgress[token];
+      // Ignore stale, unknown, or malformed updates. Progress is monotonic.
+      if (previous == null || value <= previous) return;
+      if (_progressTotals.containsKey(token) &&
+          _progressTotals[token] != null &&
+          (total is! num || total != _progressTotals[token])) {
+        return;
+      }
+      _progressTotals[token] = total is num ? total : null;
+      _activeProgress[token] = value;
+      _progress.add(
+        MCPProgressUpdate(
+          progressToken: token,
+          progress: value,
+          total: total is num ? total : null,
+          message: params['message']?.toString(),
+        ),
+      );
+      return;
+    }
     final method = json['method'];
     if (method != 'notifications/resources/updated') return;
     final params = json['params'];
@@ -275,6 +362,9 @@ class MCPClient {
 
     _queueResourceRefresh(uri);
   }
+
+  /// Progress updates for active requests that supplied a progress token.
+  Stream<MCPProgressUpdate> get progress => _progress.stream;
 
   void _queueResourceRefresh(String uri) {
     if (_closed) return;
@@ -405,17 +495,20 @@ class MCPClient {
   Future<void> _doInitialize({
     required bool replayResourceSubscriptions,
   }) async {
+    if (protocolMode == MCPProtocolMode.modern) {
+      await _doModernDiscover();
+      if (replayResourceSubscriptions) {
+        await _replayActiveResourceSubscriptions();
+      }
+      return;
+    }
     final response = await transport.send(
       JsonRpcRequest(
         method: 'initialize',
         id: _id,
         params: {
-          'protocolVersion': '2025-06-18',
-          'capabilities': {
-            'tools': {},
-            'prompts': {},
-            'resources': {'subscribe': true},
-          },
+          'protocolVersion': legacyProtocolVersion,
+          'capabilities': <String, dynamic>{},
           'clientInfo': {'name': 'ai_sdk_dart', 'version': '2.0.0'},
         },
       ),
@@ -436,7 +529,7 @@ class MCPClient {
         'Initialize failed: result.protocolVersion must be a string',
       );
     }
-    if (protocolVersion != '2025-06-18') {
+    if (protocolVersion != legacyProtocolVersion) {
       throw MCPException(
         'Unsupported protocolVersion "$protocolVersion" from initialize',
       );
@@ -461,23 +554,95 @@ class MCPClient {
     }
   }
 
+  Future<void> _doModernDiscover() async {
+    if (transport case final StreamableHttpClientTransport http) {
+      http.setProtocolVersion(modernProtocolVersion);
+    }
+    final response = await transport.send(
+      JsonRpcRequest(method: 'server/discover', id: _id, params: _modernMeta()),
+    );
+    if (response.isError) {
+      throw MCPException('Modern server discovery failed: ${response.error}');
+    }
+    final result = response.result;
+    if (result is! Map) {
+      throw const MCPException('Modern server discovery returned no result');
+    }
+    final supported = result['supportedVersions'];
+    if (supported is! List || supported.isEmpty) {
+      throw const MCPException(
+        'Modern server discovery result must contain supportedVersions',
+      );
+    }
+    if (!supported
+        .map((value) => value.toString())
+        .contains(modernProtocolVersion)) {
+      throw MCPException(
+        'Modern server does not support $modernProtocolVersion '
+        '(supported: ${supported.join(', ')})',
+      );
+    }
+  }
+
+  Map<String, dynamic> _modernMeta([Map<String, dynamic>? existing]) => {
+    '_meta': {
+      ...?existing,
+      'io.modelcontextprotocol/protocolVersion': modernProtocolVersion,
+      'io.modelcontextprotocol/clientCapabilities': <String, dynamic>{},
+      'io.modelcontextprotocol/clientInfo': {
+        'name': 'ai_sdk_dart',
+        'version': '2.0.0',
+      },
+    },
+  };
+
+  JsonRpcRequest _modernRequest(JsonRpcRequest request) {
+    final params = <String, dynamic>{
+      ...?request.params,
+      ..._modernMeta(
+        request.params?['_meta'] is Map
+            ? (request.params!['_meta'] as Map).cast<String, dynamic>()
+            : null,
+      ),
+    };
+    return JsonRpcRequest(
+      method: request.method,
+      id: request.id,
+      params: params,
+    );
+  }
+
   Future<void> _replayActiveResourceSubscriptions() async {
     for (final entry in _resourceSubscriptions.entries.toList()) {
       final subscription = entry.value;
       if (subscription.isClosed) {
         continue;
       }
-      final response = await transport.send(
-        JsonRpcRequest(
-          method: 'resources/subscribe',
-          id: _id,
-          params: {'uri': entry.key},
-        ),
+      final requestId = _id;
+      final response = await _send(
+        protocolMode == MCPProtocolMode.modern
+            ? JsonRpcRequest(
+                method: 'subscriptions/listen',
+                id: requestId,
+                params: {
+                  'notifications': {
+                    'resourceSubscriptions': [entry.key],
+                  },
+                },
+              )
+            : JsonRpcRequest(
+                method: 'resources/subscribe',
+                id: requestId,
+                params: {'uri': entry.key},
+              ),
       );
       if (response.isError) {
         throw MCPException(
-          'resources/subscribe "${entry.key}" failed: ${response.error}',
+          '${protocolMode == MCPProtocolMode.modern ? 'subscriptions/listen' : 'resources/subscribe'} "${entry.key}" failed: ${response.error}',
         );
+      }
+      if (protocolMode == MCPProtocolMode.modern) {
+        _modernSubscriptionRequestIds[entry.key] = requestId;
       }
     }
   }
@@ -492,42 +657,178 @@ class MCPClient {
     );
   }
 
-  /// Send a request, retrying with reconnect if the policy allows.
-  Future<JsonRpcResponse> _send(JsonRpcRequest request) async {
+  Future<JsonRpcResponse> _send(
+    JsonRpcRequest request, {
+    bool? retryOnTransportFailure,
+  }) async {
     final policy = reconnectPolicy;
-    if (policy == null) {
+    final retrySafe =
+        retryOnTransportFailure ??
+        const {
+          'tools/list',
+          'prompts/list',
+          'prompts/get',
+          'resources/list',
+          'resources/templates/list',
+          'resources/read',
+          'resources/subscribe',
+          'resources/unsubscribe',
+          'ping',
+        }.contains(request.method);
+    final maxAttempts = policy?.maxAttempts ?? 0;
+    for (var attempt = 0; attempt <= maxAttempts; attempt++) {
+      if (_closed) throw const MCPException('Client is closed');
       try {
-        return await transport.send(request);
-      } on MCPSessionExpiredException {
-        await _recoverFromSessionExpiry();
-        return transport.send(request);
-      }
-    }
-    for (var attempt = 0; attempt <= policy.maxAttempts; attempt++) {
-      try {
-        return await transport.send(request);
-      } on MCPSessionExpiredException {
-        await _recoverFromSessionExpiry();
-        return transport.send(request);
-      } catch (e) {
-        if (attempt >= policy.maxAttempts) rethrow;
-        // Try to reconnect.
-        final delay = policy.delayFor(attempt);
-        await Future<void>.delayed(delay);
+        try {
+          final wireRequest =
+              protocolMode == MCPProtocolMode.modern && attempt > 0
+              ? JsonRpcRequest(
+                  method: request.method,
+                  id: _id,
+                  params: request.params,
+                )
+              : request;
+          final wireResponse = await transport.send(
+            protocolMode == MCPProtocolMode.modern
+                ? _modernRequest(wireRequest)
+                : wireRequest,
+          );
+          _validateModernResult(wireRequest, wireResponse);
+          return wireResponse;
+        } on MCPSessionExpiredException {
+          await _recoverFromSessionExpiry();
+          if (_closed) throw const MCPException('Client is closed');
+          final recoveredRequest = protocolMode == MCPProtocolMode.modern
+              ? JsonRpcRequest(
+                  method: request.method,
+                  id: _id,
+                  params: request.params,
+                )
+              : request;
+          final wireResponse = await transport.send(
+            protocolMode == MCPProtocolMode.modern
+                ? _modernRequest(recoveredRequest)
+                : recoveredRequest,
+          );
+          _validateModernResult(recoveredRequest, wireResponse);
+          return wireResponse;
+        }
+      } catch (error, stackTrace) {
+        if (error is MCPSessionExpiredException) rethrow;
+        // A malformed modern result was received successfully, so the
+        // operation is not transport-ambiguous. Preserve its protocol error
+        // instead of converting it into a tool replay warning.
+        if (error is _MCPModernProtocolException) {
+          rethrow;
+        }
+        if (request.method == 'tools/call' &&
+            (!retrySafe || attempt >= maxAttempts)) {
+          Error.throwWithStackTrace(
+            MCPAmbiguousToolCompletionException(
+              toolName: request.params?['name']?.toString() ?? '',
+              requestId: request.id,
+              cause: error,
+            ),
+            stackTrace,
+          );
+        }
+        if (!retrySafe || attempt >= maxAttempts) rethrow;
+        await _waitForReconnect(policy!.delayFor(attempt));
         if (_transportFactory != null) {
           await transport.close();
+          if (_closed) throw const MCPException('Client is closed');
           transport = _transportFactory();
           _listenToTransport();
           _initialized = false;
-          try {
-            await _ensureInitialized();
-          } catch (_) {
-            // Will retry on the next loop iteration.
-          }
+          await _ensureInitialized(replayResourceSubscriptions: true);
         }
       }
     }
     throw const MCPException('Max reconnect attempts reached');
+  }
+
+  void _validateModernResult(JsonRpcRequest request, JsonRpcResponse response) {
+    if (protocolMode != MCPProtocolMode.modern || response.isError) return;
+
+    // `server/discover` predates the result envelope and advertises the
+    // modern strategy before ordinary requests begin.
+    if (request.method == 'server/discover') return;
+    final result = response.result;
+    if (result is! Map) {
+      throw const _MCPModernProtocolException(
+        'Modern MCP result must be an object with resultType',
+      );
+    }
+    final resultType = result['resultType'];
+    if (resultType != 'complete' && resultType != 'input_required') {
+      throw const _MCPModernProtocolException(
+        'Modern MCP result must contain resultType "complete" or '
+        '"input_required"',
+      );
+    }
+    if (resultType != 'input_required') return;
+
+    const supportsInputRequired = {
+      'prompts/get',
+      'resources/read',
+      'tools/call',
+    };
+    if (!supportsInputRequired.contains(request.method)) {
+      throw _MCPModernProtocolException(
+        'Modern MCP method ${request.method} cannot return input_required',
+      );
+    }
+    final inputRequests = result['inputRequests'];
+    final requestState = result['requestState'];
+    if (inputRequests == null && requestState == null) {
+      throw const _MCPModernProtocolException(
+        'Modern input_required result must contain inputRequests or '
+        'requestState',
+      );
+    }
+    if (inputRequests != null && inputRequests is! Map) {
+      throw const _MCPModernProtocolException(
+        'Modern input_required inputRequests must be an object',
+      );
+    }
+    if (requestState != null && requestState is! String) {
+      throw const _MCPModernProtocolException(
+        'Modern input_required requestState must be a string',
+      );
+    }
+    if (inputRequests is Map) {
+      const supportedInputRequestMethods = {
+        'elicitation/create',
+        'sampling/createMessage',
+        'roots/list',
+      };
+      for (final entry in inputRequests.entries) {
+        if (entry.key is! String || (entry.key as String).isEmpty) {
+          throw const _MCPModernProtocolException(
+            'Modern input_required request IDs must be non-empty strings',
+          );
+        }
+        final inputRequest = entry.value;
+        if (inputRequest is! Map ||
+            inputRequest['method'] is! String ||
+            !supportedInputRequestMethods.contains(inputRequest['method'])) {
+          throw const _MCPModernProtocolException(
+            'Modern input_required entries must be JSON-RPC requests',
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _waitForReconnect(Duration delay) async {
+    final elapsed = Completer<void>();
+    final timer = Timer(delay, elapsed.complete);
+    try {
+      await Future.any([elapsed.future, _closedSignal.future]);
+    } finally {
+      timer.cancel();
+    }
+    if (_closed) throw const MCPException('Client is closed');
   }
 
   // ---------------------------------------------------------------------------
@@ -588,44 +889,99 @@ class MCPClient {
   }
 
   /// Call a specific tool by [name] with the given [input].
-  Future<Object?> callTool(String name, Object? input) async {
-    await initialize();
-    final response = await _send(
-      JsonRpcRequest(
-        method: 'tools/call',
-        id: _id,
-        params: {
-          'name': name,
-          'arguments': input is Map ? input : {'value': input},
-        },
-      ),
-    );
-    if (response.isError) {
-      throw MCPException('tools/call "$name" failed: ${response.error}');
+  /// Set [retryOnTransportFailure] only when replay is safe for this operation.
+  /// This requires a reconnect policy and does not provide exactly-once execution.
+  Future<Object?> callTool(
+    String name,
+    Object? input, {
+    bool retryOnTransportFailure = false,
+    Map<String, dynamic>? inputResponses,
+    Object? requestState,
+    Object? progressToken,
+  }) async {
+    if (progressToken != null &&
+        progressToken is! String &&
+        progressToken is! int) {
+      throw const MCPException('progressToken must be a string or integer');
     }
-    final result = response.result;
-    if (result is! Map) return result;
-    // MCP returns {content: [{type: 'text', text: '...'}], isError: bool}
-    final content = result['content'];
-    final isError = result['isError'] == true;
-    if (content is List && content.isNotEmpty) {
-      final textParts = content
-          .whereType<Map>()
-          .where((p) => p['type'] == 'text')
-          .map((p) => p['text']?.toString() ?? '')
-          .toList();
-      if (isError) {
-        throw MCPException(
-          'Tool "$name" returned error: ${content.join('\n')}',
+    if (progressToken != null && _activeProgress.containsKey(progressToken)) {
+      throw const MCPException('progressToken is already active');
+    }
+    if (progressToken != null) {
+      _activeProgress[progressToken] = -double.infinity;
+      _progressTotals[progressToken] = null;
+    }
+    try {
+      await initialize();
+      final response = await _send(
+        JsonRpcRequest(
+          method: 'tools/call',
+          id: _id,
+          params: {
+            'name': name,
+            'arguments': input is Map ? input : {'value': input},
+            ...?inputResponses == null
+                ? null
+                : {'inputResponses': inputResponses},
+            ...?requestState == null ? null : {'requestState': requestState},
+            if (progressToken != null)
+              '_meta': {'progressToken': progressToken},
+          },
+        ),
+        retryOnTransportFailure: retryOnTransportFailure,
+      );
+      if (response.isError) {
+        throw MCPException('tools/call "$name" failed: ${response.error}');
+      }
+      final result = response.result;
+      if (result is! Map) return result;
+      if (result['resultType'] == 'input_required') {
+        final requests = result['inputRequests'];
+        final state = result['requestState'];
+        if (requests is! Map && state == null) {
+          throw const MCPException(
+            'tools/call returned input_required without inputRequests or requestState',
+          );
+        }
+        return MCPInputRequiredResult(
+          inputRequests: requests is Map
+              ? requests.cast<String, dynamic>()
+              : const {},
+          requestState: state,
+          meta: result['_meta'] is Map
+              ? (result['_meta'] as Map).cast<String, dynamic>()
+              : null,
         );
       }
-      final hasOnlyText = content.every(
-        (part) => part is Map && part['type'] == 'text',
-      );
-      return hasOnlyText ? textParts.join('\n') : List<Object?>.from(content);
+      // MCP returns {content: [{type: 'text', text: '...'}], isError: bool}
+      final content = result['content'];
+      final isError = result['isError'] == true;
+      if (content is List && content.isNotEmpty) {
+        final textParts = content
+            .whereType<Map>()
+            .where((p) => p['type'] == 'text')
+            .map((p) => p['text']?.toString() ?? '')
+            .toList();
+        if (isError) {
+          throw MCPException(
+            'Tool "$name" returned error: ${content.join('\n')}',
+          );
+        }
+        final hasOnlyText = content.every(
+          (part) => part is Map && part['type'] == 'text',
+        );
+        return hasOnlyText ? textParts.join('\n') : List<Object?>.from(content);
+      }
+      if (isError) throw MCPException('Tool "$name" returned error');
+      return result;
+    } finally {
+      if (progressToken != null) {
+        // Let notifications already queued by the transport drain before the
+        // token stops being associated with the request.
+        scheduleMicrotask(() => _activeProgress.remove(progressToken));
+        scheduleMicrotask(() => _progressTotals.remove(progressToken));
+      }
     }
-    if (isError) throw MCPException('Tool "$name" returned error');
-    return result;
   }
 
   // ---------------------------------------------------------------------------
@@ -797,6 +1153,27 @@ class MCPClient {
 
   Future<void> _subscribeResourceOnServer(String uri) async {
     await initialize();
+    if (protocolMode == MCPProtocolMode.modern) {
+      final requestId = _id;
+      final response = await _send(
+        JsonRpcRequest(
+          method: 'subscriptions/listen',
+          id: requestId,
+          params: {
+            'notifications': {
+              'resourceSubscriptions': [uri],
+            },
+          },
+        ),
+      );
+      if (response.isError) {
+        throw MCPException(
+          'subscriptions/listen "$uri" failed: ${response.error}',
+        );
+      }
+      _modernSubscriptionRequestIds[uri] = requestId;
+      return;
+    }
     final response = await _send(
       JsonRpcRequest(
         method: 'resources/subscribe',
@@ -816,6 +1193,24 @@ class MCPClient {
     _resourceRefreshStates.remove(uri);
     try {
       await initialize();
+      if (protocolMode == MCPProtocolMode.modern) {
+        final requestId = _modernSubscriptionRequestIds.remove(uri);
+        if (requestId != null) {
+          if (transport case final StreamableHttpClientTransport http) {
+            await http.cancelSubscription(requestId);
+          }
+          await transport.sendNotification(
+            JsonRpcNotification(
+              method: 'notifications/cancelled',
+              params: {
+                'requestId': requestId,
+                'reason': 'resource subscription cancelled',
+              },
+            ),
+          );
+        }
+        return;
+      }
       await _send(
         JsonRpcRequest(
           method: 'resources/unsubscribe',
@@ -846,12 +1241,16 @@ class MCPClient {
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
+    _closedSignal.complete();
     await _notificationSub?.cancel();
     for (final subscription in _resourceSubscriptions.values.toList()) {
       await subscription.close();
     }
     _resourceSubscriptions.clear();
     _resourceRefreshStates.clear();
+    _activeProgress.clear();
+    _progressTotals.clear();
+    await _progress.close();
     await transport.close();
   }
 }

@@ -1,9 +1,11 @@
+import 'streaming/reasoning_buffer.dart';
 import 'dart:convert';
 import 'dart:async';
 
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
 import 'cancellation.dart';
+import 'body_inclusion.dart';
 import '../messages/model_message.dart';
 import '../output/output.dart';
 import '../stop_conditions/stop_conditions.dart';
@@ -14,7 +16,10 @@ import 'partial_json.dart';
 import 'retry_helper.dart';
 import 'shared/common_helpers.dart';
 import 'shared/output_instruction.dart';
+import 'shared/stream_outcome.dart';
+import 'shared/operation_scope.dart';
 import 'shared/tool_selection.dart';
+import 'shared/tool_concurrency.dart';
 import 'streaming/stream_text_types.dart';
 import 'streaming/structured_output.dart';
 import 'streaming/terminal_streams.dart';
@@ -42,6 +47,7 @@ export 'streaming/stream_text_types.dart';
 /// ```
 Future<StreamTextResult<TOutput>> streamText<TOutput>({
   required LanguageModelV4 model,
+  String? instructions,
   String? system,
   String? prompt,
   List<ModelMessage>? messages,
@@ -49,15 +55,22 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   ProviderOptions? providerOptions,
   LanguageModelV4Reasoning reasoning = LanguageModelV4Reasoning.providerDefault,
   bool includeRawChunks = false,
+  BodyInclusionPolicy bodyInclusion = const BodyInclusionPolicy.none(),
   ToolSet tools = const {},
+  ToolApprovalPolicy? approvalPolicy,
+  ToolApprovalPolicySelector? approvalPolicyFor,
+  String approvalPolicyRevision = 'default',
   List<LanguageModelV4ProviderDefinedTool> providerDefinedTools = const [],
   LanguageModelV4ToolChoice? toolChoice,
   int maxSteps = 1,
+  int maxToolConcurrency = 1,
   List<StopCondition> stopConditions = const [],
   Object? stopWhen, // StopCondition | List<StopCondition>
   List<LanguageModelV4ToolApprovalResponse> toolApprovalResponses = const [],
   CancellationToken? abortSignal,
   Map<String, Object?>? runtimeContext,
+  Object? generationContext,
+  bool allowSystemInMessages = false,
   int? maxOutputTokens,
   double? temperature,
   double? topP,
@@ -73,7 +86,9 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   StreamTextOnError? onError,
   StreamTextOnAbort? onAbort,
   StreamTextOnFinish<TOutput>? onFinish,
+  StreamTextOnEnd<TOutput>? onEnd,
   GenerateTextOnStepFinish? onStepFinish,
+  StreamTextOnStepEnd? onStepEnd,
   GenerateTextPrepareStep? prepareStep,
   StreamTextOnInputStart? onInputStart,
   StreamTextOnInputDelta? onInputDelta,
@@ -81,22 +96,58 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   StreamTextTransform? experimentalTransform,
   TimeoutConfiguration? timeout,
   GenerateTextExperimentalOnStart? experimentalOnStart,
+  GenerateTextExperimentalOnStart? onStart,
   GenerateTextExperimentalOnStepStart? experimentalOnStepStart,
+  GenerateTextExperimentalOnStepStart? onStepStart,
   GenerateTextExperimentalOnToolCallStart? experimentalOnToolCallStart,
+  GenerateTextExperimentalOnToolCallStart? onToolExecutionStart,
   GenerateTextExperimentalOnToolCallFinish? experimentalOnToolCallFinish,
+  GenerateTextExperimentalOnToolCallFinish? onToolExecutionEnd,
   TelemetrySettings? telemetry,
 }) async {
+  if (maxToolConcurrency < 1) {
+    throw ArgumentError.value(
+      maxToolConcurrency,
+      'maxToolConcurrency',
+      'must be positive',
+    );
+  }
   final telemetrySpan = startTelemetrySpan(
     telemetry,
     spanName: 'ai.streamText',
     attributes: {
-      'ai.model.provider': model.provider,
-      'ai.model.id': model.modelId,
-      'ai.prompt': ?prompt,
+      AiTelemetryKeys.modelProvider: model.provider,
+      AiTelemetryKeys.modelId: model.modelId,
+      if (telemetry?.captureInputs == true && prompt != null)
+        'ai.prompt': prompt,
     },
   );
+  final metricStopwatch = Stopwatch()..start();
+  var retryCount = 0;
+  var metricProvider = model.provider;
+  var metricModelId = model.modelId;
+  void recordMetric(
+    String name,
+    num value, {
+    Map<String, TelemetryAttributeValue> attributes = const {},
+  }) {
+    recordTelemetryMetric(
+      telemetry,
+      TelemetryMetric(
+        name: name,
+        value: value,
+        attributes: {
+          AiTelemetryKeys.modelProvider: metricProvider,
+          AiTelemetryKeys.modelId: metricModelId,
+          AiTelemetryKeys.operation: 'streamText',
+          ...attributes,
+        },
+      ),
+    );
+  }
 
   final outputSpec = output ?? (Output.text() as Output<TOutput>);
+  final responseMessages = <LanguageModelV4Message>[];
   var normalizedMessages = <LanguageModelV4Message>[
     if (prompt != null)
       LanguageModelV4Message(
@@ -106,10 +157,18 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
     ...?messages?.map(toLanguageModelMessage),
   ];
 
-  final systemInstruction = buildOutputSystemInstruction(system, outputSpec);
-  final approvalById = {
-    for (final approval in toolApprovalResponses) approval.approvalId: approval,
-  };
+  rejectSystemMessages(
+    messages ?? const [],
+    allowSystemInMessages: allowSystemInMessages,
+  );
+
+  var currentInstructions = instructions ?? system;
+  final initialInstructions = currentInstructions;
+  final scope = OperationScope(
+    abortSignal: abortSignal,
+    timeout: timeout?.total,
+  );
+  final approvalById = indexApprovalResponses(toolApprovalResponses);
 
   final rawController = StreamController<LanguageModelV4StreamPart>.broadcast();
   final textController = StreamController<String>.broadcast();
@@ -120,11 +179,16 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   final textCompleter = Completer<String>();
   final outputCompleter = Completer<TOutput>();
   final finishCompleter = Completer<StreamPartFinish?>();
+  final finalStepCompleter = Completer<GenerateTextStep>();
   final contentCompleter = Completer<List<LanguageModelV4ContentPart>>();
   final reasoningCompleter = Completer<List<LanguageModelV4ReasoningPart>>();
   final reasoningTextCompleter = Completer<String>();
   final filesCompleter = Completer<List<LanguageModelV4FilePart>>();
+  final reasoningFilesCompleter =
+      Completer<List<LanguageModelV4ReasoningFilePart>>();
   final sourcesCompleter = Completer<List<LanguageModelV4SourcePart>>();
+  final documentSourcesCompleter =
+      Completer<List<LanguageModelV4DocumentSourcePart>>();
   final toolCallsCompleter = Completer<List<LanguageModelV4ToolCallPart>>();
   final toolResultsCompleter = Completer<List<LanguageModelV4ToolResultPart>>();
   final finishReasonCompleter = Completer<LanguageModelV4FinishReason?>();
@@ -140,6 +204,13 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   Object? terminalError;
   StackTrace? terminalStackTrace;
   StreamTextErrorEvent? terminalFullStreamErrorEvent;
+  AbortSignalObservation? abortObservation;
+
+  Future<void> disposeAbortObservation() async {
+    final observation = abortObservation;
+    abortObservation = null;
+    await observation?.dispose();
+  }
 
   for (final future in [
     textCompleter.future,
@@ -148,7 +219,9 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
     reasoningCompleter.future,
     reasoningTextCompleter.future,
     filesCompleter.future,
+    reasoningFilesCompleter.future,
     sourcesCompleter.future,
+    documentSourcesCompleter.future,
     toolCallsCompleter.future,
     toolResultsCompleter.future,
     finishReasonCompleter.future,
@@ -167,13 +240,11 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
 
   // Wire onAbort: fire when the caller cancels via abortSignal.
   if (abortSignal != null && onAbort != null) {
-    unawaited(
-      abortSignal.onCancelled.then((_) {
-        if (!isTerminal) {
-          safeInvoke(onAbort);
-        }
-      }),
-    );
+    abortObservation = AbortSignalObservation.attach(abortSignal, () {
+      if (!isTerminal) {
+        safeInvoke(onAbort);
+      }
+    });
   }
 
   final runFuture = Future<void>(() async {
@@ -189,16 +260,19 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
     String? lastPartialFingerprint;
     StreamPartFinish? lastFinishPart;
     var lastContent = <LanguageModelV4ContentPart>[];
+    var firstMeaningfulRecorded = false;
     Object? lastRequestBody;
     Object? lastResponseBody;
     LanguageModelV4ResponseMetadata? lastResponseMetadata;
     var lastWarnings = <LanguageModelV4Warning>[];
+    List<LanguageModelV4Message>? firstRequestMessages;
 
     safeInvoke(
-      () => experimentalOnStart?.call(
+      () => (onStart ?? experimentalOnStart)?.call(
         GenerateTextExperimentalStartEvent(
           model: model,
-          system: systemInstruction,
+          system: buildOutputSystemInstruction(currentInstructions, outputSpec),
+          instructions: currentInstructions,
           prompt: prompt,
           messages: List.unmodifiable(normalizedMessages),
           runtimeContext: runtimeContext,
@@ -207,7 +281,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
     );
 
     try {
-      throwIfCancelled(abortSignal);
+      throwIfCancelled(scope.signal);
       fullController.add(const StreamTextStartEvent());
 
       final allStopConditions = resolveStopConditions(stopWhen, stopConditions);
@@ -217,23 +291,46 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
         maxSteps: maxSteps,
       );
       for (var stepNumber = 0; stepNumber < totalSteps; stepNumber++) {
-        throwIfCancelled(abortSignal);
+        final responseMessageStart = responseMessages.length;
+        throwIfCancelled(scope.signal);
         fullController.add(StreamTextStartStepEvent(stepNumber: stepNumber));
 
-        final prepareResult = await prepareStep?.call(
-          GenerateTextPrepareStepContext(
-            model: model,
-            stepNumber: stepNumber,
-            steps: List.unmodifiable(steps),
-            messages: List.unmodifiable(normalizedMessages),
-            stopConditions: allStopConditions,
-            runtimeContext: runtimeContext,
+        final prepareResult = await scope.run(
+          () async => prepareStep?.call(
+            GenerateTextPrepareStepContext(
+              model: model,
+              stepNumber: stepNumber,
+              steps: List.unmodifiable(steps),
+              instructions: currentInstructions,
+              messages: List.unmodifiable(normalizedMessages),
+              stopConditions: allStopConditions,
+              runtimeContext: runtimeContext,
+            ),
           ),
+          raceCancellation: true,
         );
 
+        if (prepareResult?.instructions case final override?) {
+          currentInstructions = override;
+        }
+
         final stepModel = prepareResult?.model ?? model;
+        metricProvider = stepModel.provider;
+        metricModelId = stepModel.modelId;
         final stepToolChoice = prepareResult?.toolChoice ?? toolChoice;
         final stepMessages = prepareResult?.messages ?? normalizedMessages;
+        firstRequestMessages ??= List<LanguageModelV4Message>.from(
+          stepMessages,
+        );
+        if (!allowSystemInMessages &&
+            stepMessages.any(
+              (message) => message.role == LanguageModelV4Role.system,
+            )) {
+          throw ArgumentError(
+            'System-role messages are rejected by default. Set '
+            'allowSystemInMessages: true for trusted legacy histories.',
+          );
+        }
         final stepProviderOptions =
             prepareResult?.providerOptions ?? providerOptions;
         final activeTools = selectActiveTools(
@@ -247,7 +344,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
         );
 
         safeInvoke(
-          () => experimentalOnStepStart?.call(
+          () => (onStepStart ?? experimentalOnStepStart)?.call(
             GenerateTextExperimentalStepStartEvent(
               stepNumber: stepNumber,
               model: stepModel,
@@ -259,7 +356,10 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
 
         final streamCallOptions = LanguageModelV4CallOptions(
           prompt: LanguageModelV4Prompt(
-            system: systemInstruction,
+            system: buildOutputSystemInstruction(
+              currentInstructions,
+              outputSpec,
+            ),
             messages: stepMessages,
           ),
           tools: [
@@ -288,63 +388,155 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
           headers: headers,
           providerOptions: stepProviderOptions,
           responseFormat: buildResponseFormat(outputSpec),
-          includeRawChunks: includeRawChunks,
-          abortSignal: abortSignal,
+          includeRawChunks: includeRawChunks || bodyInclusion.rawChunks,
+          abortSignal: scope.signal,
           reasoning: reasoning,
         );
-        final response = await withRetry(
-          maxRetries: maxRetries,
-          totalTimeout: remainingTimeout(
-            timeout: timeout?.total,
-            elapsed: overallStopwatch.elapsed,
+        final stepStopwatch = Stopwatch()..start();
+        final acquisitionStopwatch = Stopwatch()..start();
+        final response = await scope.run(
+          () => withRetry(
+            maxRetries: maxRetries,
+            totalTimeout: remainingTimeout(
+              timeout: timeout?.total,
+              elapsed: overallStopwatch.elapsed,
+            ),
+            stepTimeout: timeout?.step,
+            abortSignal: scope.signal,
+            onRetry: () => retryCount++,
+            fn: (attemptTimeout) {
+              final call = stepModel.doStream(streamCallOptions);
+              unawaited(
+                call.then((lateResponse) async {
+                  if (!scope.signal.isCancelled) return;
+                  try {
+                    final subscription = lateResponse.stream.listen(
+                      (_) {},
+                      onError: (_, _) {},
+                    );
+                    await subscription.cancel();
+                  } catch (_) {}
+                }, onError: (_) {}),
+              );
+              final acquisitionTimeout = minTimeout(
+                attemptTimeout,
+                timeout?.firstChunk,
+              );
+              if (acquisitionTimeout == null) return call;
+              return call.timeout(
+                acquisitionTimeout,
+                onTimeout: () {
+                  scheduleMicrotask(scope.signal.cancel);
+                  throw TimeoutException(
+                    'Model stream acquisition timed out.',
+                    acquisitionTimeout,
+                  );
+                },
+              );
+            },
           ),
-          stepTimeout: timeout?.step,
-          abortSignal: abortSignal,
-          fn: (attemptTimeout) {
-            final call = stepModel.doStream(streamCallOptions);
-            return attemptTimeout != null ? call.timeout(attemptTimeout) : call;
-          },
         );
-        lastRequestBody = response.request?.body;
-        lastResponseBody = response.response?.body;
+        lastRequestBody = bodyInclusion.requestBody
+            ? response.request?.body
+            : null;
+        lastResponseBody = bodyInclusion.responseBody
+            ? response.response?.body
+            : null;
         lastWarnings = List<LanguageModelV4Warning>.from(response.warnings);
         lastResponseMetadata = response.response;
 
         final stepTextById = <String, StringBuffer>{};
+        final textProviderMetadataById = <String, ProviderMetadata?>{};
         final stepToolCalls = <LanguageModelV4ToolCallPart>[];
         final stepToolResults = <LanguageModelV4ToolResultPart>[];
         final stepApprovalRequests = <LanguageModelV4ToolApprovalRequestPart>[];
         final stepContent = <LanguageModelV4ContentPart>[];
         final toolInputBuffers = <String, StringBuffer>{};
         final toolInputNames = <String, String>{};
-        final reasoningBuffers = <String, StringBuffer>{};
+        final reasoningBuffers = <String, ReasoningBuffer>{};
+        ImmutableArraySnapshotBuilder<dynamic>? arraySnapshotBuilder;
+        var arraySnapshotLength = 0;
+        List<dynamic> arraySnapshot() {
+          final builder = arraySnapshotBuilder ??=
+              ImmutableArraySnapshotBuilder<dynamic>();
+          builder.addAll(partialArrayValues.skip(arraySnapshotLength));
+          arraySnapshotLength = partialArrayValues.length;
+          return builder.snapshot();
+        }
+
         StreamPartFinish? stepFinishPart;
 
-        final iterator = StreamIterator<LanguageModelV4StreamPart>(
-          response.stream,
-        );
+        final iterator =
+            StreamIterator<StreamOutcome<LanguageModelV4StreamPart>>(
+              captureStreamErrors(response.stream),
+            );
         var sawStreamPart = false;
         try {
-          while (await _moveNextWithStreamTimeout(
-            iterator,
-            abortSignal: abortSignal,
-            timeout: sawStreamPart ? timeout?.chunk : timeout?.firstChunk,
-            totalTimeout: timeout?.total,
-            overallStopwatch: overallStopwatch,
+          while (await scope.run(
+            () => _moveNextWithStreamTimeout(
+              iterator,
+              abortSignal: scope.signal,
+              timeout: sawStreamPart
+                  ? timeout?.chunk
+                  : remainingTimeout(
+                      timeout: timeout?.firstChunk,
+                      elapsed: acquisitionStopwatch.elapsed,
+                    ),
+              stepTimeout: timeout?.step,
+              stepStopwatch: stepStopwatch,
+              totalTimeout: timeout?.total,
+              overallStopwatch: overallStopwatch,
+            ),
           )) {
-            final part = iterator.current;
-            sawStreamPart = true;
-            rawController.add(part);
+            final part = _filterStreamPart(
+              iterator.current.unwrap(),
+              bodyInclusion,
+            );
+            if (!firstMeaningfulRecorded &&
+                _hasMeaningfulTelemetryPayload(part)) {
+              firstMeaningfulRecorded = true;
+              recordMetric(
+                AiTelemetryMetrics.firstMeaningfulMs,
+                metricStopwatch.elapsedMicroseconds / 1000,
+              );
+            }
+            if (bodyInclusion.rawChunks ||
+                includeRawChunks ||
+                part is! StreamPartRaw) {
+              rawController.add(part);
+            }
             if (part case StreamPartRaw(:final rawValue)) {
-              fullController.add(StreamTextRawEvent(rawValue: rawValue));
-              onChunk?.call(StreamTextRawChunk(rawValue: rawValue));
+              if (bodyInclusion.rawChunks || includeRawChunks) {
+                fullController.add(StreamTextRawEvent(rawValue: rawValue));
+                onChunk?.call(StreamTextRawChunk(rawValue: rawValue));
+              }
             }
 
             switch (part) {
-              case StreamPartTextStart(:final id):
+              case StreamPartTextStart(:final id, :final providerMetadata):
                 stepTextById[id] = StringBuffer();
-                fullController.add(StreamTextTextStartEvent(id: id));
-              case StreamPartTextDelta(:final id, :final delta):
+                textProviderMetadataById[id] = null;
+                _mergeTextProviderMetadata(
+                  textProviderMetadataById,
+                  id,
+                  providerMetadata,
+                );
+                fullController.add(
+                  StreamTextTextStartEvent(
+                    id: id,
+                    providerMetadata: providerMetadata,
+                  ),
+                );
+              case StreamPartTextDelta(
+                :final id,
+                :final delta,
+                :final providerMetadata,
+              ):
+                _mergeTextProviderMetadata(
+                  textProviderMetadataById,
+                  id,
+                  providerMetadata,
+                );
                 final transformedStream =
                     experimentalTransform?.call(delta) ?? Stream.value(delta);
                 final transformedIterator = StreamIterator<String>(
@@ -353,7 +545,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                 try {
                   while (await raceWithCancellation(
                     transformedIterator.moveNext(),
-                    abortSignal,
+                    scope.signal,
                   )) {
                     final transformedDelta = transformedIterator.current;
                     final textBuffer = stepTextById.putIfAbsent(
@@ -364,7 +556,11 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                     overallTextBuffer.write(transformedDelta);
                     textController.add(transformedDelta);
                     fullController.add(
-                      StreamTextTextDeltaEvent(id: id, delta: transformedDelta),
+                      StreamTextTextDeltaEvent(
+                        id: id,
+                        delta: transformedDelta,
+                        providerMetadata: providerMetadata,
+                      ),
                     );
                     onChunk?.call(
                       StreamTextTextChunk(id: id, text: transformedDelta),
@@ -387,17 +583,17 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                         );
                         if (acceptedCount > 0) {
                           lastArraySnapshotLength = partialArrayValues.length;
-                          partialController.add(
-                            createTrackedImmutableSnapshot(partialArrayValues),
-                          );
+                          if (partialController.hasListener) {
+                            partialController.add(arraySnapshot());
+                          }
                         }
                       } else if (update.isClosed &&
                           lastArraySnapshotLength !=
                               partialArrayValues.length) {
                         lastArraySnapshotLength = partialArrayValues.length;
-                        partialController.add(
-                          createTrackedImmutableSnapshot(partialArrayValues),
-                        );
+                        if (partialController.hasListener) {
+                          partialController.add(arraySnapshot());
+                        }
                       }
                     } else if (outputSpec is! TextOutput) {
                       final cadence = partialJsonTracker.append(
@@ -423,35 +619,93 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                 } finally {
                   await transformedIterator.cancel();
                 }
-              case StreamPartTextEnd(:final id):
+              case StreamPartTextEnd(:final id, :final providerMetadata):
+                _mergeTextProviderMetadata(
+                  textProviderMetadataById,
+                  id,
+                  providerMetadata,
+                );
                 final text = stepTextById[id]?.toString() ?? '';
-                stepContent.add(LanguageModelV4TextPart(text: text));
-                fullController.add(StreamTextTextEndEvent(id: id));
-              case StreamPartReasoningStart(:final id):
-                reasoningBuffers[id] = StringBuffer();
-                fullController.add(StreamTextReasoningStartEvent(id: id));
-              case StreamPartReasoningDelta(:final id, :final delta):
+                stepContent.add(
+                  LanguageModelV4TextPart(
+                    text: text,
+                    providerOptions: textProviderMetadataById[id],
+                  ),
+                );
+                fullController.add(
+                  StreamTextTextEndEvent(
+                    id: id,
+                    providerMetadata: providerMetadata,
+                  ),
+                );
+              case StreamPartReasoningStart(:final id, :final providerMetadata):
+                reasoningBuffers
+                    .putIfAbsent(id, ReasoningBuffer.new)
+                    .mergeMetadata(providerMetadata);
+                fullController.add(
+                  StreamTextReasoningStartEvent(
+                    id: id,
+                    providerMetadata: providerMetadata,
+                  ),
+                );
+              case StreamPartReasoningDelta(
+                :final id,
+                :final delta,
+                :final providerMetadata,
+              ):
                 final buffer = reasoningBuffers.putIfAbsent(id, () {
                   fullController.add(StreamTextReasoningStartEvent(id: id));
-                  return StringBuffer();
+                  return ReasoningBuffer();
                 });
-                buffer.write(delta);
+                buffer.write(delta, providerMetadata);
                 fullController.add(
-                  StreamTextReasoningDeltaEvent(id: id, delta: delta),
+                  StreamTextReasoningDeltaEvent(
+                    id: id,
+                    delta: delta,
+                    providerMetadata: providerMetadata,
+                  ),
                 );
                 onChunk?.call(StreamTextReasoningChunk(delta: delta));
-              case StreamPartReasoningEnd(:final id):
-                final text = reasoningBuffers.remove(id)?.toString() ?? '';
-                stepContent.add(LanguageModelV4ReasoningPart(text: text));
-                fullController.add(StreamTextReasoningEndEvent(id: id));
+              case StreamPartReasoningEnd(
+                :final id,
+                :final providerMetadata,
+                :final signature,
+              ):
+                final buffer = reasoningBuffers.remove(id) ?? ReasoningBuffer();
+                stepContent.add(
+                  buffer.finish(
+                    metadata: providerMetadata,
+                    signature: signature,
+                  ),
+                );
+                fullController.add(
+                  StreamTextReasoningEndEvent(
+                    id: id,
+                    providerMetadata: providerMetadata,
+                    signature: signature,
+                  ),
+                );
               case StreamPartSource(:final source):
                 stepContent.add(source);
                 fullController.add(StreamTextSourceEvent(source: source));
                 onChunk?.call(StreamTextSourceChunk(source: source));
+              case StreamPartDocumentSource(:final source):
+                stepContent.add(source);
+                fullController.add(
+                  StreamTextDocumentSourceEvent(source: source),
+                );
+                onChunk?.call(StreamTextDocumentSourceChunk(source: source));
               case StreamPartFile(:final file):
                 stepContent.add(file);
                 fullController.add(StreamTextFileEvent(file: file));
                 onChunk?.call(StreamTextFileChunk(file: file));
+              case StreamPartReasoningFile(:final file):
+                stepContent.add(file);
+                fullController.add(StreamTextReasoningFileEvent(file: file));
+                onChunk?.call(StreamTextReasoningFileChunk(file: file));
+              case StreamPartOpaque(:final opaque):
+                stepContent.add(opaque);
+                fullController.add(StreamTextOpaqueEvent(opaque: opaque));
               case StreamPartToolInputStart(:final id, :final toolName):
                 toolInputBuffers[id] = StringBuffer();
                 toolInputNames[id] = toolName;
@@ -542,15 +796,30 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                 stepFinishPart = part;
                 lastFinishPart = part;
             }
+            if (part is! StreamPartStreamStart &&
+                part is! StreamPartRaw &&
+                part is! StreamPartResponseMetadata) {
+              sawStreamPart = true;
+            }
+            _throwIfStreamDeadline(
+              scope.signal,
+              stepTimeout: timeout?.step,
+              stepStopwatch: stepStopwatch,
+            );
           }
         } finally {
-          await iterator.cancel();
+          try {
+            await iterator.cancel();
+          } catch (_) {}
         }
+        _throwIfStreamDeadline(
+          scope.signal,
+          stepTimeout: timeout?.step,
+          stepStopwatch: stepStopwatch,
+        );
 
         for (final entry in reasoningBuffers.entries) {
-          stepContent.add(
-            LanguageModelV4ReasoningPart(text: entry.value.toString()),
-          );
+          stepContent.add(entry.value.finish());
           fullController.add(StreamTextReasoningEndEvent(id: entry.key));
         }
 
@@ -568,16 +837,22 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
             content: stepContent,
           ),
         ];
+        responseMessages.add(normalizedMessages.last);
 
         if (stepToolCalls.isNotEmpty) {
-          for (final call in stepToolCalls) {
-            throwIfCancelled(abortSignal);
-            final execution = await executeToolCall(
+          final executableCalls = stepToolCalls
+              .where((call) => !isProviderExecutedToolCall(call))
+              .toList(growable: false);
+          final executions = await executeToolCallsBounded(
+            calls: executableCalls,
+            maxConcurrency: maxToolConcurrency,
+            abortSignal: scope.signal,
+            execute: (call) => executeToolCall(
               tools: toolSelection.exposedTools,
               call: call,
               messages: normalizedMessages,
               approvalById: approvalById,
-              abortSignal: abortSignal,
+              abortSignal: scope.signal,
               timeout: minTimeout(
                 remainingTimeout(
                   timeout: timeout?.total,
@@ -585,9 +860,17 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                 ),
                 timeout?.toolTimeoutFor(call.toolName),
               ),
+              approvalPolicy:
+                  approvalPolicyFor?.call(call.toolName, call.input) ??
+                  approvalPolicy,
+              policyRevision: approvalPolicyRevision,
+              generationContext: generationContext ?? runtimeContext,
               runtimeContext: runtimeContext,
-              onToolCallStart: experimentalOnToolCallStart,
-              onToolCallFinish: experimentalOnToolCallFinish,
+              requireExactApprovalBinding: true,
+              onToolCallStart:
+                  onToolExecutionStart ?? experimentalOnToolCallStart,
+              onToolCallFinish:
+                  onToolExecutionEnd ?? experimentalOnToolCallFinish,
               onPreliminaryResult: (preliminary) {
                 final result = LanguageModelV4ToolResultPart(
                   toolCallId: call.toolCallId,
@@ -609,7 +892,15 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                   ),
                 );
               },
-            );
+            ),
+          );
+          for (
+            var executionIndex = 0;
+            executionIndex < executions.length;
+            executionIndex++
+          ) {
+            final call = executableCalls[executionIndex];
+            final execution = executions[executionIndex];
             if (execution.approvalRequest != null) {
               stepApprovalRequests.add(execution.approvalRequest!);
               stepContent.add(execution.approvalRequest!);
@@ -649,6 +940,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
               content: stepToolResults,
             ),
           ];
+          responseMessages.add(normalizedMessages.last);
         }
 
         final stepText = stepContent
@@ -675,12 +967,23 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
           toolCalls: stepToolCalls,
           toolResults: stepToolResults,
           toolApprovalRequests: stepApprovalRequests,
+          responseMessages: List.unmodifiable(
+            responseMessages.skip(responseMessageStart),
+          ),
           response: LanguageModelV4GenerateResult(
             content: stepContent,
             finishReason: resolvedFinish.finishReason,
             usage: resolvedFinish.usage,
+            warnings: List.unmodifiable(lastWarnings),
             providerMetadata: resolvedFinish.providerMetadata,
             rawFinishReason: resolvedFinish.rawFinishReason,
+            request: LanguageModelV4RequestMetadata(
+              body: bodyInclusion.requestBody ? lastRequestBody : null,
+            ),
+            response: _streamFilteredResponseMetadata(
+              lastResponseMetadata,
+              bodyInclusion,
+            ),
           ),
           text: stepText,
           finishReason: resolvedFinish.finishReason,
@@ -689,7 +992,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
         steps.add(step);
         lastContent = stepContent;
 
-        safeInvoke(() => onStepFinish?.call(stepFinish));
+        safeInvoke(() => (onStepEnd ?? onStepFinish)?.call(stepFinish));
         fullController.add(StreamTextFinishStepEvent(step: stepFinish));
 
         final shouldStop = shouldStopAfterStep(
@@ -711,17 +1014,43 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
           .whereType<LanguageModelV4TextPart>()
           .map((part) => part.text)
           .join();
+      throwIfCancelled(scope.signal);
+      scope.checkDeadline();
       final finalOutput = parseOutputWithNoObjectError(
         output: outputSpec,
         text: finalText,
         usage: lastFinishPart?.usage,
         response: lastResponseMetadata,
       );
+      scope.checkDeadline();
       final totalUsage = sumUsage(steps.map((step) => step.usage));
-      final reasoningParts = lastContent
-          .whereType<LanguageModelV4ReasoningPart>()
-          .toList();
-      final resolvedReasoningText = lastContent
+      final aggregateContent = steps
+          .expand((step) => step.content)
+          .toList(growable: false);
+      final aggregateToolCalls = steps
+          .expand((step) => step.toolCalls)
+          .toList(growable: false);
+      final aggregateToolResults = steps
+          .expand((step) => step.toolResults)
+          .toList(growable: false);
+      final aggregateSources = steps
+          .expand((step) => step.sources)
+          .toList(growable: false);
+      final aggregateFiles = steps
+          .expand((step) => step.files)
+          .toList(growable: false);
+      final aggregateReasoningFiles = steps
+          .expand((step) => step.reasoningFiles)
+          .toList(growable: false);
+      final aggregateDocumentSources = steps
+          .expand((step) => step.documentSources)
+          .toList(growable: false);
+      final aggregateWarnings = steps
+          .expand((step) => step.warnings)
+          .toList(growable: false);
+      final finalStep = steps.last;
+      final reasoningParts = finalStep.reasoning;
+      final resolvedReasoningText = finalStep.content
           .where(
             (part) =>
                 part is LanguageModelV4ReasoningPart ||
@@ -732,34 +1061,18 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                 part is LanguageModelV4ReasoningPart ? part.text : '[REDACTED]',
           )
           .join();
-      final sources = lastContent
-          .whereType<LanguageModelV4SourcePart>()
-          .toList();
-      final files = lastContent.whereType<LanguageModelV4FilePart>().toList();
-      final responseMessages = normalizedMessages
-          .where(
-            (message) =>
-                message.role == LanguageModelV4Role.assistant ||
-                message.role == LanguageModelV4Role.tool,
-          )
-          .toList(growable: false);
       final requestInfo = GenerateTextRequest(
-        system: systemInstruction,
-        messages: List.unmodifiable(
-          normalizedMessages
-              .where(
-                (message) =>
-                    message.role == LanguageModelV4Role.user ||
-                    message.role == LanguageModelV4Role.system,
-              )
-              .toList(),
-        ),
+        system: buildOutputSystemInstruction(initialInstructions, outputSpec),
+        messages: List.unmodifiable(firstRequestMessages ?? normalizedMessages),
         body: lastRequestBody,
       );
       final responseInfo = GenerateTextResponse(
         messages: List.unmodifiable(responseMessages),
         body: lastResponseBody,
-        metadata: lastResponseMetadata,
+        metadata: _streamFilteredResponseMetadata(
+          lastResponseMetadata,
+          bodyInclusion,
+        ),
       );
       final resolvedFinish =
           lastFinishPart ??
@@ -772,97 +1085,119 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
         output: finalOutput,
         finishReason: resolvedFinish.finishReason,
         rawFinishReason: resolvedFinish.rawFinishReason,
-        usage: resolvedFinish.usage,
+        usage: totalUsage,
         totalUsage: totalUsage,
         providerMetadata: resolvedFinish.providerMetadata,
         steps: List.unmodifiable(steps),
         reasoning: List.unmodifiable(reasoningParts),
         reasoningText: resolvedReasoningText,
-        sources: List.unmodifiable(sources),
-        files: List.unmodifiable(files),
+        sources: List.unmodifiable(aggregateSources),
+        documentSources: List.unmodifiable(aggregateDocumentSources),
+        files: List.unmodifiable(aggregateFiles),
+        reasoningFiles: List.unmodifiable(aggregateReasoningFiles),
         responseMessages: List.unmodifiable(responseMessages),
         request: requestInfo,
         response: responseInfo,
-        warnings: List.unmodifiable(lastWarnings),
+        finalStep: finalStep,
+        warnings: List.unmodifiable(aggregateWarnings),
       );
 
       isTerminal = true;
+      await disposeAbortObservation();
       fullController.add(finishEvent);
-      safeInvoke(() => onFinish?.call(finishEvent));
+      safeInvoke(() => (onEnd ?? onFinish)?.call(finishEvent));
+      throwIfCancelled(scope.signal);
+      scope.checkDeadline();
 
       textCompleter.completeIfPending(finalText);
       outputCompleter.completeIfPending(finalOutput);
       finishCompleter.completeIfPending(lastFinishPart);
-      contentCompleter.completeIfPending(List.unmodifiable(lastContent));
+      contentCompleter.completeIfPending(List.unmodifiable(aggregateContent));
       reasoningCompleter.completeIfPending(List.unmodifiable(reasoningParts));
       reasoningTextCompleter.completeIfPending(resolvedReasoningText);
-      filesCompleter.completeIfPending(List.unmodifiable(files));
-      sourcesCompleter.completeIfPending(List.unmodifiable(sources));
+      filesCompleter.completeIfPending(List.unmodifiable(aggregateFiles));
+      reasoningFilesCompleter.completeIfPending(
+        List.unmodifiable(aggregateReasoningFiles),
+      );
+      sourcesCompleter.completeIfPending(List.unmodifiable(aggregateSources));
+      documentSourcesCompleter.completeIfPending(
+        List.unmodifiable(aggregateDocumentSources),
+      );
       toolCallsCompleter.completeIfPending(
-        List.unmodifiable(
-          lastContent.whereType<LanguageModelV4ToolCallPart>().toList(),
-        ),
+        List.unmodifiable(aggregateToolCalls),
       );
       toolResultsCompleter.completeIfPending(
-        List.unmodifiable(
-          lastContent.whereType<LanguageModelV4ToolResultPart>().toList(),
-        ),
+        List.unmodifiable(aggregateToolResults),
       );
       finishReasonCompleter.completeIfPending(resolvedFinish.finishReason);
       rawFinishReasonCompleter.completeIfPending(
         resolvedFinish.rawFinishReason,
       );
-      usageCompleter.completeIfPending(resolvedFinish.usage);
+      usageCompleter.completeIfPending(totalUsage);
       totalUsageCompleter.completeIfPending(totalUsage);
-      warningsCompleter.completeIfPending(List.unmodifiable(lastWarnings));
+      warningsCompleter.completeIfPending(List.unmodifiable(aggregateWarnings));
       stepsCompleter.completeIfPending(List.unmodifiable(steps));
+      finalStepCompleter.completeIfPending(finalStep);
       requestCompleter.completeIfPending(requestInfo);
       responseCompleter.completeIfPending(responseInfo);
       providerMetadataCompleter.completeIfPending(
         resolvedFinish.providerMetadata,
       );
     } catch (error, stackTrace) {
+      final filteredError = filterBodyBearingError(error, bodyInclusion);
       isTerminal = true;
-      terminalError = error;
+      await disposeAbortObservation();
+      terminalError = filteredError;
       terminalStackTrace = stackTrace;
-      terminalFullStreamErrorEvent = StreamTextErrorEvent(error: error);
-      safeInvoke(() => onError?.call(error));
+      terminalFullStreamErrorEvent = StreamTextErrorEvent(error: filteredError);
+      safeInvoke(() => onError?.call(filteredError));
       fullController.add(terminalFullStreamErrorEvent!);
 
-      textCompleter.completeErrorIfPending(error, stackTrace);
-      outputCompleter.completeErrorIfPending(error, stackTrace);
-      finishCompleter.completeErrorIfPending(error, stackTrace);
-      contentCompleter.completeErrorIfPending(error, stackTrace);
-      reasoningCompleter.completeErrorIfPending(error, stackTrace);
-      reasoningTextCompleter.completeErrorIfPending(error, stackTrace);
-      filesCompleter.completeErrorIfPending(error, stackTrace);
-      sourcesCompleter.completeErrorIfPending(error, stackTrace);
-      toolCallsCompleter.completeErrorIfPending(error, stackTrace);
-      toolResultsCompleter.completeErrorIfPending(error, stackTrace);
-      finishReasonCompleter.completeErrorIfPending(error, stackTrace);
-      rawFinishReasonCompleter.completeErrorIfPending(error, stackTrace);
-      usageCompleter.completeErrorIfPending(error, stackTrace);
-      totalUsageCompleter.completeErrorIfPending(error, stackTrace);
-      warningsCompleter.completeErrorIfPending(error, stackTrace);
-      stepsCompleter.completeErrorIfPending(error, stackTrace);
-      requestCompleter.completeErrorIfPending(error, stackTrace);
-      responseCompleter.completeErrorIfPending(error, stackTrace);
-      providerMetadataCompleter.completeErrorIfPending(error, stackTrace);
+      textCompleter.completeErrorIfPending(filteredError, stackTrace);
+      outputCompleter.completeErrorIfPending(filteredError, stackTrace);
+      finishCompleter.completeErrorIfPending(filteredError, stackTrace);
+      contentCompleter.completeErrorIfPending(filteredError, stackTrace);
+      reasoningCompleter.completeErrorIfPending(filteredError, stackTrace);
+      reasoningTextCompleter.completeErrorIfPending(filteredError, stackTrace);
+      filesCompleter.completeErrorIfPending(filteredError, stackTrace);
+      reasoningFilesCompleter.completeErrorIfPending(filteredError, stackTrace);
+      sourcesCompleter.completeErrorIfPending(filteredError, stackTrace);
+      documentSourcesCompleter.completeErrorIfPending(
+        filteredError,
+        stackTrace,
+      );
+      toolCallsCompleter.completeErrorIfPending(filteredError, stackTrace);
+      toolResultsCompleter.completeErrorIfPending(filteredError, stackTrace);
+      finishReasonCompleter.completeErrorIfPending(filteredError, stackTrace);
+      rawFinishReasonCompleter.completeErrorIfPending(
+        filteredError,
+        stackTrace,
+      );
+      usageCompleter.completeErrorIfPending(filteredError, stackTrace);
+      totalUsageCompleter.completeErrorIfPending(filteredError, stackTrace);
+      warningsCompleter.completeErrorIfPending(filteredError, stackTrace);
+      stepsCompleter.completeErrorIfPending(filteredError, stackTrace);
+      requestCompleter.completeErrorIfPending(filteredError, stackTrace);
+      responseCompleter.completeErrorIfPending(filteredError, stackTrace);
+      providerMetadataCompleter.completeErrorIfPending(
+        filteredError,
+        stackTrace,
+      );
 
       if (rawController.hasListener) {
-        rawController.addError(error, stackTrace);
+        rawController.addError(filteredError, stackTrace);
       }
       if (textController.hasListener) {
-        textController.addError(error, stackTrace);
+        textController.addError(filteredError, stackTrace);
       }
       if (fullController.hasListener) {
-        fullController.addError(error, stackTrace);
+        fullController.addError(filteredError, stackTrace);
       }
       if (partialController.hasListener) {
-        partialController.addError(error, stackTrace);
+        partialController.addError(filteredError, stackTrace);
       }
       if (elementController.hasListener) {
-        elementController.addError(error, stackTrace);
+        elementController.addError(filteredError, stackTrace);
       }
     } finally {
       await rawController.close();
@@ -870,46 +1205,74 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
       await fullController.close();
       await partialController.close();
       await elementController.close();
+      await disposeAbortObservation();
     }
   });
-  runFuture.ignore();
+  runFuture.whenComplete(scope.close).ignore();
 
   // End the telemetry span when the stream fully finishes or fails. Both
   // completers are settled together, so once finish succeeds totalUsage has
   // succeeded as well.
   finishCompleter.future.then(
-    (_) => totalUsageCompleter.future.then((usage) {
-      telemetrySpan
-        ..setAttribute('ai.usage.promptTokens', usage?.inputTokens.total ?? 0)
-        ..setAttribute(
-          'ai.usage.completionTokens',
-          usage?.outputTokens.total ?? 0,
-        )
-        ..end();
-    }),
+    (_) => totalUsageCompleter.future.then(
+      (usage) => stepsCompleter.future.then((steps) {
+        telemetrySpan
+          ..setAttribute(AiTelemetryKeys.promptTokens, usage?.inputTokens.total)
+          ..setAttribute(
+            AiTelemetryKeys.completionTokens,
+            usage?.outputTokens.total,
+          )
+          ..setAttribute(AiTelemetryKeys.stepCount, steps.length)
+          ..end();
+        recordMetric(
+          AiTelemetryMetrics.totalMs,
+          metricStopwatch.elapsedMicroseconds / 1000,
+          attributes: {AiTelemetryKeys.operationStatus: 'success'},
+        );
+        recordMetric(AiTelemetryMetrics.stepCount, steps.length);
+        recordMetric(AiTelemetryMetrics.usageKnown, usage == null ? 0 : 1);
+        recordMetric(AiTelemetryMetrics.retryCount, retryCount);
+        recordMetric(AiTelemetryMetrics.success, 1);
+      }),
+    ),
     onError: (Object e, StackTrace st) {
+      final cancelled = abortSignal?.isCancelled == true;
+      recordMetric(
+        AiTelemetryMetrics.totalMs,
+        metricStopwatch.elapsedMicroseconds / 1000,
+        attributes: {
+          AiTelemetryKeys.operationStatus: cancelled ? 'cancelled' : 'failure',
+        },
+      );
+      recordMetric(
+        cancelled ? AiTelemetryMetrics.cancelled : AiTelemetryMetrics.failure,
+        1,
+      );
       telemetrySpan
         ..recordException(e, stackTrace: st)
         ..end(error: e);
     },
   );
 
+  final canonicalStream = terminalAwareBroadcastStream(
+    source: fullController.stream,
+    isTerminal: () => isTerminal,
+    terminalError: () => terminalError,
+    terminalStackTrace: () => terminalStackTrace,
+    replayOnError: () => terminalFullStreamErrorEvent == null
+        ? const <StreamTextEvent>[]
+        : <StreamTextEvent>[terminalFullStreamErrorEvent!],
+  );
+  final providerStream = terminalAwareBroadcastStream(
+    source: rawController.stream,
+    isTerminal: () => isTerminal,
+    terminalError: () => terminalError,
+    terminalStackTrace: () => terminalStackTrace,
+  );
+
   return StreamTextResult<TOutput>(
-    stream: terminalAwareBroadcastStream(
-      source: rawController.stream,
-      isTerminal: () => isTerminal,
-      terminalError: () => terminalError,
-      terminalStackTrace: () => terminalStackTrace,
-    ),
-    fullStream: terminalAwareBroadcastStream(
-      source: fullController.stream,
-      isTerminal: () => isTerminal,
-      terminalError: () => terminalError,
-      terminalStackTrace: () => terminalStackTrace,
-      replayOnError: () => terminalFullStreamErrorEvent == null
-          ? const <StreamTextEvent>[]
-          : <StreamTextEvent>[terminalFullStreamErrorEvent!],
-    ),
+    stream: canonicalStream,
+    providerStream: providerStream,
     textStream: terminalAwareBroadcastStream(
       source: textController.stream,
       isTerminal: () => isTerminal,
@@ -934,7 +1297,9 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
     reasoning: reasoningCompleter.future,
     reasoningText: reasoningTextCompleter.future,
     files: filesCompleter.future,
+    reasoningFiles: reasoningFilesCompleter.future,
     sources: sourcesCompleter.future,
+    documentSources: documentSourcesCompleter.future,
     toolCalls: toolCallsCompleter.future,
     toolResults: toolResultsCompleter.future,
     finishReason: finishReasonCompleter.future,
@@ -947,23 +1312,106 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
     response: responseCompleter.future,
     providerMetadata: providerMetadataCompleter.future,
     finish: finishCompleter.future,
+    finalStep: finalStepCompleter.future,
   );
 }
 
+LanguageModelV4ResponseMetadata? _streamFilteredResponseMetadata(
+  LanguageModelV4ResponseMetadata? metadata,
+  BodyInclusionPolicy policy,
+) => metadata == null
+    ? null
+    : LanguageModelV4ResponseMetadata(
+        id: metadata.id,
+        modelId: metadata.modelId,
+        timestamp: metadata.timestamp,
+        headers: metadata.headers,
+        body: policy.responseBody ? metadata.body : null,
+      );
+
+LanguageModelV4StreamPart _filterStreamPart(
+  LanguageModelV4StreamPart part,
+  BodyInclusionPolicy policy,
+) => switch (part) {
+  StreamPartResponseMetadata(:final metadata) => StreamPartResponseMetadata(
+    metadata: _streamFilteredResponseMetadata(metadata, policy)!,
+  ),
+  StreamPartError(:final error) => StreamPartError(
+    error: filterBodyBearingError(error, policy),
+  ),
+  _ => part,
+};
+
+bool _hasMeaningfulTelemetryPayload(LanguageModelV4StreamPart part) =>
+    switch (part) {
+      StreamPartTextDelta(:final delta) => delta.isNotEmpty,
+      StreamPartReasoningDelta(:final delta) => delta.isNotEmpty,
+      StreamPartToolInputDelta(:final delta) => delta.isNotEmpty,
+      StreamPartToolCall(:final toolCall) => toolCall.toolName.isNotEmpty,
+      StreamPartToolResult(:final toolResult) => toolResult.toolName.isNotEmpty,
+      StreamPartToolApprovalRequest(:final approvalRequest) =>
+        approvalRequest.toolCall.toolName.isNotEmpty,
+      StreamPartSource(:final source) =>
+        source.id.isNotEmpty || source.url.isNotEmpty,
+      StreamPartFile(:final file) => file.mediaType.isNotEmpty,
+      _ => false,
+    };
+
+void _mergeTextProviderMetadata(
+  Map<String, ProviderMetadata?> metadataById,
+  String id,
+  ProviderMetadata? metadata,
+) {
+  if (metadata == null) return;
+  final merged = metadataById[id] ??= {};
+  for (final entry in metadata.entries) {
+    merged[entry.key] = {...?merged[entry.key], ...entry.value};
+  }
+}
+
 Future<bool> _moveNextWithStreamTimeout(
-  StreamIterator<LanguageModelV4StreamPart> iterator, {
+  StreamIterator<StreamOutcome<LanguageModelV4StreamPart>> iterator, {
   CancellationToken? abortSignal,
   Duration? timeout,
+  Duration? stepTimeout,
+  Stopwatch? stepStopwatch,
   Duration? totalTimeout,
   required Stopwatch overallStopwatch,
 }) {
   final moveNext = raceWithCancellation(iterator.moveNext(), abortSignal);
   final effectiveTimeout = minTimeout(
     remainingTimeout(timeout: totalTimeout, elapsed: overallStopwatch.elapsed),
-    timeout,
+    minTimeout(
+      timeout,
+      stepStopwatch == null
+          ? stepTimeout
+          : remainingTimeout(
+              timeout: stepTimeout,
+              elapsed: stepStopwatch.elapsed,
+            ),
+    ),
   );
   if (effectiveTimeout == null) return moveNext;
-  return moveNext.timeout(effectiveTimeout);
+  return moveNext.timeout(
+    effectiveTimeout,
+    onTimeout: () {
+      if (abortSignal case final signal?) {
+        scheduleMicrotask(signal.cancel);
+      }
+      throw TimeoutException('Stream chunk timed out.', effectiveTimeout);
+    },
+  );
+}
+
+void _throwIfStreamDeadline(
+  CancellationToken signal, {
+  required Duration? stepTimeout,
+  required Stopwatch stepStopwatch,
+}) {
+  if (stepTimeout != null && stepStopwatch.elapsed >= stepTimeout) {
+    signal.cancel();
+    throw TimeoutException('Model step timed out.', stepTimeout);
+  }
 }
 
 Object _safeParseStreamToolInput(String text) {

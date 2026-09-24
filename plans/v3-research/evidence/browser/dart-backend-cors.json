@@ -1,0 +1,12 @@
+{
+  "capturedAt": "2026-09-23T16:10:46.133Z",
+  "browser": "154.0.8037.0",
+  "origin": "http://127.0.0.1:8083",
+  "endpoint": "http://127.0.0.1:8084/chat",
+  "passed": true,
+  "sourceSha256": "ee161eb84779fb21933871b904cc43a563429cab6209011460e39ce27e11a332",
+  "status": 200,
+  "protocol": "v1",
+  "body": "data: {\"type\":\"start\",\"messageId\":\"example-assistant\"}\n\ndata: {\"type\":\"text-start\",\"id\":\"example-text\"}\n\ndata: {\"type\":\"text-delta\",\"id\":\"example-text\",\"delta\":\"Hello from the trusted backend.\"}\n\ndata: {\"type\":\"text-end\",\"id\":\"example-text\"}\n\ndata: {\"type\":\"finish\"}\n\ndata: [DONE]\n\n",
+  "limitations": "Browser cross-origin framing/header smoke only; scripted fixture, no production authentication or live provider."
+}

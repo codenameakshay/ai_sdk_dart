@@ -22,7 +22,7 @@ void main() {
 
     group('initialize()', () {
       test(
-        'sends protocol version "2025-06-18" and tools capability',
+        'sends protocol version "2025-06-18" and implemented client capabilities',
         () async {
           final server = await FakeStreamableHttpServer.start();
           addTearDown(server.close);
@@ -43,7 +43,7 @@ void main() {
             '2.0.0',
           );
           final caps = params['capabilities'] as Map<String, dynamic>;
-          expect(caps.keys, contains('tools'));
+          expect(caps, isEmpty);
         },
       );
 
@@ -954,7 +954,7 @@ void main() {
 
     group('capabilities', () {
       test(
-        'initialize advertises prompts and resources capabilities',
+        'initialize advertises only implemented client capabilities',
         () async {
           final server = await FakeStreamableHttpServer.start();
           addTearDown(server.close);
@@ -969,9 +969,7 @@ void main() {
           final caps =
               (initReq.body?['params'] as Map)['capabilities']
                   as Map<String, dynamic>;
-          expect(caps.keys, contains('prompts'));
-          expect(caps.keys, contains('resources'));
-          expect((caps['resources'] as Map)['subscribe'], isTrue);
+          expect(caps, isEmpty);
         },
       );
     });

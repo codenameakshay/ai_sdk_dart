@@ -4,9 +4,9 @@ import 'dart:typed_data';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
 
-/// A fake [LanguageModelV4AbortSignal] that can be cancelled on demand from a
+/// A fake [AbortSignal] that can be cancelled on demand from a
 /// test.
-class TestAbortSignal implements LanguageModelV4AbortSignal {
+class TestAbortSignal implements AbortSignal {
   final Completer<void> _completer = Completer<void>();
   bool _isCancelled = false;
 

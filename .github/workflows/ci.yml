@@ -8,8 +8,11 @@ on:
 jobs:
   analyze-test-coverage:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       FLUTTER_VERSION: 3.44.3
+      AI_SDK_REMOTE_REFERENCE_URL: http://127.0.0.1:8081/chat
+      AI_SDK_MCP_REFERENCE: '1'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,9 +36,42 @@ jobs:
       - name: Analyze
         run: make analyze DART=dart FLUTTER=flutter
 
+      - name: Set up Node for pinned protocol fixtures
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install pinned protocol fixtures
+        run: |
+          npm ci --ignore-scripts --prefix examples/remote_backend/js
+          npm ci --ignore-scripts --prefix examples/mcp_reference/js
+
+      - name: Start remote protocol fixture
+        run: |
+          node examples/remote_backend/js/server.mjs > "$RUNNER_TEMP/remote-reference.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/remote-reference.pid"
+          for attempt in $(seq 1 30); do
+            if curl --silent --output /dev/null http://127.0.0.1:8081/; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/remote-reference.log"
+          exit 1
+
       - name: Test
         run: make test DART=dart FLUTTER=flutter
+
+      - name: Check provider catalog
+        run: make catalog-check DART=dart
 
       # Ratchet gate: prevents coverage regressions across the published packages.
       - name: Test with coverage (gate)
         run: make coverage-check DART=dart FLUTTER=flutter
+
+      - name: Stop remote protocol fixture
+        if: always()
+        run: |
+          if test -f "$RUNNER_TEMP/remote-reference.pid"; then
+            kill "$(cat "$RUNNER_TEMP/remote-reference.pid")" 2>/dev/null || true
+          fi

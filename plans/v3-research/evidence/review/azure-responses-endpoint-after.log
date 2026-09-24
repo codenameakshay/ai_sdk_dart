@@ -1,0 +1,27 @@
+00:00 +0: loading packages/ai_sdk_azure/test/api_error_conformance_test.dart
+00:00 +0: packages/ai_sdk_azure/test/api_error_conformance_test.dart: Azure API error surfacing doEmbed surfaces the provider message
+00:00 +1: loading packages/ai_sdk_azure/test/azure_provider_test.dart
+00:00 +1: packages/ai_sdk_azure/test/azure_provider_test.dart: AzureOpenAIProvider creates language model with correct provider/spec/modelId
+00:00 +2: packages/ai_sdk_azure/test/azure_provider_test.dart: AzureOpenAIProvider creates embedding model with correct provider/spec/modelId
+00:00 +3: packages/ai_sdk_azure/test/azure_provider_test.dart: AzureOpenAIProvider uses default api version
+00:00 +4: packages/ai_sdk_azure/test/azure_provider_test.dart: AzureOpenAIProvider accepts custom api version
+00:00 +5: packages/ai_sdk_azure/test/azure_provider_test.dart: malformed 2xx embedding responses raise AiApiCallError
+00:00 +6: packages/ai_sdk_azure/test/azure_provider_test.dart: wrong-shaped 2xx embedding responses raise AiApiCallError
+00:00 +7: packages/ai_sdk_azure/test/azure_provider_test.dart: OpenAI-compatible capabilities (via shared base) serializes tools and tool_choice
+00:00 +8: packages/ai_sdk_azure/test/azure_provider_test.dart: OpenAI-compatible capabilities (via shared base) serializes multimodal image content part
+00:00 +9: packages/ai_sdk_azure/test/azure_provider_test.dart: OpenAI-compatible capabilities (via shared base) sends api-key header and api-version query param
+00:00 +10: packages/ai_sdk_azure/test/azure_provider_test.dart: OpenAI-compatible capabilities (via shared base) endpoint ending with slash still posts to deployment chat once
+00:00 +11: packages/ai_sdk_azure/test/azure_provider_test.dart: OpenAI-compatible capabilities (via shared base) chat credentials are resolved immediately before each request
+00:00 +12: packages/ai_sdk_azure/test/azure_provider_test.dart: OpenAI-compatible capabilities (via shared base) dispose closes owned clients and leaves injected clients open
+00:00 +13: packages/ai_sdk_azure/test/azure_provider_test.dart: OpenAI-compatible capabilities (via shared base) response_format json_schema is serialized from a JSON response format
+00:00 +14: packages/ai_sdk_azure/test/azure_provider_test.dart: OpenAI-compatible capabilities (via shared base) forwards providerOptions into the request body
+00:00 +15: packages/ai_sdk_azure/test/azure_provider_test.dart: Azure embedding doEmbed wire format forwards embedding providerOptions
+00:00 +16: packages/ai_sdk_azure/test/azure_provider_test.dart: Azure embedding doEmbed wire format posts to deployment /embeddings with api-key header and api-version query, parses embeddings in input order
+00:00 +17: packages/ai_sdk_azure/test/azure_provider_test.dart: Azure embedding doEmbed wire format rejects a response with no data list
+00:00 +18: packages/ai_sdk_azure/test/azure_provider_test.dart: Azure embedding doEmbed wire format normalizes numeric vectors
+00:00 +19: packages/ai_sdk_azure/test/azure_provider_test.dart: Azure embedding doEmbed wire format endpoint ending with slash still posts to deployment embeddings once
+00:00 +20: packages/ai_sdk_azure/test/azure_provider_test.dart: Azure embedding doEmbed wire format embedding credentials are resolved immediately before each request
+00:00 +21: loading packages/ai_sdk_azure/test/responses_endpoint_review_test.dart
+00:00 +21: packages/ai_sdk_azure/test/responses_endpoint_review_test.dart: Azure Responses uses the v1 endpoint (stream=false)
+00:01 +22: packages/ai_sdk_azure/test/responses_endpoint_review_test.dart: Azure Responses uses the v1 endpoint (stream=true)
+00:01 +23: All tests passed!

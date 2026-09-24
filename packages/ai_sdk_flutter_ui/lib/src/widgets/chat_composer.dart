@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/ai_motion.dart';
+import 'ui_strings.dart';
 
 /// A message-input row: a text field plus a send button, with optional attach
 /// and stop affordances.
@@ -26,7 +27,7 @@ class ChatComposer extends StatefulWidget {
     this.isLoading = false,
     this.onStop,
     this.onAttach,
-    this.hintText = 'Message…',
+    this.hintText,
     this.enabled = true,
   });
 
@@ -48,7 +49,7 @@ class ChatComposer extends StatefulWidget {
   final VoidCallback? onAttach;
 
   /// Placeholder text for the input field.
-  final String hintText;
+  final String? hintText;
 
   /// Whether the whole composer is interactive.
   final bool enabled;
@@ -70,9 +71,10 @@ class _ChatComposerState extends State<ChatComposer> {
   @override
   void didUpdateWidget(covariant ChatComposer oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.controller == widget.controller) return;
-    if (_ownsController) _controller.dispose();
-    _setController(widget.controller);
+    if (oldWidget.controller != widget.controller) {
+      if (_ownsController) _controller.dispose();
+      _setController(widget.controller);
+    }
   }
 
   void _setController(TextEditingController? controller) {
@@ -88,6 +90,8 @@ class _ChatComposerState extends State<ChatComposer> {
 
   void _send() {
     if (!widget.enabled || widget.isLoading) return;
+    final composing = _controller.value.composing;
+    if (composing.isValid && !composing.isCollapsed) return;
     final text = _controller.text.trim();
     if (text.isEmpty) return;
     if (_ownsController) _controller.clear();
@@ -108,7 +112,9 @@ class _ChatComposerState extends State<ChatComposer> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final strings = AiSdkUiStringsScope.of(context);
     final showStop = widget.isLoading && widget.onStop != null;
+    final stopEnabled = widget.enabled && showStop;
     final sendEnabled = widget.enabled && !widget.isLoading;
 
     return SafeArea(
@@ -121,31 +127,34 @@ class _ChatComposerState extends State<ChatComposer> {
               PressableScale(
                 child: IconButton(
                   key: const ValueKey('chat-composer-attach'),
-                  tooltip: 'Attach file',
+                  tooltip: strings.attachFile,
                   onPressed: widget.enabled ? _attach : null,
                   icon: const Icon(Icons.add_rounded),
                 ),
               ),
             Expanded(
-              child: TextField(
-                key: const ValueKey('chat-composer-field'),
-                controller: _controller,
-                enabled: widget.enabled,
-                textInputAction: TextInputAction.send,
-                onSubmitted: (_) => _send(),
-                minLines: 1,
-                maxLines: 5,
-                decoration: InputDecoration(
-                  hintText: widget.hintText,
-                  filled: true,
-                  fillColor: scheme.surfaceContainerHighest,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                    borderSide: BorderSide.none,
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 18,
-                    vertical: 12,
+              child: KeyedSubtree(
+                key: ValueKey(widget.enabled),
+                child: TextField(
+                  key: const ValueKey('chat-composer-field'),
+                  controller: _controller,
+                  enabled: widget.enabled,
+                  textInputAction: TextInputAction.send,
+                  onSubmitted: (_) => _send(),
+                  minLines: 1,
+                  maxLines: 5,
+                  decoration: InputDecoration(
+                    hintText: widget.hintText ?? strings.messageHint,
+                    filled: true,
+                    fillColor: scheme.surfaceContainerHighest,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(24),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 12,
+                    ),
                   ),
                 ),
               ),
@@ -169,13 +178,14 @@ class _ChatComposerState extends State<ChatComposer> {
                         key: const ValueKey('chat-composer-stop-semantics'),
                         container: true,
                         button: true,
-                        label: 'Stop response',
-                        onTap: _stop,
+                        label: strings.stopResponse,
+                        enabled: stopEnabled,
+                        onTap: stopEnabled ? _stop : null,
                         child: ExcludeSemantics(
                           child: IconButton.filled(
                             key: const ValueKey('chat-composer-stop'),
-                            tooltip: 'Stop response',
-                            onPressed: _stop,
+                            tooltip: strings.stopResponse,
+                            onPressed: stopEnabled ? _stop : null,
                             icon: const Icon(Icons.stop_rounded),
                           ),
                         ),
@@ -188,12 +198,12 @@ class _ChatComposerState extends State<ChatComposer> {
                         container: true,
                         button: true,
                         enabled: sendEnabled,
-                        label: 'Send message',
+                        label: strings.sendMessage,
                         onTap: sendEnabled ? _send : null,
                         child: ExcludeSemantics(
                           child: IconButton.filled(
                             key: const ValueKey('chat-composer-send'),
-                            tooltip: 'Send message',
+                            tooltip: strings.sendMessage,
                             onPressed: sendEnabled ? _send : null,
                             icon: const Icon(Icons.arrow_upward_rounded),
                           ),

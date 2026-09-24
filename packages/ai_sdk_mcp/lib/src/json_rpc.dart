@@ -84,6 +84,21 @@ class MCPException implements Exception {
   String toString() => 'MCPException: $message';
 }
 
+/// The server may have executed a tool before its response was lost.
+///
+/// Reconcile the external operation before deciding whether to retry.
+class MCPAmbiguousToolCompletionException extends MCPException {
+  const MCPAmbiguousToolCompletionException({
+    required this.toolName,
+    required this.requestId,
+    required this.cause,
+  }) : super('Tool completion is unknown; automatic retries have stopped.');
+
+  final String toolName;
+  final int requestId;
+  final Object cause;
+}
+
 /// Exception thrown when an MCP transport fails at the HTTP layer.
 class MCPTransportException extends MCPException {
   MCPTransportException({

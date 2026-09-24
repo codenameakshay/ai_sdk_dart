@@ -7,6 +7,7 @@ import 'reasoning_view.dart';
 import 'source_citations.dart';
 import 'tool_approval_card.dart';
 import 'tool_call_card.dart';
+import 'ui_strings.dart';
 
 /// Signature for rendering a text segment of an assistant message. Use it to
 /// plug in a markdown renderer of your choice — the package stays dependency
@@ -30,6 +31,7 @@ typedef ToolApprovalCallback =
 /// - tool-approval request → [ToolApprovalCard] (when approval callbacks are set)
 /// - image → [MessageImage]
 /// - file → [MessageAttachment]
+/// - reasoning file → [MessageReasoningFileAttachment]
 /// - source → collected into a single trailing [SourceCitations]
 ///
 /// When the message has no `parts` (plain text path), its `content` is rendered
@@ -106,6 +108,11 @@ class AssistantMessageView extends StatelessWidget {
                 remoteImageProviderBuilder: remoteImageProviderBuilder,
               ),
             );
+          case LanguageModelV4ReasoningFilePart():
+            // Reasoning files have a distinct provider contract from user
+            // attachments. Keep that distinction in the UI instead of
+            // adapting the part to LanguageModelV4FilePart.
+            children.add(MessageReasoningFileAttachment(file: part));
           case LanguageModelV4FilePart():
             children.add(
               MessageAttachment(
@@ -115,9 +122,12 @@ class AssistantMessageView extends StatelessWidget {
             );
           case LanguageModelV4SourcePart():
             sources.add(part);
+          case LanguageModelV4DocumentSourcePart():
+            children.add(_documentSource(context, part));
           case LanguageModelV4RedactedReasoningPart():
           case LanguageModelV4ToolResultPart():
           case LanguageModelV4ToolApprovalResponse():
+          case LanguageModelV4OpaquePart():
             break; // not rendered inline
         }
       }
@@ -143,10 +153,14 @@ class AssistantMessageView extends StatelessWidget {
   Widget _text(BuildContext context, String text) {
     final builder = textBuilder;
     if (builder != null) return builder(context, text);
-    // Bubbleless assistant prose reads as the body of the turn; give it a
-    // comfortable reading line-height.
     final style = Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.5);
-    return SelectableText(text, style: style);
+    return Semantics(
+      container: true,
+      excludeSemantics: true,
+      label: text,
+      readOnly: true,
+      child: SelectionArea(child: Text(text, style: style)),
+    );
   }
 
   Widget _approval(LanguageModelV4ToolApprovalRequestPart part) {
@@ -157,6 +171,27 @@ class AssistantMessageView extends StatelessWidget {
       request: part,
       onApprove: (reason) => onToolApprove?.call(part, reason),
       onDeny: (reason) => onToolDeny?.call(part, reason),
+    );
+  }
+
+  Widget _documentSource(
+    BuildContext context,
+    LanguageModelV4DocumentSourcePart source,
+  ) {
+    final strings = AiSdkUiStringsScope.of(context);
+    final mediaType = source.mediaType;
+    final detail = mediaType.isEmpty ? null : mediaType;
+    return Semantics(
+      container: true,
+      label: strings.documentSource(source.title),
+      value: detail,
+      child: Tooltip(
+        message: detail == null ? source.title : strings.document(detail),
+        child: Chip(
+          avatar: const Icon(Icons.description_outlined, size: 16),
+          label: Text(source.title),
+        ),
+      ),
     );
   }
 

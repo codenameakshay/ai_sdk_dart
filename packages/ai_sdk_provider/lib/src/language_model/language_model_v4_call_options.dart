@@ -1,3 +1,4 @@
+import '../shared/abort_signal.dart';
 import '../shared/json_value.dart';
 import 'language_model_v4_prompt.dart';
 import 'language_model_v4_response_format.dart';
@@ -44,7 +45,7 @@ class LanguageModelV4CallOptions {
   final ProviderOptions? providerOptions;
   final LanguageModelV4ResponseFormat? responseFormat;
   final bool includeRawChunks;
-  final LanguageModelV4AbortSignal? abortSignal;
+  final AbortSignal? abortSignal;
   final LanguageModelV4Reasoning reasoning;
 }
 
@@ -56,11 +57,8 @@ extension LanguageModelV4ToolGroups on LanguageModelV4CallOptions {
       tools.whereType<LanguageModelV4ProviderDefinedTool>();
 }
 
-/// Provider-facing cancellation signal.
-abstract interface class LanguageModelV4AbortSignal {
-  bool get isCancelled;
-  Future<void> get onCancelled;
-}
+@Deprecated('Use AbortSignal. This alias is retained for the v3 major line.')
+typedef LanguageModelV4AbortSignal = AbortSignal;
 
 /// Provider-independent reasoning effort.
 enum LanguageModelV4Reasoning {

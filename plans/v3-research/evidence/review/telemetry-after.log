@@ -1,0 +1,24 @@
+00:00 +0: loading packages/ai_sdk_telemetry/test/observation_identity_review_test.dart
+00:00 +0: packages/ai_sdk_telemetry/test/observation_identity_review_test.dart: resource attributes retain only sanitized values
+00:00 +1: packages/ai_sdk_telemetry/test/observation_identity_review_test.dart: redaction runs once at admission and retries preserve observation
+00:00 +2: packages/ai_sdk_telemetry/test/observation_identity_review_test.dart: redactor failures omit only the failing attribute
+00:00 +3: packages/ai_sdk_telemetry/test/observation_identity_review_test.dart: same metric names share one OTLP metric with ordered points
+00:00 +4: packages/ai_sdk_telemetry/test/observation_identity_review_test.dart: connection timeout leaves an injected client usable for retry
+00:00 +5: loading packages/ai_sdk_telemetry/test/deadline_review_test.dart
+00:00 +5: packages/ai_sdk_telemetry/test/deadline_review_test.dart: dispose bounds an existing stalled connection
+00:00 +6: packages/ai_sdk_telemetry/test/deadline_review_test.dart: connection setup and response share one export deadline
+00:00 +7: loading packages/ai_sdk_telemetry/test/otlp_http_metric_sink_test.dart
+00:00 +7: packages/ai_sdk_telemetry/test/otlp_http_metric_sink_test.dart: exports typed metrics as OTLP HTTP JSON
+00:00 +8: packages/ai_sdk_telemetry/test/otlp_http_metric_sink_test.dart: redacts attributes before export
+00:00 +9: packages/ai_sdk_telemetry/test/otlp_http_metric_sink_test.dart: bounds buffering and omits unsupported values
+00:00 +10: packages/ai_sdk_telemetry/test/otlp_http_metric_sink_test.dart: export errors are diagnosed and leave metrics queued
+00:00 +11: packages/ai_sdk_telemetry/test/otlp_http_metric_sink_test.dart: detaches an in-flight batch before records arrive
+00:00 +12: packages/ai_sdk_telemetry/test/otlp_http_metric_sink_test.dart: deadline aborts a stalled response and preserves the batch
+00:00 +13: packages/ai_sdk_telemetry/test/otlp_http_metric_sink_test.dart: restores a failed detached batch ahead of newer records
+00:00 +14: packages/ai_sdk_telemetry/test/otlp_http_metric_sink_test.dart: dispose closes admission while an export is pending
+00:00 +15: packages/ai_sdk_telemetry/test/otlp_http_metric_sink_test.dart: snapshots mutable inputs and omits cyclic or non-finite values
+00:00 +16: packages/ai_sdk_telemetry/test/otlp_http_metric_sink_test.dart: rejects oversized metrics before retaining their payload
+00:00 +17: packages/ai_sdk_telemetry/test/otlp_http_metric_sink_test.dart: rejects invalid production bounds and deadlines
+00:00 +18: loading packages/ai_sdk_telemetry/test/batch_size_review_test.dart
+00:01 +18: packages/ai_sdk_telemetry/test/batch_size_review_test.dart: valid observations split into payloads within the byte limit
+00:01 +19: All tests passed!

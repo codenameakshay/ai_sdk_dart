@@ -1,4 +1,4 @@
-## 2.0.0
+## 3.0.0
 
 - Migrated chat language models to the V4 provider contract and added
   provider-neutral reasoning controls, structured response formats, nested

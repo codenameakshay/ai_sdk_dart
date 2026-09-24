@@ -23,4 +23,5 @@ export 'streaming_text_view.dart';
 export 'tool_approval_card.dart';
 export 'tool_call_card.dart';
 export 'typing_indicator.dart';
+export 'ui_strings.dart';
 export 'usage_view.dart';

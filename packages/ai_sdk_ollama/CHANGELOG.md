@@ -1,4 +1,4 @@
-## 2.0.0
+## 3.0.0
 
 - Migrated Ollama language generation and streaming to the V4 contract,
   including complete tool calls, metadata, raw chunks, and nested usage.

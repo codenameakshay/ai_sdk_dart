@@ -1657,10 +1657,11 @@ void main() {
                           mediaType: 'application/pdf',
                           filename: 'a.pdf',
                         ),
-                        // An unsupported-for-this-path part (source) -> 'unsupported'.
-                        LanguageModelV4SourcePart(
-                          id: 's1',
-                          url: 'https://src.example',
+                        LanguageModelV4FilePart(
+                          data: DataContentBytes(
+                            Uint8List.fromList(utf8.encode('file')),
+                          ),
+                          mediaType: 'text/plain',
                         ),
                       ]),
                     ),
@@ -1686,7 +1687,8 @@ void main() {
         expect(outParts[2]['type'], 'file');
         expect(outParts[2]['url'], 'https://files.example/a.pdf');
         expect(outParts[2]['filename'], 'a.pdf');
-        expect(outParts[3]['type'], 'unsupported');
+        expect(outParts[3]['base64'], base64Encode(utf8.encode('file')));
+        expect(outParts, hasLength(4));
       },
     );
 
@@ -2019,6 +2021,185 @@ void main() {
             contains('stream response body is null'),
           ),
         ),
+      );
+    });
+
+    test(
+      'rejects reasoning files and document sources before dispatch',
+      () async {
+        var requests = 0;
+        final server = await _startServer((request) async {
+          requests++;
+          _writeOk(request);
+        });
+        addTearDown(server.close);
+        final model = _bearerModel(server.baseUrl);
+
+        for (final part in [
+          LanguageModelV4ReasoningFilePart(
+            data: DataContentBytes(Uint8List.fromList([1])),
+            mediaType: 'application/pdf',
+          ),
+          const LanguageModelV4DocumentSourcePart(
+            id: 'doc-1',
+            mediaType: 'application/pdf',
+            title: 'Document',
+          ),
+        ]) {
+          await expectLater(
+            model.doGenerate(
+              LanguageModelV4CallOptions(
+                prompt: LanguageModelV4Prompt(
+                  messages: [
+                    LanguageModelV4Message(
+                      role: LanguageModelV4Role.user,
+                      content: [part],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            throwsA(isA<UnsupportedError>()),
+          );
+        }
+        expect(requests, 0);
+      },
+    );
+
+    test('serializes denied tool results with approval identity', () async {
+      late Map<String, dynamic> captured;
+      final server = await _startServer((request) async {
+        captured = await _captureBody(request);
+        _writeOk(request);
+      });
+      addTearDown(server.close);
+      final model = _bearerModel(server.baseUrl);
+      await model.doGenerate(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
+            messages: [
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.tool,
+                content: [
+                  const LanguageModelV4ToolResultPart(
+                    toolCallId: 'call-denied',
+                    toolName: 'dangerous',
+                    output: ToolResultOutputExecutionDenied(
+                      'needs approval',
+                      'approval-1',
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+      final message = (captured['messages'] as List).single as Map;
+      final content = jsonDecode(message['content'] as String) as Map;
+      expect(content['output'], {
+        'type': 'execution-denied',
+        'reason': 'needs approval',
+        'approvalId': 'approval-1',
+      });
+    });
+
+    test('rejects provider references in rich tool content', () async {
+      final server = await _startServer((request) async {
+        fail('foreign provider content must fail before dispatch');
+      });
+      addTearDown(server.close);
+      final model = _bearerModel(server.baseUrl);
+      await expectLater(
+        model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.tool,
+                  content: [
+                    LanguageModelV4ToolResultPart(
+                      toolCallId: 'call-1',
+                      toolName: 'lookup',
+                      output: ToolResultOutputContent([
+                        LanguageModelV4ImagePart(
+                          image: const DataContentProviderReference(
+                            namespace: 'other',
+                            id: 'asset-1',
+                          ),
+                        ),
+                      ]),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        throwsA(isA<UnsupportedError>()),
+      );
+      await expectLater(
+        model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.tool,
+                  content: [
+                    const LanguageModelV4ToolResultPart(
+                      toolCallId: 'call-2',
+                      toolName: 'lookup',
+                      output: ToolResultOutputContent([
+                        LanguageModelV4FilePart(
+                          data: DataContentProviderReference(
+                            namespace: 'other',
+                            id: 'file-1',
+                          ),
+                          mediaType: 'text/plain',
+                        ),
+                      ]),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        throwsA(isA<UnsupportedError>()),
+      );
+    });
+
+    test('rejects unsupported source parts in rich tool content', () async {
+      final server = await _startServer((request) async {
+        fail('unsupported tool content must fail before dispatch');
+      });
+      addTearDown(server.close);
+      final model = _bearerModel(server.baseUrl);
+      await expectLater(
+        model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.tool,
+                  content: [
+                    const LanguageModelV4ToolResultPart(
+                      toolCallId: 'call-1',
+                      toolName: 'lookup',
+                      output: ToolResultOutputContent([
+                        LanguageModelV4SourcePart(
+                          id: 'source-1',
+                          url: 'https://example.test/source',
+                        ),
+                      ]),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        throwsA(isA<UnsupportedError>()),
       );
     });
   });

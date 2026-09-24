@@ -29,6 +29,20 @@ class DataContentUrl extends LanguageModelV4DataContent {
   final Uri url;
 }
 
+/// An opaque file or asset reference owned by a provider.
+///
+/// References are namespaced so an adapter cannot accidentally send an ID
+/// issued by another provider as a URL or local byte payload.
+class DataContentProviderReference extends LanguageModelV4DataContent {
+  const DataContentProviderReference({
+    required this.namespace,
+    required this.id,
+  });
+
+  final String namespace;
+  final String id;
+}
+
 /// Base64-encodes [data], or `null` for [DataContentUrl] (which has no bytes
 /// to encode locally).
 String? dataContentToBase64(LanguageModelV4DataContent data) {
@@ -36,5 +50,9 @@ String? dataContentToBase64(LanguageModelV4DataContent data) {
     DataContentBytes(:final bytes) => base64Encode(bytes),
     DataContentBase64(:final base64) => base64,
     DataContentUrl() => null,
+    DataContentProviderReference(:final namespace, :final id) =>
+      throw UnsupportedError(
+        'Provider reference $namespace:$id requires a provider-specific serializer',
+      ),
   };
 }

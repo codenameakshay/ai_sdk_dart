@@ -1,0 +1,119 @@
+{
+  "commit": "b50a8ab8361287cf14055ef6c6b8aff77232a589",
+  "run": "https://github.com/codenameakshay/ai_sdk_dart/actions/runs/35887584292",
+  "status": "failed_threshold",
+  "threshold_percent": 99,
+  "covered": 12623,
+  "total": 13654,
+  "percent": 92.45,
+  "packages": [
+    {
+      "package": "ai_sdk_telemetry",
+      "percent": 92.79,
+      "covered": 206,
+      "total": 222
+    },
+    {
+      "package": "ai_sdk_realtime",
+      "percent": 78.83,
+      "covered": 499,
+      "total": 633
+    },
+    {
+      "package": "ai_sdk_remote",
+      "percent": 98.24,
+      "covered": 615,
+      "total": 626
+    },
+    {
+      "package": "ai_sdk_conversation",
+      "percent": 88.76,
+      "covered": 545,
+      "total": 614
+    },
+    {
+      "package": "ai_sdk_json_schema",
+      "percent": 100.0,
+      "covered": 53,
+      "total": 53
+    },
+    {
+      "package": "ai_sdk_dart",
+      "percent": 97.3,
+      "covered": 2989,
+      "total": 3072
+    },
+    {
+      "package": "ai_sdk_provider",
+      "percent": 100.0,
+      "covered": 278,
+      "total": 278
+    },
+    {
+      "package": "ai_sdk_openai",
+      "percent": 92.43,
+      "covered": 1306,
+      "total": 1413
+    },
+    {
+      "package": "ai_sdk_openai_compatible",
+      "percent": 99.35,
+      "covered": 462,
+      "total": 465
+    },
+    {
+      "package": "ai_sdk_anthropic",
+      "percent": 95.93,
+      "covered": 542,
+      "total": 565
+    },
+    {
+      "package": "ai_sdk_google",
+      "percent": 90.02,
+      "covered": 568,
+      "total": 631
+    },
+    {
+      "package": "ai_sdk_azure",
+      "percent": 93.85,
+      "covered": 61,
+      "total": 65
+    },
+    {
+      "package": "ai_sdk_cohere",
+      "percent": 93.62,
+      "covered": 367,
+      "total": 392
+    },
+    {
+      "package": "ai_sdk_groq",
+      "percent": 94.44,
+      "covered": 17,
+      "total": 18
+    },
+    {
+      "package": "ai_sdk_mistral",
+      "percent": 91.07,
+      "covered": 51,
+      "total": 56
+    },
+    {
+      "package": "ai_sdk_ollama",
+      "percent": 95.26,
+      "covered": 261,
+      "total": 274
+    },
+    {
+      "package": "ai_sdk_mcp",
+      "percent": 95.63,
+      "covered": 1226,
+      "total": 1282
+    },
+    {
+      "package": "ai_sdk_flutter_ui",
+      "percent": 86.04,
+      "covered": 2577,
+      "total": 2995
+    }
+  ]
+}

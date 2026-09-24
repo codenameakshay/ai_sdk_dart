@@ -8,6 +8,7 @@ import 'chat_message_bubble.dart';
 import 'scroll_bottom_policy.dart';
 import 'streaming_text_view.dart';
 import 'typing_indicator.dart';
+import 'ui_strings.dart';
 
 /// Builder signature for customizing how a single message row is rendered.
 ///
@@ -170,6 +171,9 @@ class _ChatMessageListState extends State<ChatMessageList> {
         final streaming = widget.controller.streamingContent;
         final status = widget.controller.status;
         final hasCustomBuilder = widget.messageBuilder != null;
+        final lastMessage = messages.isEmpty ? null : messages.last;
+        final hasRenderedAssistant =
+            lastMessage?.role == ModelMessageRole.assistant;
 
         // A custom builder keeps the simple contract (a pending row only when
         // there is streaming text). The default composition also surfaces a
@@ -178,7 +182,7 @@ class _ChatMessageListState extends State<ChatMessageList> {
             ? streaming.isNotEmpty
             : streaming.isNotEmpty ||
                   status == ChatStatus.submitted ||
-                  status == ChatStatus.streaming;
+                  (status == ChatStatus.streaming && !hasRenderedAssistant);
 
         final itemCount = messages.length + (pendingActive ? 1 : 0);
 
@@ -250,6 +254,7 @@ class _ChatMessageListState extends State<ChatMessageList> {
 
   Widget _buildRow(BuildContext context, ModelMessage message) {
     final builder = widget.messageBuilder;
+    final strings = AiSdkUiStringsScope.of(context);
     if (builder != null) return builder(context, message, false);
 
     if (message.role == ModelMessageRole.user) {
@@ -264,7 +269,7 @@ class _ChatMessageListState extends State<ChatMessageList> {
       return Semantics(
         key: const ValueKey('assistant-message-semantics'),
         container: true,
-        label: 'Assistant message',
+        label: strings.assistantMessage,
         value: plainText,
         readOnly: true,
         child: ExcludeSemantics(child: assistantTurn),
@@ -278,7 +283,7 @@ class _ChatMessageListState extends State<ChatMessageList> {
     return Semantics(
       container: true,
       explicitChildNodes: true,
-      label: 'Assistant message',
+      label: AiSdkUiStringsScope.of(context).assistantMessage,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: Row(

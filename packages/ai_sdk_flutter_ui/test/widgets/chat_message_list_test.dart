@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:ai_sdk_conversation/ai_sdk_conversation.dart';
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 import 'package:flutter/material.dart';
@@ -6,6 +9,38 @@ import 'package:flutter_test/flutter_test.dart';
 import '../helpers.dart';
 
 Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
+
+class _SnapshotConversationBackend implements ConversationBackend {
+  _SnapshotConversationBackend()
+    : _conversation = Conversation(id: 'chat-1', messages: const []);
+
+  Conversation _conversation;
+  final _changes = StreamController<Conversation>.broadcast();
+
+  @override
+  Conversation get conversation => _conversation;
+  @override
+  Stream<Conversation> get changes => _changes.stream;
+  @override
+  Future<void> send(String text) async {}
+  @override
+  Future<void> interrupt() async {}
+  @override
+  Future<void> restore(Map<String, dynamic> encoded) async {}
+  @override
+  Future<void> respondToApproval({
+    required String approvalId,
+    required bool approved,
+    String? reason,
+  }) async {}
+  @override
+  Future<void> dispose() => _changes.close();
+
+  void publish(Conversation value) {
+    _conversation = value;
+    _changes.add(value);
+  }
+}
 
 class _TrackingScrollController extends ScrollController {
   int animateCallCount = 0;
@@ -160,6 +195,48 @@ void main() {
         if (controller.status == ChatStatus.ready) break;
       }
     });
+
+    testWidgets(
+      'renders a conversation adapter answer once while streaming and after completion',
+      (tester) async {
+        final backend = _SnapshotConversationBackend();
+        final conversation = ConversationController(backend);
+        final controller = ConversationChatController(conversation);
+        addTearDown(controller.dispose);
+
+        await tester.pumpWidget(_wrap(ChatMessageList(controller: controller)));
+        final streaming = Conversation(
+          id: 'chat-1',
+          messages: [
+            ConversationMessage(
+              id: 'assistant-1',
+              role: ConversationRole.assistant,
+              status: ConversationMessageStatus.streaming,
+              parts: [TextPart(id: 'text-1', text: 'conversation reply')],
+            ),
+          ],
+        );
+        backend.publish(streaming);
+        await tester.pump();
+        expect(find.text('conversation reply'), findsOneWidget);
+
+        backend.publish(
+          Conversation(
+            id: 'chat-1',
+            messages: [
+              ConversationMessage(
+                id: 'assistant-1',
+                role: ConversationRole.assistant,
+                status: ConversationMessageStatus.complete,
+                parts: [TextPart(id: 'text-1', text: 'conversation reply')],
+              ),
+            ],
+          ),
+        );
+        await tester.pump();
+        expect(find.text('conversation reply'), findsOneWidget);
+      },
+    );
 
     testWidgets('renders the empty state when provided and empty', (
       tester,

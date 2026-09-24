@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -530,6 +531,36 @@ void main() {
       expect(adapter.fetchCount, 1);
     });
 
+    test('cancelling an active stream aborts its response body', () async {
+      final release = Completer<void>();
+      final server = await TestServer.start((request) async {
+        await utf8.decoder.bind(request).join();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write('{"type":"message-start"}\n');
+        await request.response.flush();
+        await release.future;
+        await request.response.close();
+      });
+      addTearDown(() async {
+        if (!release.isCompleted) release.complete();
+        await server.close();
+      });
+
+      final stream =
+          await CohereProvider(apiKey: 'test', baseUrl: server.baseUrl)
+              .call('command-r-plus')
+              .doStream(LanguageModelV4CallOptions(prompt: userPrompt('hi')));
+      final started = Completer<void>();
+      final subscription = stream.stream.listen((_) {
+        if (!started.isCompleted) started.complete();
+      });
+      await started.future;
+      final cancelling = subscription.cancel();
+      release.complete();
+      await cancelling;
+    });
+
     test(
       'stream, embedding, and rerank resolve credentials per dispatch',
       () async {
@@ -625,46 +656,39 @@ void main() {
       },
     );
 
-    test(
-      'normalizes numeric vectors and ignores response rows beyond the input',
-      () async {
-        final server = await TestServer.start((request) async {
-          await utf8.decoder.bind(request).join();
-          request.response.statusCode = 200;
-          request.response.headers.contentType = ContentType.json;
-          request.response.write(
-            jsonEncode({
-              'embeddings': {
-                'float': [
-                  [1, 2.5],
-                  [-3, 4],
-                  [99],
-                ],
-              },
-            }),
-          );
-          await request.response.close();
-        });
-        addTearDown(server.close);
+    test('normalizes numeric vectors', () async {
+      final server = await TestServer.start((request) async {
+        await utf8.decoder.bind(request).join();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'embeddings': {
+              'float': [
+                [1, 2.5],
+                [-3, 4],
+              ],
+            },
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
 
-        final result =
-            await CohereProvider(apiKey: 'key', baseUrl: server.baseUrl)
-                .embedding('embed-v4.0')
-                .doEmbed(
-                  const EmbeddingModelV2CallOptions<String>(values: ['a', 'b']),
-                );
+      final result =
+          await CohereProvider(apiKey: 'key', baseUrl: server.baseUrl)
+              .embedding('embed-v4.0')
+              .doEmbed(
+                const EmbeddingModelV2CallOptions<String>(values: ['a', 'b']),
+              );
 
-        expect(result.embeddings, hasLength(2));
-        expect(result.embeddings.map((embedding) => embedding.value), [
-          'a',
-          'b',
-        ]);
-        expect(result.embeddings.map((embedding) => embedding.embedding), [
-          [1.0, 2.5],
-          [-3.0, 4.0],
-        ]);
-      },
-    );
+      expect(result.embeddings, hasLength(2));
+      expect(result.embeddings.map((embedding) => embedding.value), ['a', 'b']);
+      expect(result.embeddings.map((embedding) => embedding.embedding), [
+        [1.0, 2.5],
+        [-3.0, 4.0],
+      ]);
+    });
 
     test('forwards providerOptions into the stream request body', () async {
       late Map<String, dynamic> captured;

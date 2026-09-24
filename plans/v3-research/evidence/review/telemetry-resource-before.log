@@ -1,0 +1,17 @@
+00:00 +0: loading packages/ai_sdk_telemetry/test/observation_identity_review_test.dart
+00:00 +0: resource attributes retain only sanitized values
+00:00 +0 -1: resource attributes retain only sanitized values [E]
+  Expected: {'secret': '[redacted]'}
+    Actual: {'secret': 'private'}
+     Which: at location ['secret'] is 'private' instead of '[redacted]'
+
+  package:matcher                                                            expect
+  packages/ai_sdk_telemetry/test/observation_identity_review_test.dart 21:5  main.<fn>
+
+00:00 +0 -1: Some tests failed.
+
+Failing tests:
+  packages/ai_sdk_telemetry/test/observation_identity_review_test.dart: resource attributes retain only sanitized values
+
+Consider enabling the flag chain-stack-traces to receive more detailed exceptions.
+For example, 'dart test --chain-stack-traces'.

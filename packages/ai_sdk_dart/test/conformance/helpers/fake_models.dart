@@ -373,11 +373,20 @@ class FakeMultiStepModel extends LanguageModelV4 {
   ) async {
     final result = await doGenerate(options);
     final parts = <LanguageModelV4StreamPart>[];
+    parts.add(StreamPartStreamStart(warnings: result.warnings));
     for (final part in result.content) {
       if (part is LanguageModelV4TextPart) {
         parts.add(StreamPartTextStart(id: 'text-1'));
         parts.add(StreamPartTextDelta(id: 'text-1', delta: part.text));
         parts.add(StreamPartTextEnd(id: 'text-1'));
+      } else if (part is LanguageModelV4ReasoningPart) {
+        parts.add(StreamPartReasoningStart(id: 'reasoning-1'));
+        parts.add(
+          StreamPartReasoningDelta(id: 'reasoning-1', delta: part.text),
+        );
+        parts.add(
+          StreamPartReasoningEnd(id: 'reasoning-1', signature: part.signature),
+        );
       } else if (part is LanguageModelV4ToolCallPart) {
         parts.add(
           StreamPartToolInputStart(
@@ -387,6 +396,14 @@ class FakeMultiStepModel extends LanguageModelV4 {
         );
         parts.add(StreamPartToolInputEnd(id: part.toolCallId));
         parts.add(StreamPartToolCall(toolCall: part));
+      } else if (part is LanguageModelV4SourcePart) {
+        parts.add(StreamPartSource(source: part));
+      } else if (part is LanguageModelV4DocumentSourcePart) {
+        parts.add(StreamPartDocumentSource(source: part));
+      } else if (part is LanguageModelV4FilePart) {
+        parts.add(StreamPartFile(file: part));
+      } else if (part is LanguageModelV4ReasoningFilePart) {
+        parts.add(StreamPartReasoningFile(file: part));
       }
     }
     parts.add(
@@ -394,6 +411,8 @@ class FakeMultiStepModel extends LanguageModelV4 {
     );
     return LanguageModelV4StreamResult(
       stream: simulateReadableStream(parts: parts),
+      request: result.request,
+      response: result.response,
     );
   }
 }
@@ -491,6 +510,12 @@ class FakeCapturingModel extends LanguageModelV4 {
 
 /// A fake embedding model that returns a fixed embedding vector for any input.
 class FakeEmbeddingModel implements EmbeddingModelV2<String> {
+  @override
+  int? get maxEmbeddingsPerCall => null;
+
+  @override
+  bool get supportsParallelCalls => true;
+
   FakeEmbeddingModel(
     this.embedding, {
     this.usage,

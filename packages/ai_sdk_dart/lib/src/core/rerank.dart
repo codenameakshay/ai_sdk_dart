@@ -1,6 +1,7 @@
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
-import 'timeout_helpers.dart';
+import '../tools/tool.dart';
+import 'shared/operation_scope.dart';
 
 /// Result returned by [rerank].
 ///
@@ -57,17 +58,22 @@ Future<RerankResult> rerank({
   Map<String, String>? headers,
   ProviderOptions? providerOptions,
   Duration? timeout,
+  CancellationToken? abortSignal,
 }) async {
-  final call = model.doRerank(
-    RerankModelV1CallOptions(
-      query: query,
-      documents: documents,
-      topN: topN,
-      headers: headers,
-      providerOptions: providerOptions,
+  final result = await runOperation(
+    abortSignal: abortSignal,
+    timeout: timeout,
+    operation: (signal) => model.doRerank(
+      RerankModelV1CallOptions(
+        query: query,
+        documents: documents,
+        topN: topN,
+        headers: headers,
+        providerOptions: providerOptions,
+        abortSignal: signal,
+      ),
     ),
   );
-  final result = await withOptionalTimeout(call, timeout);
 
   return RerankResult(
     documents: result.documents

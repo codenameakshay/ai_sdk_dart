@@ -1,0 +1,35 @@
+00:00 +0: loading packages/ai_sdk_azure/test/responses_endpoint_review_test.dart
+00:00 +0: Azure Responses uses the v1 endpoint (stream=false)
+00:00 +0 -1: Azure Responses uses the v1 endpoint (stream=false) [E]
+  Expected: '/openai/v1/responses'
+    Actual: '/openai/deployments/my-deployment/responses'
+     Which: is different.
+            Expected: /openai/v1/respons ...
+              Actual: /openai/deployment ...
+                              ^
+             Differ at offset 8
+
+  package:matcher                                                      expect
+  packages/ai_sdk_azure/test/responses_endpoint_review_test.dart 53:7  main.<fn>
+
+00:00 +0 -1: Azure Responses uses the v1 endpoint (stream=true)
+00:00 +0 -2: Azure Responses uses the v1 endpoint (stream=true) [E]
+  Expected: '/openai/v1/responses'
+    Actual: '/openai/deployments/my-deployment/responses'
+     Which: is different.
+            Expected: /openai/v1/respons ...
+              Actual: /openai/deployment ...
+                              ^
+             Differ at offset 8
+
+  package:matcher                                                      expect
+  packages/ai_sdk_azure/test/responses_endpoint_review_test.dart 53:7  main.<fn>
+
+00:00 +0 -2: Some tests failed.
+
+Failing tests:
+  packages/ai_sdk_azure/test/responses_endpoint_review_test.dart: Azure Responses uses the v1 endpoint (stream=false)
+  packages/ai_sdk_azure/test/responses_endpoint_review_test.dart: Azure Responses uses the v1 endpoint (stream=true)
+
+Consider enabling the flag chain-stack-traces to receive more detailed exceptions.
+For example, 'dart test --chain-stack-traces'.

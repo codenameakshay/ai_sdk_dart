@@ -1,4 +1,4 @@
-## 2.0.0
+## 3.0.0
 
 - Migrated Gemini generation and streaming to V4 lifecycle, response formats,
   nested usage, and complete tool-call events.

@@ -1,0 +1,17 @@
+{
+  "browser": "154.0.8037.0",
+  "desktopViewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "mobileViewport": {
+    "width": 390,
+    "height": 844
+  },
+  "keyboardApproval": true,
+  "pointerDenial": true,
+  "errors": [],
+  "desktop": "- button \"Open navigation menu\"\n- heading \"Tools Chat\" [level=2]\n- heading \"Tools Chat\" [level=2]\n- group:\n  - group \"Tool approval required for deleteFile\":\n    - textbox \"Approve tool call? deleteFile\" [disabled]\n    - button \"Deny\"\n    - button \"Approve\"\n  - text: User message Delete q3.pdf from reports.\n- textbox \"Approval pending…\" [disabled]\n- text: Approved fixture action\n- button \"Send message\" [disabled]",
+  "mobile": "- button \"Open navigation menu\"\n- heading \"Tools Chat\" [level=2]\n- heading \"Tools Chat\" [level=2]\n- group:\n  - group \"Tool approval required for deleteFile\":\n    - textbox \"Approve tool call? deleteFile\" [disabled]\n    - button \"Deny\"\n    - button \"Approve\"\n  - text: User message Delete q3.pdf from reports.\n- textbox \"Approval pending…\" [disabled]\n- text: Denied fixture action\n- button \"Send message\" [disabled]",
+  "note": "Offline fixture callbacks only; mobile viewport is not device qualification. Flutter semantics activated programmatically."
+}

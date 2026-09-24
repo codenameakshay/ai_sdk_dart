@@ -351,6 +351,110 @@ void main() {
     });
 
     test(
+      'preserves opaque, document, reasoning-file, and provider references',
+      () {
+        const opaque = LanguageModelV4OpaquePart(
+          provider: 'fake',
+          raw: {'kind': 'response.item'},
+        );
+        const document = LanguageModelV4DocumentSourcePart(
+          id: 'doc-1',
+          mediaType: 'application/pdf',
+          title: 'Guide',
+          filename: 'guide.pdf',
+        );
+        final reasoningFile = LanguageModelV4ReasoningFilePart(
+          data: DataContentBytes(Uint8List.fromList([4, 5])),
+          mediaType: 'application/pdf',
+          filename: 'trace.pdf',
+        );
+        const toolResult = LanguageModelV4ToolResultPart(
+          toolCallId: 'call-1',
+          toolName: 'lookup',
+          output: ToolResultOutputErrorText('failed'),
+        );
+        const jsonOutput = ToolResultOutputJson({'ok': true});
+        const errorJsonOutput = ToolResultOutputErrorJson({'error': 'failed'});
+        const urlSource = LanguageModelV4SourcePart(
+          id: 'url-1',
+          url: 'https://example.com',
+        );
+
+        expect(opaque.provider, 'fake');
+        expect(opaque.raw, {'kind': 'response.item'});
+        expect(document.sourceType, 'document');
+        expect(document.filename, 'guide.pdf');
+        expect(reasoningFile.mediaType, 'application/pdf');
+        expect(reasoningFile.filename, 'trace.pdf');
+        expect(reasoningFile.data, isA<DataContentBytes>());
+        expect(toolResult.isError, isTrue);
+        expect(jsonOutput.value, {'ok': true});
+        expect(errorJsonOutput.value, {'error': 'failed'});
+        expect(urlSource.sourceType, 'url');
+        expect(
+          const ToolResultOutputExecutionDenied().reason,
+          'Tool call execution denied.',
+        );
+        expect(
+          const ToolResultOutputExecutionDenied(
+            'blocked',
+            'approval-1',
+          ).approvalId,
+          'approval-1',
+        );
+
+        final streamParts = <LanguageModelV4StreamPart>[
+          StreamPartDocumentSource(source: document),
+          StreamPartReasoningFile(file: reasoningFile),
+          const StreamPartOpaque(opaque: opaque),
+        ];
+        expect(streamParts[0], isA<StreamPartDocumentSource>());
+        expect(streamParts[1], isA<StreamPartReasoningFile>());
+        expect((streamParts[2] as StreamPartOpaque).opaque.provider, 'fake');
+      },
+    );
+
+    test('provider-owned data references require an adapter serializer', () {
+      const reference = DataContentProviderReference(
+        namespace: 'fake',
+        id: 'asset-1',
+      );
+      expect(reference.namespace, 'fake');
+      expect(reference.id, 'asset-1');
+      expect(
+        () => dataContentToBase64(reference),
+        throwsA(isA<UnsupportedError>()),
+      );
+    });
+
+    test('capability descriptors retain evidence and lifecycle metadata', () {
+      final descriptor = ProviderCapabilityDescriptor(
+        provider: 'fake',
+        modelId: 'fake-model',
+        apiSurface: 'chat',
+        source: Uri.parse('https://example.com/capabilities'),
+        verifiedOn: DateTime.utc(2026, 8, 10),
+        maxEmbeddingsPerCall: 128,
+        supportsParallelCalls: true,
+        features: const {'tools', 'vision'},
+        feature: 'reasoning',
+        lifecycle: ProviderCapabilityLifecycle.preview,
+        confidence: ProviderCapabilityConfidence.fixture,
+        evidenceId: 'fixture-1',
+      );
+
+      expect(descriptor.provider, 'fake');
+      expect(descriptor.modelId, 'fake-model');
+      expect(descriptor.maxEmbeddingsPerCall, 128);
+      expect(descriptor.supportsParallelCalls, isTrue);
+      expect(descriptor.features, containsAll(['tools', 'vision']));
+      expect(descriptor.feature, 'reasoning');
+      expect(descriptor.lifecycle, ProviderCapabilityLifecycle.preview);
+      expect(descriptor.confidence, ProviderCapabilityConfidence.fixture);
+      expect(descriptor.evidenceId, 'fixture-1');
+    });
+
+    test(
       'embedding, image, speech, transcription, and rerank types retain data',
       () {
         final embeddingOptions = EmbeddingModelV2CallOptions<String>(
@@ -524,6 +628,12 @@ void main() {
         lastError: 'boom',
         errors: ['first', 'second', 'boom'],
       );
+      final invalidEmbedding = const AiInvalidEmbeddingResponseError(
+        'embedding count mismatch',
+        expectedCount: 2,
+        actualCount: 1,
+        index: 1,
+      );
 
       expect(cancelled.message, 'Operation cancelled.');
       expect(AiOperationCancelledError.isInstance(cancelled), isTrue);
@@ -531,6 +641,9 @@ void main() {
       expect(noSuchTool.toString(), 'AiNoSuchToolError: missing tool');
       expect(invalidInput.message, 'bad input');
       expect(noContent.message, 'empty');
+      expect(invalidEmbedding.expectedCount, 2);
+      expect(invalidEmbedding.actualCount, 1);
+      expect(invalidEmbedding.index, 1);
 
       expect(noObject.text, '{}');
       expect(noObject.response?.id, 'resp');

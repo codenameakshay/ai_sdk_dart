@@ -5,9 +5,27 @@ publish_to: none
 environment:
   sdk: ^3.11.1
 
+dev_dependencies:
+  test: ^1.25.0
+  ai_sdk_anthropic:
+    path: packages/ai_sdk_anthropic
+  ai_sdk_dart:
+    path: packages/ai_sdk_dart
+  ai_sdk_google:
+    path: packages/ai_sdk_google
+  ai_sdk_openai:
+    path: packages/ai_sdk_openai
+  ai_sdk_provider:
+    path: packages/ai_sdk_provider
+
 workspace:
   - packages/ai_sdk_provider
   - packages/ai_sdk_dart
+  - packages/ai_sdk_json_schema
+  - packages/ai_sdk_conversation
+  - packages/ai_sdk_remote
+  - packages/ai_sdk_realtime
+  - packages/ai_sdk_telemetry
   - packages/ai_sdk_openai_compatible
   - packages/ai_sdk_openai
   - packages/ai_sdk_anthropic
@@ -22,3 +40,4 @@ workspace:
   - examples/basic
   - examples/flutter_chat
   - examples/advanced_app
+  - examples/remote_backend

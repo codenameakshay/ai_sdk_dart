@@ -103,24 +103,36 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
   Future<LanguageModelV4GenerateResult> doGenerate(
     LanguageModelV4CallOptions options,
   ) async {
-    final headers = await _resolvedHeaders();
-    final requestBody = _buildBody(options, stream: false);
-    final cancelToken = _cancelTokenFor(options.abortSignal);
+    final cancellation = DioCancellationScope(options.abortSignal);
+    late final Map<String, dynamic> requestBody;
     final Response<Map<String, dynamic>> response;
     try {
+      final headers = await runWithAbortSignal(
+        _resolvedHeaders,
+        options.abortSignal,
+      );
+      if (options.abortSignal?.isCancelled == true) {
+        throw const AiOperationCancelledError();
+      }
+      requestBody = _buildBody(options, stream: false);
       response = await config.client.post<Map<String, dynamic>>(
         providerEndpoint(config.baseUrl, '/chat/completions'),
         data: requestBody,
         queryParameters: config.queryParameters,
         options: _requestOptions(headers, options),
-        cancelToken: cancelToken,
+        cancelToken: cancellation.token,
       );
     } on DioException catch (e) {
+      await cancellation.dispose();
       throw await apiErrorFromDioException(e, provider: provider);
+    } catch (_) {
+      await cancellation.dispose();
+      rethrow;
     }
 
     final data = response.data;
     if (data == null) {
+      await cancellation.dispose();
       throw _invalidResponse(response, provider: provider);
     }
     try {
@@ -191,7 +203,10 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
         ),
       );
     } on Object catch (error) {
+      await cancellation.dispose();
       throw _invalidResponse(response, provider: provider, cause: error);
+    } finally {
+      await cancellation.dispose();
     }
   }
 
@@ -199,11 +214,18 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
   Future<LanguageModelV4StreamResult> doStream(
     LanguageModelV4CallOptions options,
   ) async {
-    final headers = await _resolvedHeaders();
-    final requestBody = _buildBody(options, stream: true);
-    final cancelToken = _cancelTokenFor(options.abortSignal);
+    final cancellation = DioCancellationScope(options.abortSignal);
+    late final Map<String, dynamic> requestBody;
     final Response<ResponseBody> response;
     try {
+      final headers = await runWithAbortSignal(
+        _resolvedHeaders,
+        options.abortSignal,
+      );
+      if (options.abortSignal?.isCancelled == true) {
+        throw const AiOperationCancelledError();
+      }
+      requestBody = _buildBody(options, stream: true);
       response = await config.client.post<ResponseBody>(
         providerEndpoint(config.baseUrl, '/chat/completions'),
         data: requestBody,
@@ -213,18 +235,30 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
           options,
           responseType: ResponseType.stream,
         ),
-        cancelToken: cancelToken,
+        cancelToken: cancellation.token,
       );
     } on DioException catch (e) {
+      await cancellation.dispose();
       throw await apiErrorFromDioException(e, provider: provider);
+    } catch (_) {
+      await cancellation.dispose();
+      rethrow;
     }
 
     final body = response.data;
     if (body == null) {
+      await cancellation.dispose();
       throw StateError('$provider stream response body is null.');
     }
 
     final controller = StreamController<LanguageModelV4StreamPart>();
+    controller.onCancel = () async {
+      final token = cancellation.token;
+      if (token != null && !token.isCancelled) {
+        token.cancel('stream subscription cancelled');
+      }
+      await cancellation.dispose();
+    };
     final toolState = <int, _ToolStreamState>{};
     var textStarted = false;
     var reasoningStarted = false;
@@ -398,6 +432,7 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
           controller.add(const StreamPartStreamStart());
         }
         await controller.close();
+        await cancellation.dispose();
       }
     }());
 
@@ -541,6 +576,13 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
             },
           });
         }
+        continue;
+      }
+      if (part is LanguageModelV4ReasoningFilePart ||
+          part is LanguageModelV4DocumentSourcePart) {
+        throw UnsupportedError(
+          'OpenAI-compatible cannot serialize ${part.runtimeType} in a prompt.',
+        );
       }
     }
     return out;
@@ -636,6 +678,20 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
   Object _toToolResultOutputJson(LanguageModelV4ToolResultOutput output) {
     return switch (output) {
       ToolResultOutputText(:final text) => {'type': 'text', 'text': text},
+      ToolResultOutputErrorText(:final text) => {
+        'type': 'error-text',
+        'text': text,
+      },
+      ToolResultOutputJson(:final value) => {'type': 'json', 'value': value},
+      ToolResultOutputErrorJson(:final value) => {
+        'type': 'error-json',
+        'value': value,
+      },
+      ToolResultOutputExecutionDenied(:final reason, :final approvalId) => {
+        'type': 'execution-denied',
+        'reason': reason,
+        'approvalId': ?approvalId,
+      },
       ToolResultOutputContent(:final parts) => {
         'type': 'content',
         'parts': parts.map(_toGenericContentPartJson).toList(),
@@ -651,25 +707,43 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
     }
     if (part is LanguageModelV4ImagePart) {
       final data = dataContentToBase64(part.image);
+      final url = part.image is DataContentUrl
+          ? (part.image as DataContentUrl).url.toString()
+          : null;
+      if (data == null && url == null) {
+        throw UnsupportedError(
+          'OpenAI-compatible cannot serialize this tool image content.',
+        );
+      }
       return {
         'type': 'image',
         'mediaType': ?part.mediaType,
-        if (part.image is DataContentUrl)
-          'url': (part.image as DataContentUrl).url.toString(),
+        'url': ?url,
         'base64': ?data,
       };
     }
     if (part is LanguageModelV4FilePart) {
+      final data = dataContentToBase64(part.data);
+      final url = part.data is DataContentUrl
+          ? (part.data as DataContentUrl).url.toString()
+          : null;
+      if (data == null && url == null) {
+        throw UnsupportedError(
+          'OpenAI-compatible cannot serialize this tool file content.',
+        );
+      }
       return {
         'type': 'file',
         'mediaType': part.mediaType,
-        if (part.filename != null) 'filename': part.filename,
-        if (part.data is DataContentUrl)
-          'url': (part.data as DataContentUrl).url.toString(),
-        'base64': ?dataContentToBase64(part.data),
+        'filename': ?part.filename,
+        'url': ?url,
+        'base64': ?data,
       };
     }
-    return {'type': 'unsupported'};
+    throw UnsupportedError(
+      'OpenAI-compatible cannot serialize ${part.runtimeType} '
+      'tool result content.',
+    );
   }
 
   // ── reasoning / thinking extraction ───────────────────────────────────
@@ -748,27 +822,6 @@ List<LanguageModelV4Warning> _readWarnings(Object? warningsRaw) {
       .map(_parseWarning)
       .whereType<LanguageModelV4Warning>()
       .toList(growable: false);
-}
-
-CancelToken? _cancelTokenFor(LanguageModelV4AbortSignal? abortSignal) {
-  if (abortSignal == null) {
-    return null;
-  }
-
-  final cancelToken = CancelToken();
-  if (abortSignal.isCancelled) {
-    cancelToken.cancel('abortSignal');
-    return cancelToken;
-  }
-
-  unawaited(
-    abortSignal.onCancelled.then((_) {
-      if (!cancelToken.isCancelled) {
-        cancelToken.cancel('abortSignal');
-      }
-    }),
-  );
-  return cancelToken;
 }
 
 LanguageModelV4Warning? _parseWarning(Object? item) {

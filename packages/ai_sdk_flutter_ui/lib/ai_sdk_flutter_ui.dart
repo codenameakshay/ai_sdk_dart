@@ -7,6 +7,7 @@ library;
 
 export 'src/chat_controller.dart';
 export 'src/completion_controller.dart';
+export 'src/conversation_controller.dart';
 export 'src/frame_notifier.dart';
 export 'src/object_stream_controller.dart';
 export 'src/widgets/widgets.dart';

@@ -21,6 +21,20 @@ LanguageModelV4Message toLanguageModelMessage(ModelMessage message) {
 }
 
 @internal
+void rejectSystemMessages(
+  Iterable<ModelMessage> messages, {
+  required bool allowSystemInMessages,
+}) {
+  if (allowSystemInMessages) return;
+  if (messages.any((message) => message.role == ModelMessageRole.system)) {
+    throw ArgumentError(
+      'System-role messages are rejected by default. Use instructions or '
+      'set allowSystemInMessages: true for trusted legacy histories.',
+    );
+  }
+}
+
+@internal
 void safeInvoke(void Function() action) {
   try {
     action();

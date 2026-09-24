@@ -1,0 +1,31 @@
+00:00 +0: loading packages/ai_sdk_openai/test/hosted_replay_review_test.dart
+00:00 +0: hosted call and result replay one original wire item
+00:00 +0 -1: hosted call and result replay one original wire item [E]
+  Expected: an object with length of <1>
+    Actual: WhereIterable<Map<dynamic, dynamic>>:[
+              {
+                'type': 'web_search_call',
+                'id': 'search-1',
+                'status': 'completed',
+                'action': {'type': 'search', 'query': 'Dart'}
+              },
+              {
+                'type': 'web_search_call',
+                'id': 'search-1',
+                'status': 'completed',
+                'action': {'type': 'search', 'query': 'Dart'}
+              }
+            ]
+     Which: has length of <2>
+  One hosted response item must not be replayed once as a call and again as its result
+
+  package:matcher                                                  expect
+  packages/ai_sdk_openai/test/hosted_replay_review_test.dart 44:5  main.<fn>
+
+00:00 +0 -1: Some tests failed.
+
+Failing tests:
+  packages/ai_sdk_openai/test/hosted_replay_review_test.dart: hosted call and result replay one original wire item
+
+Consider enabling the flag chain-stack-traces to receive more detailed exceptions.
+For example, 'dart test --chain-stack-traces'.

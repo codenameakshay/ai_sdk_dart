@@ -5,7 +5,445 @@ import 'package:http/http.dart' as http;
 
 import 'json_rpc.dart';
 
-/// Streamable HTTP transport for MCP 2025-06-18.
+typedef MCPAccessTokenProvider = Future<String?> Function();
+
+/// Host-owned authorization hooks. Token storage and browser login remain
+/// outside the SDK; the transport only asks the host for a current token.
+class MCPAuthConfiguration {
+  MCPAuthConfiguration({
+    required this.resource,
+    this.issuer,
+    this.accessToken,
+    this.refreshAccessToken,
+    this.retryAfterUnauthorized = false,
+  }) {
+    if (!resource.hasScheme || resource.host.isEmpty || resource.hasFragment) {
+      throw ArgumentError.value(
+        resource,
+        'resource',
+        'must be an absolute URI without a fragment',
+      );
+    }
+    if (issuer != null && (!issuer!.hasScheme || issuer!.host.isEmpty)) {
+      throw ArgumentError.value(issuer, 'issuer', 'must be an absolute URI');
+    }
+  }
+
+  final Uri resource;
+  final Uri? issuer;
+  final MCPAccessTokenProvider? accessToken;
+  final MCPAccessTokenProvider? refreshAccessToken;
+
+  /// Explicitly opt into replaying a request after refresh. Keep false for
+  /// mutating calls when a server could have executed before returning 401.
+  final bool retryAfterUnauthorized;
+
+  /// Validates RFC 9207 issuer binding before a host exchanges an auth code.
+  void validateAuthorizationIssuer(
+    String? responseIssuer, {
+    required bool issuerParameterSupported,
+  }) {
+    if (issuerParameterSupported && responseIssuer == null) {
+      throw const MCPException('Authorization response is missing issuer');
+    }
+    if (responseIssuer != null &&
+        (issuer == null || responseIssuer != issuer.toString())) {
+      throw const MCPException('Authorization response issuer mismatch');
+    }
+  }
+
+  /// Accepts only HTTPS redirects or loopback HTTP redirects, without a
+  /// fragment or embedded credentials.
+  static Uri validateRedirectUri(Uri redirectUri) {
+    final loopback =
+        redirectUri.host == 'localhost' ||
+        redirectUri.host == '127.0.0.1' ||
+        redirectUri.host == '::1';
+    if (redirectUri.userInfo.isNotEmpty ||
+        redirectUri.hasFragment ||
+        (redirectUri.scheme != 'https' &&
+            !(redirectUri.scheme == 'http' && loopback))) {
+      throw ArgumentError.value(
+        redirectUri,
+        'redirectUri',
+        'must use HTTPS or loopback HTTP without credentials or fragments',
+      );
+    }
+    return redirectUri;
+  }
+
+  void validateProtectedResource(MCPProtectedResourceMetadata metadata) {
+    if (metadata.resource != resource) {
+      throw const MCPException('Protected resource metadata resource mismatch');
+    }
+    if (issuer != null && !metadata.authorizationServers.contains(issuer)) {
+      throw const MCPException(
+        'Protected resource metadata authorization server mismatch',
+      );
+    }
+  }
+}
+
+class MCPProtectedResourceMetadata {
+  const MCPProtectedResourceMetadata({
+    required this.resource,
+    required this.authorizationServers,
+    this.scopesSupported = const [],
+  });
+
+  final Uri resource;
+  final List<Uri> authorizationServers;
+  final List<String> scopesSupported;
+
+  factory MCPProtectedResourceMetadata.fromJson(Map<String, dynamic> json) {
+    final resource = _metadataUri(json['resource']);
+    final serverValues = json['authorization_servers'];
+    final scopes = json['scopes_supported'];
+    if (serverValues is! List ||
+        serverValues.isEmpty ||
+        (scopes != null &&
+            (scopes is! List || scopes.any((item) => item is! String)))) {
+      throw const MCPException('Invalid protected resource metadata');
+    }
+    final servers = serverValues.map(_metadataUri).toList();
+
+    return MCPProtectedResourceMetadata(
+      resource: resource,
+      authorizationServers: List.unmodifiable(servers),
+      scopesSupported: List.unmodifiable(
+        (scopes as List?)?.cast<String>() ?? const <String>[],
+      ),
+    );
+  }
+}
+
+class MCPAuthorizationServerMetadata {
+  const MCPAuthorizationServerMetadata({
+    required this.issuer,
+    required this.authorizationEndpoint,
+    required this.tokenEndpoint,
+    this.authorizationResponseIssuerSupported = false,
+  });
+
+  final Uri issuer;
+  final Uri authorizationEndpoint;
+  final Uri tokenEndpoint;
+  final bool authorizationResponseIssuerSupported;
+
+  factory MCPAuthorizationServerMetadata.fromJson(
+    Map<String, dynamic> json,
+    Uri expectedIssuer,
+  ) {
+    final issuer = _metadataUri(json['issuer']);
+    final authorization = _metadataUri(json['authorization_endpoint']);
+    final token = _metadataUri(json['token_endpoint']);
+    if (json['issuer'] != expectedIssuer.toString() || issuer.hasQuery) {
+      throw const MCPException('Invalid authorization server metadata');
+    }
+
+    return MCPAuthorizationServerMetadata(
+      issuer: issuer,
+      authorizationEndpoint: authorization,
+      tokenEndpoint: token,
+      authorizationResponseIssuerSupported:
+          json['authorization_response_iss_parameter_supported'] == true,
+    );
+  }
+}
+
+Uri _metadataUri(Object? value) {
+  final uri = value is String ? Uri.tryParse(value) : null;
+  final loopback =
+      uri != null && const {'localhost', '127.0.0.1', '::1'}.contains(uri.host);
+  if (uri == null ||
+      uri.host.isEmpty ||
+      uri.userInfo.isNotEmpty ||
+      uri.hasFragment ||
+      (uri.scheme != 'https' && !(uri.scheme == 'http' && loopback))) {
+    throw const MCPException('Invalid authorization metadata URI');
+  }
+  return uri;
+}
+
+/// Fetches RFC 9728 protected-resource metadata and RFC 8414/OIDC metadata.
+/// The host owns the HTTP client and any resulting credentials.
+class MCPAuthDiscovery {
+  /// Discovers protected-resource metadata for the requested MCP resource.
+  ///
+  /// A `resource_metadata` URL in a Bearer challenge wins. Without one, RFC
+  /// 9728 path-insertion discovery is attempted before the origin-level
+  /// fallback. Metadata requests intentionally contain no Authorization
+  /// header; credentials belong to the host's authorization flow.
+  static Future<MCPProtectedResourceMetadata> discoverProtectedResource(
+    Uri resource, {
+    String? wwwAuthenticate,
+    http.Client? client,
+  }) async {
+    _validateResourceUri(resource);
+    final metadataFromHeader = _resourceMetadataUrl(wwwAuthenticate);
+    final candidates = metadataFromHeader == null
+        ? _protectedResourceCandidates(resource)
+        : [metadataFromHeader];
+    MCPException? lastError;
+    for (final candidate in candidates) {
+      try {
+        final metadata = await protectedResource(candidate, client: client);
+        if (metadata.resource != resource) {
+          throw const MCPException(
+            'Protected resource metadata resource mismatch',
+          );
+        }
+        return metadata;
+      } on MCPException catch (error) {
+        lastError = error;
+        if (metadataFromHeader != null) rethrow;
+      }
+    }
+    throw lastError ??
+        const MCPException('Protected resource metadata unavailable');
+  }
+
+  static Future<MCPProtectedResourceMetadata> protectedResource(
+    Uri metadataUri, {
+    http.Client? client,
+  }) async {
+    final owns = client == null;
+    final httpClient = client ?? http.Client();
+    try {
+      final response = await httpClient.get(
+        metadataUri,
+        headers: {'Accept': 'application/json'},
+      );
+      if (response.statusCode != 200) {
+        throw MCPException(
+          'Protected resource metadata failed: HTTP ${response.statusCode}',
+        );
+      }
+      final body = jsonDecode(response.body);
+      if (body is! Map) {
+        throw const MCPException('Invalid protected resource metadata');
+      }
+      return MCPProtectedResourceMetadata.fromJson(
+        body.cast<String, dynamic>(),
+      );
+    } finally {
+      if (owns) httpClient.close();
+    }
+  }
+
+  static Future<MCPAuthorizationServerMetadata> authorizationServer(
+    Uri issuer, {
+    http.Client? client,
+  }) async {
+    final owns = client == null;
+    final httpClient = client ?? http.Client();
+    try {
+      _metadataUri(issuer.toString());
+      if (issuer.hasQuery) {
+        throw const MCPException('Issuer must not contain a query');
+      }
+      final issuerPath = issuer.path == '/' ? '' : issuer.path;
+      final paths = <String>{
+        '/.well-known/oauth-authorization-server$issuerPath',
+        '/.well-known/openid-configuration$issuerPath',
+        if (issuerPath.isNotEmpty)
+          '${issuerPath.endsWith('/') ? issuerPath.substring(0, issuerPath.length - 1) : issuerPath}/.well-known/openid-configuration',
+      };
+      http.Response? response;
+      for (final path in paths) {
+        final candidate = issuer.replace(path: path, query: '', fragment: '');
+        final attempt = await httpClient.get(
+          candidate,
+          headers: {'Accept': 'application/json'},
+        );
+        if (attempt.statusCode == 200) {
+          response = attempt;
+          break;
+        }
+      }
+      if (response == null) {
+        throw const MCPException('Authorization server metadata unavailable');
+      }
+      final body = jsonDecode(response.body);
+      if (body is! Map) {
+        throw const MCPException('Invalid authorization server metadata');
+      }
+      return MCPAuthorizationServerMetadata.fromJson(
+        body.cast<String, dynamic>(),
+        issuer,
+      );
+    } finally {
+      if (owns) httpClient.close();
+    }
+  }
+}
+
+void _validateResourceUri(Uri resource) {
+  final loopback = const {
+    'localhost',
+    '127.0.0.1',
+    '::1',
+  }.contains(resource.host);
+  if (!resource.hasScheme ||
+      resource.host.isEmpty ||
+      resource.hasFragment ||
+      (resource.scheme != 'https' &&
+          !(resource.scheme == 'http' && loopback))) {
+    throw const MCPException(
+      'Protected resource must use HTTPS or loopback HTTP without a fragment',
+    );
+  }
+}
+
+List<Uri> _protectedResourceCandidates(Uri resource) {
+  final path = resource.path.isEmpty ? '/' : resource.path;
+  final insertion = path == '/'
+      ? '/.well-known/oauth-protected-resource'
+      : '/.well-known/oauth-protected-resource$path';
+  final root = '/.well-known/oauth-protected-resource';
+  return [
+    resource.replace(path: insertion, query: '', fragment: ''),
+    if (insertion != root)
+      resource.replace(path: root, query: '', fragment: ''),
+  ];
+}
+
+Uri? _resourceMetadataUrl(String? header) {
+  if (header == null || header.trim().isEmpty) return null;
+  Uri? found;
+  String? scheme;
+  final parameters = <String, String>{};
+  void finishChallenge() {
+    if (scheme?.toLowerCase() != 'bearer') return;
+    final value = parameters['resource_metadata'];
+    if (value == null) return;
+    final uri = _metadataUri(value);
+    if (found != null && found != uri) {
+      throw const MCPException('Ambiguous resource_metadata challenges');
+    }
+    found = uri;
+  }
+
+  for (final segment in _splitAuthenticateChallenges(header)) {
+    final match = RegExp(
+      r'^([A-Za-z][A-Za-z0-9_-]*)\s+(.*)$',
+    ).firstMatch(segment);
+    if (match != null) {
+      finishChallenge();
+      scheme = match.group(1);
+      parameters.clear();
+      parameters.addAll(_parseChallengeParameters(match.group(2)!));
+    } else {
+      if (scheme == null) {
+        throw const MCPException('Malformed WWW-Authenticate challenge');
+      }
+      final additional = _parseChallengeParameters(segment);
+      if (additional.keys.any(parameters.containsKey)) {
+        throw const MCPException('Duplicate WWW-Authenticate parameter');
+      }
+      parameters.addAll(additional);
+    }
+  }
+  finishChallenge();
+  return found;
+}
+
+List<String> _splitAuthenticateChallenges(String header) {
+  final parts = <String>[];
+  var start = 0;
+  var quoted = false;
+  var escaped = false;
+  for (var i = 0; i < header.length; i++) {
+    final char = header[i];
+    if (escaped) {
+      escaped = false;
+    } else if (quoted && char == '\\') {
+      escaped = true;
+    } else if (char == '"') {
+      quoted = !quoted;
+    } else if (char == ',' && !quoted) {
+      parts.add(header.substring(start, i).trim());
+      start = i + 1;
+    }
+  }
+  if (quoted || escaped) {
+    throw const MCPException('Malformed WWW-Authenticate header');
+  }
+  final tail = header.substring(start).trim();
+  if (tail.isNotEmpty) parts.add(tail);
+  return parts;
+}
+
+Map<String, String> _parseChallengeParameters(String value) {
+  final result = <String, String>{};
+  if (value.isEmpty) return result;
+  for (final parameter in _splitCommaValues(value)) {
+    final equals = parameter.indexOf('=');
+    if (equals <= 0) {
+      throw const MCPException('Malformed WWW-Authenticate parameter');
+    }
+    final key = parameter.substring(0, equals).trim().toLowerCase();
+    var raw = parameter.substring(equals + 1).trim();
+    if (raw.isEmpty) {
+      throw const MCPException('Malformed WWW-Authenticate value');
+    }
+    if (raw.startsWith('"')) {
+      if (!raw.endsWith('"') || raw.length < 2) {
+        throw const MCPException('Malformed WWW-Authenticate quoted value');
+      }
+      final buffer = StringBuffer();
+      var escaped = false;
+      for (final char in raw.substring(1, raw.length - 1).split('')) {
+        if (escaped) {
+          buffer.write(char);
+          escaped = false;
+        } else if (char == '\\') {
+          escaped = true;
+        } else {
+          buffer.write(char);
+        }
+      }
+      if (escaped) {
+        throw const MCPException('Malformed WWW-Authenticate escape');
+      }
+      raw = buffer.toString();
+    } else if (!RegExp(r"^[A-Za-z0-9!#$%&'*+\-.^_`|~]+$").hasMatch(raw)) {
+      throw const MCPException('Malformed WWW-Authenticate token');
+    }
+    if (result.containsKey(key)) {
+      throw const MCPException('Duplicate WWW-Authenticate parameter');
+    }
+    result[key] = raw;
+  }
+  return result;
+}
+
+List<String> _splitCommaValues(String value) {
+  final parts = <String>[];
+  var start = 0;
+  var quoted = false;
+  var escaped = false;
+  for (var i = 0; i < value.length; i++) {
+    final char = value[i];
+    if (escaped) {
+      escaped = false;
+    } else if (quoted && char == '\\') {
+      escaped = true;
+    } else if (char == '"') {
+      quoted = !quoted;
+    } else if (char == ',' && !quoted) {
+      parts.add(value.substring(start, i).trim());
+      start = i + 1;
+    }
+  }
+  if (quoted || escaped) {
+    throw const MCPException('Malformed WWW-Authenticate parameter');
+  }
+  parts.add(value.substring(start).trim());
+  return parts;
+}
+
+/// Streamable HTTP transport for MCP legacy and modern protocol eras.
 ///
 /// This transport uses a single HTTP endpoint for POST, GET, and DELETE. It
 /// supports:
@@ -19,6 +457,7 @@ class StreamableHttpClientTransport implements MCPTransport {
     this.headers,
     this.requestTimeout = const Duration(seconds: 30),
     this.listenerReconnectDelay = const Duration(milliseconds: 250),
+    this.auth,
     http.Client? client,
   }) : _client = client ?? http.Client(),
        _ownsClient = client == null;
@@ -27,6 +466,7 @@ class StreamableHttpClientTransport implements MCPTransport {
   final Map<String, String>? headers;
   final Duration requestTimeout;
   final Duration listenerReconnectDelay;
+  final MCPAuthConfiguration? auth;
 
   final http.Client _client;
   final bool _ownsClient;
@@ -35,6 +475,7 @@ class StreamableHttpClientTransport implements MCPTransport {
   static const _maxBufferedResponseChars = 1024 * 1024;
 
   StreamSubscription<_SseEvent>? _listenerSubscription;
+  final _subscriptionStreams = <int, StreamSubscription<_SseEvent>>{};
   Timer? _listenerReconnectTimer;
   bool _listenerConnecting = false;
   bool _listenerStarted = false;
@@ -46,17 +487,26 @@ class StreamableHttpClientTransport implements MCPTransport {
   String? _lastEventId;
   bool _sessionExpired = false;
   bool _closed = false;
+  Future<String?>? _refreshFuture;
 
   @override
   Stream<Map<String, dynamic>> get notifications => _notifications.stream;
 
   /// Called by [MCPClient] after initialize negotiation succeeds.
   void setProtocolVersion(String protocolVersion) {
+    if (protocolVersion == '2026-07-28') {
+      // Modern MCP has no protocol-level session. Ignore any accidental
+      // session header from a dual-era server.
+      _sessionId = null;
+      _pendingSessionId = null;
+    }
     _sessionId = _pendingSessionId;
     _pendingSessionId = null;
     _protocolVersion = protocolVersion;
     _sessionExpired = false;
   }
+
+  bool get _modern => _protocolVersion == '2026-07-28';
 
   Future<void> resetHandshakeState() async {
     _pendingSessionId = null;
@@ -90,6 +540,26 @@ class StreamableHttpClientTransport implements MCPTransport {
       if (includeSessionAndVersion && _sessionId != null)
         'Mcp-Session-Id': _sessionId!,
     };
+  }
+
+  Map<String, String> _modernPostHeaders(JsonRpcRequest request) {
+    final name = request.params?['name'] ?? request.params?['uri'];
+    return {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/event-stream',
+      ..._baseHeaders(),
+      'MCP-Protocol-Version': _protocolVersion!,
+      'Mcp-Method': request.method,
+      if (name is String && name.isNotEmpty)
+        'Mcp-Name': _encodeHeaderValue(name),
+    };
+  }
+
+  String _encodeHeaderValue(String value) {
+    if (value.codeUnits.every((unit) => unit >= 0x20 && unit <= 0x7e)) {
+      return value;
+    }
+    return '=?base64?${base64Encode(utf8.encode(value))}?=';
   }
 
   Map<String, String> _getHeaders() {
@@ -206,13 +676,48 @@ class StreamableHttpClientTransport implements MCPTransport {
 
   Future<http.StreamedResponse> _sendRequest(http.BaseRequest request) async {
     try {
-      return await _client.send(request).timeout(requestTimeout);
+      final token = await auth?.accessToken?.call();
+      if (token != null && token.isNotEmpty) {
+        request.headers['Authorization'] = 'Bearer $token';
+      }
+      var response = await _client.send(request).timeout(requestTimeout);
+      if (response.statusCode == 401 &&
+          auth?.refreshAccessToken != null &&
+          auth?.retryAfterUnauthorized == true) {
+        await response.stream.drain<void>();
+        final refreshed = await _refreshAccessToken();
+        if (refreshed != null &&
+            refreshed.isNotEmpty &&
+            request is http.Request) {
+          final retry = http.Request(request.method, request.url)
+            ..headers.addAll(request.headers)
+            ..body = request.body;
+          retry.headers['Authorization'] = 'Bearer $refreshed';
+          response = await _client.send(retry).timeout(requestTimeout);
+        }
+      }
+      return response;
     } catch (error) {
       throw _transportError(
         method: request.method,
         uri: request.url,
         context: error.runtimeType.toString(),
       );
+    }
+  }
+
+  Future<String?> _refreshAccessToken() async {
+    final active = _refreshFuture;
+    if (active != null) return active;
+
+    final refresh = auth!.refreshAccessToken!.call();
+    _refreshFuture = refresh;
+    try {
+      return await refresh;
+    } finally {
+      if (identical(_refreshFuture, refresh)) {
+        _refreshFuture = null;
+      }
     }
   }
 
@@ -297,6 +802,20 @@ class StreamableHttpClientTransport implements MCPTransport {
           return;
         }
         final message = decoded.cast<String, dynamic>();
+        if (request.method == 'subscriptions/listen' &&
+            message['method'] == 'notifications/subscriptions/acknowledged') {
+          if (!completer.isCompleted) {
+            _subscriptionStreams[request.id] = subscription;
+            completer.complete(
+              JsonRpcResponse(
+                id: request.id,
+                result: const {'resultType': 'complete'},
+              ),
+            );
+          }
+          _dispatchMessage(message);
+          return;
+        }
         final isResponseLike =
             message.containsKey('result') || message.containsKey('error');
         if (isResponseLike) {
@@ -310,7 +829,11 @@ class StreamableHttpClientTransport implements MCPTransport {
               completer.completeError(error, stackTrace);
             }
           }
-          unawaited(subscription.cancel());
+          if (request.method == 'subscriptions/listen') {
+            _subscriptionStreams[request.id] = subscription;
+          } else {
+            unawaited(subscription.cancel());
+          }
           return;
         }
         _dispatchMessage(message);
@@ -324,6 +847,7 @@ class StreamableHttpClientTransport implements MCPTransport {
         }
       },
       onDone: () {
+        _subscriptionStreams.remove(request.id);
         if (!completer.isCompleted) {
           completer.completeError(
             MCPException(
@@ -339,17 +863,25 @@ class StreamableHttpClientTransport implements MCPTransport {
       requestTimeout,
       onTimeout: () {
         unawaited(subscription.cancel());
-        unawaited(
-          _sendCancelledNotification(
-            request.id,
-            'Request timed out after ${requestTimeout.inMilliseconds}ms',
-          ),
-        );
+        if (!_modern) {
+          unawaited(
+            _sendCancelledNotification(
+              request.id,
+              'Request timed out after ${requestTimeout.inMilliseconds}ms',
+            ),
+          );
+        }
         throw MCPException(
           'Request timed out waiting for ${request.method} response',
         );
       },
     );
+  }
+
+  /// Stops a modern `subscriptions/listen` response stream.
+  Future<void> cancelSubscription(int requestId) async {
+    final subscription = _subscriptionStreams.remove(requestId);
+    await subscription?.cancel();
   }
 
   Future<void> _sendCancelledNotification(int requestId, String reason) async {
@@ -371,6 +903,10 @@ class StreamableHttpClientTransport implements MCPTransport {
   @override
   Future<JsonRpcResponse> send(JsonRpcRequest request) async {
     _ensureOpen();
+    if (_modern) {
+      final response = await _postModern(request);
+      return response;
+    }
     final isInitialize = request.method == 'initialize';
     if (!isInitialize) {
       _ensureSessionUsable('POST');
@@ -415,9 +951,61 @@ class StreamableHttpClientTransport implements MCPTransport {
     );
   }
 
+  Future<JsonRpcResponse> _postModern(JsonRpcRequest request) async {
+    final httpRequest = http.Request('POST', url)
+      ..headers.addAll(_modernPostHeaders(request))
+      ..body = jsonEncode(request.toJson());
+    final response = await _sendRequest(httpRequest);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final bodyText = await _readBoundedResponseBody(response, method: 'POST');
+      throw _transportError(
+        method: 'POST',
+        uri: url,
+        statusCode: response.statusCode,
+        context: _safeResponseContext(bodyText),
+      );
+    }
+    final contentType = _responseHeader(response.headers, 'content-type');
+    if (_isJsonContentType(contentType)) {
+      return _parseJsonResponse(response, expectedId: request.id);
+    }
+    if (_isSseContentType(contentType)) {
+      return _parseSseResponse(response, request);
+    }
+    await _drainResponse(response);
+    throw MCPException(
+      'Unexpected MCP response Content-Type: ${contentType ?? 'missing'}',
+    );
+  }
+
   @override
   Future<void> sendNotification(JsonRpcNotification notification) async {
     _ensureOpen();
+    if (_modern) {
+      final request = JsonRpcRequest(
+        method: notification.method,
+        id: 0,
+        params: notification.params,
+      );
+      final httpRequest = http.Request('POST', url)
+        ..headers.addAll(_modernPostHeaders(request))
+        ..body = jsonEncode(notification.toJson());
+      final response = await _sendRequest(httpRequest);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        final bodyText = await _readBoundedResponseBody(
+          response,
+          method: 'POST',
+        );
+        throw _transportError(
+          method: 'POST',
+          uri: url,
+          statusCode: response.statusCode,
+          context: _safeResponseContext(bodyText),
+        );
+      }
+      await _drainResponse(response);
+      return;
+    }
     _ensureSessionUsable('POST');
 
     final response = await _post(
@@ -566,8 +1154,15 @@ class StreamableHttpClientTransport implements MCPTransport {
 
     Object? closeError;
     await _stopListener();
+    for (final subscription in _subscriptionStreams.values.toList()) {
+      await subscription.cancel();
+    }
+    _subscriptionStreams.clear();
 
-    if (_sessionId != null && !_sessionExpired && _protocolVersion != null) {
+    if (!_modern &&
+        _sessionId != null &&
+        !_sessionExpired &&
+        _protocolVersion != null) {
       final request = http.Request('DELETE', url);
       request.headers.addAll(_deleteHeaders());
       try {

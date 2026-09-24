@@ -1,0 +1,3 @@
+[  +48 ms] executing: /usr/bin/arch -arm64e xcrun simctl launch 154781AA-E525-424F-9768-390D4DED6241 com.example.flutterChat --enable-dart-profiling --disable-vm-service-publication --start-paused --enable-checked-mode --verify-entry-points
+[ +105 ms] Waiting for VM Service port to be available...
+2026-09-23 15:43:22.984 Df Runner[16400:d33f] (Flutter) flutter: The Dart VM service is listening on http://127.0.0.1:50443/06Da3yUD1gk=/

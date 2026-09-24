@@ -1,15 +1,60 @@
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:ai_sdk_conversation/ai_sdk_conversation.dart';
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_dart/test.dart';
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+import 'package:ai_sdk_remote/ai_sdk_remote.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart';
+import 'package:http/testing.dart';
 
 import '../helpers.dart';
 
 Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
+
+class _LifecycleBackend implements ConversationBackend {
+  _LifecycleBackend([Conversation? initial])
+    : _conversation =
+          initial ?? Conversation(id: 'lifecycle', messages: const []);
+
+  final Conversation _conversation;
+  final _changes = StreamController<Conversation>.broadcast();
+  final disposeSignal = Completer<void>();
+  int disposeCount = 0;
+
+  @override
+  Conversation get conversation => _conversation;
+
+  @override
+  Stream<Conversation> get changes => _changes.stream;
+
+  @override
+  Future<void> send(String text) async {}
+
+  @override
+  Future<void> interrupt() async {}
+
+  @override
+  Future<void> restore(Map<String, dynamic> encoded) async {}
+
+  @override
+  Future<void> respondToApproval({
+    required String approvalId,
+    required bool approved,
+    String? reason,
+  }) async {}
+
+  @override
+  Future<void> dispose() async {
+    disposeCount++;
+    if (!disposeSignal.isCompleted) disposeSignal.complete();
+    await _changes.close();
+  }
+}
 
 const _approvalRequest = LanguageModelV4ToolApprovalRequestPart(
   approvalId: 'approval_c1',
@@ -190,6 +235,261 @@ void main() {
       expect(find.text('seed message'), findsOneWidget);
     });
 
+    testWidgets('conversation constructor streams a local backend', (
+      tester,
+    ) async {
+      final conversation = ConversationController(
+        LocalConversationBackend(
+          agent: textAgent('local backend reply'),
+          initial: Conversation(id: 'local', messages: const []),
+        ),
+      );
+      addTearDown(conversation.dispose);
+
+      await tester.pumpWidget(
+        _wrap(
+          AiChatScaffold.conversation(
+            conversationController: conversation,
+            disposeConversationController: false,
+          ),
+        ),
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('chat-composer-field')),
+        'hello local',
+      );
+      await tester.tap(find.byKey(const ValueKey('chat-composer-send')));
+      await pumpTesterUntil(
+        tester,
+        () => find.text('local backend reply').evaluate().isNotEmpty,
+      );
+
+      expect(find.text('hello local'), findsOneWidget);
+      expect(find.text('local backend reply'), findsOneWidget);
+    });
+
+    testWidgets('conversation constructor renders and answers local approval', (
+      tester,
+    ) async {
+      final conversation = ConversationController(
+        LocalConversationBackend(
+          agent: approvalAgent(repeatCallAfterApproval: false),
+          initial: Conversation(id: 'approval', messages: const []),
+        ),
+      );
+      addTearDown(conversation.dispose);
+
+      await tester.pumpWidget(
+        _wrap(
+          AiChatScaffold.conversation(
+            conversationController: conversation,
+            disposeConversationController: false,
+          ),
+        ),
+      );
+      await tester.runAsync(() => conversation.send('approve local'));
+      await tester.pump();
+      await pumpTesterUntil(
+        tester,
+        () => find.byType(ToolApprovalCard).evaluate().isNotEmpty,
+      );
+      expect(
+        find.byKey(const ValueKey('tool-approval-approve')),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('tool-approval-approve')));
+      await pumpTesterUntil(
+        tester,
+        () => find.text('final answer').evaluate().isNotEmpty,
+      );
+      expect(find.text('final answer'), findsOneWidget);
+    });
+
+    testWidgets('conversation constructor streams a remote backend', (
+      tester,
+    ) async {
+      final client = MockClient((request) async {
+        expect(request.method, 'POST');
+        return Response(
+          'data: ${jsonEncode({'type': 'start', 'messageId': 'remote-a'})}\n\n'
+          'data: ${jsonEncode({'type': 'text-start', 'id': 'remote-text'})}\n\n'
+          'data: ${jsonEncode({'type': 'text-delta', 'id': 'remote-text', 'delta': 'remote reply'})}\n\n'
+          'data: ${jsonEncode({'type': 'text-end', 'id': 'remote-text'})}\n\n'
+          'data: ${jsonEncode({'type': 'finish'})}\n\n'
+          'data: [DONE]\n\n',
+          200,
+          headers: {
+            'x-vercel-ai-ui-message-stream': 'v1',
+            'content-type': 'text/event-stream',
+          },
+        );
+      });
+      final transport = RemoteConversationTransport(
+        endpoint: Uri.parse('https://backend.test/chat'),
+        client: client,
+      );
+      final conversation = ConversationController(
+        RemoteConversationBackend(
+          transport: transport,
+          initial: Conversation(id: 'remote', messages: const []),
+        ),
+      );
+      addTearDown(conversation.dispose);
+      addTearDown(client.close);
+
+      await tester.pumpWidget(
+        _wrap(
+          AiChatScaffold.conversation(
+            conversationController: conversation,
+            disposeConversationController: false,
+          ),
+        ),
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('chat-composer-field')),
+        'hello remote',
+      );
+      await tester.tap(find.byKey(const ValueKey('chat-composer-send')));
+      await pumpTesterUntil(
+        tester,
+        () => find.text('remote reply').evaluate().isNotEmpty,
+      );
+
+      expect(find.text('hello remote'), findsOneWidget);
+      expect(find.text('remote reply'), findsOneWidget);
+    });
+
+    testWidgets('conversation scaffold disposes an owned controller', (
+      tester,
+    ) async {
+      final backend = _LifecycleBackend();
+      final conversation = ConversationController(backend);
+
+      await tester.pumpWidget(
+        _wrap(
+          AiChatScaffold.conversation(conversationController: conversation),
+        ),
+      );
+      await tester.pumpWidget(_wrap(const SizedBox.shrink()));
+      await tester.pumpAndSettle();
+      await tester.runAsync(() async {
+        await backend.disposeSignal.future;
+      });
+
+      expect(backend.disposeCount, 1);
+    });
+
+    testWidgets(
+      'conversation scaffold can leave caller-owned controller alive',
+      (tester) async {
+        final backend = _LifecycleBackend();
+        final conversation = ConversationController(backend);
+
+        await tester.pumpWidget(
+          _wrap(
+            AiChatScaffold.conversation(
+              conversationController: conversation,
+              disposeConversationController: false,
+            ),
+          ),
+        );
+        expect(backend.disposeCount, 0);
+        await backend.dispose();
+        expect(backend.disposeCount, 1);
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+      },
+    );
+
+    testWidgets('conversation scaffold replaces adapters with new backends', (
+      tester,
+    ) async {
+      final firstBackend = _LifecycleBackend(
+        Conversation(
+          id: 'first',
+          messages: [
+            ConversationMessage(
+              id: 'first-user',
+              role: ConversationRole.user,
+              parts: [TextPart(id: 'first-text', text: 'first conversation')],
+            ),
+          ],
+        ),
+      );
+      final secondBackend = _LifecycleBackend(
+        Conversation(
+          id: 'second',
+          messages: [
+            ConversationMessage(
+              id: 'second-user',
+              role: ConversationRole.user,
+              parts: [TextPart(id: 'second-text', text: 'second conversation')],
+            ),
+          ],
+        ),
+      );
+      final first = ConversationController(firstBackend);
+      final second = ConversationController(secondBackend);
+      addTearDown(first.dispose);
+      addTearDown(second.dispose);
+
+      await tester.pumpWidget(
+        _wrap(AiChatScaffold.conversation(conversationController: first)),
+      );
+      expect(find.text('first conversation'), findsOneWidget);
+
+      await tester.pumpWidget(
+        _wrap(AiChatScaffold.conversation(conversationController: second)),
+      );
+      expect(find.text('second conversation'), findsOneWidget);
+      expect(find.text('first conversation'), findsNothing);
+      expect(firstBackend.disposeCount, 1);
+    });
+
+    testWidgets(
+      'conversation scaffold renders restored pending approval initially',
+      (tester) async {
+        final call = ToolCallPart(
+          id: 'tool-c1',
+          callId: 'c1',
+          name: 'deleteFile',
+          arguments: {'path': '/tmp/secret'},
+        );
+        final approval = ApprovalPart(
+          id: 'approval-a1',
+          approvalId: 'a1',
+          callId: 'c1',
+          toolName: 'deleteFile',
+          status: ApprovalStatus.pending,
+        );
+        final backend = _LifecycleBackend(
+          Conversation(
+            id: 'restored',
+            messages: [
+              ConversationMessage(
+                id: 'assistant-1',
+                role: ConversationRole.assistant,
+                status: ConversationMessageStatus.pendingApproval,
+                parts: [call, approval],
+              ),
+            ],
+          ),
+        );
+        final conversation = ConversationController(backend);
+        addTearDown(conversation.dispose);
+
+        await tester.pumpWidget(
+          _wrap(
+            AiChatScaffold.conversation(conversationController: conversation),
+          ),
+        );
+
+        expect(find.byType(ToolApprovalCard), findsOneWidget);
+        expect(find.text('deleteFile'), findsWidgets);
+      },
+    );
+
     testWidgets('sending via the composer drives the controller', (
       tester,
     ) async {
@@ -297,9 +597,16 @@ void main() {
         final controller = _ApprovalProbeController();
         addTearDown(controller.dispose);
         final agent = textAgent('unused');
+        var attached = false;
 
         await tester.pumpWidget(
-          _wrap(AiChatScaffold(controller: controller, agent: agent)),
+          _wrap(
+            AiChatScaffold(
+              controller: controller,
+              agent: agent,
+              onAttach: () => attached = true,
+            ),
+          ),
         );
 
         controller.showApproval();
@@ -307,19 +614,40 @@ void main() {
 
         expect(find.byType(ToolApprovalCard), findsOneWidget);
         expect(find.text('Approve the tool call to continue.'), findsOneWidget);
-        expect(
-          tester
-              .widget<TextField>(
-                find.byKey(const ValueKey('chat-composer-field')),
-              )
-              .enabled,
-          isFalse,
+        final field = tester.widget<TextField>(
+          find.byKey(const ValueKey('chat-composer-field')),
         );
+        expect(field.enabled, isFalse);
         expect(
           find.byKey(const ValueKey('chat-composer-send')),
           findsOneWidget,
         );
         expect(find.byKey(const ValueKey('chat-composer-stop')), findsNothing);
+        expect(
+          tester
+              .widget<IconButton>(
+                find.byKey(const ValueKey('chat-composer-send')),
+              )
+              .onPressed,
+          isNull,
+        );
+        expect(
+          tester
+              .widget<IconButton>(
+                find.byKey(const ValueKey('chat-composer-attach')),
+              )
+              .onPressed,
+          isNull,
+        );
+        await tester.tap(
+          find.byKey(const ValueKey('chat-composer-send')),
+          warnIfMissed: false,
+        );
+        await tester.tap(
+          find.byKey(const ValueKey('chat-composer-attach')),
+          warnIfMissed: false,
+        );
+        expect(attached, isFalse);
 
         await tester.tap(find.byKey(const ValueKey('tool-approval-approve')));
         await tester.pump();

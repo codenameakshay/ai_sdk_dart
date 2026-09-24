@@ -1,0 +1,68 @@
+[
+  {
+    "kind": "object",
+    "size": "1KiB",
+    "bytes": 1139,
+    "parseAttempts": 1,
+    "decodeAttempts": 1,
+    "snapshotCount": 0,
+    "snapshotElementsCopied": 0,
+    "elements": 0,
+    "elapsedMicroseconds": 14651
+  },
+  {
+    "kind": "array",
+    "size": "1KiB",
+    "bytes": 1073,
+    "parseAttempts": 4,
+    "decodeAttempts": 4,
+    "snapshotCount": 4,
+    "snapshotElementsCopied": 10,
+    "elements": 4,
+    "elapsedMicroseconds": 5362
+  },
+  {
+    "kind": "object",
+    "size": "64KiB",
+    "bytes": 65595,
+    "parseAttempts": 1,
+    "decodeAttempts": 1,
+    "snapshotCount": 0,
+    "snapshotElementsCopied": 0,
+    "elements": 0,
+    "elapsedMicroseconds": 36394
+  },
+  {
+    "kind": "array",
+    "size": "64KiB",
+    "bytes": 65771,
+    "parseAttempts": 244,
+    "decodeAttempts": 244,
+    "snapshotCount": 244,
+    "snapshotElementsCopied": 29890,
+    "elements": 244,
+    "elapsedMicroseconds": 34379
+  },
+  {
+    "kind": "object",
+    "size": "1MiB",
+    "bytes": 1048593,
+    "parseAttempts": 1,
+    "decodeAttempts": 1,
+    "snapshotCount": 0,
+    "snapshotElementsCopied": 0,
+    "elements": 0,
+    "elapsedMicroseconds": 108647
+  },
+  {
+    "kind": "array",
+    "size": "1MiB",
+    "bytes": 1048745,
+    "parseAttempts": 3874,
+    "decodeAttempts": 3874,
+    "snapshotCount": 3874,
+    "snapshotElementsCopied": 7505875,
+    "elements": 3874,
+    "elapsedMicroseconds": 174845
+  }
+]

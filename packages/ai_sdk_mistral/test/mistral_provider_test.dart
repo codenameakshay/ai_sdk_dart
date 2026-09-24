@@ -12,6 +12,26 @@ import '../../ai_sdk_provider/test/support/test_server.dart';
 import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
+  test('default provider exposes embedding capabilities', () {
+    final model = mistral.embedding('mistral-embed');
+    expect(model.provider, 'mistral');
+    expect(model.maxEmbeddingsPerCall, isNull);
+    expect(model.supportsParallelCalls, isTrue);
+  });
+
+  test('embedding rethrows credential-provider failures', () async {
+    final provider = MistralProvider(
+      credentialProvider: () async => throw StateError('credential failed'),
+    );
+    await expectLater(
+      provider
+          .embedding('mistral-embed')
+          .doEmbed(const EmbeddingModelV2CallOptions<String>(values: ['x'])),
+      throwsStateError,
+    );
+    provider.dispose();
+  });
+
   group('MistralProvider', () {
     test('creates language model with correct provider/spec/modelId', () {
       final provider = MistralProvider(apiKey: 'test-key');
@@ -303,7 +323,7 @@ void main() {
       },
     );
 
-    test('tolerates a response with no data list', () async {
+    test('rejects a response with no data list', () async {
       final server = await _startServer((request) async {
         await captureBody(request);
         request.response.statusCode = 200;
@@ -318,10 +338,12 @@ void main() {
         baseUrl: server.baseUrl,
       ).embedding('mistral-embed');
 
-      final result = await model.doEmbed(
-        const EmbeddingModelV2CallOptions<String>(values: ['only']),
+      await expectLater(
+        model.doEmbed(
+          const EmbeddingModelV2CallOptions<String>(values: ['only']),
+        ),
+        throwsA(isA<AiApiCallError>()),
       );
-      expect(result.embeddings, isEmpty);
     });
 
     test('rejects null and malformed 2xx embedding responses', () async {
@@ -354,48 +376,41 @@ void main() {
       );
     });
 
-    test(
-      'normalizes numeric vectors and ignores response rows beyond the input',
-      () async {
-        final server = await _startServer((request) async {
-          await captureBody(request);
-          request.response.statusCode = 200;
-          request.response.headers.contentType = ContentType.json;
-          request.response.write(
-            jsonEncode({
-              'data': [
-                {
-                  'embedding': [1, 2.5],
-                },
-                {
-                  'embedding': [-3, 4],
-                },
-                {'embedding': 'ignored malformed extra row'},
-              ],
-            }),
-          );
-          await request.response.close();
-        });
-        addTearDown(server.close);
+    test('normalizes numeric vectors', () async {
+      final server = await _startServer((request) async {
+        await captureBody(request);
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'data': [
+              {
+                'embedding': [1, 2.5],
+              },
+              {
+                'embedding': [-3, 4],
+              },
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
 
-        final result =
-            await MistralProvider(apiKey: 'key', baseUrl: server.baseUrl)
-                .embedding('mistral-embed')
-                .doEmbed(
-                  const EmbeddingModelV2CallOptions<String>(values: ['a', 'b']),
-                );
+      final result =
+          await MistralProvider(apiKey: 'key', baseUrl: server.baseUrl)
+              .embedding('mistral-embed')
+              .doEmbed(
+                const EmbeddingModelV2CallOptions<String>(values: ['a', 'b']),
+              );
 
-        expect(result.embeddings, hasLength(2));
-        expect(result.embeddings.map((embedding) => embedding.value), [
-          'a',
-          'b',
-        ]);
-        expect(result.embeddings.map((embedding) => embedding.embedding), [
-          [1.0, 2.5],
-          [-3.0, 4.0],
-        ]);
-      },
-    );
+      expect(result.embeddings, hasLength(2));
+      expect(result.embeddings.map((embedding) => embedding.value), ['a', 'b']);
+      expect(result.embeddings.map((embedding) => embedding.embedding), [
+        [1.0, 2.5],
+        [-3.0, 4.0],
+      ]);
+    });
 
     test('baseUrl ending with slash still posts to embeddings once', () async {
       late String path;

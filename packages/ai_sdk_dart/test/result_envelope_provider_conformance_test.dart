@@ -79,11 +79,16 @@ void main() {
         final generated = await generateText<String>(
           model: model,
           prompt: 'hi',
+          bodyInclusion: const BodyInclusionPolicy.all(),
         );
         expect(generated.request.body, isA<Map<String, dynamic>>());
         expect(generated.responseInfo.body, isA<Map<String, dynamic>>());
 
-        final streamed = await streamText<String>(model: model, prompt: 'hi');
+        final streamed = await streamText<String>(
+          model: model,
+          prompt: 'hi',
+          bodyInclusion: const BodyInclusionPolicy.all(),
+        );
         await streamed.output;
         expect((await streamed.request).body, isA<Map<String, dynamic>>());
         expect((await streamed.response).body, isA<Map<String, dynamic>>());
@@ -160,11 +165,16 @@ void main() {
         final generated = await generateText<String>(
           model: model,
           prompt: 'hi',
+          bodyInclusion: const BodyInclusionPolicy.all(),
         );
         expect(generated.request.body, isA<Map<String, dynamic>>());
         expect(generated.responseInfo.body, isA<Map<String, dynamic>>());
 
-        final streamed = await streamText<String>(model: model, prompt: 'hi');
+        final streamed = await streamText<String>(
+          model: model,
+          prompt: 'hi',
+          bodyInclusion: const BodyInclusionPolicy.all(),
+        );
         await streamed.output;
         expect((await streamed.request).body, isA<Map<String, dynamic>>());
         expect((await streamed.response).body, isA<Map<String, dynamic>>());
@@ -233,11 +243,16 @@ void main() {
         final generated = await generateText<String>(
           model: model,
           prompt: 'hi',
+          bodyInclusion: const BodyInclusionPolicy.all(),
         );
         expect(generated.request.body, isA<Map<String, dynamic>>());
         expect(generated.responseInfo.body, isA<Map<String, dynamic>>());
 
-        final streamed = await streamText<String>(model: model, prompt: 'hi');
+        final streamed = await streamText<String>(
+          model: model,
+          prompt: 'hi',
+          bodyInclusion: const BodyInclusionPolicy.all(),
+        );
         await streamed.output;
         expect((await streamed.request).body, isA<Map<String, dynamic>>());
         expect((await streamed.response).body, isA<Map<String, dynamic>>());

@@ -233,6 +233,12 @@ class _FakeStepModel extends _FakeModel {
 }
 
 class _FakeEmbeddingModel implements EmbeddingModelV2<String> {
+  @override
+  int? get maxEmbeddingsPerCall => null;
+
+  @override
+  bool get supportsParallelCalls => true;
+
   const _FakeEmbeddingModel(this._embedding);
   final List<double> _embedding;
 

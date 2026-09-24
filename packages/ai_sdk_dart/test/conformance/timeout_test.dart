@@ -209,11 +209,23 @@ void main() {
             result.output,
             throwsA(isA<TimeoutException>()),
           );
+          final reasoningFilesExpectation = expectLater(
+            result.reasoningFiles,
+            throwsA(isA<TimeoutException>()),
+          );
+          final documentSourcesExpectation = expectLater(
+            result.documentSources,
+            throwsA(isA<TimeoutException>()),
+          );
           await expectLater(
             result.fullStream.toList(),
             throwsA(isA<TimeoutException>()),
           );
-          await outputExpectation;
+          await Future.wait([
+            outputExpectation,
+            reasoningFilesExpectation,
+            documentSourcesExpectation,
+          ]);
         },
       );
 
@@ -585,6 +597,12 @@ class _DelayedToolValueStream extends Stream<Object?> {
 }
 
 class _SlowEmbeddingModel implements EmbeddingModelV2<String> {
+  @override
+  int? get maxEmbeddingsPerCall => null;
+
+  @override
+  bool get supportsParallelCalls => true;
+
   _SlowEmbeddingModel({required this.delay});
   final Duration delay;
 

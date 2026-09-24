@@ -23,11 +23,16 @@ void main() {
               toolName: 'search',
               input: {'q': 'flutter'},
             ),
+            LanguageModelV4ReasoningFilePart(
+              data: DataContentBase64(''),
+              mediaType: 'application/pdf',
+            ),
             LanguageModelV4SourcePart(
               id: 's1',
               url: 'https://example.com',
               title: 'Example',
             ),
+            LanguageModelV4OpaquePart(provider: 'mock', raw: 'opaque'),
           ],
         );
 
@@ -36,11 +41,33 @@ void main() {
         expect(find.text('Here is the answer'), findsOneWidget);
         expect(find.byType(ReasoningView), findsOneWidget);
         expect(find.byType(ToolCallCard), findsOneWidget);
+        expect(find.byType(MessageReasoningFileAttachment), findsOneWidget);
+        expect(find.text('application/pdf'), findsOneWidget);
         expect(find.text('search'), findsOneWidget);
         expect(find.byType(SourceCitations), findsOneWidget);
         expect(find.text('Example'), findsOneWidget);
       },
     );
+
+    testWidgets('exposes selectable assistant text to semantics', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      await tester.pumpWidget(
+        _wrap(
+          const AssistantMessageView(
+            message: ModelMessage(
+              role: ModelMessageRole.assistant,
+              content: 'readable answer',
+            ),
+          ),
+        ),
+      );
+
+      expect(find.bySemanticsLabel('readable answer'), findsOneWidget);
+      expect(find.byType(SelectionArea), findsOneWidget);
+      semantics.dispose();
+    });
 
     testWidgets('falls back to message.content when there are no parts', (
       tester,
@@ -238,6 +265,35 @@ void main() {
       );
 
       expect(find.byType(SelectableText), findsNothing);
+    });
+
+    testWidgets('uses a document title when its media type is empty', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      await tester.pumpWidget(
+        _wrap(
+          const AssistantMessageView(
+            message: ModelMessage.parts(
+              role: ModelMessageRole.assistant,
+              parts: [
+                LanguageModelV4DocumentSourcePart(
+                  id: 'doc-1',
+                  mediaType: '',
+                  title: 'Untyped source',
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      expect(find.byTooltip('Untyped source'), findsOneWidget);
+      expect(
+        find.bySemanticsLabel('Document source: Untyped source'),
+        findsOneWidget,
+      );
+      semantics.dispose();
     });
   });
 }

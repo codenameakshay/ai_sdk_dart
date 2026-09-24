@@ -111,5 +111,31 @@ void main() {
 
       expect(find.textContaining('UNENCODABLE'), findsOneWidget);
     });
+
+    testWidgets('uses labels from the inherited strings scope', (tester) async {
+      await tester.pumpWidget(
+        _wrap(
+          AiSdkUiStringsScope(
+            strings: const AiSdkUiStrings(
+              toolApprovalTitle: 'Werkzeug bestätigen?',
+              approve: 'Zulassen',
+              deny: 'Ablehnen',
+              approvalReasonHint: 'Begründung',
+            ),
+            child: ToolApprovalCard(
+              request: _request,
+              showReasonField: true,
+              onApprove: (_) {},
+              onDeny: (_) {},
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('Werkzeug bestätigen?'), findsOneWidget);
+      expect(find.text('Zulassen'), findsOneWidget);
+      expect(find.text('Ablehnen'), findsOneWidget);
+      expect(find.text('Begründung'), findsOneWidget);
+    });
   });
 }

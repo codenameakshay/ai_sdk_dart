@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'pages/chat_page.dart';
 import 'pages/completion_page.dart';
+import 'pages/conversation_page.dart';
 import 'pages/object_stream_page.dart';
 
 void main() {
@@ -34,6 +35,10 @@ class App extends StatelessWidget {
         useMaterial3: true,
       ),
       home: _Shell(initialIndex: initialIndex),
+      routes: {
+        '/conversation': (_) => const LocalConversationPage(),
+        '/remote': (_) => const RemoteConversationPage(),
+      },
     );
   }
 }

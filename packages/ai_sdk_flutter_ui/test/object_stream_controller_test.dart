@@ -114,6 +114,20 @@ class _ThrowingObjectModel extends LanguageModelV4 {
   }
 }
 
+class _SyncThrowingObjectModel extends _ThrowingObjectModel {
+  _SyncThrowingObjectModel(super.error);
+
+  @override
+  String get provider => throw error;
+
+  @override
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
+  ) {
+    throw error;
+  }
+}
+
 void main() {
   group('ObjectStreamController', () {
     test('starts with initial value and idle state', () {
@@ -243,6 +257,24 @@ void main() {
 
       await controller.submit('boom');
       await pumpUntil(() => controller.error != null);
+
+      expect(controller.error, same(failure));
+      expect(captured, same(failure));
+      expect(controller.isLoading, isFalse);
+      expect(controller.isStreaming, isFalse);
+      controller.dispose();
+    });
+
+    test('submit surfaces synchronous stream startup failures', () async {
+      Object? captured;
+      final failure = StateError('stream setup failed');
+      final controller = ObjectStreamController<Map<String, dynamic>>(
+        model: _SyncThrowingObjectModel(failure),
+        schema: mapSchema,
+        onError: (error) => captured = error,
+      );
+
+      await controller.submit('boom');
 
       expect(controller.error, same(failure));
       expect(captured, same(failure));

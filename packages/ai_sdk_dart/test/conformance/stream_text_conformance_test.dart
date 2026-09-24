@@ -76,6 +76,26 @@ void main() {
 
     // ── Full stream event taxonomy ─────────────────────────────────────────
 
+    test(
+      'stream is canonical lifecycle and providerStream is raw provider',
+      () async {
+        final result = await streamText(
+          model: FakeTextModel('hello'),
+          prompt: 'hi',
+        );
+        final eventsFuture = result.stream.toList();
+        final providerPartsFuture = result.providerStream.toList();
+        final fullEventsFuture = result.fullStream.toList();
+        final events = await eventsFuture;
+        final providerParts = await providerPartsFuture;
+        final fullEvents = await fullEventsFuture;
+        expect(events, everyElement(isA<StreamTextEvent>()));
+        expect(events.first, isA<StreamTextStartEvent>());
+        expect(providerParts, everyElement(isA<LanguageModelV4StreamPart>()));
+        expect(fullEvents, isNotEmpty);
+      },
+    );
+
     group('fullStream event taxonomy', () {
       test('fullStream starts with StreamTextStartEvent', () async {
         final model = FakeTextModel('hello');
@@ -220,6 +240,7 @@ void main() {
         final result = await streamText(
           model: model,
           prompt: 'hi',
+          bodyInclusion: const BodyInclusionPolicy.all(),
           onChunk: (chunk) => chunkTypes.add(chunk.runtimeType),
         );
 
@@ -240,6 +261,7 @@ void main() {
         final result = await streamText(
           model: model,
           prompt: 'hi',
+          bodyInclusion: const BodyInclusionPolicy.all(),
           onChunk: (chunk) => chunkTypes.add(chunk.runtimeType),
         );
 
@@ -350,6 +372,16 @@ void main() {
           );
 
           expect(events.single, isA<StreamTextErrorEvent>());
+          await Future.wait([
+            expectLater(
+              result.reasoningFiles,
+              throwsA(isA<AiOperationCancelledError>()),
+            ),
+            expectLater(
+              result.documentSources,
+              throwsA(isA<AiOperationCancelledError>()),
+            ),
+          ]);
         },
       );
 

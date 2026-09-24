@@ -47,7 +47,7 @@ class _PromptSuggestionsState extends State<PromptSuggestions>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 420),
+    duration: AiMotion.entrance,
   );
   bool _started = false;
 

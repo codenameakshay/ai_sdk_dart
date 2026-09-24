@@ -10,3 +10,5 @@ library;
 
 export 'src/openai_compatible_chat_language_model.dart';
 export 'src/openai_compatible_config.dart';
+
+export 'src/dio_cancellation.dart';

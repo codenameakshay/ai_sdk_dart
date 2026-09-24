@@ -346,21 +346,41 @@ StreamTextResult<Object?> _completedStreamResult({
   required List<StreamTextEvent> events,
   required String finalText,
 }) {
+  final content = <LanguageModelV4ContentPart>[
+    if (finalText.isNotEmpty) LanguageModelV4TextPart(text: finalText),
+  ];
+  final step = GenerateTextStep(
+    stepNumber: 0,
+    content: content,
+    toolCalls: const [],
+    toolResults: const [],
+    toolApprovalRequests: const [],
+    response: LanguageModelV4GenerateResult(
+      content: content,
+      finishReason: LanguageModelV4FinishReason.stop,
+    ),
+    text: finalText,
+    finishReason: LanguageModelV4FinishReason.stop,
+  );
   return StreamTextResult<Object?>(
-    stream: const Stream<LanguageModelV4StreamPart>.empty(),
-    fullStream: Stream<StreamTextEvent>.fromIterable(events),
+    stream: Stream<StreamTextEvent>.fromIterable(events),
+    providerStream: const Stream<LanguageModelV4StreamPart>.empty(),
     textStream: const Stream<String>.empty(),
     partialOutputStream: const Stream<Object?>.empty(),
     elementStream: const Stream<Object?>.empty(),
     text: Future<String>.value(finalText),
     output: Future<Object?>.value(finalText),
-    content: Future<List<LanguageModelV4ContentPart>>.value(
-      finalText.isEmpty ? const [] : [LanguageModelV4TextPart(text: finalText)],
-    ),
+    content: Future<List<LanguageModelV4ContentPart>>.value(content),
     reasoning: Future<List<LanguageModelV4ReasoningPart>>.value(const []),
     reasoningText: Future<String>.value(''),
     files: Future<List<LanguageModelV4FilePart>>.value(const []),
+    reasoningFiles: Future<List<LanguageModelV4ReasoningFilePart>>.value(
+      const [],
+    ),
     sources: Future<List<LanguageModelV4SourcePart>>.value(const []),
+    documentSources: Future<List<LanguageModelV4DocumentSourcePart>>.value(
+      const [],
+    ),
     toolCalls: Future<List<LanguageModelV4ToolCallPart>>.value(const []),
     toolResults: Future<List<LanguageModelV4ToolResultPart>>.value(const []),
     finishReason: Future<LanguageModelV4FinishReason?>.value(
@@ -370,7 +390,8 @@ StreamTextResult<Object?> _completedStreamResult({
     usage: Future<LanguageModelV4Usage?>.value(null),
     totalUsage: Future<LanguageModelV4Usage?>.value(null),
     warnings: Future.value(const <LanguageModelV4Warning>[]),
-    steps: Future<List<GenerateTextStep>>.value(const []),
+    steps: Future<List<GenerateTextStep>>.value([step]),
+    finalStep: Future<GenerateTextStep>.value(step),
     request: Future<GenerateTextRequest>.value(
       const GenerateTextRequest(system: null, messages: []),
     ),

@@ -12,6 +12,13 @@ import '../../ai_sdk_provider/test/support/test_server.dart';
 import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
+  test('chat alias and default provider expose expected models', () {
+    expect(azureOpenAI.responses('deployment').provider, 'azure');
+    expect(azureOpenAI.chat('deployment').modelId, 'deployment');
+    expect(azureOpenAI.embedding('deployment').maxEmbeddingsPerCall, 2048);
+    expect(azureOpenAI.embedding('deployment').supportsParallelCalls, isTrue);
+  });
+
   group('AzureOpenAIProvider', () {
     test('creates language model with correct provider/spec/modelId', () {
       final provider = AzureOpenAIProvider(
@@ -407,7 +414,7 @@ void main() {
       expect(result.embeddings[1].embedding, [0.4, 0.5, 0.6]);
     });
 
-    test('tolerates a response with no data list', () async {
+    test('rejects a response with no data list', () async {
       final server = await TestServer.start((request) async {
         await captureBody(request);
         request.response.statusCode = 200;
@@ -422,56 +429,49 @@ void main() {
         apiKey: 'key',
       ).embedding('text-embedding-ada-002');
 
-      final result = await model.doEmbed(
-        const EmbeddingModelV2CallOptions<String>(values: ['only']),
+      await expectLater(
+        model.doEmbed(
+          const EmbeddingModelV2CallOptions<String>(values: ['only']),
+        ),
+        throwsA(isA<AiApiCallError>()),
       );
-      expect(result.embeddings, isEmpty);
     });
 
-    test(
-      'normalizes numeric vectors and ignores response rows beyond the input',
-      () async {
-        final server = await TestServer.start((request) async {
-          await captureBody(request);
-          request.response.statusCode = 200;
-          request.response.headers.contentType = ContentType.json;
-          request.response.write(
-            jsonEncode({
-              'data': [
-                {
-                  'embedding': [1, 2.5],
-                },
-                {
-                  'embedding': [-3, 4],
-                },
-                {
-                  'embedding': [99],
-                },
-              ],
-            }),
-          );
-          await request.response.close();
-        });
-        addTearDown(server.close);
+    test('normalizes numeric vectors', () async {
+      final server = await TestServer.start((request) async {
+        await captureBody(request);
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'data': [
+              {
+                'embedding': [1, 2.5],
+              },
+              {
+                'embedding': [-3, 4],
+              },
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
 
-        final result =
-            await AzureOpenAIProvider(endpoint: server.baseUrl, apiKey: 'key')
-                .embedding('text-embedding-ada-002')
-                .doEmbed(
-                  const EmbeddingModelV2CallOptions<String>(values: ['a', 'b']),
-                );
+      final result =
+          await AzureOpenAIProvider(endpoint: server.baseUrl, apiKey: 'key')
+              .embedding('text-embedding-ada-002')
+              .doEmbed(
+                const EmbeddingModelV2CallOptions<String>(values: ['a', 'b']),
+              );
 
-        expect(result.embeddings, hasLength(2));
-        expect(result.embeddings.map((embedding) => embedding.value), [
-          'a',
-          'b',
-        ]);
-        expect(result.embeddings.map((embedding) => embedding.embedding), [
-          [1.0, 2.5],
-          [-3.0, 4.0],
-        ]);
-      },
-    );
+      expect(result.embeddings, hasLength(2));
+      expect(result.embeddings.map((embedding) => embedding.value), ['a', 'b']);
+      expect(result.embeddings.map((embedding) => embedding.embedding), [
+        [1.0, 2.5],
+        [-3.0, 4.0],
+      ]);
+    });
 
     test(
       'endpoint ending with slash still posts to deployment embeddings once',

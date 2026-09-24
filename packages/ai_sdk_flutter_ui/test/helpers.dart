@@ -164,6 +164,20 @@ class ThrowingStreamAgent extends ToolLoopAgent {
     List<LanguageModelV4ToolApprovalResponse> toolApprovalResponses = const [],
     CancellationToken? abortSignal,
     TimeoutConfiguration? timeout,
+    ToolApprovalPolicy? approvalPolicy,
+    ToolApprovalPolicySelector? approvalPolicyFor,
+    String? approvalPolicyRevision,
+    Object? generationContext,
+    bool allowSystemInMessages = false,
+    GenerateTextExperimentalOnStart? onStart,
+    GenerateTextExperimentalOnStepStart? onStepStart,
+    GenerateTextExperimentalOnToolCallStart? onToolExecutionStart,
+    GenerateTextExperimentalOnToolCallFinish? onToolExecutionEnd,
+    StreamTextOnEnd? onEnd,
+    StreamTextOnStepEnd? onStepEnd,
+    GenerateTextPrepareStep? prepareStep,
+    StreamTextOnChunk? onChunk,
+    BodyInclusionPolicy bodyInclusion = const BodyInclusionPolicy.none(),
   }) async {
     throw error;
   }
@@ -219,8 +233,8 @@ class RecordedStreamInvocation {
 
   StreamTextResult<Object?> buildResult() {
     return StreamTextResult<Object?>(
-      stream: const Stream.empty(),
-      fullStream: _fullController.stream,
+      stream: _fullController.stream,
+      providerStream: const Stream.empty(),
       textStream: _textController.stream,
       partialOutputStream: const Stream.empty(),
       elementStream: const Stream.empty(),
@@ -230,7 +244,9 @@ class RecordedStreamInvocation {
       reasoning: Future.value(const []),
       reasoningText: _reasoningTextCompleter.future,
       files: Future.value(const []),
+      reasoningFiles: Future.value(const []),
       sources: _sourcesCompleter.future,
+      documentSources: Future.value(const []),
       toolCalls: _toolCallsCompleter.future,
       toolResults: _toolResultsCompleter.future,
       finishReason: Future.value(LanguageModelV4FinishReason.stop),
@@ -252,6 +268,18 @@ class RecordedStreamInvocation {
           rawFinishReason: 'stop',
         ),
       ),
+      finalStep: Future.value(
+        const GenerateTextStep(
+          stepNumber: 0,
+          content: [],
+          toolCalls: [],
+          toolResults: [],
+          toolApprovalRequests: [],
+          response: LanguageModelV4GenerateResult(),
+          text: '',
+          finishReason: LanguageModelV4FinishReason.stop,
+        ),
+      ),
     );
   }
 
@@ -265,6 +293,47 @@ class RecordedStreamInvocation {
 
   void emitError(Object error) {
     _fullController.add(StreamTextErrorEvent(error: error));
+  }
+
+  void emitToolResult(
+    LanguageModelV4ToolResultPart toolResult, {
+    bool preliminary = false,
+  }) {
+    _fullController.add(
+      StreamTextToolResultEvent(
+        toolResult: toolResult,
+        preliminary: preliminary,
+      ),
+    );
+  }
+
+  void emitToolInputEnd({
+    required String toolCallId,
+    required String toolName,
+    required Object input,
+  }) {
+    _fullController.add(
+      StreamTextToolInputEndEvent(
+        toolCallId: toolCallId,
+        toolName: toolName,
+        input: input,
+        inputBuffer: jsonEncode(input),
+      ),
+    );
+  }
+
+  void emitToolError({
+    required String toolCallId,
+    required String toolName,
+    required Object error,
+  }) {
+    _fullController.add(
+      StreamTextToolErrorEvent(
+        toolCallId: toolCallId,
+        toolName: toolName,
+        error: error,
+      ),
+    );
   }
 
   void emitFullStreamFailure(Object error) {
@@ -288,6 +357,7 @@ class RecordedStreamInvocation {
     List<LanguageModelV4SourcePart> sources = const [],
     List<LanguageModelV4ToolCallPart> toolCalls = const [],
     List<LanguageModelV4ToolResultPart> toolResults = const [],
+    bool closeTextStream = true,
   }) async {
     if (!_textCompleter.isCompleted) _textCompleter.complete(finalText);
     if (!_outputCompleter.isCompleted) _outputCompleter.complete(finalText);
@@ -310,7 +380,11 @@ class RecordedStreamInvocation {
       _toolResultsCompleter.complete(toolResults);
     }
     await _fullController.close();
-    await _textController.close();
+    if (closeTextStream) {
+      await _textController.close();
+    } else {
+      unawaited(_textController.close());
+    }
   }
 }
 
@@ -326,6 +400,20 @@ class RecordingStreamAgent extends ToolLoopAgent {
     List<LanguageModelV4ToolApprovalResponse> toolApprovalResponses = const [],
     CancellationToken? abortSignal,
     TimeoutConfiguration? timeout,
+    ToolApprovalPolicy? approvalPolicy,
+    ToolApprovalPolicySelector? approvalPolicyFor,
+    String? approvalPolicyRevision,
+    Object? generationContext,
+    bool allowSystemInMessages = false,
+    GenerateTextExperimentalOnStart? onStart,
+    GenerateTextExperimentalOnStepStart? onStepStart,
+    GenerateTextExperimentalOnToolCallStart? onToolExecutionStart,
+    GenerateTextExperimentalOnToolCallFinish? onToolExecutionEnd,
+    StreamTextOnEnd? onEnd,
+    StreamTextOnStepEnd? onStepEnd,
+    GenerateTextPrepareStep? prepareStep,
+    StreamTextOnChunk? onChunk,
+    BodyInclusionPolicy bodyInclusion = const BodyInclusionPolicy.none(),
   }) async {
     final invocation = RecordedStreamInvocation(
       abortSignal: abortSignal,
@@ -344,6 +432,19 @@ class RecordingStreamAgent extends ToolLoopAgent {
     List<LanguageModelV4ToolApprovalResponse> toolApprovalResponses = const [],
     CancellationToken? abortSignal,
     TimeoutConfiguration? timeout,
+    ToolApprovalPolicy? approvalPolicy,
+    ToolApprovalPolicySelector? approvalPolicyFor,
+    String? approvalPolicyRevision,
+    Object? generationContext,
+    bool allowSystemInMessages = false,
+    GenerateTextExperimentalOnStart? onStart,
+    GenerateTextExperimentalOnStepStart? onStepStart,
+    GenerateTextExperimentalOnToolCallStart? onToolExecutionStart,
+    GenerateTextExperimentalOnToolCallFinish? onToolExecutionEnd,
+    StreamTextOnEnd? onEnd,
+    StreamTextOnStepEnd? onStepEnd,
+    GenerateTextPrepareStep? prepareStep,
+    BodyInclusionPolicy bodyInclusion = const BodyInclusionPolicy.none(),
   }) async {
     final invocation = RecordedStreamInvocation(
       abortSignal: abortSignal,
@@ -490,6 +591,8 @@ ToolLoopAgent approvalAgent({
   String toolName = 'deleteFile',
   String finalText = 'final answer',
   String toolCallId = 'c1',
+  bool repeatCallAfterApproval = true,
+  bool continuationOnly = false,
 }) {
   final call = mockToolCall(
     toolName: toolName,
@@ -498,8 +601,8 @@ ToolLoopAgent approvalAgent({
   );
   return ToolLoopAgent(
     model: QueuedStreamModel([
-      [call],
-      [call],
+      if (!continuationOnly) [call],
+      if (repeatCallAfterApproval) [call],
       [mockText(finalText)],
     ]),
     tools: {toolName: approvalTool('done')},

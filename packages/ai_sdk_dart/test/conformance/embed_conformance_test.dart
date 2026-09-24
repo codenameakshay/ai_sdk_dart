@@ -123,6 +123,12 @@ void main() {
 
 class _EmptyEmbeddingModel implements EmbeddingModelV2<String> {
   @override
+  int? get maxEmbeddingsPerCall => null;
+
+  @override
+  bool get supportsParallelCalls => true;
+
+  @override
   String get provider => 'fake';
 
   @override

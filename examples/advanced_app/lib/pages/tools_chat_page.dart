@@ -156,9 +156,9 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
               maxSteps: 5,
             );
       // The `text` future rejects on a streaming error; we surface errors via
-      // fullStream below, so swallow it to avoid an unhandled async error.
+      // stream below, so swallow it to avoid an unhandled async error.
       result.text.then((_) {}, onError: (_) {});
-      _sub = result.fullStream.listen(
+      _sub = result.stream.listen(
         _onEvent,
         onError: _onError,
         onDone: _onDone,

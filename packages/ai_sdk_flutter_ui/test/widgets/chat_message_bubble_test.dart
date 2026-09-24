@@ -7,7 +7,9 @@ Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
 
 void main() {
   group('ChatMessageBubble', () {
-    testWidgets('renders user message text (selectable)', (tester) async {
+    testWidgets('renders user message text with selection support', (
+      tester,
+    ) async {
       await tester.pumpWidget(
         _wrap(
           const ChatMessageBubble(
@@ -19,8 +21,8 @@ void main() {
         ),
       );
       expect(find.text('hello there'), findsOneWidget);
-      // Text is selectable.
-      expect(find.byType(SelectableText), findsOneWidget);
+      // SelectionArea keeps the text selectable without mounting an editor.
+      expect(find.byType(SelectionArea), findsOneWidget);
     });
 
     testWidgets('renders assistant message', (tester) async {
@@ -71,7 +73,41 @@ void main() {
       expect(find.text('tool output'), findsOneWidget);
       // Left-aligned like assistant/system (not right-aligned like user).
       final align = tester.widget<Align>(find.byType(Align));
-      expect(align.alignment, Alignment.centerLeft);
+      expect(align.alignment, AlignmentDirectional.centerStart);
+    });
+
+    testWidgets('resolves user alignment against RTL direction', (
+      tester,
+    ) async {
+      Widget harness(TextDirection direction) => MaterialApp(
+        home: Directionality(
+          textDirection: direction,
+          child: const Scaffold(
+            body: ChatMessageBubble(
+              message: ModelMessage(
+                role: ModelMessageRole.user,
+                content: 'rtl-aware',
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(harness(TextDirection.ltr));
+      final ltrBubble = find.descendant(
+        of: find.byType(Align),
+        matching: find.byType(Container),
+      );
+      final ltrLeft = tester.getTopLeft(ltrBubble).dx;
+
+      await tester.pumpWidget(harness(TextDirection.rtl));
+      final rtlBubble = find.descendant(
+        of: find.byType(Align),
+        matching: find.byType(Container),
+      );
+      final rtlLeft = tester.getTopLeft(rtlBubble).dx;
+
+      expect(rtlLeft, lessThan(ltrLeft));
     });
   });
 }

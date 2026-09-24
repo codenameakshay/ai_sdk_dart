@@ -534,7 +534,7 @@ void main() {
           'type': 'image',
           'data': {'kind': 'custom'},
         },
-        {'type': 'text', 'providerOptions': 'invalid'},
+        {'type': 'text', 'text': 'bad metadata', 'providerOptions': 'invalid'},
         {'type': 'image', 'data': 'invalid'},
         {
           'type': 'image',

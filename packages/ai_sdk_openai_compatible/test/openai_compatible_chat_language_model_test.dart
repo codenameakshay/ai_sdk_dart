@@ -1657,6 +1657,12 @@ void main() {
                           mediaType: 'application/pdf',
                           filename: 'a.pdf',
                         ),
+                        LanguageModelV4FilePart(
+                          data: DataContentBytes(
+                            Uint8List.fromList(utf8.encode('file')),
+                          ),
+                          mediaType: 'text/plain',
+                        ),
                       ]),
                     ),
                   ],
@@ -1681,7 +1687,8 @@ void main() {
         expect(outParts[2]['type'], 'file');
         expect(outParts[2]['url'], 'https://files.example/a.pdf');
         expect(outParts[2]['filename'], 'a.pdf');
-        expect(outParts, hasLength(3));
+        expect(outParts[3]['base64'], base64Encode(utf8.encode('file')));
+        expect(outParts, hasLength(4));
       },
     );
 
@@ -2120,6 +2127,35 @@ void main() {
                             namespace: 'other',
                             id: 'asset-1',
                           ),
+                        ),
+                      ]),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        throwsA(isA<UnsupportedError>()),
+      );
+      await expectLater(
+        model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.tool,
+                  content: [
+                    const LanguageModelV4ToolResultPart(
+                      toolCallId: 'call-2',
+                      toolName: 'lookup',
+                      output: ToolResultOutputContent([
+                        LanguageModelV4FilePart(
+                          data: DataContentProviderReference(
+                            namespace: 'other',
+                            id: 'file-1',
+                          ),
+                          mediaType: 'text/plain',
                         ),
                       ]),
                     ),

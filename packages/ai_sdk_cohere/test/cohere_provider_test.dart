@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -528,6 +529,36 @@ void main() {
 
       await expectLater(future, throwsA(isA<AiOperationCancelledError>()));
       expect(adapter.fetchCount, 1);
+    });
+
+    test('cancelling an active stream aborts its response body', () async {
+      final release = Completer<void>();
+      final server = await TestServer.start((request) async {
+        await utf8.decoder.bind(request).join();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write('{"type":"message-start"}\n');
+        await request.response.flush();
+        await release.future;
+        await request.response.close();
+      });
+      addTearDown(() async {
+        if (!release.isCompleted) release.complete();
+        await server.close();
+      });
+
+      final stream =
+          await CohereProvider(apiKey: 'test', baseUrl: server.baseUrl)
+              .call('command-r-plus')
+              .doStream(LanguageModelV4CallOptions(prompt: userPrompt('hi')));
+      final started = Completer<void>();
+      final subscription = stream.stream.listen((_) {
+        if (!started.isCompleted) started.complete();
+      });
+      await started.future;
+      final cancelling = subscription.cancel();
+      release.complete();
+      await cancelling;
     });
 
     test(

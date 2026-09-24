@@ -45,6 +45,30 @@ void main() {
     );
   });
 
+  test('rejects empty embedding and rerank response bodies', () async {
+    final server = await TestServer.start((request) async {
+      request.response.statusCode = 200;
+      await request.response.close();
+    });
+    addTearDown(server.close);
+    final provider = CohereProvider(apiKey: 'test', baseUrl: server.baseUrl);
+
+    await expectLater(
+      provider
+          .embedding('embed-v4.0')
+          .doEmbed(const EmbeddingModelV2CallOptions<String>(values: ['text'])),
+      throwsA(isA<AiApiCallError>()),
+    );
+    await expectLater(
+      provider
+          .rerank('rerank-v3.5')
+          .doRerank(
+            const RerankModelV1CallOptions(query: 'query', documents: ['doc']),
+          ),
+      throwsA(isA<AiApiCallError>()),
+    );
+  });
+
   test('rejects unsupported prompt and tool-result media', () async {
     final model = CohereProvider(apiKey: 'test').call('command-r');
     for (final part in <LanguageModelV4ContentPart>[

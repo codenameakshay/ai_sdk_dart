@@ -222,7 +222,8 @@ void main() {
         return _response(
           'data: {"type":"start","messageId":"assistant-1"}\n\n'
           'data: {"type":"text-start","id":"text-1",'
-          '"providerMetadata":{"vendor":{"segment":"answer"}}}\n\n'
+          '"providerMetadata":{"vendor":{"segment":"answer",'
+          '"values":[1,{"labels":["a"]}]}}}\n\n'
           'data: {"type":"text-delta","id":"text-1","delta":"Hi"}\n\n'
           'data: {"type":"text-end","id":"text-1"}\n\n'
           'data: {"type":"tool-input-available","toolCallId":"call-1",'
@@ -247,7 +248,15 @@ void main() {
           .toList();
       final parts = snapshots.last.messages.single.parts;
       expect((parts.whereType<TextPart>().single).providerOptions, {
-        'vendor': {'segment': 'answer'},
+        'vendor': {
+          'segment': 'answer',
+          'values': [
+            1,
+            {
+              'labels': ['a'],
+            },
+          ],
+        },
       });
       expect((parts.whereType<ToolCallPart>().single).providerOptions, {
         'vendor': {'trace': 'call-1'},
@@ -885,6 +894,31 @@ void main() {
     expect(message.parts.whereType<ApprovalPart>(), hasLength(1));
   });
 
+  test('serializes text tool errors in outgoing history', () async {
+    late Map<String, dynamic> body;
+    final client = MockClient((request) async {
+      body = jsonDecode(request.body) as Map<String, dynamic>;
+      return _response(
+        'data: {"type":"start"}\n\n'
+        'data: {"type":"finish"}\n\n'
+        'data: [DONE]\n\n',
+      );
+    });
+    final transport = RemoteConversationTransport(
+      endpoint: Uri.parse('https://backend.test/chat'),
+      client: client,
+    );
+    addTearDown(transport.dispose);
+    addTearDown(client.close);
+
+    await transport.send(_errorTextToolHistory()).toList();
+
+    final message = (body['messages'] as List).single as Map;
+    final result = (message['parts'] as List).last as Map;
+    expect(result['errorText'], 'search failed');
+    expect(result.containsKey('output'), isFalse);
+  });
+
   test('rejects invalid lifecycle and approval ordering', () async {
     await _expectSendError(
       'data: {"type":"start"}\n\n'
@@ -993,6 +1027,28 @@ void main() {
             parts: [
               FilePart(
                 id: 'file-1',
+                data: ConversationFileProviderReference(
+                  namespace: 'vendor',
+                  id: 'opaque',
+                ),
+                mimeType: 'text/plain',
+              ),
+            ],
+          ),
+        ],
+      ),
+      isA<UnsupportedError>(),
+    );
+    await _expectHistoryError(
+      Conversation(
+        id: 'c1',
+        messages: [
+          ConversationMessage(
+            id: 'assistant-1',
+            role: ConversationRole.assistant,
+            parts: [
+              ReasoningFilePart(
+                id: 'reasoning-file-1',
                 data: ConversationFileProviderReference(
                   namespace: 'vendor',
                   id: 'opaque',

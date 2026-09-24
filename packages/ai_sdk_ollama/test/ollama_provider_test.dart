@@ -155,6 +155,25 @@ void main() {
       expect(adapter.fetchCount, 1);
     });
 
+    test('doStream skips dispatch when already cancelled', () async {
+      final adapter = CancellationHttpClientAdapter();
+      final client = _cancellationClient(adapter, 'http://localhost/api');
+      addTearDown(() => client.close(force: true));
+      final signal = TestAbortSignal()..cancel();
+      await expectLater(
+        OllamaProvider(baseUrl: 'http://localhost/api', client: client)
+            .call('llama3')
+            .doStream(
+              LanguageModelV4CallOptions(
+                prompt: userPrompt('hi'),
+                abortSignal: signal,
+              ),
+            ),
+        throwsA(isA<AiOperationCancelledError>()),
+      );
+      expect(adapter.fetchCount, 0);
+    });
+
     test(
       'dispose closes owned clients and leaves injected clients open',
       () async {
@@ -804,6 +823,7 @@ void main() {
 
       final streamResult = await model.doStream(
         LanguageModelV4CallOptions(
+          includeRawChunks: true,
           prompt: LanguageModelV4Prompt(
             messages: [
               LanguageModelV4Message(
@@ -820,6 +840,7 @@ void main() {
         parts.whereType<StreamPartTextDelta>().map((p) => p.delta).join(),
         'thinking',
       );
+      expect(parts.whereType<StreamPartRaw>(), isNotEmpty);
       final start = parts.whereType<StreamPartToolInputStart>().single;
       expect(start.toolName, 'weather');
       final end = parts.whereType<StreamPartToolInputEnd>().single;
@@ -1083,6 +1104,45 @@ void main() {
         [-3.0, 4.0],
       ]);
     });
+
+    test(
+      'pre-cancelled embeddings skip dispatch and empty bodies are typed',
+      () async {
+        final adapter = CancellationHttpClientAdapter();
+        final client = _cancellationClient(adapter, 'http://localhost/api');
+        addTearDown(() => client.close(force: true));
+        final signal = TestAbortSignal()..cancel();
+        final model = OllamaProvider(
+          baseUrl: 'http://localhost/api',
+          client: client,
+        ).embedding('nomic-embed-text');
+        await expectLater(
+          model.doEmbed(
+            EmbeddingModelV2CallOptions<String>(
+              values: const ['hi'],
+              abortSignal: signal,
+            ),
+          ),
+          throwsA(isA<AiOperationCancelledError>()),
+        );
+        expect(adapter.fetchCount, 0);
+
+        final server = await _startServer((request) async {
+          await utf8.decoder.bind(request).join();
+          request.response.statusCode = 200;
+          await request.response.close();
+        });
+        addTearDown(server.close);
+        await expectLater(
+          OllamaProvider(baseUrl: server.baseUrl)
+              .embedding('nomic-embed-text')
+              .doEmbed(
+                const EmbeddingModelV2CallOptions<String>(values: ['hi']),
+              ),
+          throwsA(isA<AiApiCallError>()),
+        );
+      },
+    );
   });
 }
 

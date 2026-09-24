@@ -67,6 +67,43 @@ void main() {
       );
     });
 
+    test(
+      'types empty embedding responses and preserves credential failures',
+      () async {
+        final emptyServer = await _startServer((request) async {
+          request.response.statusCode = 200;
+          await request.response.close();
+        });
+        addTearDown(emptyServer.close);
+        await expectLater(
+          GoogleGenerativeAIProvider(
+                apiKey: 'test',
+                baseUrl: emptyServer.baseUrl,
+              )
+              .embedding('text-embedding-004')
+              .doEmbed(const EmbeddingModelV2CallOptions(values: ['hi'])),
+          throwsA(isA<AiApiCallError>()),
+        );
+
+        final provider = GoogleGenerativeAIProvider(
+          credentialProvider: () async => throw StateError('credential failed'),
+        );
+        await expectLater(
+          provider
+              .call('gemini-2.0-flash')
+              .doStream(LanguageModelV4CallOptions(prompt: userPrompt('hi'))),
+          throwsStateError,
+        );
+        await expectLater(
+          provider
+              .embedding('text-embedding-004')
+              .doEmbed(const EmbeddingModelV2CallOptions(values: ['hi'])),
+          throwsStateError,
+        );
+        provider.dispose();
+      },
+    );
+
     test('rejects malformed nested 2xx chat response fields', () async {
       final cases = <Map<String, dynamic>>[
         {

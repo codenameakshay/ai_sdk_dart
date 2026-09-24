@@ -448,6 +448,64 @@ void main() {
     expect(config['thinkingConfig'], {'thinkingLevel': 'high'});
     await result.stream.listen((_) {}).cancel();
   });
+
+  test(
+    'serializes empty messages and exposes embedding capabilities',
+    () async {
+      final adapter = _Adapter((_) => {'candidates': []});
+      final dio = Dio()..httpClientAdapter = adapter;
+      addTearDown(() => dio.close(force: true));
+      await _model(dio).doGenerate(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
+            messages: [
+              const LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [],
+              ),
+            ],
+          ),
+        ),
+      );
+      expect(
+        (((adapter.input['contents'] as List).single as Map)['parts'] as List),
+        [
+          <String, String>{'text': ''},
+        ],
+      );
+      final embedding = GoogleGenerativeAIProvider(
+        apiKey: 'fixture',
+        client: dio,
+      ).embedding('text-embedding-004');
+      expect(embedding.maxEmbeddingsPerCall, isNull);
+      expect(embedding.supportsParallelCalls, isTrue);
+    },
+  );
+
+  test('parses a function call whose args field is absent', () async {
+    final adapter = _Adapter(
+      (_) => {
+        'candidates': [
+          {
+            'content': {
+              'parts': [
+                {
+                  'functionCall': {'name': 'lookup'},
+                },
+              ],
+            },
+          },
+        ],
+      },
+    );
+    final dio = Dio()..httpClientAdapter = adapter;
+    addTearDown(() => dio.close(force: true));
+    final result = await _model(dio).doGenerate(_options());
+    expect(
+      result.content.whereType<LanguageModelV4ToolCallPart>().single.input,
+      isEmpty,
+    );
+  });
 }
 
 LanguageModelV4 _model(Dio dio, {String modelId = 'gemini-test'}) =>

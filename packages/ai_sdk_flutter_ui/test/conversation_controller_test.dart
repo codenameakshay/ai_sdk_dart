@@ -261,9 +261,10 @@ ToolLoopAgent _textAgent(String text) =>
 Conversation _empty() => Conversation(id: 'chat-1', messages: const []);
 
 class _NoRetryBackend implements ConversationBackend {
-  _NoRetryBackend(this.conversation);
+  _NoRetryBackend(this.conversation, {this.failApproval = false});
   @override
   Conversation conversation;
+  final bool failApproval;
   final _changes = StreamController<Conversation>.broadcast();
 
   @override
@@ -283,7 +284,9 @@ class _NoRetryBackend implements ConversationBackend {
     required String approvalId,
     required bool approved,
     String? reason,
-  }) async {}
+  }) async {
+    if (failApproval) throw StateError('approval failed');
+  }
 
   @override
   Future<void> dispose() async {
@@ -1729,6 +1732,66 @@ void main() {
     await backend.dispose();
   });
 
+  test('retry can pause for and resume a tool approval', () async {
+    final model = _ApprovalSequenceModel([
+      [
+        mockToolCall(
+          toolName: 'delete',
+          input: const {'path': '/tmp/retry'},
+          toolCallId: 'retry-call',
+        ),
+      ],
+      [mockText('retry complete')],
+    ]);
+    var executions = 0;
+    final backend = LocalConversationBackend(
+      agent: ToolLoopAgent(
+        model: model,
+        maxSteps: 2,
+        tools: {'delete': _countedApprovalTool(() => executions++)},
+      ),
+      initial: Conversation(
+        id: 'retry-approval',
+        messages: [
+          ConversationMessage(
+            id: 'user-1',
+            role: ConversationRole.user,
+            parts: [TextPart(id: 'user-text', text: 'delete it')],
+          ),
+          ConversationMessage(
+            id: 'assistant-1',
+            role: ConversationRole.assistant,
+            status: ConversationMessageStatus.failed,
+            parts: [TextPart(id: 'failed-text', text: 'failed')],
+          ),
+        ],
+      ),
+    );
+
+    await backend.retryLastTurn();
+    final approval = backend.conversation.messages.last.parts
+        .whereType<ApprovalPart>()
+        .single;
+    expect(
+      backend.conversation.messages.last.status,
+      ConversationMessageStatus.pendingApproval,
+    );
+    expect(executions, 0);
+
+    await backend.respondToApproval(
+      approvalId: approval.approvalId!,
+      approved: true,
+    );
+    await pumpUntil(
+      () =>
+          backend.conversation.messages.last.status ==
+          ConversationMessageStatus.complete,
+    );
+    expect(executions, 1);
+    expect(model.streamCalls, 2);
+    await backend.dispose();
+  });
+
   test('controller retry is unsupported unless the backend opts in', () async {
     final backend = _NoRetryBackend(_empty());
     final controller = ConversationController(backend, disposeBackend: false);
@@ -1752,16 +1815,20 @@ void main() {
     await backend.dispose();
   });
 
-  test('chat adapter reports send failures and stop interrupts', () async {
-    final backend = _NoRetryBackend(_empty());
+  test('chat adapter reports backend failures and stop interrupts', () async {
+    final backend = _NoRetryBackend(_empty(), failApproval: true);
     final controller = ConversationController(backend);
     final chat = ConversationChatController(controller);
-    await chat.sendText('hi');
+    expect(chat.retryInfo.isAvailable, isFalse);
+    await chat.sendMessage(agent: _textAgent('ignored'), text: 'hi');
     expect(chat.error, isA<StateError>());
     expect(chat.status, ChatStatus.error);
     expect(chat.isStreaming, isFalse);
     chat.clearError();
     expect(chat.error, isNull);
+    chat.addToolApprovalResponse(approvalId: 'approval', approved: true);
+    await pumpUntil(() => chat.status == ChatStatus.error);
+    expect(chat.error, isA<StateError>());
     await chat.stop();
     chat.dispose();
   });
@@ -1857,23 +1924,41 @@ void main() {
                 const LanguageModelV4ReasoningPart(
                   text: 'why',
                   signature: 'sig',
+                  providerOptions: {
+                    'vendor': {'reasoning': true},
+                  },
                 ),
                 const LanguageModelV4ImagePart(
                   image: DataContentBase64('AQI='),
                   mediaType: 'image/png',
+                  providerOptions: {
+                    'vendor': {'image': true},
+                  },
                 ),
                 LanguageModelV4FilePart(
                   data: DataContentUrl(Uri.parse('https://example.com/a.pdf')),
                   mediaType: 'application/pdf',
+                  filename: 'a.pdf',
+                  providerOptions: {
+                    'vendor': {'file': true},
+                  },
                 ),
                 const LanguageModelV4SourcePart(
                   id: 'source-1',
                   url: 'https://example.com/source',
+                  title: 'Source',
+                  providerMetadata: {
+                    'vendor': {'source': true},
+                  },
                 ),
                 const LanguageModelV4DocumentSourcePart(
                   id: 'doc-1',
                   mediaType: 'application/pdf',
                   title: 'Document',
+                  filename: 'document.pdf',
+                  providerMetadata: {
+                    'vendor': {'document': true},
+                  },
                 ),
                 const LanguageModelV4OpaquePart(
                   provider: 'vendor',

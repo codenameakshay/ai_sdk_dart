@@ -295,6 +295,47 @@ class RecordedStreamInvocation {
     _fullController.add(StreamTextErrorEvent(error: error));
   }
 
+  void emitToolResult(
+    LanguageModelV4ToolResultPart toolResult, {
+    bool preliminary = false,
+  }) {
+    _fullController.add(
+      StreamTextToolResultEvent(
+        toolResult: toolResult,
+        preliminary: preliminary,
+      ),
+    );
+  }
+
+  void emitToolInputEnd({
+    required String toolCallId,
+    required String toolName,
+    required Object input,
+  }) {
+    _fullController.add(
+      StreamTextToolInputEndEvent(
+        toolCallId: toolCallId,
+        toolName: toolName,
+        input: input,
+        inputBuffer: jsonEncode(input),
+      ),
+    );
+  }
+
+  void emitToolError({
+    required String toolCallId,
+    required String toolName,
+    required Object error,
+  }) {
+    _fullController.add(
+      StreamTextToolErrorEvent(
+        toolCallId: toolCallId,
+        toolName: toolName,
+        error: error,
+      ),
+    );
+  }
+
   void emitFullStreamFailure(Object error) {
     _fullController.addError(error);
   }
@@ -316,6 +357,7 @@ class RecordedStreamInvocation {
     List<LanguageModelV4SourcePart> sources = const [],
     List<LanguageModelV4ToolCallPart> toolCalls = const [],
     List<LanguageModelV4ToolResultPart> toolResults = const [],
+    bool closeTextStream = true,
   }) async {
     if (!_textCompleter.isCompleted) _textCompleter.complete(finalText);
     if (!_outputCompleter.isCompleted) _outputCompleter.complete(finalText);
@@ -338,7 +380,11 @@ class RecordedStreamInvocation {
       _toolResultsCompleter.complete(toolResults);
     }
     await _fullController.close();
-    await _textController.close();
+    if (closeTextStream) {
+      await _textController.close();
+    } else {
+      unawaited(_textController.close());
+    }
   }
 }
 

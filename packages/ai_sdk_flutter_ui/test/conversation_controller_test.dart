@@ -1450,6 +1450,12 @@ void main() {
       everyElement(ApprovalStatus.rejected),
     );
     expect(
+      restored.conversation.messages.last.parts.whereType<ToolResultPart>().map(
+        (part) => part.executionDeniedReason,
+      ),
+      everyElement(isNotNull),
+    );
+    expect(
       restored.conversation.messages.last.parts.whereType<TextPart>().map(
         (part) => part.text,
       ),
@@ -1458,6 +1464,105 @@ void main() {
     await source.dispose();
     await restored.dispose();
   });
+
+  test('live tool execution errors are persisted as error results', () async {
+    final backend = LocalConversationBackend(
+      agent: ToolLoopAgent(
+        model: _ApprovalSequenceModel([
+          [
+            mockToolCall(
+              toolName: 'fail',
+              input: const {},
+              toolCallId: 'call-fail',
+            ),
+          ],
+        ]),
+        tools: {
+          'fail': Tool<Map<String, dynamic>, String>(
+            inputSchema: Schema<Map<String, dynamic>>(
+              jsonSchema: const {'type': 'object'},
+              fromJson: (json) => json,
+            ),
+            executeDynamic: (input, options) async =>
+                throw StateError('tool failed'),
+          ),
+        },
+      ),
+      initial: _empty(),
+    );
+
+    await backend.send('run failing tool');
+
+    final result = backend.conversation.messages.last.parts
+        .whereType<ToolResultPart>()
+        .single;
+    expect(result.isError, isTrue);
+    expect(result.outputKind, 'text');
+    expect(result.output, contains('tool failed'));
+    await backend.dispose();
+  });
+
+  test(
+    'live tool error and execution-denied events retain their details',
+    () async {
+      final agent = RecordingStreamAgent();
+      final backend = LocalConversationBackend(agent: agent, initial: _empty());
+      final sending = backend.send('run tools');
+      await pumpUntil(() => agent.invocations.isNotEmpty);
+      await pumpUntil(
+        () =>
+            backend.conversation.messages.last.status ==
+            ConversationMessageStatus.streaming,
+      );
+      final invocation = agent.invocations.single;
+      invocation
+        ..emitToolInputEnd(
+          toolCallId: 'error-call',
+          toolName: 'lookup',
+          input: const {},
+        )
+        ..emitToolInputEnd(
+          toolCallId: 'denied-call',
+          toolName: 'delete',
+          input: const {},
+        )
+        ..emitToolError(
+          toolCallId: 'error-call',
+          toolName: 'lookup',
+          error: {'message': 'lookup failed'},
+        )
+        ..emitToolResult(
+          const LanguageModelV4ToolResultPart(
+            toolCallId: 'denied-call',
+            toolName: 'delete',
+            output: ToolResultOutputExecutionDenied(
+              'policy denied',
+              'approval-1',
+            ),
+          ),
+        );
+      final finishing = invocation.finish(
+        finalText: 'done',
+        closeTextStream: false,
+      );
+      await sending;
+      await finishing;
+
+      final results = backend.conversation.messages.last.parts
+          .whereType<ToolResultPart>()
+          .toList();
+      final error = results.singleWhere((part) => part.callId == 'error-call');
+      expect(error.output, {'message': 'lookup failed'});
+      expect(error.outputKind, 'error_json');
+      expect(error.isError, isTrue);
+      final denied = results.singleWhere(
+        (part) => part.callId == 'denied-call',
+      );
+      expect(denied.executionDeniedReason, 'policy denied');
+      expect(denied.executionDeniedApprovalId, 'approval-1');
+      await backend.dispose();
+    },
+  );
 
   test('provider failure settles a failed assistant snapshot', () async {
     final backend = LocalConversationBackend(

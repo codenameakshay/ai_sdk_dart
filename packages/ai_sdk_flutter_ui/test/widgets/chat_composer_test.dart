@@ -104,6 +104,21 @@ void main() {
       expect(find.byTooltip('Datei anhängen'), findsOneWidget);
     });
 
+    testWidgets('uses built-in strings when no localization scope exists', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _wrap(
+          Builder(
+            builder: (context) =>
+                Text(AiSdkUiStringsScope.of(context).messageHint),
+          ),
+        ),
+      );
+
+      expect(find.text('Message…'), findsOneWidget);
+    });
+
     testWidgets('remains usable at large text scale in a narrow width', (
       tester,
     ) async {

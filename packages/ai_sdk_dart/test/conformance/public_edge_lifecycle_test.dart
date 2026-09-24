@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
+import 'package:ai_sdk_dart/src/core/streaming/structured_output.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
 
@@ -28,6 +29,19 @@ void main() {
       prompt: 'json',
     );
     expect(result.object, {'ok': true});
+  });
+
+  test('shared output decoder handles text and non-strict arrays', () {
+    expect(parseOutput<String>(Output.text(), 'plain'), 'plain');
+    expect(
+      parseOutput<List<dynamic>>(
+        Output.array(element: _objectSchema()),
+        '[{"ok":true}]',
+      ),
+      [
+        {'ok': true},
+      ],
+    );
   });
 
   test(
@@ -75,6 +89,51 @@ void main() {
       );
     },
   );
+
+  test('streamText records approval and source telemetry payloads', () async {
+    const call = LanguageModelV4ToolCallPart(
+      toolCallId: 'call-1',
+      toolName: 'lookup',
+      input: {},
+    );
+    final result = await streamText(
+      model: FakeStreamModel([
+        const StreamPartToolApprovalRequest(
+          approvalRequest: LanguageModelV4ToolApprovalRequestPart(
+            approvalId: 'approval-1',
+            toolCall: call,
+          ),
+        ),
+        const StreamPartSource(
+          source: LanguageModelV4SourcePart(
+            id: 'source-1',
+            url: 'https://example.test/source',
+          ),
+        ),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
+      ]),
+      prompt: 'lookup',
+      telemetry: const TelemetrySettings(isEnabled: true),
+    );
+    await result.fullStream.toList();
+  });
+
+  test('streamText records source telemetry independently', () async {
+    final result = await streamText(
+      model: FakeStreamModel([
+        const StreamPartSource(
+          source: LanguageModelV4SourcePart(
+            id: 'source-1',
+            url: 'https://example.test/source',
+          ),
+        ),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
+      ]),
+      prompt: 'source',
+      telemetry: const TelemetrySettings(isEnabled: true),
+    );
+    await result.fullStream.toList();
+  });
 
   test('streamObject reports a non-object JSON response', () async {
     final result = await streamObject(
@@ -171,6 +230,7 @@ void main() {
         prompt: 'go',
         maxSteps: 2,
         runtimeContext: const {'tenant': 'acme'},
+        approvalPolicyFor: (_, _) => ToolApprovalPolicy.never,
         tools: {
           'inspect': tool<Map<String, dynamic>, String>(
             inputSchema: _objectSchema(),

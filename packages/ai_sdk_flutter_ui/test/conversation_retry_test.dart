@@ -5,6 +5,7 @@ import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_dart/test.dart';
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+import 'package:ai_sdk_remote/ai_sdk_remote.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -174,6 +175,133 @@ void main() {
       expect(
         backend.conversation.messages.last.status,
         ConversationMessageStatus.complete,
+      );
+      await backend.dispose();
+    },
+  );
+
+  test(
+    'retry info classifies missing, pending, unsafe, and available turns',
+    () async {
+      Conversation snapshot(List<ConversationMessage> messages) =>
+          Conversation(id: 'retry-info', messages: messages);
+      ConversationMessage user() => ConversationMessage(
+        id: 'user',
+        role: ConversationRole.user,
+        parts: [TextPart(id: 'user-text', text: 'hello')],
+      );
+      ConversationMessage failed(List<ConversationPart> parts) =>
+          ConversationMessage(
+            id: 'assistant',
+            role: ConversationRole.assistant,
+            status: ConversationMessageStatus.failed,
+            parts: parts,
+          );
+
+      final backend = LocalConversationBackend(
+        agent: textAgent('unused'),
+        initial: _empty(),
+      );
+      expect(
+        backend.retryInfo.availability,
+        ConversationRetryAvailability.noFailedTurn,
+      );
+      await backend.restore(
+        ConversationCodec.encode(
+          snapshot([
+            ConversationMessage(
+              id: 'pending',
+              role: ConversationRole.assistant,
+              status: ConversationMessageStatus.pendingApproval,
+              parts: [
+                ToolCallPart(
+                  id: 'pending-call-part',
+                  callId: 'pending-call',
+                  name: 'tool',
+                  arguments: const {},
+                ),
+                ApprovalPart(
+                  id: 'pending-approval',
+                  callId: 'pending-call',
+                  approvalId: 'pending-approval',
+                  status: ApprovalStatus.pending,
+                ),
+              ],
+            ),
+          ]),
+        ),
+      );
+      expect(
+        backend.retryInfo.availability,
+        ConversationRetryAvailability.pendingApproval,
+      );
+      await backend.restore(
+        ConversationCodec.encode(
+          snapshot([
+            user(),
+            failed([
+              ToolCallPart(
+                id: 'call-part',
+                callId: 'call',
+                name: 'tool',
+                arguments: const {},
+              ),
+            ]),
+          ]),
+        ),
+      );
+      expect(
+        backend.retryInfo.availability,
+        ConversationRetryAvailability.unsafe,
+      );
+      await backend.restore(
+        ConversationCodec.encode(
+          snapshot([
+            user(),
+            failed([TextPart(id: 'partial', text: 'partial')]),
+          ]),
+        ),
+      );
+      expect(
+        backend.retryInfo.availability,
+        ConversationRetryAvailability.available,
+      );
+      expect(backend.retryInfo.isAvailable, isTrue);
+      await backend.dispose();
+    },
+  );
+
+  test('chat reload exposes retry errors', () async {
+    final backend = LocalConversationBackend(
+      agent: textAgent('unused'),
+      initial: _empty(),
+    );
+    final conversation = ConversationController(backend);
+    final chat = ConversationChatController(conversation);
+    addTearDown(chat.dispose);
+
+    await chat.reload();
+
+    expect(chat.status, ChatStatus.error);
+    expect(chat.error, isA<RetryUnsafeError>());
+  });
+
+  test(
+    'remote retry reports unsupported without contacting the transport',
+    () async {
+      final backend = RemoteConversationBackend(
+        transport: RemoteConversationTransport(
+          endpoint: Uri.parse('http://127.0.0.1:1'),
+        ),
+        initial: _empty(),
+      );
+      expect(
+        backend.retryInfo.availability,
+        ConversationRetryAvailability.unsupported,
+      );
+      await expectLater(
+        backend.retryLastTurn(),
+        throwsA(isA<RetryUnsupportedError>()),
       );
       await backend.dispose();
     },

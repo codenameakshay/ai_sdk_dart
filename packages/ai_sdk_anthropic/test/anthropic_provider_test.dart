@@ -143,6 +143,91 @@ void main() {
     );
   });
 
+  test('maps all reasoning levels and stream JSON/cache options', () async {
+    final captured = <Map<String, dynamic>>[];
+    final server = await _startServer((request) async {
+      captured.add(
+        (jsonDecode(await utf8.decoder.bind(request).join()) as Map)
+            .cast<String, dynamic>(),
+      );
+      request.response.statusCode = 200;
+      request.response.headers.set('content-type', 'text/event-stream');
+      request.response.write(
+        'data: {"type":"message_start","message":{"usage":{}}}\n\n'
+        'data: {"type":"message_stop"}\n\n',
+      );
+      await request.response.close();
+    });
+    addTearDown(server.close);
+
+    const levels = [
+      LanguageModelV4Reasoning.minimal,
+      LanguageModelV4Reasoning.low,
+      LanguageModelV4Reasoning.medium,
+      LanguageModelV4Reasoning.high,
+      LanguageModelV4Reasoning.xhigh,
+      LanguageModelV4Reasoning.none,
+      LanguageModelV4Reasoning.providerDefault,
+    ];
+    for (final level in levels) {
+      final stream =
+          await AnthropicProvider(apiKey: 'test', baseUrl: server.baseUrl)
+              .call('claude-3-7-sonnet-20250219')
+              .doStream(
+                LanguageModelV4CallOptions(
+                  prompt: userPrompt('reasoning'),
+                  reasoning: level,
+                ),
+              );
+      await stream.stream.drain<void>();
+    }
+
+    final adaptive =
+        await AnthropicProvider(apiKey: 'test', baseUrl: server.baseUrl)
+            .call('claude-sonnet-5')
+            .doStream(
+              LanguageModelV4CallOptions(
+                prompt: userPrompt('structured'),
+                reasoning: LanguageModelV4Reasoning.xhigh,
+                responseFormat: const LanguageModelV4JsonResponseFormat(
+                  schema: {'type': 'object'},
+                ),
+                providerOptions: const {
+                  'anthropic': {
+                    'effort': 'high',
+                    'cache_control': {'type': 'ephemeral'},
+                  },
+                },
+              ),
+            );
+    await adaptive.stream.drain<void>();
+
+    final adaptiveThinking =
+        await AnthropicProvider(apiKey: 'test', baseUrl: server.baseUrl)
+            .call('claude-sonnet-5')
+            .doStream(
+              LanguageModelV4CallOptions(
+                prompt: userPrompt('adaptive'),
+                reasoning: LanguageModelV4Reasoning.xhigh,
+              ),
+            );
+    await adaptiveThinking.stream.drain<void>();
+
+    expect(captured[4]['thinking'], {'type': 'enabled', 'budget_tokens': 3686});
+    expect(captured[5]['thinking'], {'type': 'disabled'});
+    expect(captured[6].containsKey('thinking'), isFalse);
+    expect(captured[7]['thinking'], isNull);
+    expect(captured[7]['cache_control'], {'type': 'ephemeral'});
+    expect(captured[7]['output_config'], {
+      'effort': 'high',
+      'format': {
+        'type': 'json_schema',
+        'schema': {'type': 'object'},
+      },
+    });
+    expect(captured.last['thinking'], {'type': 'adaptive'});
+  });
+
   group('AnthropicProvider', () {
     test('rejects null and malformed 2xx chat responses', () async {
       final nullServer = await _startServer((request) async {

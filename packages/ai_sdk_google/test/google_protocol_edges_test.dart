@@ -376,6 +376,78 @@ void main() {
       expect((parts[1] as Map)['thoughtSignature'], 'sig-call');
     },
   );
+
+  test(
+    'serializes empty tool output and JSON schema response format',
+    () async {
+      final adapter = _Adapter((_) => {'candidates': []});
+      final dio = Dio()..httpClientAdapter = adapter;
+      addTearDown(() => dio.close(force: true));
+      await _model(dio).doGenerate(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
+            messages: [
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.tool,
+                content: [
+                  const LanguageModelV4ToolResultPart(
+                    toolCallId: 'call1',
+                    toolName: 'lookup',
+                    output: ToolResultOutputContent([]),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          responseFormat: const LanguageModelV4JsonResponseFormat(
+            schema: {'type': 'object'},
+          ),
+          reasoning: LanguageModelV4Reasoning.xhigh,
+        ),
+      );
+      final generationConfig = adapter.input['generationConfig'] as Map;
+      expect(generationConfig['responseMimeType'], 'application/json');
+      expect(generationConfig['responseJsonSchema'], {'type': 'object'});
+      expect(
+        (((adapter.input['contents'] as List).single as Map)['parts'] as List)
+            .single,
+        {
+          'functionResponse': {
+            'id': 'call1',
+            'name': 'lookup',
+            'response': {
+              'isError': false,
+              'output': {'type': 'content', 'parts': []},
+            },
+          },
+        },
+      );
+    },
+  );
+  test('streams with a JSON schema and cancels an active stream', () async {
+    final adapter = _Adapter(
+      (_) => {},
+      stream: [
+        {'candidates': []},
+      ],
+    );
+    final dio = Dio()..httpClientAdapter = adapter;
+    addTearDown(() => dio.close(force: true));
+    final result = await _model(dio, modelId: 'gemini-3-pro').doStream(
+      LanguageModelV4CallOptions(
+        prompt: LanguageModelV4Prompt(messages: []),
+        responseFormat: const LanguageModelV4JsonResponseFormat(
+          schema: {'type': 'object'},
+        ),
+        reasoning: LanguageModelV4Reasoning.xhigh,
+      ),
+    );
+    final config = adapter.input['generationConfig'] as Map;
+    expect(config['responseMimeType'], 'application/json');
+    expect(config['responseJsonSchema'], {'type': 'object'});
+    expect(config['thinkingConfig'], {'thinkingLevel': 'high'});
+    await result.stream.listen((_) {}).cancel();
+  });
 }
 
 LanguageModelV4 _model(Dio dio, {String modelId = 'gemini-test'}) =>

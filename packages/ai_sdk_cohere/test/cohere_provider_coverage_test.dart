@@ -12,8 +12,37 @@ import '../../ai_sdk_provider/test/support/test_server.dart';
 void main() {
   test('default provider exposes all model families', () {
     expect(cohere('command-r').provider, 'cohere');
+    expect(cohere.embedding('embed-v4.0').maxEmbeddingsPerCall, 96);
     expect(cohere.embedding('embed-v4.0').supportsParallelCalls, isTrue);
     expect(cohere.rerank('rerank-v3.5').specificationVersion, 'v1');
+  });
+
+  test('wraps malformed rerank responses as API errors', () async {
+    final server = await TestServer.start((request) async {
+      request.response.statusCode = 200;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(
+        jsonEncode({
+          'results': [
+            {'index': 4},
+          ],
+        }),
+      );
+      await request.response.close();
+    });
+    addTearDown(server.close);
+
+    await expectLater(
+      CohereProvider(apiKey: 'test', baseUrl: server.baseUrl)
+          .rerank('rerank-v3.5')
+          .doRerank(
+            const RerankModelV1CallOptions(
+              query: 'query',
+              documents: ['document'],
+            ),
+          ),
+      throwsA(isA<AiApiCallError>()),
+    );
   });
 
   test('rejects unsupported prompt and tool-result media', () async {

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:ai_sdk_realtime/ai_sdk_realtime.dart';
 import 'package:test/test.dart';
 
@@ -132,10 +133,45 @@ void main() {
     );
     await session.close();
   });
+
+  test('abort after readiness closes the transport once', () async {
+    final transport = _Transport();
+    final signal = _Signal();
+    final pending = RealtimeSession.connect(
+      apiKey: 'fixture',
+      endpoint: Uri.parse('ws://fixture/realtime'),
+      abortSignal: signal,
+      connector: (_, _) async => transport,
+    );
+    await transport.listening.future;
+    transport.add({
+      'type': 'session.created',
+      'session': {'id': 's1'},
+    });
+    final session = await pending;
+    signal.cancel();
+    await transport.closed.future;
+    await session.close();
+    expect(session.state, RealtimeConnectionState.closed);
+    expect(transport.closeCount, 1);
+  });
+}
+
+class _Signal implements AbortSignal {
+  final cancelled = Completer<void>();
+
+  @override
+  bool get isCancelled => cancelled.isCompleted;
+
+  @override
+  Future<void> get onCancelled => cancelled.future;
+
+  void cancel() => cancelled.complete();
 }
 
 class _Transport implements RealtimeTransport {
   final listening = Completer<void>();
+  final closed = Completer<void>();
   late final controller = StreamController<Object?>.broadcast(
     sync: true,
     onListen: listening.complete,
@@ -163,5 +199,6 @@ class _Transport implements RealtimeTransport {
   Future<void> close([int? code, String? reason]) async {
     closeCount++;
     await controller.close();
+    if (!closed.isCompleted) closed.complete();
   }
 }

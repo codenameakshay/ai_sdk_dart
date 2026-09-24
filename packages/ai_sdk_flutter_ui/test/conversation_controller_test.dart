@@ -459,6 +459,137 @@ void main() {
     },
   );
 
+  test('replays tool-role and URI-only file history', () async {
+    final model = _ApprovalSequenceModel([
+      [const LanguageModelV4TextPart(text: 'continued')],
+    ]);
+    final backend = LocalConversationBackend(
+      agent: ToolLoopAgent(model: model),
+      initial: Conversation(
+        id: 'replay-history',
+        messages: [
+          ConversationMessage(
+            id: 'assistant-call',
+            role: ConversationRole.assistant,
+            parts: [
+              ToolCallPart(
+                id: 'call-part',
+                callId: 'call-1',
+                name: 'lookup',
+                arguments: const {},
+              ),
+            ],
+          ),
+          ConversationMessage(
+            id: 'tool-history',
+            role: ConversationRole.tool,
+            parts: [
+              ToolResultPart(
+                id: 'tool-output',
+                callId: 'call-1',
+                output: {'ok': true},
+                outputKind: 'json',
+              ),
+            ],
+          ),
+          ConversationMessage(
+            id: 'assistant-history',
+            role: ConversationRole.assistant,
+            parts: [
+              FilePart(
+                id: 'uri-file',
+                uri: 'https://example.com/file',
+                mimeType: 'application/octet-stream',
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+
+    await backend.send('continue');
+
+    final messages = model.seenMessages.single;
+    expect(messages[1].role, LanguageModelV4Role.tool);
+    final file = messages[2].content
+        .whereType<LanguageModelV4FilePart>()
+        .single;
+    expect(
+      (file.data as DataContentUrl).url,
+      Uri.parse('https://example.com/file'),
+    );
+    await backend.dispose();
+  });
+
+  test(
+    'rejects malformed persisted tool content before provider dispatch',
+    () async {
+      final invalidParts = [
+        {'type': 'custom'},
+        {
+          'type': 'redacted_reasoning',
+          'data': {'kind': 'url', 'url': 'https://example.com'},
+        },
+        {
+          'type': 'image',
+          'data': {'kind': 'custom'},
+        },
+        {'type': 'text', 'providerOptions': 'invalid'},
+        {'type': 'image', 'data': 'invalid'},
+        {
+          'type': 'image',
+          'data': {'kind': 'bytes'},
+        },
+      ];
+      for (final part in invalidParts) {
+        final model = _ApprovalSequenceModel([
+          [const LanguageModelV4TextPart(text: 'unused')],
+        ]);
+        final backend = LocalConversationBackend(
+          agent: ToolLoopAgent(model: model),
+          initial: Conversation(
+            id: 'malformed-tool-content',
+            messages: [
+              ConversationMessage(
+                id: 'assistant-call',
+                role: ConversationRole.assistant,
+                parts: [
+                  ToolCallPart(
+                    id: 'call-part',
+                    callId: 'call-1',
+                    name: 'lookup',
+                    arguments: const {},
+                  ),
+                ],
+              ),
+              ConversationMessage(
+                id: 'tool-history',
+                role: ConversationRole.tool,
+                parts: [
+                  ToolResultPart(
+                    id: 'bad-content',
+                    callId: 'call-1',
+                    output: [part],
+                    outputKind: 'content',
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+
+        await backend.send('continue');
+
+        expect(model.streamCalls, 0);
+        expect(
+          backend.conversation.messages.last.status,
+          ConversationMessageStatus.failed,
+        );
+        await backend.dispose();
+      }
+    },
+  );
+
   test(
     'accumulates reasoning provider metadata across stream events',
     () async {
@@ -855,6 +986,91 @@ void main() {
       'resumed',
     );
     await backend.dispose();
+  });
+
+  test('remote failures settle only the latest assistant turn', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(server.close);
+    var requests = 0;
+    server.listen((request) async {
+      requests++;
+      if (requests == 1) {
+        request.response
+          ..statusCode = 200
+          ..headers.contentType = ContentType('text', 'event-stream')
+          ..headers.set('x-vercel-ai-ui-message-stream', 'v1')
+          ..write(
+            'data: ${jsonEncode({'type': 'start', 'messageId': 'assistant-failed'})}\n\n',
+          );
+        await request.response.flush();
+        request.response.write('data: not-json\n\n');
+      } else {
+        request.response.statusCode = 500;
+      }
+      await request.response.close();
+    });
+    RemoteConversationBackend backend() => RemoteConversationBackend(
+      transport: RemoteConversationTransport(
+        endpoint: Uri.parse('http://127.0.0.1:${server.port}'),
+      ),
+      initial: _empty(),
+    );
+
+    final started = backend();
+    await expectLater(started.send('fail after start'), throwsA(anything));
+    expect(
+      started.conversation.messages.last.status,
+      ConversationMessageStatus.failed,
+    );
+    await started.dispose();
+
+    final noAssistant = backend();
+    await expectLater(noAssistant.send('fail before start'), throwsA(anything));
+    expect(noAssistant.conversation.messages, hasLength(1));
+    expect(
+      noAssistant.conversation.messages.single.role,
+      ConversationRole.user,
+    );
+    await noAssistant.dispose();
+
+    final noUser = backend();
+    await noUser.restore(
+      ConversationCodec.encode(
+        Conversation(
+          id: 'chat-1',
+          messages: [
+            ConversationMessage(
+              id: 'assistant-pending',
+              role: ConversationRole.assistant,
+              status: ConversationMessageStatus.pendingApproval,
+              parts: [
+                ToolCallPart(
+                  id: 'call-part',
+                  callId: 'call-1',
+                  name: 'lookup',
+                  arguments: const {},
+                ),
+                ApprovalPart(
+                  id: 'approval-part',
+                  approvalId: 'approval-1',
+                  callId: 'call-1',
+                  status: ApprovalStatus.pending,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+    await expectLater(
+      noUser.respondToApproval(approvalId: 'approval-1', approved: true),
+      throwsA(anything),
+    );
+    expect(
+      noUser.conversation.messages.single.status,
+      ConversationMessageStatus.streaming,
+    );
+    await noUser.dispose();
   });
 
   test(
@@ -1813,6 +2029,17 @@ void main() {
     });
     await controller.dispose();
     await backend.dispose();
+
+    final local = LocalConversationBackend(
+      agent: _textAgent('unused'),
+      initial: _empty(),
+    );
+    final retryController = ConversationController(local);
+    expect(
+      retryController.retryInfo.availability,
+      ConversationRetryAvailability.noFailedTurn,
+    );
+    await retryController.dispose();
   });
 
   test('chat adapter reports backend failures and stop interrupts', () async {
@@ -1831,6 +2058,32 @@ void main() {
     expect(chat.error, isA<StateError>());
     await chat.stop();
     chat.dispose();
+  });
+
+  test('chat adapter maps tool message roles', () async {
+    final backend = _NoRetryBackend(
+      Conversation(
+        id: 'tool-role',
+        messages: [
+          ConversationMessage(
+            id: 'tool-message',
+            role: ConversationRole.tool,
+            parts: const [],
+          ),
+        ],
+      ),
+    );
+    final controller = ConversationController(backend, disposeBackend: false);
+    final chat = ConversationChatController(
+      controller,
+      disposeConversationController: false,
+    );
+
+    expect(chat.messages.single.role, ModelMessageRole.tool);
+
+    chat.dispose();
+    await controller.dispose();
+    await backend.dispose();
   });
 
   test('local backend records live media, sources, and tool output', () async {
@@ -1853,6 +2106,27 @@ void main() {
           StreamPartFile(
             file: LanguageModelV4FilePart(
               data: DataContentUrl(Uri.parse('https://example.com/b.bin')),
+              mediaType: 'application/octet-stream',
+            ),
+          ),
+          const StreamPartFile(
+            file: LanguageModelV4FilePart(
+              data: DataContentProviderReference(
+                namespace: 'vendor',
+                id: 'file-1',
+              ),
+              mediaType: 'application/octet-stream',
+            ),
+          ),
+          const StreamPartReasoningFile(
+            file: LanguageModelV4ReasoningFilePart(
+              data: DataContentBase64('AwQ='),
+              mediaType: 'application/octet-stream',
+            ),
+          ),
+          StreamPartReasoningFile(
+            file: LanguageModelV4ReasoningFilePart(
+              data: DataContentUrl(Uri.parse('https://example.com')),
               mediaType: 'application/octet-stream',
             ),
           ),
@@ -1894,8 +2168,23 @@ void main() {
     );
     await backend.send('media');
     final parts = backend.conversation.messages.last.parts;
-    expect(parts.whereType<FilePart>(), hasLength(3));
-    expect(parts.whereType<ReasoningFilePart>(), hasLength(1));
+    expect(parts.whereType<FilePart>(), hasLength(4));
+    expect(parts.whereType<ReasoningFilePart>(), hasLength(3));
+    expect(
+      (parts.whereType<FilePart>().last.data
+              as ConversationFileProviderReference)
+          .namespace,
+      'vendor',
+    );
+    expect(
+      (parts.whereType<ReasoningFilePart>().first.data as ConversationFileBytes)
+          .bytes,
+      [3, 4],
+    );
+    expect(
+      parts.whereType<ReasoningFilePart>().map((part) => part.uri),
+      contains('https://example.com'),
+    );
     expect(parts.whereType<SourcePart>(), hasLength(1));
     expect(parts.whereType<DocumentSourcePart>(), hasLength(1));
     expect(parts.whereType<UnknownPart>(), hasLength(1));
@@ -1920,12 +2209,23 @@ void main() {
               toolCallId: 'call-rich',
               toolName: 'lookup',
               output: ToolResultOutputContent([
-                const LanguageModelV4TextPart(text: 'ok'),
+                const LanguageModelV4TextPart(
+                  text: 'ok',
+                  providerOptions: {
+                    'vendor': {'text': true},
+                  },
+                ),
                 const LanguageModelV4ReasoningPart(
                   text: 'why',
                   signature: 'sig',
                   providerOptions: {
                     'vendor': {'reasoning': true},
+                  },
+                ),
+                LanguageModelV4RedactedReasoningPart(
+                  data: Uint8List.fromList([5, 6]),
+                  providerOptions: const {
+                    'vendor': {'redacted': true},
                   },
                 ),
                 const LanguageModelV4ImagePart(
@@ -1936,12 +2236,33 @@ void main() {
                   },
                 ),
                 LanguageModelV4FilePart(
-                  data: DataContentUrl(Uri.parse('https://example.com/a.pdf')),
+                  data: DataContentBytes(Uint8List.fromList([7, 8])),
                   mediaType: 'application/pdf',
                   filename: 'a.pdf',
                   providerOptions: {
                     'vendor': {'file': true},
                   },
+                ),
+                LanguageModelV4ReasoningFilePart(
+                  data: DataContentBytes(Uint8List.fromList([9, 10])),
+                  mediaType: 'application/octet-stream',
+                  filename: 'reasoning.bin',
+                  providerOptions: const {
+                    'vendor': {'reasoningFile': true},
+                  },
+                ),
+                LanguageModelV4FilePart(
+                  data: DataContentUrl(
+                    Uri.parse('https://example.com/out.pdf'),
+                  ),
+                  mediaType: 'application/pdf',
+                ),
+                const LanguageModelV4ReasoningFilePart(
+                  data: DataContentProviderReference(
+                    namespace: 'vendor',
+                    id: 'reasoning-file-1',
+                  ),
+                  mediaType: 'application/octet-stream',
                 ),
                 const LanguageModelV4SourcePart(
                   id: 'source-1',
@@ -1960,9 +2281,12 @@ void main() {
                     'vendor': {'document': true},
                   },
                 ),
-                const LanguageModelV4OpaquePart(
+                LanguageModelV4OpaquePart(
                   provider: 'vendor',
-                  raw: {'id': 'opaque-1'},
+                  raw: {
+                    'id': 'opaque-1',
+                    'bytes': Uint8List.fromList([11]),
+                  },
                 ),
               ]),
             ),
@@ -1981,7 +2305,26 @@ void main() {
         .single;
     expect(result.outputKind, 'content');
     expect(result.output, isA<List>());
-    expect((result.output as List), hasLength(7));
+    expect((result.output as List), hasLength(11));
+    final encoded = (result.output as List).cast<Map<String, dynamic>>();
+    expect(encoded.first['providerOptions'], {
+      'vendor': {'text': true},
+    });
+    expect(encoded[2]['type'], 'redacted_reasoning');
+    expect((encoded[2]['data'] as Map)['base64'], 'BQY=');
+    expect(encoded[5]['type'], 'reasoning_file');
+    expect(encoded[5]['filename'], 'reasoning.bin');
+    expect((encoded[5]['data'] as Map)['base64'], 'CQo=');
+    expect(encoded[5]['providerOptions'], {
+      'vendor': {'reasoningFile': true},
+    });
+    expect((encoded[6]['data'] as Map)['kind'], 'url');
+    expect((encoded[7]['data'] as Map)['kind'], 'provider_reference');
+    expect((encoded.last['raw'] as Map)['bytes'], {
+      'kind': 'bytes',
+      'base64': 'Cw==',
+      'length': 1,
+    });
     await backend.dispose();
   });
 }

@@ -415,6 +415,33 @@ void main() {
       await sink.dispose();
     },
   );
+
+  test('bounds attributes and contains diagnostic callback failures', () async {
+    final sink = OtlpHttpMetricSink(
+      endpoint: Uri.parse('http://127.0.0.1:${server.port}/v1/metrics'),
+      maxAttributes: 1,
+      maxListLength: 1,
+      redactAttribute: (key, value) {
+        if (key == 'bad') throw StateError('redactor failed');
+        return value;
+      },
+      onDiagnostic: (error, [_]) => throw StateError('diagnostic failed'),
+    );
+    sink.record(
+      const TelemetryMetric(
+        name: 'bounded',
+        value: 1,
+        attributes: {
+          'bad': 'omitted',
+          'list': [1, 2],
+          'kept': true,
+        },
+      ),
+    );
+    await sink.flush();
+    expect(_firstDataPointAttributes(payloads.single), isEmpty);
+    await sink.dispose();
+  });
 }
 
 String _firstMetricName(Map<String, dynamic> payload) {

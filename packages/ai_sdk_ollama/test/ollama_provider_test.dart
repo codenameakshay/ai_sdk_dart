@@ -691,6 +691,33 @@ void main() {
       expect(messages.single.containsKey('images'), isFalse);
     });
 
+    test('rejects provider file references before dispatch', () async {
+      final model = OllamaProvider().call('llava');
+      await expectLater(
+        model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                const LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [
+                    LanguageModelV4ImagePart(
+                      image: DataContentProviderReference(
+                        namespace: 'files',
+                        id: 'file-1',
+                      ),
+                      mediaType: 'image/png',
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        throwsUnsupportedError,
+      );
+    });
+
     test(
       'parses a tool call with no arguments as an empty input map',
       () async {

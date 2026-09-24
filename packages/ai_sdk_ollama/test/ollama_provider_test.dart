@@ -175,6 +175,66 @@ void main() {
     });
 
     test(
+      'non-Dio failures propagate from generate, stream, and embedding',
+      () async {
+        final client = Dio()..httpClientAdapter = _ThrowingHttpClientAdapter();
+        addTearDown(() => client.close(force: true));
+        final provider = OllamaProvider(
+          baseUrl: 'http://127.0.0.1:1',
+          client: client,
+        );
+        final wrappedBoom = throwsA(
+          isA<AiApiCallError>().having(
+            (error) => error.cause,
+            'cause',
+            isA<DioException>().having(
+              (error) => error.error,
+              'error',
+              isA<StateError>().having(
+                (error) => error.message,
+                'message',
+                'boom',
+              ),
+            ),
+          ),
+        );
+
+        await expectLater(
+          provider(
+            'llama',
+          ).doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('hi'))),
+          wrappedBoom,
+        );
+        await expectLater(
+          provider(
+            'llama',
+          ).doStream(LanguageModelV4CallOptions(prompt: userPrompt('hi'))),
+          wrappedBoom,
+        );
+        await expectLater(
+          provider
+              .embedding('nomic-embed-text')
+              .doEmbed(
+                const EmbeddingModelV2CallOptions<String>(values: ['hi']),
+              ),
+          wrappedBoom,
+        );
+      },
+    );
+
+    test('doStream rejects a null response body', () async {
+      final client = Dio()..interceptors.add(_NullStreamBodyInterceptor());
+      addTearDown(() => client.close(force: true));
+
+      await expectLater(
+        OllamaProvider(baseUrl: 'http://127.0.0.1:1', client: client)
+            .call('llama')
+            .doStream(LanguageModelV4CallOptions(prompt: userPrompt('hi'))),
+        throwsA(isA<AiApiCallError>()),
+      );
+    });
+
+    test(
       'dispose closes owned clients and leaves injected clients open',
       () async {
         final server = await _startServer((request) async {
@@ -1161,3 +1221,24 @@ Dio _cancellationClient(HttpClientAdapter adapter, String baseUrl) {
 Future<TestServer> _startServer(
   Future<void> Function(HttpRequest request) handler,
 ) => TestServer.start(handler, pathSuffix: '/api');
+
+class _ThrowingHttpClientAdapter implements HttpClientAdapter {
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async => throw StateError('boom');
+
+  @override
+  void close({bool force = false}) {}
+}
+
+class _NullStreamBodyInterceptor extends Interceptor {
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    handler.resolve(
+      Response<dynamic>(requestOptions: options, statusCode: 200),
+    );
+  }
+}

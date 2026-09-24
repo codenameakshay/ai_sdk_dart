@@ -209,6 +209,120 @@ void main() {
       },
     );
 
+    test('uses approvalPolicyFor when replaying an approved call', () async {
+      var executions = 0;
+      var selectorCalls = 0;
+      final model = FakeTextModel('resumed answer');
+      final agent = ToolLoopAgent(
+        model: model,
+        tools: {
+          'danger': tool<Map<String, dynamic>, String>(
+            inputSchema: objectSchema(),
+            needsApproval: (_, _) async => true,
+            execute: (_, _) async {
+              executions++;
+              return 'done';
+            },
+          ),
+        },
+      );
+      const toolCallId = 'provider-call-policy';
+      const approvalId = 'approval-policy';
+      final toolCall = LanguageModelV4ToolCallPart(
+        toolCallId: toolCallId,
+        toolName: 'danger',
+        input: const {'value': 'x'},
+      );
+      const fingerprint = '{"value":"x"}';
+
+      await agent.resume(
+        replay: ToolApprovalReplay(
+          messages: [
+            const ModelMessage(content: 'go', role: ModelMessageRole.user),
+            ModelMessage.parts(
+              role: ModelMessageRole.assistant,
+              parts: [toolCall],
+            ),
+          ],
+          requests: [
+            LanguageModelV4ToolApprovalRequestPart(
+              approvalId: approvalId,
+              toolCall: toolCall,
+              policyRevision: 'default',
+              argumentsFingerprint: fingerprint,
+            ),
+          ],
+        ),
+        toolApprovalResponses: const [
+          LanguageModelV4ToolApprovalResponse(
+            approvalId: approvalId,
+            approved: true,
+            toolCallId: toolCallId,
+            toolName: 'danger',
+            argumentsFingerprint: fingerprint,
+            policyRevision: 'default',
+          ),
+        ],
+        approvalPolicyFor: (toolName, input) {
+          selectorCalls++;
+          expect(toolName, 'danger');
+          expect(input, {'value': 'x'});
+          return ToolApprovalPolicy.never;
+        },
+      );
+
+      expect(selectorCalls, 1);
+      expect(executions, 1);
+    });
+
+    test('closes the resume scope when tool execution throws', () async {
+      final agent = ToolLoopAgent(
+        model: FakeTextModel('unexpected'),
+        tools: {'echo': echoTool((_) => throw TimeoutException('tool failed'))},
+      );
+      const toolCallId = 'provider-call-failure';
+      const approvalId = 'approval-failure';
+      final toolCall = LanguageModelV4ToolCallPart(
+        toolCallId: toolCallId,
+        toolName: 'echo',
+        input: const {'value': 'x'},
+      );
+      const fingerprint = '{"value":"x"}';
+
+      await expectLater(
+        agent.resume(
+          replay: ToolApprovalReplay(
+            messages: [
+              const ModelMessage(content: 'go', role: ModelMessageRole.user),
+              ModelMessage.parts(
+                role: ModelMessageRole.assistant,
+                parts: [toolCall],
+              ),
+            ],
+            requests: [
+              LanguageModelV4ToolApprovalRequestPart(
+                approvalId: approvalId,
+                toolCall: toolCall,
+                policyRevision: 'default',
+                argumentsFingerprint: fingerprint,
+              ),
+            ],
+          ),
+          toolApprovalResponses: const [
+            LanguageModelV4ToolApprovalResponse(
+              approvalId: approvalId,
+              approved: true,
+              toolCallId: toolCallId,
+              toolName: 'echo',
+              argumentsFingerprint: fingerprint,
+              policyRevision: 'default',
+            ),
+          ],
+        ),
+        throwsA(isA<TimeoutException>()),
+      );
+    });
+
     test(
       'prevalidates every approval before executing or calling the provider',
       () async {

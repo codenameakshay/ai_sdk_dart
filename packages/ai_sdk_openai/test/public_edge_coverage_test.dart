@@ -7,6 +7,43 @@ import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('default provider instance is public', () {
+    expect(openai, isA<OpenAIProvider>());
+  });
+
+  test('batch exceptions and non-positive timeouts fail locally', () {
+    expect(
+      const OpenAIBatchException('bad').toString(),
+      'OpenAIBatchException: bad',
+    );
+    expect(
+      OpenAIBatchSubmissionException(
+        const DataContentProviderReference(namespace: 'openai', id: 'file-1'),
+        StateError('cause'),
+      ).toString(),
+      contains('cause'),
+    );
+    final files = OpenAIFiles(
+      client: Dio()..httpClientAdapter = _Adapter((_) => '{}'),
+      headers: () async => const {},
+      baseUrl: 'https://api.openai.test/v1/',
+    );
+    expect(
+      () => files.retrieve(
+        const DataContentProviderReference(namespace: 'openai', id: 'file-1'),
+        timeout: Duration.zero,
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => files.retrieve(
+        const DataContentProviderReference(namespace: 'openai', id: 'file-1'),
+        timeout: const Duration(microseconds: -1),
+      ),
+      throwsArgumentError,
+    );
+  });
+
   test(
     'file helpers serialize and download setup failures propagate',
     () async {
@@ -72,6 +109,65 @@ void main() {
       expect(parts.whereType<StreamPartToolApprovalRequest>(), hasLength(1));
     },
   );
+
+  test(
+    'generate uses hosted MCP item id as the approval id fallback',
+    () async {
+      final result = await _model(
+        _Adapter(
+          (_) => jsonEncode({
+            'id': 'r1',
+            'status': 'completed',
+            'output': [
+              {
+                'type': 'mcp_approval_request',
+                'id': 'approval-gen',
+                'name': 'search',
+                'arguments': {'query': 'Dart'},
+              },
+            ],
+          }),
+        ),
+      ).doGenerate(_options());
+
+      expect(
+        result.content
+            .whereType<LanguageModelV4ToolCallPart>()
+            .single
+            .toolCallId,
+        'approval-gen',
+      );
+      expect(
+        result.content
+            .whereType<LanguageModelV4ToolApprovalRequestPart>()
+            .single
+            .approvalId,
+        'approval-gen',
+      );
+    },
+  );
+
+  test('stream rejects a null response body', () async {
+    final dio = Dio()..interceptors.add(_NullStreamBodyInterceptor());
+    addTearDown(() => dio.close(force: true));
+    final model = OpenAIResponsesLanguageModel(
+      modelId: 'gpt-test',
+      client: dio,
+      headers: () async => const {},
+      baseUrl: 'https://api.openai.test/v1/responses',
+    );
+
+    await expectLater(
+      model.doStream(_options()),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('stream body is null'),
+        ),
+      ),
+    );
+  });
 
   test(
     'computer output rejects non-screenshot outputs and accepts error JSON',
@@ -142,6 +238,25 @@ void main() {
           throwsA(isA<FormatException>()),
         );
       }
+
+      await expectLater(
+        send(
+          ToolResultOutputJson({
+            'output': {
+              'type': 'computer_screenshot',
+              'imageUrl': 'https://example.test/a.png',
+              'fileId': 1,
+            },
+          }),
+        ),
+        throwsA(
+          isA<FormatException>().having(
+            (error) => error.message,
+            'message',
+            contains('Computer screenshot references must be strings.'),
+          ),
+        ),
+      );
     },
   );
 
@@ -272,4 +387,13 @@ class _Adapter implements HttpClientAdapter {
 
   @override
   void close({bool force = false}) {}
+}
+
+class _NullStreamBodyInterceptor extends Interceptor {
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    handler.resolve(
+      Response<dynamic>(requestOptions: options, statusCode: 200),
+    );
+  }
 }

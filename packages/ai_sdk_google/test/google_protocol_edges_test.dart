@@ -6,6 +6,8 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
+import '../../ai_sdk_provider/test/support/cancellation_adapter.dart';
+
 void main() {
   test(
     'generate maps thoughts, signed calls, files, and grounding sources',
@@ -271,6 +273,26 @@ void main() {
     });
   });
 
+  test('provider-default reasoning omits thinking configuration', () async {
+    final adapter = _Adapter((_) => {'candidates': []});
+    final dio = Dio()..httpClientAdapter = adapter;
+    addTearDown(() => dio.close(force: true));
+
+    await _model(dio).doGenerate(_options(maxOutputTokens: 10));
+    expect(
+      (adapter.input['generationConfig'] as Map)['thinkingConfig'],
+      isNull,
+    );
+
+    for (final modelId in ['gemini-3-flash', 'gemini-3-pro']) {
+      await _model(dio, modelId: modelId).doGenerate(_options());
+      expect(
+        (adapter.input['generationConfig'] as Map)['thinkingConfig'],
+        isNull,
+      );
+    }
+  });
+
   test('rejects unsupported prompt files and media in tool results', () async {
     final adapter = _Adapter((_) => {'candidates': []});
     final dio = Dio()..httpClientAdapter = adapter;
@@ -447,6 +469,37 @@ void main() {
     expect(config['responseJsonSchema'], {'type': 'object'});
     expect(config['thinkingConfig'], {'thinkingLevel': 'high'});
     await result.stream.listen((_) {}).cancel();
+  });
+
+  test('cancels a stream subscription without hanging', () async {
+    final adapter = _Adapter(
+      (_) => {},
+      stream: [
+        {
+          'candidates': [
+            {
+              'content': {
+                'parts': [
+                  {'text': 'hi'},
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    );
+    final dio = Dio()..httpClientAdapter = adapter;
+    addTearDown(() => dio.close(force: true));
+
+    final abortSignal = TestAbortSignal();
+    final result = await _model(dio).doStream(
+      LanguageModelV4CallOptions(
+        prompt: const LanguageModelV4Prompt(messages: []),
+        abortSignal: abortSignal,
+      ),
+    );
+    final subscription = result.stream.listen((_) {});
+    await subscription.cancel().timeout(const Duration(seconds: 5));
   });
 
   test(

@@ -109,4 +109,4 @@ flowchart TD
   I --> J[Release-qualified PR]
 ```
 
-The prior pushed iOS job failed in an animated send-button finder. The [exact-head native run](v3-research/evidence/ios/README.md) now passes both launches, with distinct pending-write and restored-approval screenshots plus safe text retry. It uses a scripted model, not a hosted provider. Aggregate coverage, native frame evidence, independent final-head review and live qualification remain open. No merge or publication is authorized by this checkpoint.
+Native two-launch E2E passed on later heads through `96f649d`. Local aggregate coverage at `8ccdb0b` is **13,563/13,695 (99.04%)**. Independent standards review of that test tranche found no hard breaches. Spec review still records live canaries, device audio, and debug-only iOS frames as open external gaps. No merge or publication is authorized by this checkpoint.

@@ -111,5 +111,29 @@ void main() {
         expect(model.lastCallOptions!.prompt.messages, hasLength(2));
       },
     );
+
+    test(
+      '${streaming ? "streamText" : "generateText"} request messages keep prior assistant turns',
+      () async {
+        final model = FakeTextModel('new answer');
+        const history = [
+          ModelMessage(role: ModelMessageRole.assistant, content: 'old answer'),
+          ModelMessage(role: ModelMessageRole.user, content: 'new question'),
+        ];
+        final requestMessages = streaming
+            ? (await (await streamText(
+                model: model,
+                messages: history,
+              )).request).messages
+            : (await generateText(
+                model: model,
+                messages: history,
+              )).request.messages;
+        expect(requestMessages.map((message) => message.role).toList(), [
+          LanguageModelV4Role.assistant,
+          LanguageModelV4Role.user,
+        ]);
+      },
+    );
   }
 }

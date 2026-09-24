@@ -265,6 +265,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
     Object? lastResponseBody;
     LanguageModelV4ResponseMetadata? lastResponseMetadata;
     var lastWarnings = <LanguageModelV4Warning>[];
+    List<LanguageModelV4Message>? firstRequestMessages;
 
     safeInvoke(
       () => (onStart ?? experimentalOnStart)?.call(
@@ -318,6 +319,9 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
         metricModelId = stepModel.modelId;
         final stepToolChoice = prepareResult?.toolChoice ?? toolChoice;
         final stepMessages = prepareResult?.messages ?? normalizedMessages;
+        firstRequestMessages ??= List<LanguageModelV4Message>.from(
+          stepMessages,
+        );
         if (!allowSystemInMessages &&
             stepMessages.any(
               (message) => message.role == LanguageModelV4Role.system,
@@ -1059,15 +1063,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
           .join();
       final requestInfo = GenerateTextRequest(
         system: buildOutputSystemInstruction(initialInstructions, outputSpec),
-        messages: List.unmodifiable(
-          normalizedMessages
-              .where(
-                (message) =>
-                    message.role == LanguageModelV4Role.user ||
-                    message.role == LanguageModelV4Role.system,
-              )
-              .toList(),
-        ),
+        messages: List.unmodifiable(firstRequestMessages ?? normalizedMessages),
         body: lastRequestBody,
       );
       final responseInfo = GenerateTextResponse(

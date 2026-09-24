@@ -180,6 +180,23 @@ void main() {
     await sink.dispose(deadline: const Duration(milliseconds: 30));
   });
 
+  test(
+    'expired flush deadline restores a batch before opening a request',
+    () async {
+      final sink = OtlpHttpMetricSink(
+        endpoint: Uri.parse('http://127.0.0.1:${server.port}/v1/metrics'),
+      );
+      sink.record(const TelemetryMetric(name: 'expired', value: 1));
+      await expectLater(
+        sink.flush(deadline: const Duration(microseconds: 1)),
+        throwsA(isA<TimeoutException>()),
+      );
+      expect(sink.pendingCount, 1);
+      expect(payloads, isEmpty);
+      await sink.dispose();
+    },
+  );
+
   test('restores a failed detached batch ahead of newer records', () async {
     requestStarted = Completer<void>();
     releaseResponse = Completer<void>();

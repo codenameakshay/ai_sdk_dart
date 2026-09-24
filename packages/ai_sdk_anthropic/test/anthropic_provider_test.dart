@@ -16,6 +16,133 @@ import '../../ai_sdk_provider/test/support/test_server.dart';
 import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
+  test('default provider exposes the Anthropic model contract', () {
+    expect(anthropic('claude-sonnet-4-5').provider, 'anthropic');
+    expect(anthropic('claude-sonnet-4-5').modelId, 'claude-sonnet-4-5');
+  });
+
+  test(
+    'rejects provider-only prompt parts and maps legacy reasoning none',
+    () async {
+      final server = await _startServer((request) async {
+        final body =
+            (jsonDecode(await utf8.decoder.bind(request).join()) as Map)
+                .cast<String, dynamic>();
+        final thinking = body['thinking'];
+        expect(thinking, {'type': 'disabled'});
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({'content': []}));
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = AnthropicProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).call('claude-3-7-sonnet-20250219');
+      await expectLater(
+        model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [
+                    const LanguageModelV4DocumentSourcePart(
+                      id: 'doc',
+                      mediaType: 'application/pdf',
+                      title: 'doc',
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        throwsUnsupportedError,
+      );
+      await expectLater(
+        model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [
+                    const LanguageModelV4ReasoningFilePart(
+                      data: DataContentBase64('YQ=='),
+                      mediaType: 'text/plain',
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        throwsUnsupportedError,
+      );
+
+      await model.doGenerate(
+        LanguageModelV4CallOptions(
+          prompt: userPrompt('none'),
+          reasoning: LanguageModelV4Reasoning.none,
+        ),
+      );
+    },
+  );
+
+  test('stream preserves reasoning signatures and cache-only usage', () async {
+    final server = await _startServer((request) async {
+      await utf8.decoder.bind(request).join();
+      request.response.statusCode = 200;
+      request.response.headers.contentType = ContentType(
+        'text',
+        'event-stream',
+      );
+      request.response.write(
+        'data: {"type":"message_start","message":{"usage":{"cache_read_input_tokens":7}}}\n\n'
+        'data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","id":"reason-0"}}\n\n'
+        'data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"signed"}}\n\n'
+        'data: {"type":"message_delta","usage":{"output_tokens":2},"delta":{"stop_reason":"end_turn"}}\n\n',
+      );
+      await request.response.close();
+    });
+    addTearDown(server.close);
+
+    final result =
+        await AnthropicProvider(apiKey: 'test', baseUrl: server.baseUrl)
+            .call('claude-sonnet-4-5')
+            .doStream(LanguageModelV4CallOptions(prompt: userPrompt('reason')));
+    final parts = await result.stream.toList();
+    final reasoningEnd = parts.whereType<StreamPartReasoningEnd>().single;
+    expect(reasoningEnd.signature, 'signed');
+    expect(reasoningEnd.providerMetadata?['anthropic'], {
+      'signature': 'signed',
+    });
+    final finish = parts.whereType<StreamPartFinish>().single;
+    expect(finish.usage.inputTokens.total, 7);
+    expect(finish.usage.outputTokens.total, 2);
+  });
+
+  test('empty stream still starts and closes cleanly', () async {
+    final server = await _startServer((request) async {
+      request.response.statusCode = 200;
+      request.response.headers.set('content-type', 'text/event-stream');
+      await request.response.close();
+    });
+    addTearDown(server.close);
+
+    final result =
+        await AnthropicProvider(apiKey: 'test', baseUrl: server.baseUrl)
+            .call('claude-sonnet-4-5')
+            .doStream(LanguageModelV4CallOptions(prompt: userPrompt('empty')));
+    expect(
+      await result.stream.toList(),
+      contains(isA<StreamPartStreamStart>()),
+    );
+  });
+
   group('AnthropicProvider', () {
     test('rejects null and malformed 2xx chat responses', () async {
       final nullServer = await _startServer((request) async {

@@ -12,6 +12,13 @@ import '../../ai_sdk_provider/test/support/test_server.dart';
 import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
+  test('chat alias and default provider expose expected models', () {
+    expect(azureOpenAI.responses('deployment').provider, 'azure');
+    expect(azureOpenAI.chat('deployment').modelId, 'deployment');
+    expect(azureOpenAI.embedding('deployment').maxEmbeddingsPerCall, 2048);
+    expect(azureOpenAI.embedding('deployment').supportsParallelCalls, isTrue);
+  });
+
   group('AzureOpenAIProvider', () {
     test('creates language model with correct provider/spec/modelId', () {
       final provider = AzureOpenAIProvider(

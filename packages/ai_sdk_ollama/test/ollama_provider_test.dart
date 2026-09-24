@@ -14,6 +14,13 @@ import '../../ai_sdk_provider/test/support/test_server.dart';
 import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
+  test('default provider exposes embedding capabilities', () {
+    final model = ollama.embedding('nomic-embed-text');
+    expect(model.provider, 'ollama');
+    expect(model.maxEmbeddingsPerCall, isNull);
+    expect(model.supportsParallelCalls, isTrue);
+  });
+
   group('OllamaProvider', () {
     test('creates language model with correct provider/spec/modelId', () {
       final provider = OllamaProvider();

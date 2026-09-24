@@ -12,6 +12,26 @@ import '../../ai_sdk_provider/test/support/test_server.dart';
 import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
+  test('default provider exposes embedding capabilities', () {
+    final model = mistral.embedding('mistral-embed');
+    expect(model.provider, 'mistral');
+    expect(model.maxEmbeddingsPerCall, isNull);
+    expect(model.supportsParallelCalls, isTrue);
+  });
+
+  test('embedding rethrows credential-provider failures', () async {
+    final provider = MistralProvider(
+      credentialProvider: () async => throw StateError('credential failed'),
+    );
+    await expectLater(
+      provider
+          .embedding('mistral-embed')
+          .doEmbed(const EmbeddingModelV2CallOptions<String>(values: ['x'])),
+      throwsStateError,
+    );
+    provider.dispose();
+  });
+
   group('MistralProvider', () {
     test('creates language model with correct provider/spec/modelId', () {
       final provider = MistralProvider(apiKey: 'test-key');

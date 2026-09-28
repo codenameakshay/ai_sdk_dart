@@ -9,13 +9,15 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
+import 'support/fake_adapter.dart';
+
 void main() {
   test(
     'Responses maps generic reasoning, JSON mode and file bytes faithfully',
     () async {
       Map<String, dynamic>? body;
       final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-        ..httpClientAdapter = _Adapter((request) async {
+        ..httpClientAdapter = FakeHttpAdapter((request) async {
           body = (request.data as Map).cast<String, dynamic>();
           return _reply(request, {
             'id': 'r',
@@ -72,7 +74,7 @@ void main() {
     () async {
       Map<String, dynamic>? body;
       final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-        ..httpClientAdapter = _Adapter((request) async {
+        ..httpClientAdapter = FakeHttpAdapter((request) async {
           body = (request.data as Map).cast<String, dynamic>();
           return _reply(request, {
             'id': 'resp_options',
@@ -129,7 +131,7 @@ void main() {
     () async {
       Map<String, dynamic>? body;
       final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-        ..httpClientAdapter = _Adapter((request) async {
+        ..httpClientAdapter = FakeHttpAdapter((request) async {
           body = (request.data as Map).cast<String, dynamic>();
           return _reply(request, {
             'id': 'resp-computer-output',
@@ -205,7 +207,7 @@ void main() {
     'Responses rejects malformed computer safety acknowledgements',
     () async {
       final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-        ..httpClientAdapter = _Adapter(
+        ..httpClientAdapter = FakeHttpAdapter(
           (request) async => _reply(request, {
             'id': 'resp-computer-invalid',
             'status': 'completed',
@@ -247,7 +249,7 @@ void main() {
   test('Responses adapter sends items and maps output/tool calls', () async {
     Map<String, dynamic>? requestBody;
     final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-      ..httpClientAdapter = _Adapter((request) async {
+      ..httpClientAdapter = FakeHttpAdapter((request) async {
         final raw = request.data;
         requestBody = raw is String
             ? jsonDecode(raw) as Map<String, dynamic>
@@ -341,7 +343,7 @@ void main() {
     'Responses preserves encrypted-only reasoning in non-stream output',
     () async {
       final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-        ..httpClientAdapter = _Adapter((request) async {
+        ..httpClientAdapter = FakeHttpAdapter((request) async {
           return _reply(request, {
             'id': 'resp_reasoning',
             'status': 'completed',
@@ -382,7 +384,7 @@ void main() {
 
   test('Responses preserves opaque reasoning without stream deltas', () async {
     final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-      ..httpClientAdapter = _Adapter(
+      ..httpClientAdapter = FakeHttpAdapter(
         (request) async => _streamReply(request, [
           {
             'type': 'response.output_item.done',
@@ -423,7 +425,7 @@ void main() {
   test('Responses keeps continuation items in prompt order', () async {
     Map<String, dynamic>? body;
     final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-      ..httpClientAdapter = _Adapter((request) async {
+      ..httpClientAdapter = FakeHttpAdapter((request) async {
         body = (request.data as Map).cast<String, dynamic>();
         return _reply(request, {
           'id': 'resp_order',
@@ -485,7 +487,7 @@ void main() {
     'Responses maps URL citations to source parts with provider metadata',
     () async {
       final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-        ..httpClientAdapter = _Adapter(
+        ..httpClientAdapter = FakeHttpAdapter(
           (request) async => _reply(request, {
             'id': 'resp_source',
             'status': 'completed',
@@ -535,7 +537,7 @@ void main() {
 
   test('Responses stream emits semantic deltas and terminal finish', () async {
     final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-      ..httpClientAdapter = _Adapter(
+      ..httpClientAdapter = FakeHttpAdapter(
         (request) async => _streamReply(request, [
           {
             'type': 'response.created',
@@ -640,7 +642,7 @@ void main() {
     'Responses rejects function calls with missing identity fields',
     () async {
       final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-        ..httpClientAdapter = _Adapter((request) async {
+        ..httpClientAdapter = FakeHttpAdapter((request) async {
           return _reply(request, {
             'id': 'resp_bad_identity',
             'status': 'completed',
@@ -682,7 +684,7 @@ void main() {
     'Responses rejects streamed identity changes and missing names',
     () async {
       final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-        ..httpClientAdapter = _Adapter(
+        ..httpClientAdapter = FakeHttpAdapter(
           (request) async => _streamReply(request, [
             {
               'type': 'response.output_item.added',
@@ -749,7 +751,7 @@ void main() {
     'streamText executes a Responses function call once across duplicate events',
     () async {
       final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-        ..httpClientAdapter = _Adapter(
+        ..httpClientAdapter = FakeHttpAdapter(
           (request) async => _streamReply(request, [
             {
               'type': 'response.created',
@@ -825,7 +827,7 @@ void main() {
 
   test('truncated Responses stream emits a terminal error', () async {
     final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-      ..httpClientAdapter = _Adapter(
+      ..httpClientAdapter = FakeHttpAdapter(
         (request) async => _streamReply(request, [
           {
             'type': 'response.created',
@@ -857,7 +859,7 @@ void main() {
     'failed and content-filter incomplete responses preserve terminal cause',
     () async {
       final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-        ..httpClientAdapter = _Adapter(
+        ..httpClientAdapter = FakeHttpAdapter(
           (request) async => _streamReply(request, [
             {
               'type': 'response.failed',
@@ -885,7 +887,7 @@ void main() {
       expect(failedParts.whereType<StreamPartError>(), hasLength(1));
 
       final filterDio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-        ..httpClientAdapter = _Adapter(
+        ..httpClientAdapter = FakeHttpAdapter(
           (request) async => _streamReply(request, [
             {
               'type': 'response.incomplete',
@@ -922,7 +924,7 @@ void main() {
   test('typed hosted tools serialize with Responses wire types', () async {
     Map<String, dynamic>? body;
     final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-      ..httpClientAdapter = _Adapter((request) async {
+      ..httpClientAdapter = FakeHttpAdapter((request) async {
         body = (request.data as Map).cast<String, dynamic>();
         return _reply(request, {
           'id': 'resp_hosted',
@@ -945,7 +947,7 @@ void main() {
               OpenAIFileSearchTool(vectorStoreIds: ['vs_1'], maxNumResults: 3),
               OpenAICodeInterpreterTool(container: {'type': 'auto'}),
               OpenAIImageGenerationTool(args: {'size': '1024x1024'}),
-              OpenAIMCPTool(
+              OpenAIMcpTool(
                 serverLabel: 'docs',
                 serverUrl: 'https://mcp.test',
                 allowedTools: ['lookup'],
@@ -989,7 +991,7 @@ void main() {
     'Responses preserves provider executed hosted calls and results',
     () async {
       final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-        ..httpClientAdapter = _Adapter((request) async {
+        ..httpClientAdapter = FakeHttpAdapter((request) async {
           return _reply(request, {
             'id': 'resp_hosted_result',
             'status': 'completed',
@@ -1095,7 +1097,7 @@ void main() {
       Map<String, dynamic>? secondBody;
       var requestCount = 0;
       final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-        ..httpClientAdapter = _Adapter((request) async {
+        ..httpClientAdapter = FakeHttpAdapter((request) async {
           requestCount++;
           if (requestCount == 2) {
             secondBody = (request.data as Map).cast<String, dynamic>();
@@ -1165,7 +1167,7 @@ void main() {
     'Responses streams hosted lifecycle items without local execution',
     () async {
       final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-        ..httpClientAdapter = _Adapter(
+        ..httpClientAdapter = FakeHttpAdapter(
           (request) async => _streamReply(request, [
             {
               'type': 'response.output_item.done',
@@ -1231,7 +1233,7 @@ void main() {
     'Responses streams computer and MCP hosted items with annotations',
     () async {
       final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-        ..httpClientAdapter = _Adapter(
+        ..httpClientAdapter = FakeHttpAdapter(
           (request) async => _streamReply(request, [
             {
               'type': 'response.created',
@@ -1332,7 +1334,7 @@ void main() {
       var calls = 0;
       Map<String, dynamic>? secondBody;
       final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-        ..httpClientAdapter = _Adapter((request) async {
+        ..httpClientAdapter = FakeHttpAdapter((request) async {
           calls++;
           if (calls == 2) {
             secondBody = (request.data as Map).cast<String, dynamic>();
@@ -1416,7 +1418,7 @@ void main() {
       var calls = 0;
       Map<String, dynamic>? secondBody;
       final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-        ..httpClientAdapter = _Adapter((request) async {
+        ..httpClientAdapter = FakeHttpAdapter((request) async {
           calls++;
           if (calls == 2) {
             secondBody = (request.data as Map).cast<String, dynamic>();
@@ -1537,7 +1539,7 @@ void main() {
       var calls = 0;
       Map<String, dynamic>? secondBody;
       final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-        ..httpClientAdapter = _Adapter((request) async {
+        ..httpClientAdapter = FakeHttpAdapter((request) async {
           calls++;
           if (calls == 2) {
             secondBody = (request.data as Map).cast<String, dynamic>();
@@ -1636,7 +1638,7 @@ void main() {
     () async {
       Map<String, dynamic>? body;
       final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-        ..httpClientAdapter = _Adapter((request) async {
+        ..httpClientAdapter = FakeHttpAdapter((request) async {
           body = (request.data as Map).cast<String, dynamic>();
           return _reply(request, {
             'id': 'resp_approval',
@@ -1678,7 +1680,7 @@ void main() {
   test('core does not execute provider hosted tool calls locally', () async {
     var executions = 0;
     final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-      ..httpClientAdapter = _Adapter(
+      ..httpClientAdapter = FakeHttpAdapter(
         (request) async => _reply(request, {
           'id': 'resp_core_hosted',
           'status': 'completed',
@@ -1719,7 +1721,7 @@ void main() {
 
   test('Responses maps text boundaries to each output message item', () async {
     final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-      ..httpClientAdapter = _Adapter(
+      ..httpClientAdapter = FakeHttpAdapter(
         (request) async => _streamReply(request, [
           {
             'type': 'response.output_item.added',
@@ -1775,7 +1777,7 @@ void main() {
     'Responses preserves unknown items as canonical opaque stream content',
     () async {
       final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-        ..httpClientAdapter = _Adapter(
+        ..httpClientAdapter = FakeHttpAdapter(
           (request) async => _streamReply(request, [
             {
               'type': 'response.output_item.done',
@@ -1817,7 +1819,7 @@ void main() {
     'streamText retains unknown Responses items in content and fullStream',
     () async {
       final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-        ..httpClientAdapter = _Adapter(
+        ..httpClientAdapter = FakeHttpAdapter(
           (request) async => _streamReply(request, [
             {
               'type': 'response.output_item.done',
@@ -1855,7 +1857,7 @@ void main() {
     Map<String, dynamic>? secondBody;
     var requestCount = 0;
     final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-      ..httpClientAdapter = _Adapter((request) async {
+      ..httpClientAdapter = FakeHttpAdapter((request) async {
         requestCount++;
         if (requestCount == 2) {
           secondBody = (request.data as Map).cast<String, dynamic>();
@@ -1937,7 +1939,7 @@ void main() {
     'Responses marks failed hosted results and preliminary hosted results',
     () async {
       final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-        ..httpClientAdapter = _Adapter(
+        ..httpClientAdapter = FakeHttpAdapter(
           (request) async => _streamReply(request, [
             {
               'type': 'response.output_item.done',
@@ -1988,7 +1990,7 @@ void main() {
     'streamText forwards provider hosted results through fullStream',
     () async {
       final dio = Dio(BaseOptions(baseUrl: 'https://api.openai.test/v1'))
-        ..httpClientAdapter = _Adapter(
+        ..httpClientAdapter = FakeHttpAdapter(
           (request) async => _streamReply(request, [
             {
               'type': 'response.output_item.done',
@@ -2036,19 +2038,6 @@ class _Signal implements AbortSignal {
     _cancelled = true;
     _done.complete();
   }
-}
-
-class _Adapter implements HttpClientAdapter {
-  _Adapter(this.handler);
-  final Future<ResponseBody> Function(RequestOptions) handler;
-  @override
-  Future<ResponseBody> fetch(
-    RequestOptions options,
-    Stream<Uint8List>? requestStream,
-    Future<void>? cancelFuture,
-  ) => handler(options);
-  @override
-  void close({bool force = false}) {}
 }
 
 ResponseBody _reply(RequestOptions _, Map<String, dynamic> body) =>

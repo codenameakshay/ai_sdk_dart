@@ -232,7 +232,15 @@ void main() {
       await _model(
         adapter,
       ).doGenerate(LanguageModelV4CallOptions(prompt: prompt));
-      expect(jsonDecode((adapter as _Adapter).lastBody), isA<Map>());
+      final requestBody = (adapter as _Adapter).lastRequestData as Map;
+      final input = (requestBody['input'] as List).cast<Map>();
+      expect(input.single, {
+        'type': 'function_call_output',
+        'call_id': 'call1',
+        'output': [
+          {'type': 'input_text', 'text': 'result'},
+        ],
+      });
 
       final invalidPrompt = LanguageModelV4Prompt(
         messages: [
@@ -284,6 +292,7 @@ class _Adapter implements HttpClientAdapter {
   final String Function(RequestOptions) body;
   final bool streaming;
   String lastBody = '';
+  Object? lastRequestData;
 
   @override
   Future<ResponseBody> fetch(
@@ -291,6 +300,7 @@ class _Adapter implements HttpClientAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
+    lastRequestData = options.data;
     lastBody = body(options);
     return ResponseBody.fromString(
       lastBody,

@@ -195,7 +195,7 @@ class OpenAIFiles {
       if (data == null) throw const OpenAIFileException('Empty file response');
       return OpenAIFileMetadata.fromJson(data);
     } on DioException catch (error) {
-      _rethrowCancellation(scope);
+      throwIfOpenAICancelled(scope);
       throw await apiErrorFromDioException(error, provider: 'openai');
     } finally {
       await scope.dispose();
@@ -224,7 +224,7 @@ class OpenAIFiles {
       }
       return metadata;
     } on DioException catch (error) {
-      _rethrowCancellation(scope);
+      throwIfOpenAICancelled(scope);
       throw await apiErrorFromDioException(error, provider: 'openai');
     } finally {
       await scope.dispose();
@@ -252,7 +252,7 @@ class OpenAIFiles {
       return _downloadStream(body.stream, scope);
     } on DioException catch (error) {
       await scope.dispose(cancelTransport: true);
-      _rethrowCancellation(scope);
+      throwIfOpenAICancelled(scope);
       throw await apiErrorFromDioException(error, provider: 'openai');
     } catch (_) {
       await scope.dispose(cancelTransport: true);
@@ -278,7 +278,7 @@ class OpenAIFiles {
         throw const OpenAIFileException('File delete acknowledgement mismatch');
       }
     } on DioException catch (error) {
-      _rethrowCancellation(scope);
+      throwIfOpenAICancelled(scope);
       throw await apiErrorFromDioException(error, provider: 'openai');
     } finally {
       await scope.dispose();
@@ -299,11 +299,6 @@ class OpenAIFiles {
       throw ArgumentError('provider reference id must not be empty');
     }
   }
-}
-
-void _rethrowCancellation(OpenAIRequestScope scope) {
-  if (scope.timedOut) throw const OpenAIFileTimeoutException();
-  if (scope.cancelled) throw const AiOperationCancelledError();
 }
 
 Stream<List<int>> _downloadStream(

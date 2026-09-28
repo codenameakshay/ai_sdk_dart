@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
 import 'pages/completion_page.dart';
+import 'pages/conversation_page.dart';
 import 'pages/embeddings_page.dart';
 import 'pages/image_gen_page.dart';
 import 'pages/multimodal_page.dart';
 import 'pages/object_stream_page.dart';
 import 'pages/provider_chat_page.dart';
+import 'pages/responses_page.dart';
 import 'pages/stt_page.dart';
 import 'pages/tools_chat_page.dart';
 import 'pages/tts_page.dart';
@@ -25,6 +27,8 @@ enum AdvancedExamplePage {
   stt,
   completion,
   objectStream,
+  conversation,
+  responses,
   widgetGallery,
 }
 
@@ -103,6 +107,16 @@ class _ShellState extends State<_Shell> with RestorationMixin {
       AdvancedExamplePage.objectStream,
       'Object Stream',
       Icons.data_object,
+    ),
+    _NavItem(
+      AdvancedExamplePage.conversation,
+      'Conversation',
+      Icons.forum_outlined,
+    ),
+    _NavItem(
+      AdvancedExamplePage.responses,
+      'Responses',
+      Icons.travel_explore_outlined,
     ),
     _NavItem(
       AdvancedExamplePage.widgetGallery,
@@ -189,6 +203,8 @@ class _ShellState extends State<_Shell> with RestorationMixin {
       AdvancedExamplePage.stt => const SttPage(),
       AdvancedExamplePage.completion => const CompletionPage(),
       AdvancedExamplePage.objectStream => const ObjectStreamPage(),
+      AdvancedExamplePage.conversation => const ConversationPage(),
+      AdvancedExamplePage.responses => const ResponsesPage(),
       AdvancedExamplePage.widgetGallery => const WidgetGalleryPage(),
     };
   }
@@ -217,6 +233,8 @@ AdvancedExamplePage? _initialPageFromUri() {
     'stt' => AdvancedExamplePage.stt,
     'completion' => AdvancedExamplePage.completion,
     'object-stream' => AdvancedExamplePage.objectStream,
+    'conversation' => AdvancedExamplePage.conversation,
+    'responses' => AdvancedExamplePage.responses,
     'widget-gallery' => AdvancedExamplePage.widgetGallery,
     _ => null,
   };

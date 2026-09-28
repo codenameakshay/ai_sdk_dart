@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:flutter_chat/main.dart';
 import 'package:flutter_chat/pages/completion_page.dart';
+import 'package:flutter_chat/pages/conversation_page.dart';
 import 'package:flutter_chat/pages/object_stream_page.dart';
 
 void main() {
@@ -34,6 +35,22 @@ void main() {
     expect(find.text('Object Stream'), findsWidgets);
     expect(find.textContaining('Streams a typed JSON object'), findsOneWidget);
     expect(find.text('Generate'), findsOneWidget);
+
+    await tester.tap(find.text('Conversation'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Local conversation'), findsOneWidget);
+    expect(find.byKey(const ValueKey('chat-composer-field')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('conversation-language-toggle')),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Remote'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Remote conversation'), findsOneWidget);
+    expect(find.byKey(const ValueKey('chat-composer-field')), findsOneWidget);
   });
 
   testWidgets('completion page streams text and stop cancels offline', (
@@ -102,6 +119,34 @@ void main() {
 
     expect(find.text('Object Stream'), findsOneWidget);
     expect(find.text('Say hello to start the conversation'), findsNothing);
+  });
+
+  testWidgets('conversation language toggle switches labels and RTL offline', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(const MaterialApp(home: LocalConversationPage()));
+    await tester.pump();
+
+    expect(find.text('Message…'), findsOneWidget);
+    expect(
+      tester
+          .widget<Directionality>(find.byType(Directionality).last)
+          .textDirection,
+      TextDirection.ltr,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey('conversation-language-toggle')),
+    );
+    await tester.pump();
+
+    expect(find.text('رسالة…'), findsOneWidget);
+    expect(
+      tester
+          .widget<Directionality>(find.byType(Directionality).last)
+          .textDirection,
+      TextDirection.rtl,
+    );
   });
 }
 

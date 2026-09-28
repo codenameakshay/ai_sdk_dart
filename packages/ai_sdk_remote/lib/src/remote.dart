@@ -207,6 +207,10 @@ class RemoteConversationTransport {
         rethrow;
       } on FormatException catch (error) {
         throw RemoteProtocolException('Malformed SSE or JSON frame: $error');
+      } on ConversationValidationException catch (error) {
+        throw RemoteProtocolException(
+          'Invalid conversation frame: ${error.message}',
+        );
       }
       if (cancellation?.isCancelled ?? false) return;
       if (!done) {
@@ -739,8 +743,7 @@ class _ConversationReducer {
   void _toolAvailable(Map<String, dynamic> e, bool error) {
     final callId = _string(e, 'toolCallId');
     final name = _string(e, 'toolName');
-    final input = error ? e['input'] : e['input'];
-    final args = _map(input, 'input');
+    final args = _map(e['input'], 'input');
     final index = _toolIndexes[callId];
     final previous = index == null ? null : _parts[index];
     final previousCall = previous is ToolCallPart ? previous : null;
@@ -767,7 +770,7 @@ class _ConversationReducer {
       _parts[index] = part;
     }
     if (error) {
-      _parts.add(
+      _addPart(
         ToolResultPart(
           id: 'tool-error-$callId',
           callId: callId,
@@ -839,7 +842,7 @@ class _ConversationReducer {
       ToolResultPart(
         id: 'result-$callId',
         callId: callId,
-        output: error ? _string(e, 'errorText') : _freeze(e['output']),
+        output: error ? _string(e, 'errorText') : e['output'],
         isError: error,
         toolName: e['toolName'] as String?,
         outputKind:
@@ -1060,6 +1063,9 @@ String _stringAllowEmpty(Map<String, dynamic> e, String key) {
   return value;
 }
 
+// Conversation part constructors (e.g. ToolCallPart, ToolResultPart,
+// ConversationMessage) already deep-freeze and apply depth/node limits to
+// the maps built here, so this only validates the wire shape.
 Map<String, dynamic> _map(Object? value, String key) {
   if (value is! Map) throw RemoteProtocolException('Expected object $key');
   final result = <String, dynamic>{};
@@ -1067,50 +1073,7 @@ Map<String, dynamic> _map(Object? value, String key) {
     if (entry.key is! String) {
       throw RemoteProtocolException('Expected string keys in $key');
     }
-    result[entry.key as String] = _freeze(entry.value);
+    result[entry.key as String] = entry.value;
   }
   return result;
-}
-
-class _RemoteJsonState {
-  final active = Set<Object>.identity();
-  int nodes = 0;
-}
-
-Object? _freeze(Object? value, [_RemoteJsonState? state, int depth = 0]) {
-  final context = state ?? _RemoteJsonState();
-  if (depth > 64) {
-    throw const RemoteProtocolException('JSON value is too deeply nested');
-  }
-  if (++context.nodes > 10000) {
-    throw const RemoteProtocolException('JSON value contains too many nodes');
-  }
-  if (value == null || value is String || value is bool || value is num) {
-    return value;
-  }
-  if (value is List) {
-    if (!context.active.add(value)) {
-      throw const RemoteProtocolException('Cyclic JSON value');
-    }
-    final result = List.unmodifiable(
-      value.map((item) => _freeze(item, context, depth + 1)),
-    );
-    context.active.remove(value);
-    return result;
-  }
-  if (value is Map) {
-    if (!context.active.add(value)) {
-      throw const RemoteProtocolException('Cyclic JSON value');
-    }
-    final result = <String, dynamic>{};
-    for (final entry in value.entries) {
-      if (entry.key is! String) {
-        throw const RemoteProtocolException('JSON object keys must be strings');
-      }
-      result[entry.key as String] = _freeze(entry.value, context, depth + 1);
-    }
-    context.active.remove(value);
-    return Map<String, dynamic>.unmodifiable(result);
-  }
-  throw RemoteProtocolException('Unsupported JSON value');
 }

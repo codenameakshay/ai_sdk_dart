@@ -25,6 +25,62 @@ void main() {
   );
 
   test(
+    'repeated tool input errors for one call yield a single result',
+    () async {
+      final client = MockClient((request) async {
+        return _response(
+          'data: {"type":"start"}\n\n'
+          'data: {"type":"tool-input-error","toolCallId":"call-1",'
+          '"toolName":"search","input":{},"errorText":"invalid"}\n\n'
+          'data: {"type":"tool-input-error","toolCallId":"call-1",'
+          '"toolName":"search","input":{},"errorText":"invalid again"}\n\n'
+          'data: {"type":"finish"}\n\n'
+          'data: [DONE]\n\n',
+        );
+      });
+      final transport = RemoteConversationTransport(
+        endpoint: Uri.parse('https://backend.test/chat'),
+        client: client,
+      );
+      addTearDown(transport.dispose);
+      addTearDown(client.close);
+
+      final snapshots = await transport
+          .send(Conversation(id: 'c1', messages: const []))
+          .toList();
+      final results = snapshots.last.messages.single.parts
+          .whereType<ToolResultPart>()
+          .where((part) => part.callId == 'call-1');
+      expect(results, hasLength(1));
+      expect(results.single.output, 'invalid again');
+    },
+  );
+
+  test('frames that violate conversation limits are protocol errors', () async {
+    final nested = '${'{"a":' * 70}1${'}' * 70}';
+    final client = MockClient((request) async {
+      return _response(
+        'data: {"type":"start"}\n\n'
+        'data: {"type":"tool-input-available","toolCallId":"call-1",'
+        '"toolName":"search","input":$nested}\n\n'
+        'data: {"type":"finish"}\n\n'
+        'data: [DONE]\n\n',
+      );
+    });
+    final transport = RemoteConversationTransport(
+      endpoint: Uri.parse('https://backend.test/chat'),
+      client: client,
+    );
+    addTearDown(transport.dispose);
+    addTearDown(client.close);
+
+    await expectLater(
+      transport.send(Conversation(id: 'c1', messages: const [])).toList(),
+      throwsA(isA<RemoteProtocolException>()),
+    );
+  });
+
+  test(
     'merges static and async authentication headers before dispatch',
     () async {
       late http.BaseRequest sent;
@@ -156,6 +212,47 @@ void main() {
       'vendor': {'trace': 'result-1'},
     });
     expect(part.containsKey('providerOptions'), isFalse);
+  });
+
+  test(
+    'serializes completed tool history with the UI available state',
+    () async {
+      Map<String, dynamic>? body;
+      final client = MockClient((request) async {
+        body = jsonDecode(request.body) as Map<String, dynamic>;
+        return _response(
+          'data: {"type":"start"}\n\n'
+          'data: {"type":"finish"}\n\n'
+          'data: [DONE]\n\n',
+        );
+      });
+      final transport = RemoteConversationTransport(
+        endpoint: Uri.parse('https://backend.test/chat'),
+        client: client,
+      );
+      addTearDown(transport.dispose);
+      addTearDown(client.close);
+
+      await transport.send(_toolHistory()).toList();
+
+      final part = ((body!['messages'] as List).single as Map)['parts'] as List;
+      expect(part.single['state'], 'output-available');
+      expect(part.single['output'], {'ok': true});
+    },
+  );
+
+  test('pinned server accepts completed tool history', () async {
+    final endpoint = _pinnedEndpoint();
+    if (endpoint == null) {
+      markTestSkipped('Set AI_SDK_REMOTE_REFERENCE_URL for the pinned server');
+      return;
+    }
+    final transport = RemoteConversationTransport(
+      endpoint: Uri.parse(endpoint),
+    );
+    addTearDown(transport.dispose);
+    final snapshots = await transport.send(_toolHistory()).toList();
+    expect(snapshots, isNotEmpty);
   });
 
   test('serializes denied tool output with the UI denied state', () async {
@@ -367,6 +464,102 @@ void main() {
       'url': 'data:image/png;base64,AP+A',
       'mediaType': 'image/png',
     });
+  });
+
+  test(
+    'serializes a binary conversation file as a lossless UI data URL',
+    () async {
+      Map<String, dynamic>? body;
+      final client = MockClient((request) async {
+        body = jsonDecode(request.body) as Map<String, dynamic>;
+        return _response(
+          'data: {"type":"start"}\n\n'
+          'data: {"type":"finish"}\n\n'
+          'data: [DONE]\n\n',
+        );
+      });
+      final transport = RemoteConversationTransport(
+        endpoint: Uri.parse('https://backend.test/chat'),
+        client: client,
+      );
+      addTearDown(transport.dispose);
+      addTearDown(client.close);
+
+      await transport
+          .send(
+            Conversation(
+              id: 'c1',
+              messages: [
+                ConversationMessage(
+                  id: 'message',
+                  role: ConversationRole.user,
+                  parts: [
+                    FilePart(
+                      id: 'file',
+                      data: ConversationFileBytes(
+                        Uint8List.fromList([0, 255, 128]),
+                      ),
+                      mimeType: 'application/octet-stream',
+                      name: 'fixture.bin',
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          )
+          .toList();
+
+      final part = ((body!['messages'] as List).single as Map)['parts'] as List;
+      expect(part.single['url'], 'data:application/octet-stream;base64,AP+A');
+      expect(part.single['mediaType'], 'application/octet-stream');
+      expect(part.single['filename'], 'fixture.bin');
+    },
+  );
+
+  test('rejects an opaque provider file before dispatch', () async {
+    var requests = 0;
+    final client = MockClient((request) async {
+      requests++;
+      return _response(
+        'data: {"type":"start"}\n\n'
+        'data: {"type":"finish"}\n\n'
+        'data: [DONE]\n\n',
+      );
+    });
+    final transport = RemoteConversationTransport(
+      endpoint: Uri.parse('https://backend.test/chat'),
+      client: client,
+    );
+    addTearDown(transport.dispose);
+    addTearDown(client.close);
+
+    await expectLater(
+      transport
+          .send(
+            Conversation(
+              id: 'c1',
+              messages: [
+                ConversationMessage(
+                  id: 'message',
+                  role: ConversationRole.user,
+                  parts: [
+                    FilePart(
+                      id: 'file',
+                      data: ConversationFileProviderReference(
+                        namespace: 'openai',
+                        id: 'file-1',
+                      ),
+                      mimeType: 'application/octet-stream',
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          )
+          .toList(),
+      throwsA(isA<UnsupportedError>()),
+    );
+    expect(requests, 0);
   });
 
   test('rejects redacted reasoning before dispatch', () async {

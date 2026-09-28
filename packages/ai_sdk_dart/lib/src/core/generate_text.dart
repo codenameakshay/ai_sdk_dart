@@ -824,10 +824,7 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
     final responseInfo = GenerateTextResponse(
       messages: List.unmodifiable(responseMessages),
       body: bodyInclusion.responseBody ? lastResponse?.response?.body : null,
-      metadata: _filteredResponseMetadata(
-        lastResponse?.response,
-        bodyInclusion,
-      ),
+      metadata: filterResponseMetadata(lastResponse?.response, bodyInclusion),
     );
 
     final result = GenerateTextResult<TOutput>(
@@ -971,19 +968,6 @@ LanguageModelV4GenerateResult _bodyFilteredResult(
         ),
   providerMetadata: result.providerMetadata,
 );
-
-LanguageModelV4ResponseMetadata? _filteredResponseMetadata(
-  LanguageModelV4ResponseMetadata? metadata,
-  BodyInclusionPolicy policy,
-) => metadata == null
-    ? null
-    : LanguageModelV4ResponseMetadata(
-        id: metadata.id,
-        modelId: metadata.modelId,
-        timestamp: metadata.timestamp,
-        headers: metadata.headers,
-        body: policy.responseBody ? metadata.body : null,
-      );
 
 String _contentToText(List<LanguageModelV4ContentPart> content) {
   return content.whereType<LanguageModelV4TextPart>().map((p) => p.text).join();

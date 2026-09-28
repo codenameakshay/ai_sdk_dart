@@ -29,8 +29,10 @@ class ToolApprovalReplay {
 /// Callers should present [requests] as a fresh pending approval and collect a
 /// new bound response. No tool or provider call is made before this error.
 class ToolApprovalRenewalRequiredError extends ArgumentError {
-  ToolApprovalRenewalRequiredError({required this.requests})
-    : super('Tool approval binding changed; renewal is required.');
+  ToolApprovalRenewalRequiredError({
+    required List<LanguageModelV4ToolApprovalRequestPart> requests,
+  }) : requests = List.unmodifiable(requests),
+       super('Tool approval binding changed; renewal is required.');
 
   final List<LanguageModelV4ToolApprovalRequestPart> requests;
 }
@@ -42,13 +44,12 @@ class ToolApprovalRenewalRequiredError extends ArgumentError {
 class ToolApprovalProviderExecutedError extends ArgumentError {
   ToolApprovalProviderExecutedError({
     required List<LanguageModelV4ToolApprovalRequestPart> requests,
-  }) : super(
+  }) : requests = List.unmodifiable(requests),
+       super(
          'Cannot resume provider-executed tool approval through local tools.',
-       ) {
-    this.requests = List.unmodifiable(requests);
-  }
+       );
 
-  late final List<LanguageModelV4ToolApprovalRequestPart> requests;
+  final List<LanguageModelV4ToolApprovalRequestPart> requests;
 }
 
 /// Agent that runs tools in a loop to accomplish tasks.
@@ -246,20 +247,15 @@ class ToolLoopAgent {
         '${missingApprovalIds.join(', ')}',
       );
     }
-    final invalidBindings = <String>[];
     final seenCallIds = <String>{};
-    for (final request in replay.requests) {
+    final hasInvalidBinding = replay.requests.any((request) {
       final response = approvalById[request.approvalId]!;
-      if (!seenCallIds.add(request.toolCall.toolCallId) ||
+      return !seenCallIds.add(request.toolCall.toolCallId) ||
           request.policyRevision != effectiveRevision ||
-          !approvalMatchesToolCall(response, request: request)) {
-        invalidBindings.add(request.approvalId);
-      }
-    }
-    if (invalidBindings.isNotEmpty) {
-      throw ToolApprovalRenewalRequiredError(
-        requests: List.unmodifiable(replay.requests),
-      );
+          !approvalMatchesToolCall(response, request: request);
+    });
+    if (hasInvalidBinding) {
+      throw ToolApprovalRenewalRequiredError(requests: replay.requests);
     }
     final providerExecuted = replay.requests
         .where((request) => request.toolCall.providerExecuted)

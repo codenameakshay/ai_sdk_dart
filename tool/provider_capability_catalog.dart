@@ -125,7 +125,7 @@ void main(List<String> args) {
   final generated = _render(records, path);
   if (command == 'generate') {
     stdout.write(generated);
-  } else if (command == 'check') {
+  } else {
     final generatedFile = File(generatedPath);
     if (!generatedFile.existsSync()) {
       _fail('generated Markdown is missing: $generatedPath');
@@ -135,10 +135,6 @@ void main(List<String> args) {
     }
     stdout.writeln(
       'catalog valid: ${records.length} records, ${providers.length} providers',
-    );
-  } else {
-    _fail(
-      'usage: dart run tool/provider_capability_catalog.dart [check|generate] [path] [--as-of=YYYY-MM-DD] [--fail-on-stale]',
     );
   }
 }

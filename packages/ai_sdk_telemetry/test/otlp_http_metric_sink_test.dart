@@ -442,22 +442,225 @@ void main() {
     expect(_firstDataPointAttributes(payloads.single), isEmpty);
     await sink.dispose();
   });
+
+  test(
+    'valid observations split into payloads within the byte limit',
+    () async {
+      final splitServer = await HttpServer.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
+      addTearDown(() => splitServer.close(force: true));
+      final sizes = <int>[];
+      final received = <Object?>[];
+      splitServer.listen((request) async {
+        final bytes = await request.fold<List<int>>(
+          [],
+          (all, chunk) => all..addAll(chunk),
+        );
+        sizes.add(bytes.length);
+        final payload = jsonDecode(utf8.decode(bytes)) as Map;
+        final resource = (payload['resourceMetrics'] as List).single as Map;
+        final scope = (resource['scopeMetrics'] as List).single as Map;
+        received.addAll(scope['metrics'] as List);
+        await request.response.close();
+      });
+      final sink = OtlpHttpMetricSink(
+        endpoint: Uri.parse('http://127.0.0.1:${splitServer.port}/v1/metrics'),
+        maxPayloadBytes: 800,
+        batchSize: 4,
+      );
+      addTearDown(sink.dispose);
+      for (var index = 0; index < 3; index++) {
+        sink.record(TelemetryMetric(name: '${'x' * 200}$index', value: index));
+      }
+      expect(sink.pendingCount, 3);
+      await sink.flush();
+      expect(received, hasLength(3));
+      expect(sizes, everyElement(lessThanOrEqualTo(800)));
+      expect(sink.pendingCount, 0);
+    },
+  );
+
+  test('resource attributes retain only sanitized values', () async {
+    var redactions = 0;
+    final sink = OtlpHttpMetricSink(
+      endpoint: Uri.parse('http://fixture.test/v1/metrics'),
+      resourceAttributes: const {'secret': 'private'},
+      redactAttribute: (key, value) {
+        redactions++;
+        return '[redacted]';
+      },
+    );
+    addTearDown(sink.dispose);
+    expect(sink.resourceAttributes, {'secret': '[redacted]'});
+    expect(redactions, 1);
+  });
+
+  test(
+    'redaction runs once at admission and retries preserve observation',
+    () async {
+      final requests = <Map<String, dynamic>>[];
+      final identityServer = await HttpServer.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
+      identityServer.listen((request) async {
+        requests.add(
+          jsonDecode(await utf8.decoder.bind(request).join())
+              as Map<String, dynamic>,
+        );
+        request.response.statusCode = requests.length == 1 ? 503 : 200;
+        await request.response.close();
+      });
+      var redactions = 0;
+      final sink = OtlpHttpMetricSink(
+        endpoint: Uri.parse(
+          'http://127.0.0.1:${identityServer.port}/v1/metrics',
+        ),
+        redactAttribute: (key, value) {
+          redactions++;
+          return '[redacted-$redactions]';
+        },
+      );
+      addTearDown(() async {
+        await sink.dispose();
+        await identityServer.close(force: true);
+      });
+      sink.record(
+        const TelemetryMetric(
+          name: 'ai.latency.totalMs',
+          value: 12,
+          attributes: {'secret': 'private'},
+        ),
+      );
+      expect(redactions, 1);
+      await expectLater(sink.flush(), throwsA(isA<HttpException>()));
+      await sink.flush();
+      expect(requests, hasLength(2));
+      expect(
+        redactions,
+        1,
+        reason: 'Export and retry must not rerun user redaction',
+      );
+      expect(
+        requests[1],
+        requests[0],
+        reason:
+            'Retries retain the original observation timestamp and redacted data',
+      );
+    },
+  );
+
+  test('redactor failures omit only the failing attribute', () async {
+    final requests = <Map<String, dynamic>>[];
+    final identityServer = await HttpServer.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
+    identityServer.listen((request) async {
+      requests.add(
+        jsonDecode(await utf8.decoder.bind(request).join())
+            as Map<String, dynamic>,
+      );
+      await request.response.close();
+    });
+    final diagnostics = <Object>[];
+    var redactions = 0;
+    final sink = OtlpHttpMetricSink(
+      endpoint: Uri.parse('http://127.0.0.1:${identityServer.port}/v1/metrics'),
+      redactAttribute: (key, value) {
+        redactions++;
+        if (key == 'bad') throw StateError('cannot redact');
+        return 'sanitized-$value';
+      },
+      onDiagnostic: (error, [_]) => diagnostics.add(error),
+    );
+    addTearDown(() async {
+      await sink.dispose();
+      await identityServer.close(force: true);
+    });
+
+    sink.record(
+      const TelemetryMetric(
+        name: 'ai.metric',
+        value: 1,
+        attributes: {'good': 'value', 'bad': 'secret'},
+      ),
+    );
+    await sink.flush();
+
+    expect(redactions, 2);
+    expect(diagnostics, isNotEmpty);
+    final attributes = _firstDataPointAttributes(requests.single);
+    expect(attributes, hasLength(1));
+    expect((attributes.single as Map)['key'], 'good');
+    expect(
+      ((attributes.single as Map)['value'] as Map)['stringValue'],
+      'sanitized-value',
+    );
+  });
+
+  test('same metric names share one OTLP metric with ordered points', () async {
+    final requests = <Map<String, dynamic>>[];
+    final identityServer = await HttpServer.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
+    identityServer.listen((request) async {
+      requests.add(
+        jsonDecode(await utf8.decoder.bind(request).join())
+            as Map<String, dynamic>,
+      );
+      await request.response.close();
+    });
+    final sink = OtlpHttpMetricSink(
+      endpoint: Uri.parse('http://127.0.0.1:${identityServer.port}/v1/metrics'),
+      batchSize: 3,
+    );
+    addTearDown(() async {
+      await sink.dispose();
+      await identityServer.close(force: true);
+    });
+
+    final beforeRecording = DateTime.now().microsecondsSinceEpoch * 1000;
+    sink.record(const TelemetryMetric(name: 'same', value: 1));
+    sink.record(const TelemetryMetric(name: 'other', value: 2));
+    sink.record(const TelemetryMetric(name: 'same', value: 3));
+    final afterRecording = DateTime.now().microsecondsSinceEpoch * 1000;
+    await sink.flush();
+
+    final metrics = _metrics(requests.single);
+    expect(metrics.map((metric) => (metric as Map)['name']), ['same', 'other']);
+    final same = metrics.first as Map;
+    final points = same['gauge']['dataPoints'] as List;
+    expect(points, hasLength(2));
+    expect(points.map((point) => (point as Map)['asDouble']), [1.0, 3.0]);
+    final timestamps = points
+        .map((point) => int.parse((point as Map)['timeUnixNano'] as String))
+        .toList();
+    expect(
+      timestamps,
+      everyElement(inInclusiveRange(beforeRecording, afterRecording)),
+    );
+    expect(timestamps.first, lessThanOrEqualTo(timestamps.last));
+  });
 }
 
 String _firstMetricName(Map<String, dynamic> payload) {
+  return (_metrics(payload).single as Map)['name'] as String;
+}
+
+List<Object?> _metrics(Map<String, dynamic> payload) {
   final resourceMetrics = payload['resourceMetrics'] as List;
   final scopeMetrics = (resourceMetrics.single as Map)['scopeMetrics'] as List;
-  final metrics = (scopeMetrics.single as Map)['metrics'] as List;
-  return (metrics.single as Map)['name'] as String;
+  return ((scopeMetrics.single as Map)['metrics'] as List).cast<Object?>();
 }
 
 List<Map<String, dynamic>> _firstDataPointAttributes(
   Map<String, dynamic> payload,
 ) {
-  final resourceMetrics = payload['resourceMetrics'] as List;
-  final scopeMetrics = (resourceMetrics.single as Map)['scopeMetrics'] as List;
-  final metrics = (scopeMetrics.single as Map)['metrics'] as List;
-  final gauge = ((metrics.single as Map)['gauge'] as Map);
+  final gauge = (_metrics(payload).single as Map)['gauge'] as Map;
   final points = gauge['dataPoints'] as List;
   final attributes = (points.single as Map)['attributes'] as List;
   return attributes

@@ -2,9 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:ai_sdk_realtime/ai_sdk_realtime.dart';
 import 'package:test/test.dart';
+
+import 'support/fake_abort_signal.dart';
 
 void main() {
   test('covers optional event payloads and malformed map fields', () {
@@ -136,7 +137,7 @@ void main() {
 
   test('abort after readiness closes the transport once', () async {
     final transport = _Transport();
-    final signal = _Signal();
+    final signal = FakeAbortSignal();
     final pending = RealtimeSession.connect(
       apiKey: 'fixture',
       endpoint: Uri.parse('ws://fixture/realtime'),
@@ -155,18 +156,6 @@ void main() {
     expect(session.state, RealtimeConnectionState.closed);
     expect(transport.closeCount, 1);
   });
-}
-
-class _Signal implements AbortSignal {
-  final cancelled = Completer<void>();
-
-  @override
-  bool get isCancelled => cancelled.isCompleted;
-
-  @override
-  Future<void> get onCancelled => cancelled.future;
-
-  void cancel() => cancelled.complete();
 }
 
 class _Transport implements RealtimeTransport {

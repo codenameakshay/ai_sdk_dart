@@ -1692,6 +1692,49 @@ void main() {
     });
 
     test(
+      'reconnect succeeds even when the recovery reinitialize itself fails once',
+      () async {
+        var reinitializeAttempts = 0;
+        final first = _ScriptedTransport((req) {
+          switch (req.method) {
+            case 'initialize':
+              return _initResult(req);
+            case 'notifications/initialized':
+              return _ok(req, {});
+            case 'tools/list':
+              throw const MCPException('transport down');
+            default:
+              return _ok(req, {});
+          }
+        });
+
+        final reconnected = _ScriptedTransport((req) {
+          if (req.method == 'initialize') {
+            reinitializeAttempts++;
+            throw const MCPException('reinitialize failed');
+          }
+          if (req.method == 'tools/list') return _ok(req, {'tools': []});
+          return _ok(req, {});
+        });
+
+        final client = MCPClient(
+          transport: first,
+          reconnectPolicy: const MCPReconnectPolicy(
+            maxAttempts: 1,
+            initialDelayMs: 1,
+            maxDelayMs: 2,
+          ),
+          transportFactory: () => reconnected,
+        );
+        addTearDown(client.close);
+
+        final tools = await client.tools();
+        expect(tools, isEmpty);
+        expect(reinitializeAttempts, 1);
+      },
+    );
+
+    test(
       'resource refresh queues a trailing replay when a second update lands mid-read',
       () async {
         final readRelease = Completer<void>();

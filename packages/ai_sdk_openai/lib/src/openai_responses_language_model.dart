@@ -102,9 +102,6 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
     } on DioException catch (e) {
       await cancellation.dispose();
       throw await apiErrorFromDioException(e, provider: provider);
-    } on AiOperationCancelledError {
-      await cancellation.dispose();
-      rethrow;
     } catch (_) {
       await cancellation.dispose();
       rethrow;

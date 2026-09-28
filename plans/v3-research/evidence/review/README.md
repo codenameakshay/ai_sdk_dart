@@ -12,7 +12,8 @@ These are checkpoint logs, not a final whole-workspace qualification.
 | Ollama observer lifetime | All 3 operations used future-only observation | Open at this checkpoint |
 | MCP TypeScript interoperability | No new failure claimed | Pinned legacy SDK reference 1 passed; modern protocol not covered |
 
-Reproduce with the named test files in each log using `fvm dart test`.
-The MCP reference command is `make test-mcp-reference`. Logs preserve failing
-assertions and counts; source is still evolving, so later evidence must replace
-these checkpoints when claiming release readiness.
+Reproduce with the package test suites using `fvm dart test`. The MCP
+reference command is `make test-mcp-reference`. Only the Ollama observer and
+Responses media wire logs are kept; the regressions they capture are covered by
+package tests, and later evidence must replace these checkpoints when claiming
+release readiness.

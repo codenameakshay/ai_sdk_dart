@@ -104,13 +104,13 @@ class CompletionController extends StreamingControllerBase {
       notifyListenersSafely(immediate: true, status: true);
 
       // The result's `text`/`output` futures reject on a streaming error; we
-      // surface errors via [fullStream] instead, so swallow those completions
+      // surface errors via [stream] instead, so swallow those completions
       // to keep them from becoming unhandled async errors.
       streamResult.text.then((_) {}, onError: (_) {});
       streamResult.output.then((_) {}, onError: (_) {});
 
       // Streaming errors surface on the full event stream (not the text
-      // stream), so watch both: text for content, fullStream for errors.
+      // stream), so watch both: text for content, stream for errors.
       _errorSubscription = streamResult.stream.listen((event) {
         if (!isCurrentRequest(requestId)) return;
         if (event is StreamTextErrorEvent) _handleError(event.error, requestId);

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -549,5 +550,145 @@ void main() {
         expect(apiKeys, ['first-key', 'second-key']);
       },
     );
+
+    test(
+      'embed releases the abort-signal listener after success and failure',
+      () async {
+        var fail = false;
+        final server = await TestServer.start((request) async {
+          await captureBody(request);
+          if (fail) {
+            request.response.statusCode = 500;
+            request.response.headers.contentType = ContentType.json;
+            request.response.write(
+              jsonEncode({
+                'error': {'message': 'boom'},
+              }),
+            );
+          } else {
+            request.response.statusCode = 200;
+            request.response.headers.contentType = ContentType.json;
+            request.response.write(
+              jsonEncode({
+                'data': [
+                  {
+                    'embedding': [0.1],
+                  },
+                ],
+              }),
+            );
+          }
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = AzureOpenAIProvider(
+          endpoint: server.baseUrl,
+          apiKey: 'key',
+        ).embedding('text-embedding-ada-002');
+        final signal = _Signal();
+        addTearDown(signal.close);
+
+        await model.doEmbed(
+          EmbeddingModelV2CallOptions<String>(
+            values: const ['hello'],
+            abortSignal: signal,
+          ),
+        );
+        expect(signal.active, 0);
+        final attachedAfterSuccess = signal.attached;
+        expect(attachedAfterSuccess, greaterThan(0));
+
+        fail = true;
+        await expectLater(
+          model.doEmbed(
+            EmbeddingModelV2CallOptions<String>(
+              values: const ['hello'],
+              abortSignal: signal,
+            ),
+          ),
+          throwsA(isA<AiApiCallError>()),
+        );
+        expect(signal.active, 0);
+        expect(signal.attached, greaterThan(attachedAfterSuccess));
+      },
+    );
   });
+
+  group('Azure Responses endpoint', () {
+    for (final streaming in [false, true]) {
+      test('uses the v1 endpoint (stream=$streaming)', () async {
+        late Uri uri;
+        late Map<String, dynamic> body;
+        String? apiKey;
+        final server = await TestServer.start((request) async {
+          uri = request.uri;
+          apiKey = request.headers.value('api-key');
+          body = await captureBody(request);
+          if (streaming) {
+            request.response.headers.contentType = ContentType(
+              'text',
+              'event-stream',
+            );
+            request.response.write(
+              'data: {"type":"response.completed","response":{"id":"response-1","status":"completed","output":[]}}\n\n',
+            );
+          } else {
+            request.response.headers.contentType = ContentType.json;
+            request.response.write(
+              jsonEncode({
+                'id': 'response-1',
+                'status': 'completed',
+                'output': [],
+              }),
+            );
+          }
+          await request.response.close();
+        });
+        addTearDown(server.close);
+        final provider = AzureOpenAIProvider(
+          endpoint: server.baseUrl,
+          apiKey: 'fixture-key',
+          apiVersion: '2024-05-01-preview',
+        );
+        addTearDown(provider.dispose);
+        final model = provider.responses('my-deployment');
+        const options = LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(messages: []),
+        );
+        if (streaming) {
+          final result = await model.doStream(options);
+          await result.stream.toList();
+        } else {
+          await model.doGenerate(options);
+        }
+        expect(uri.path, '/openai/v1/responses');
+        expect(uri.queryParameters, isEmpty);
+        expect(body['model'], 'my-deployment');
+        expect(body['stream'], streaming ? isTrue : anyOf(isFalse, isNull));
+        expect(apiKey, 'fixture-key');
+      });
+    }
+  });
+}
+
+class _Signal implements ObservableAbortSignal {
+  final events = StreamController<void>.broadcast();
+  var active = 0;
+  var attached = 0;
+  @override
+  bool get isCancelled => false;
+  @override
+  Future<void> get onCancelled => Completer<void>().future;
+  @override
+  Stream<void> get cancellationEvents => Stream.multi((controller) {
+    attached++;
+    active++;
+    final subscription = events.stream.listen(controller.addSync);
+    controller.onCancel = () {
+      active--;
+      return subscription.cancel();
+    };
+  }, isBroadcast: true);
+  Future<void> close() => events.close();
 }

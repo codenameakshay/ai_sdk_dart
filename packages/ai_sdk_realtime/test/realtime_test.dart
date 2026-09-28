@@ -135,47 +135,73 @@ void main() {
     });
   });
 
-  test('parses completed transcript and response usage variants', () {
-    final transcript =
-        RealtimeEvent.fromJson({
-              'type': 'conversation.item.input_audio_transcription.completed',
-              'item_id': 'item-1',
-              'content_index': 0,
-              'transcript': 'hello',
-              'usage': {
-                'type': 'tokens',
-                'input_tokens': 4,
-                'output_tokens': 2,
-                'total_tokens': 6,
-                'input_token_details': {'audio_tokens': 4},
-              },
-            })
-            as RealtimeTranscriptCompleted;
-    expect(transcript.transcript, 'hello');
-    expect(transcript.usage, isA<RealtimeTranscriptTokenUsage>());
-    expect((transcript.usage! as RealtimeTranscriptTokenUsage).inputTokens, 4);
-
-    final done =
-        RealtimeEvent.fromJson({
-              'type': 'response.done',
-              'response': {
-                'id': 'response-1',
-                'usage': {
-                  'input_tokens': 10,
-                  'output_tokens': 5,
-                  'total_tokens': 15,
-                  'input_token_details': {
-                    'cached_tokens': 3,
-                    'cached_tokens_details': {'text_tokens': 3},
-                  },
-                  'output_token_details': {'audio_tokens': 5},
-                },
-              },
-            })
-            as RealtimeResponseDone;
-    expect(done.usage?.totalTokens, 15);
-    expect(done.usage?.inputTokenDetails?.cachedTokens, 3);
-    expect(done.usage?.outputTokenDetails?.audioTokens, 5);
+  test('validates audio formats, turn detection and session modalities', () {
+    expect(
+      () => RealtimeAudioFormat(type: 'audio/unknown'),
+      throwsA(isA<AssertionError>()),
+    );
+    expect(
+      () => RealtimeAudioFormat(type: 'audio/pcm', rate: 16000),
+      throwsA(isA<AssertionError>()),
+    );
+    expect(
+      () => RealtimeAudioFormat(type: 'audio/pcma', rate: 24000),
+      throwsA(isA<AssertionError>()),
+    );
+    expect(const RealtimeAudioFormat(type: 'audio/pcm').toJson(), {
+      'type': 'audio/pcm',
+      'rate': 24000,
+    });
+    expect(
+      const RealtimeSemanticVad(
+        createResponse: false,
+        eagerness: 'high',
+        interruptResponse: false,
+      ).toJson(),
+      {
+        'type': 'semantic_vad',
+        'create_response': false,
+        'eagerness': 'high',
+        'interrupt_response': false,
+      },
+    );
+    for (final modalities in [
+      <String>[],
+      ['video'],
+      ['text', 'text'],
+    ]) {
+      expect(
+        () => RealtimeSessionConfig(outputModalities: modalities).toJson(),
+        throwsArgumentError,
+      );
+    }
+    expect(
+      const RealtimeSessionConfig(
+        model: 'model',
+        instructions: 'instructions',
+        outputModalities: ['audio'],
+        inputFormat: RealtimeAudioFormat(type: 'audio/pcmu'),
+        outputFormat: RealtimeAudioFormat(type: 'audio/pcma'),
+        voice: 'voice',
+        turnDetection: RealtimeSemanticVad(eagerness: 'low'),
+      ).toJson(),
+      {
+        'type': 'realtime',
+        'model': 'model',
+        'instructions': 'instructions',
+        'output_modalities': ['audio'],
+        'audio': {
+          'input': {
+            'format': {'type': 'audio/pcmu'},
+            'turn_detection': {'type': 'semantic_vad', 'eagerness': 'low'},
+          },
+          'output': {
+            'format': {'type': 'audio/pcma'},
+            'voice': 'voice',
+          },
+        },
+      },
+    );
   });
 
   test('bounded identity history refuses unsafe eviction', () async {

@@ -495,9 +495,11 @@ class LocalConversationBackend
         return;
       }
       _publishLive(ConversationMessageStatus.complete);
+      _liveMessageId = null;
     } catch (_) {
       if (!_disposed && epoch == _epoch) {
         _publishLive(ConversationMessageStatus.failed);
+        _liveMessageId = null;
       }
     } finally {
       if (identical(_cancellation, cancellation)) _cancellation = null;
@@ -573,9 +575,11 @@ class LocalConversationBackend
         return;
       }
       _publishLive(ConversationMessageStatus.complete);
+      _liveMessageId = null;
     } catch (_) {
       if (!_disposed && epoch == _epoch) {
         _publishLive(ConversationMessageStatus.failed);
+        _liveMessageId = null;
       }
     } finally {
       if (identical(_cancellation, cancellation)) _cancellation = null;
@@ -1131,6 +1135,7 @@ class LocalConversationBackend
       }
       if (!_disposed && epoch == _epoch) {
         _publishLive(ConversationMessageStatus.complete);
+        _liveMessageId = null;
         _pendingReplay = null;
         _pendingApprovalRequests.clear();
         _pendingApprovalResponses.clear();
@@ -1164,6 +1169,7 @@ class LocalConversationBackend
     } catch (_) {
       if (!_disposed && epoch == _epoch) {
         _publishLive(ConversationMessageStatus.failed);
+        _liveMessageId = null;
       }
     } finally {
       if (identical(_resumeCancellation, cancellation)) {

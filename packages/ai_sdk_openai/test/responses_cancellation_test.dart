@@ -116,7 +116,7 @@ void main() {
       final auth = Completer<Map<String, String>>();
       var requests = 0;
       final dio = Dio()
-        ..httpClientAdapter = _ResponseAdapter(() {
+        ..httpClientAdapter = _StreamAdapter(() {
           requests++;
           return ResponseBody.fromString('{}', HttpStatus.ok);
         });
@@ -142,7 +142,7 @@ void main() {
       final auth = Completer<Map<String, String>>();
       var requests = 0;
       final dio = Dio()
-        ..httpClientAdapter = _ResponseAdapter(() {
+        ..httpClientAdapter = _StreamAdapter(() {
           requests++;
           return ResponseBody.fromString('', HttpStatus.ok);
         });
@@ -260,21 +260,6 @@ class _Signal implements AbortSignal {
 
 class _StreamAdapter implements HttpClientAdapter {
   _StreamAdapter(this.factory);
-  final ResponseBody Function() factory;
-
-  @override
-  Future<ResponseBody> fetch(
-    RequestOptions options,
-    Stream<Uint8List>? requestStream,
-    Future<void>? cancelFuture,
-  ) async => factory();
-
-  @override
-  void close({bool force = false}) {}
-}
-
-class _ResponseAdapter implements HttpClientAdapter {
-  _ResponseAdapter(this.factory);
   final ResponseBody Function() factory;
 
   @override

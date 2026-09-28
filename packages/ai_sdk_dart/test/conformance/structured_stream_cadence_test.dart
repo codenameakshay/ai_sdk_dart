@@ -66,7 +66,7 @@ void main() {
         expect(item['emoji'], '\u{1F600}');
         expect(
           counters.parseAttemptsFor(PartialJsonParsePhase.streamTextPartial),
-          lessThan(32),
+          lessThan(8),
         );
       },
     );
@@ -179,7 +179,7 @@ void main() {
         });
         expect(
           counters.parseAttemptsFor(PartialJsonParsePhase.streamObjectSnapshot),
-          lessThan(12),
+          lessThan(8),
         );
       },
     );

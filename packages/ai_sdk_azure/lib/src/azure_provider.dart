@@ -155,7 +155,8 @@ class _AzureEmbeddingModel implements EmbeddingModelV2<String> {
   Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
     EmbeddingModelV2CallOptions<String> options,
   ) async {
-    final resolvedHeaders = await headers();
+    final cancellation = DioCancellationScope(options.abortSignal);
+    final resolvedHeaders = await cancellation.run(headers);
     final providerOptions = options.providerOptions?['azure'];
     final body = <String, dynamic>{
       'input': options.values,
@@ -173,11 +174,13 @@ class _AzureEmbeddingModel implements EmbeddingModelV2<String> {
         queryParameters: {'api-version': apiVersion},
         data: body,
         options: Options(headers: {...?options.headers, ...resolvedHeaders}),
-        cancelToken: cancelTokenFor(options.abortSignal),
+        cancelToken: cancellation.token,
       );
     } on DioException catch (e) {
+      await cancellation.dispose();
       throw await apiErrorFromDioException(e, provider: provider);
     }
+    await cancellation.dispose();
     final data = response.data;
     if (data == null) {
       throw _invalidResponse(response);

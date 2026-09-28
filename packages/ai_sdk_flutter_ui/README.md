@@ -245,8 +245,6 @@ Need more control? Compose the pieces yourself — e.g. `ChatMessageList` over y
 plus a custom `ChatComposer`, or a custom `messageBuilder` that renders `ToolCallCard`,
 `ReasoningView`, and `SourceCitations` inline for richer turns.
 
-## License
-
 ## Riverpod and Bloc lifecycle recipes
 
 The package stays framework-neutral at runtime. Concrete recipes live under
@@ -261,8 +259,7 @@ Persist `ConversationCodec.encode(controller.conversation)` and restore with
 the snapshot and never executes tools. Call `interrupt()` before replacing or
 disposing a backend.
 
-MIT
-# Conversation backends
+## Conversation backends
 
 Conversation-aware applications can use `ConversationController` with either
 `LocalConversationBackend` (a `ToolLoopAgent`) or
@@ -272,3 +269,7 @@ either backend through the same bridge. `ConversationCodec.decode` is used for
 restore and does not execute tools. Unknown parts are retained as
 `UnknownPart`; provider-specific file payloads should remain opaque unless the
 backend supplies a verified URI.
+
+## License
+
+MIT

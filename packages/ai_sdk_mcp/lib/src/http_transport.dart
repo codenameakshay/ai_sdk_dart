@@ -497,7 +497,6 @@ class StreamableHttpClientTransport implements MCPTransport {
     if (protocolVersion == '2026-07-28') {
       // Modern MCP has no protocol-level session. Ignore any accidental
       // session header from a dual-era server.
-      _sessionId = null;
       _pendingSessionId = null;
     }
     _sessionId = _pendingSessionId;

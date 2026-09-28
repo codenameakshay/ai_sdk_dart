@@ -105,9 +105,7 @@ Future<ToolExecutionResult> executeToolCall({
       generationContext: generationContext,
       toolContext: tool.toolContextIsBound
           ? ToolExecutionContext<Object?>(tool.toolContext)
-          : runtimeContext == null
-          ? null
-          : ToolExecutionContext<Map<String, Object?>>(runtimeContext),
+          : null,
     );
 
     final approvalEvaluator = tool.needsApprovalDynamic;

@@ -84,20 +84,9 @@ class _GoogleLanguageModel extends LanguageModelV4 {
     LanguageModelV4CallOptions options,
   ) async {
     final cancellation = DioCancellationScope(options.abortSignal);
-    late final String resolvedApiKey;
-    try {
-      resolvedApiKey = await runWithAbortSignal(
-        () async => (await apiKey())!,
-        options.abortSignal,
-      );
-    } catch (_) {
-      await cancellation.dispose();
-      rethrow;
-    }
-    if (options.abortSignal?.isCancelled == true) {
-      await cancellation.dispose();
-      throw const AiOperationCancelledError();
-    }
+    final resolvedApiKey = await cancellation.run(
+      () async => (await apiKey())!,
+    );
     final modelPath = _modelPath(modelId);
     final providerOptions = _googleProviderOptions(options.providerOptions);
     final requestBody = {
@@ -119,10 +108,9 @@ class _GoogleLanguageModel extends LanguageModelV4 {
         if (options.responseFormat
             case final LanguageModelV4JsonResponseFormat format) ...{
           'responseMimeType': 'application/json',
-          if (format.schema != null) 'responseJsonSchema': format.schema,
+          'responseJsonSchema': ?format.schema,
         },
-        if (_googleThinkingConfig(modelId, options) case final config?)
-          'thinkingConfig': config,
+        'thinkingConfig': ?_googleThinkingConfig(modelId, options),
       },
       if (options.tools.isNotEmpty) ...{
         'tools': _buildGoogleTools(options.tools),
@@ -307,20 +295,9 @@ class _GoogleLanguageModel extends LanguageModelV4 {
     LanguageModelV4CallOptions options,
   ) async {
     final cancellation = DioCancellationScope(options.abortSignal);
-    late final String resolvedApiKey;
-    try {
-      resolvedApiKey = await runWithAbortSignal(
-        () async => (await apiKey())!,
-        options.abortSignal,
-      );
-    } catch (_) {
-      await cancellation.dispose();
-      rethrow;
-    }
-    if (options.abortSignal?.isCancelled == true) {
-      await cancellation.dispose();
-      throw const AiOperationCancelledError();
-    }
+    final resolvedApiKey = await cancellation.run(
+      () async => (await apiKey())!,
+    );
     final modelPath = _modelPath(modelId);
     final providerOptions = _googleProviderOptions(options.providerOptions);
     final requestBody = {
@@ -342,10 +319,9 @@ class _GoogleLanguageModel extends LanguageModelV4 {
         if (options.responseFormat
             case final LanguageModelV4JsonResponseFormat format) ...{
           'responseMimeType': 'application/json',
-          if (format.schema != null) 'responseJsonSchema': format.schema,
+          'responseJsonSchema': ?format.schema,
         },
-        if (_googleThinkingConfig(modelId, options) case final config?)
-          'thinkingConfig': config,
+        'thinkingConfig': ?_googleThinkingConfig(modelId, options),
       },
       if (options.tools.isNotEmpty) ...{
         'tools': _buildGoogleTools(options.tools),
@@ -661,20 +637,9 @@ class _GoogleEmbeddingModel implements EmbeddingModelV2<String> {
     EmbeddingModelV2CallOptions<String> options,
   ) async {
     final cancellation = DioCancellationScope(options.abortSignal);
-    late final String resolvedApiKey;
-    try {
-      resolvedApiKey = await runWithAbortSignal(
-        () async => (await apiKey())!,
-        options.abortSignal,
-      );
-    } catch (_) {
-      await cancellation.dispose();
-      rethrow;
-    }
-    if (options.abortSignal?.isCancelled == true) {
-      await cancellation.dispose();
-      throw const AiOperationCancelledError();
-    }
+    final resolvedApiKey = await cancellation.run(
+      () async => (await apiKey())!,
+    );
     final modelPath = _modelPath(modelId);
     final providerOptions = options.providerOptions != null
         ? options.providerOptions![provider]
@@ -1105,7 +1070,7 @@ Object _toGoogleToolResultOutput(LanguageModelV4ToolResultOutput output) {
     ToolResultOutputExecutionDenied(:final reason, :final approvalId) => {
       'type': 'execution-denied',
       'reason': reason,
-      if (approvalId != null) 'approvalId': approvalId,
+      'approvalId': ?approvalId,
     },
     ToolResultOutputContent(:final parts) => {
       'type': 'content',

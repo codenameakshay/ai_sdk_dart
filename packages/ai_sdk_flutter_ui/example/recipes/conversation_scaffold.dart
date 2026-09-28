@@ -36,13 +36,9 @@ class _ConversationScaffoldExampleState
   }
 
   @override
-  void dispose() {
-    _conversation.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
+    // AiChatScaffold.conversation disposes the controller (and thus the
+    // backend) by default; the example doesn't need its own dispose.
     return AiChatScaffold.conversation(conversationController: _conversation);
   }
 }

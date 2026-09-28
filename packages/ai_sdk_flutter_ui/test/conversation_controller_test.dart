@@ -1948,6 +1948,68 @@ void main() {
     await backend.dispose();
   });
 
+  test('duplicate approval while executing runs the tool once', () async {
+    var executions = 0;
+    final entered = Completer<void>();
+    final release = Completer<String>();
+    final backend = LocalConversationBackend(
+      initial: Conversation(id: 'chat', messages: const []),
+      agent: ToolLoopAgent(
+        model: QueuedStreamModel([
+          [
+            mockToolCall(
+              toolName: 'write',
+              toolCallId: 'call-1',
+              input: const {},
+            ),
+          ],
+          [mockText('finished')],
+        ]),
+        tools: {
+          'write': Tool<Map<String, dynamic>, String>(
+            inputSchema: Schema<Map<String, dynamic>>(
+              jsonSchema: const {'type': 'object'},
+              fromJson: (json) => json,
+            ),
+            approvalPolicy: ToolApprovalPolicy.always,
+            executeDynamic: (_, _) async {
+              executions++;
+              if (!entered.isCompleted) entered.complete();
+              return release.future;
+            },
+          ),
+        },
+      ),
+    );
+    addTearDown(() async {
+      if (!release.isCompleted) release.complete('written');
+      await backend.dispose();
+    });
+    await backend.send('write once');
+    final approval = backend.conversation.messages
+        .expand((message) => message.parts)
+        .whereType<ApprovalPart>()
+        .single;
+    await backend.respondToApproval(
+      approvalId: approval.approvalId!,
+      approved: true,
+    );
+    await entered.future;
+    await backend.respondToApproval(
+      approvalId: approval.approvalId!,
+      approved: true,
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(executions, 1);
+    release.complete('written');
+    await pumpUntil(
+      () =>
+          backend.conversation.messages.last.status ==
+          ConversationMessageStatus.complete,
+    );
+    expect(executions, 1);
+  });
+
   test('retry can pause for and resume a tool approval', () async {
     final model = _ApprovalSequenceModel([
       [
@@ -2327,4 +2389,28 @@ void main() {
     });
     await backend.dispose();
   });
+
+  test(
+    'a completed assistant turn stays complete after the next send',
+    () async {
+      final backend = LocalConversationBackend(
+        agent: _textAgent('first'),
+        initial: _empty(),
+      );
+      await backend.send('hi');
+      final firstAssistantId = backend.conversation.messages.last.id;
+      expect(
+        backend.conversation.messages.last.status,
+        ConversationMessageStatus.complete,
+      );
+
+      await backend.send('again');
+
+      final firstAssistant = backend.conversation.messages.firstWhere(
+        (message) => message.id == firstAssistantId,
+      );
+      expect(firstAssistant.status, ConversationMessageStatus.complete);
+      await backend.dispose();
+    },
+  );
 }

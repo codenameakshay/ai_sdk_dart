@@ -239,7 +239,7 @@ Future<StreamObjectResult<T>> streamObject<T>({
         if (part is StreamPartResponseMetadata) {
           rawController.add(
             StreamPartResponseMetadata(
-              metadata: _filterObjectMetadata(part.metadata, bodyInclusion),
+              metadata: filterResponseMetadata(part.metadata, bodyInclusion)!,
             ),
           );
         } else {
@@ -282,9 +282,7 @@ Future<StreamObjectResult<T>> streamObject<T>({
           throw AiNoObjectGeneratedError(
             message: 'Failed to generate a valid structured object.',
             text: buffer.toString(),
-            response: responseMetadata == null
-                ? null
-                : _filterObjectMetadata(responseMetadata, bodyInclusion),
+            response: filterResponseMetadata(responseMetadata, bodyInclusion),
             usage: null,
             cause: error,
           );
@@ -331,17 +329,6 @@ Future<StreamObjectResult<T>> streamObject<T>({
     object: objectCompleter.future,
   );
 }
-
-LanguageModelV4ResponseMetadata _filterObjectMetadata(
-  LanguageModelV4ResponseMetadata metadata,
-  BodyInclusionPolicy policy,
-) => LanguageModelV4ResponseMetadata(
-  id: metadata.id,
-  modelId: metadata.modelId,
-  timestamp: metadata.timestamp,
-  headers: metadata.headers,
-  body: policy.responseBody ? metadata.body : null,
-);
 
 Map<String, dynamic>? _tryParseObjectJson(String text) {
   final parsed = tryParsePartialJsonValue(

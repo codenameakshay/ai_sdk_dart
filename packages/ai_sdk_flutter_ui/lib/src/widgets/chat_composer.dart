@@ -133,6 +133,8 @@ class _ChatComposerState extends State<ChatComposer> {
                 ),
               ),
             Expanded(
+              // Remount the field on enabled/disabled so Flutter web drops the
+              // old editing session instead of keeping a stale one focusable.
               child: KeyedSubtree(
                 key: ValueKey(widget.enabled),
                 child: TextField(

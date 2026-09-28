@@ -24,6 +24,20 @@ class BodyInclusionPolicy {
   final bool rawChunks;
 }
 
+/// Strips the response body from [metadata] unless retained by [policy].
+LanguageModelV4ResponseMetadata? filterResponseMetadata(
+  LanguageModelV4ResponseMetadata? metadata,
+  BodyInclusionPolicy policy,
+) => metadata == null
+    ? null
+    : LanguageModelV4ResponseMetadata(
+        id: metadata.id,
+        modelId: metadata.modelId,
+        timestamp: metadata.timestamp,
+        headers: metadata.headers,
+        body: policy.responseBody ? metadata.body : null,
+      );
+
 /// Removes provider payloads from actionable API errors unless explicitly
 /// retained by the caller's response-body policy.
 Object filterBodyBearingError(Object error, BodyInclusionPolicy policy) {

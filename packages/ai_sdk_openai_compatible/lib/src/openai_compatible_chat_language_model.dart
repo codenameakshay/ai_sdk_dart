@@ -203,7 +203,6 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
         ),
       );
     } on Object catch (error) {
-      await cancellation.dispose();
       throw _invalidResponse(response, provider: provider, cause: error);
     } finally {
       await cancellation.dispose();

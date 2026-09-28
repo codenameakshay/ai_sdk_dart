@@ -66,9 +66,8 @@ typedef ChatScaffoldStatusBuilder =
 class AiChatScaffold extends StatefulWidget {
   const AiChatScaffold({
     super.key,
-    this.controller,
-    this.agent,
-    this.conversationController,
+    required this.controller,
+    required this.agent,
     this.messageBuilder,
     this.errorBuilder,
     this.approvalBuilder,
@@ -78,10 +77,7 @@ class AiChatScaffold extends StatefulWidget {
     this.emptyState,
     this.listPadding = const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
     this.disposeConversationController = false,
-  }) : assert(
-         controller != null && agent != null && conversationController == null,
-         'Pass controller and agent, or use AiChatScaffold.conversation.',
-       );
+  }) : conversationController = null;
 
   /// Builds the same scaffold from a persisted local or remote conversation.
   ///

@@ -84,20 +84,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
     LanguageModelV4CallOptions options,
   ) async {
     final cancellation = DioCancellationScope(options.abortSignal);
-    late final Map<String, String> resolvedHeaders;
-    try {
-      resolvedHeaders = await runWithAbortSignal(
-        () async => await headers(),
-        options.abortSignal,
-      );
-    } catch (_) {
-      await cancellation.dispose();
-      rethrow;
-    }
-    if (options.abortSignal?.isCancelled == true) {
-      await cancellation.dispose();
-      throw const AiOperationCancelledError();
-    }
+    final resolvedHeaders = await cancellation.run(headers);
     final po = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
@@ -111,7 +98,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
         maxOutputTokens: options.maxOutputTokens,
       );
       if (mapped != null) {
-        if (thinking == null) thinking = mapped.thinking;
+        thinking ??= mapped.thinking;
         effort = mapped.effort;
       }
     }
@@ -258,20 +245,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
     LanguageModelV4CallOptions options,
   ) async {
     final cancellation = DioCancellationScope(options.abortSignal);
-    late final Map<String, String> resolvedHeaders;
-    try {
-      resolvedHeaders = await runWithAbortSignal(
-        () async => await headers(),
-        options.abortSignal,
-      );
-    } catch (_) {
-      await cancellation.dispose();
-      rethrow;
-    }
-    if (options.abortSignal?.isCancelled == true) {
-      await cancellation.dispose();
-      throw const AiOperationCancelledError();
-    }
+    final resolvedHeaders = await cancellation.run(headers);
     final po = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
@@ -285,7 +259,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
         maxOutputTokens: options.maxOutputTokens,
       );
       if (mapped != null) {
-        if (thinking == null) thinking = mapped.thinking;
+        thinking ??= mapped.thinking;
         effort = mapped.effort;
       }
     }
@@ -1026,7 +1000,7 @@ Map<String, dynamic> _anthropicOutputConfig(
       when format.schema != null) {
     return {
       'output_config': {
-        if (effort != null) 'effort': effort,
+        'effort': ?effort,
         'format': {'type': 'json_schema', 'schema': format.schema},
       },
     };

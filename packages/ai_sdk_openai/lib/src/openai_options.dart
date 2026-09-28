@@ -108,14 +108,3 @@ class OpenAIMcpTool extends LanguageModelV4ProviderDefinedTool {
          },
        );
 }
-
-/// Uppercase acronym spelling retained for discoverability.
-class OpenAIMCPTool extends OpenAIMcpTool {
-  OpenAIMCPTool({
-    required super.serverLabel,
-    required super.serverUrl,
-    super.allowedTools,
-    super.requireApproval,
-    super.headers,
-  });
-}

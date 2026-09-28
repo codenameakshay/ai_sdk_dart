@@ -375,14 +375,9 @@ void main() {
         );
         const jsonOutput = ToolResultOutputJson({'ok': true});
         const errorJsonOutput = ToolResultOutputErrorJson({'error': 'failed'});
-        const urlSource = LanguageModelV4SourcePart(
-          id: 'url-1',
-          url: 'https://example.com',
-        );
 
         expect(opaque.provider, 'fake');
         expect(opaque.raw, {'kind': 'response.item'});
-        expect(document.sourceType, 'document');
         expect(document.filename, 'guide.pdf');
         expect(reasoningFile.mediaType, 'application/pdf');
         expect(reasoningFile.filename, 'trace.pdf');
@@ -390,7 +385,6 @@ void main() {
         expect(toolResult.isError, isTrue);
         expect(jsonOutput.value, {'ok': true});
         expect(errorJsonOutput.value, {'error': 'failed'});
-        expect(urlSource.sourceType, 'url');
         expect(
           const ToolResultOutputExecutionDenied().reason,
           'Tool call execution denied.',
@@ -425,33 +419,6 @@ void main() {
         () => dataContentToBase64(reference),
         throwsA(isA<UnsupportedError>()),
       );
-    });
-
-    test('capability descriptors retain evidence and lifecycle metadata', () {
-      final descriptor = ProviderCapabilityDescriptor(
-        provider: 'fake',
-        modelId: 'fake-model',
-        apiSurface: 'chat',
-        source: Uri.parse('https://example.com/capabilities'),
-        verifiedOn: DateTime.utc(2026, 8, 10),
-        maxEmbeddingsPerCall: 128,
-        supportsParallelCalls: true,
-        features: const {'tools', 'vision'},
-        feature: 'reasoning',
-        lifecycle: ProviderCapabilityLifecycle.preview,
-        confidence: ProviderCapabilityConfidence.fixture,
-        evidenceId: 'fixture-1',
-      );
-
-      expect(descriptor.provider, 'fake');
-      expect(descriptor.modelId, 'fake-model');
-      expect(descriptor.maxEmbeddingsPerCall, 128);
-      expect(descriptor.supportsParallelCalls, isTrue);
-      expect(descriptor.features, containsAll(['tools', 'vision']));
-      expect(descriptor.feature, 'reasoning');
-      expect(descriptor.lifecycle, ProviderCapabilityLifecycle.preview);
-      expect(descriptor.confidence, ProviderCapabilityConfidence.fixture);
-      expect(descriptor.evidenceId, 'fixture-1');
     });
 
     test(

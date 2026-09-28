@@ -6,7 +6,7 @@ Fetched source: `/tmp/v3-upstream-openai-responses-model.ts`.
 
 ## Reproduced structured error loss
 
-`responses_failure_review_test.dart` adds two direct-provider regressions:
+`responses_error_mapping_test.dart` adds two direct-provider regressions:
 
 1. HTTP 200 with a Responses object whose status is `failed` and whose `error`
    carries `server_error` currently resolves a normal generate result. The
@@ -17,7 +17,7 @@ Fetched source: `/tmp/v3-upstream-openai-responses-model.ts`.
 Command:
 
 ```sh
-fvm dart test packages/ai_sdk_openai/test/responses_failure_review_test.dart
+fvm dart test packages/ai_sdk_openai/test/responses_error_mapping_test.dart
 ```
 
 Result: 2 failed, `/tmp/v3-responses-failure-before.log`. These are product
@@ -51,7 +51,7 @@ Before switching the default endpoint, qualify:
 Do not substitute fabricated fallback IDs or names for malformed function
 calls. Do not claim hosted-tool support from raw event forwarding alone.
 
-Additional parent regression: top-level streaming `type:error` with the string code `rate_limit_exceeded` also loses `AiApiCallError.code`. The expanded parent suite now has **3 failures**, confirmed with `fvm dart test packages/ai_sdk_openai/test/responses_failure_review_test.dart` (`/tmp/v3-responses-error-parent-current.log`). Retain the provider string code separately from HTTP status; a provider error code is not an HTTP status number.
+Additional parent regression: top-level streaming `type:error` with the string code `rate_limit_exceeded` also loses `AiApiCallError.code`. The expanded parent suite now has **3 failures**, confirmed with `fvm dart test packages/ai_sdk_openai/test/responses_error_mapping_test.dart` (`/tmp/v3-responses-error-parent-current.log`). Retain the provider string code separately from HTTP status; a provider error code is not an HTTP status number.
 
 ## Correction and parent verification
 
@@ -70,4 +70,4 @@ Before: a failed generation could resolve normally; stream error codes were lost
 
 ## Computer action identity regression after hosted mapping
 
-Pinned upstream `openai-responses-language-model.ts` lines1275–1312 distinguish two computer-call shapes: no `call_id` means provider-executed `computer_use`; a present `call_id` means client-executed `computer` with that call ID and no synthetic result. Current Dart maps both to hosted execution using the item ID. Parent `computer_identity_review_test.dart` reproduces expected`call-action`, actual`item-action` (`/tmp/v3-computer-identity-before.log`). Later assertions also require no synthesized tool result and no provider-executed marker. This is an open W06 correction; the previous worker121-pass count predates it.
+Pinned upstream `openai-responses-language-model.ts` lines1275–1312 distinguish two computer-call shapes: no `call_id` means provider-executed `computer_use`; a present `call_id` means client-executed `computer` with that call ID and no synthetic result. Current Dart maps both to hosted execution using the item ID. Parent `responses_computer_tool_test.dart` reproduces expected`call-action`, actual`item-action` (`/tmp/v3-computer-identity-before.log`). Later assertions also require no synthesized tool result and no provider-executed marker. This is an open W06 correction; the previous worker121-pass count predates it.

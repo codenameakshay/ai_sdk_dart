@@ -4,12 +4,14 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:ai_sdk_realtime/ai_sdk_realtime.dart';
 import 'package:test/test.dart';
 
+import 'support/fake_abort_signal.dart';
+
 void main() {
   test('late transport cleanup cannot leak a second error', () async {
     final escaped = <Object>[];
     await runZonedGuarded<Future<void>>(() async {
       final connected = Completer<RealtimeTransport>();
-      final signal = _Signal();
+      final signal = FakeAbortSignal();
       final pending = RealtimeSession.connect(
         apiKey: 'fixture',
         abortSignal: signal,
@@ -29,7 +31,7 @@ void main() {
 
   test('cancelled startup closes a late transport exactly once', () async {
     final connected = Completer<RealtimeTransport>();
-    final signal = _Signal();
+    final signal = FakeAbortSignal();
     final transport = _Transport();
     final pending = RealtimeSession.connect(
       apiKey: 'fixture',
@@ -47,15 +49,6 @@ void main() {
     expect(transport.closeCount, 1);
     expect(transport.sent, isEmpty);
   });
-}
-
-class _Signal implements AbortSignal {
-  final _cancelled = Completer<void>();
-  @override
-  bool get isCancelled => _cancelled.isCompleted;
-  @override
-  Future<void> get onCancelled => _cancelled.future;
-  void cancel() => _cancelled.complete();
 }
 
 class _Transport implements RealtimeTransport {

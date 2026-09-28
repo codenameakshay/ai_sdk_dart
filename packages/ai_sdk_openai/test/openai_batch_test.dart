@@ -1,18 +1,19 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
+import 'support/fake_adapter.dart';
+
 void main() {
   test('encodes unique responses JSONL and creates a batch', () async {
     final calls = <RequestOptions>[];
     final dio = Dio()
-      ..httpClientAdapter = _Adapter((request) async {
+      ..httpClientAdapter = FakeHttpAdapter((request) async {
         calls.add(request);
         if (request.method == 'POST' && request.path.endsWith('/files')) {
           return _json({
@@ -66,7 +67,7 @@ void main() {
         );
       });
       final dio = Dio()
-        ..httpClientAdapter = _Adapter((request) async {
+        ..httpClientAdapter = FakeHttpAdapter((request) async {
           submissions++;
           return _json({'id': 'batch-1', 'status': 'validating'});
         });
@@ -133,7 +134,7 @@ void main() {
         ),
       );
       final dio = Dio()
-        ..httpClientAdapter = _Adapter((request) async {
+        ..httpClientAdapter = FakeHttpAdapter((request) async {
           submissions++;
           return ResponseBody.fromString(
             '{"error":{"message":"rejected"}}',
@@ -171,7 +172,7 @@ void main() {
       final signal = _TestAbortSignal();
       final paths = <String>[];
       final dio = Dio()
-        ..httpClientAdapter = _Adapter((request) async {
+        ..httpClientAdapter = FakeHttpAdapter((request) async {
           paths.add(request.uri.path);
           return _json({
             'id': 'file-in',
@@ -248,7 +249,7 @@ void main() {
   test('gets lists and explicitly cancels without polling', () async {
     final paths = <String>[];
     final dio = Dio()
-      ..httpClientAdapter = _Adapter((request) async {
+      ..httpClientAdapter = FakeHttpAdapter((request) async {
         paths.add(request.uri.toString());
         if (request.path.endsWith('/cancel')) {
           return _json({'id': 'b', 'status': 'cancelling'});
@@ -286,7 +287,7 @@ void main() {
 
   test('rejects malformed list items and mismatched get/cancel IDs', () async {
     final dio = Dio()
-      ..httpClientAdapter = _Adapter((request) async {
+      ..httpClientAdapter = FakeHttpAdapter((request) async {
         if (request.path.endsWith('/cancel')) {
           return _json({'id': 'other', 'status': 'cancelling'});
         }
@@ -318,7 +319,7 @@ void main() {
 
   test('rejects a paginated list without a last id', () async {
     final dio = Dio()
-      ..httpClientAdapter = _Adapter((_) async {
+      ..httpClientAdapter = FakeHttpAdapter((_) async {
         return _json({'data': <Object>[], 'has_more': true});
       });
     final batches = OpenAIBatches(
@@ -376,6 +377,64 @@ void main() {
         ).toList(),
         throwsA(isA<OpenAIBatchException>()),
       );
+    },
+  );
+
+  test('line byte limit applies to each row, not a network chunk', () async {
+    final lines = [
+      for (final id in ['input-1', 'input-2'])
+        jsonEncode({
+          'custom_id': id,
+          'response': {'status_code': 200},
+          'error': null,
+        }),
+    ];
+    final rows = await decodeOpenAIBatchResults(
+      Stream.value(utf8.encode('${lines.join('\n')}\n')),
+      maxLineBytes: utf8.encode(lines.first).length,
+    ).toList();
+    expect(rows.map((row) => row.customId), ['input-1', 'input-2']);
+  });
+
+  test('batch error file permits a null response', () async {
+    final rows = await decodeOpenAIBatchResults(
+      Stream.value(
+        utf8.encode(
+          '${jsonEncode({
+            'id': 'batch_req_1',
+            'custom_id': 'input-1',
+            'response': null,
+            'error': {'code': 'batch_expired', 'message': 'This request could not be executed before expiry.'},
+          })}\n',
+        ),
+      ),
+    ).toList();
+    expect(rows.single.customId, 'input-1');
+    expect(rows.single.error?['code'], 'batch_expired');
+    expect(rows.single.response, isNull);
+  });
+
+  test(
+    'complete final JSONL row does not require a trailing newline',
+    () async {
+      final rows = await decodeOpenAIBatchResults(
+        Stream.value(
+          utf8.encode(
+            jsonEncode({
+              'id': 'batch_req_2',
+              'custom_id': 'input-2',
+              'response': {
+                'status_code': 200,
+                'request_id': 'req_2',
+                'body': {'output': []},
+              },
+              'error': null,
+            }),
+          ),
+        ),
+      ).toList();
+      expect(rows.single.customId, 'input-2');
+      expect(rows.single.statusCode, 200);
     },
   );
 
@@ -475,19 +534,6 @@ ResponseBody _json(Map<String, dynamic> json) => ResponseBody.fromString(
     'content-type': ['application/json'],
   },
 );
-
-class _Adapter implements HttpClientAdapter {
-  _Adapter(this.handler);
-  final Future<ResponseBody> Function(RequestOptions) handler;
-  @override
-  Future<ResponseBody> fetch(
-    RequestOptions options,
-    Stream<Uint8List>? requestStream,
-    Future<void>? cancelFuture,
-  ) => handler(options);
-  @override
-  void close({bool force = false}) {}
-}
 
 class _DelayedFiles extends OpenAIFiles {
   _DelayedFiles(this.uploadHandler)

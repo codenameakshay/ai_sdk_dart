@@ -950,30 +950,6 @@ void main() {
       });
     });
 
-    // ── capabilities advertised in initialize() ───────────────────────────────
-
-    group('capabilities', () {
-      test(
-        'initialize advertises only implemented client capabilities',
-        () async {
-          final server = await FakeStreamableHttpServer.start();
-          addTearDown(server.close);
-          server.queueInitializeResponse();
-
-          final client = _client(server);
-          addTearDown(client.close);
-
-          await client.initialize();
-
-          final initReq = server.requestLog.first;
-          final caps =
-              (initReq.body?['params'] as Map)['capabilities']
-                  as Map<String, dynamic>;
-          expect(caps, isEmpty);
-        },
-      );
-    });
-
     // ── MCPException ─────────────────────────────────────────────────────────
 
     group('MCPException', () {

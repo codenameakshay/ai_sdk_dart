@@ -8,11 +8,13 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
+import 'support/fake_adapter.dart';
+
 void main() {
   test('uploads bytes as multipart and returns a namespaced reference', () async {
     FormData? form;
     final dio = Dio()
-      ..httpClientAdapter = _Adapter((request) async {
+      ..httpClientAdapter = FakeHttpAdapter((request) async {
         form = request.data as FormData;
         return ResponseBody.fromString(
           '{"id":"file-1","bytes":3,"created_at":1700000000,"filename":"a.txt","purpose":"assistants"}',
@@ -56,7 +58,7 @@ void main() {
   test('uploads a known-length stream with expiry metadata', () async {
     FormData? form;
     final dio = Dio()
-      ..httpClientAdapter = _Adapter((request) async {
+      ..httpClientAdapter = FakeHttpAdapter((request) async {
         form = request.data as FormData;
         return ResponseBody.fromString(
           '{"id":"file-stream","bytes":3,"created_at":1700000000,'
@@ -116,7 +118,7 @@ void main() {
   test('validates stream length at runtime', () async {
     var requests = 0;
     final dio = Dio()
-      ..httpClientAdapter = _Adapter((_) async {
+      ..httpClientAdapter = FakeHttpAdapter((_) async {
         requests++;
         return ResponseBody.fromString('{}', 200);
       });
@@ -142,7 +144,7 @@ void main() {
   test('rejects a foreign provider reference before HTTP', () async {
     var requests = 0;
     final dio = Dio()
-      ..httpClientAdapter = _Adapter((_) async {
+      ..httpClientAdapter = FakeHttpAdapter((_) async {
         requests++;
         return ResponseBody.fromString('{}', 200);
       });
@@ -163,7 +165,7 @@ void main() {
   test('serializes an OpenAI reference as Responses file_id', () async {
     Map<String, dynamic>? body;
     final dio = Dio()
-      ..httpClientAdapter = _Adapter((request) async {
+      ..httpClientAdapter = FakeHttpAdapter((request) async {
         body = (request.data as Map).cast<String, dynamic>();
         return ResponseBody.fromString(
           '{"id":"resp-1","status":"completed","output":[]}',
@@ -306,7 +308,7 @@ void main() {
 
   test('rejects malformed metadata and delete acknowledgements', () async {
     final dio = Dio()
-      ..httpClientAdapter = _Adapter((request) async {
+      ..httpClientAdapter = FakeHttpAdapter((request) async {
         if (request.method == 'DELETE') {
           return ResponseBody.fromString(
             '{"id":"other","deleted":true}',
@@ -430,7 +432,7 @@ void main() {
     'non-cancellation errors from a download source remain the first error',
     () async {
       final dio = Dio()
-        ..httpClientAdapter = _Adapter((_) async {
+        ..httpClientAdapter = FakeHttpAdapter((_) async {
           return ResponseBody(
             Stream<Uint8List>.error(StateError('body failed')),
             200,
@@ -453,7 +455,7 @@ void main() {
     var requests = 0;
     final auth = Completer<Map<String, String>>();
     final dio = Dio()
-      ..httpClientAdapter = _Adapter((_) async {
+      ..httpClientAdapter = FakeHttpAdapter((_) async {
         requests++;
         return ResponseBody.fromString('{}', 200);
       });
@@ -481,7 +483,7 @@ void main() {
     final auth = Completer<Map<String, String>>();
     final signal = _TestSignal();
     final dio = Dio()
-      ..httpClientAdapter = _Adapter((_) async {
+      ..httpClientAdapter = FakeHttpAdapter((_) async {
         requests++;
         return ResponseBody.fromString('{}', 200);
       });
@@ -508,7 +510,7 @@ void main() {
     var requests = 0;
     final signal = _TestSignal()..cancel();
     final dio = Dio()
-      ..httpClientAdapter = _Adapter((_) async {
+      ..httpClientAdapter = FakeHttpAdapter((_) async {
         requests++;
         return ResponseBody.fromString('{}', 200);
       });
@@ -630,6 +632,106 @@ void main() {
     );
     signal.cancel();
   });
+
+  test('validates upload metadata and runtime source constraints', () {
+    for (final upload in [
+      OpenAIFileUpload(filename: ' ', purpose: 'batch', bytes: Uint8List(0)),
+      OpenAIFileUpload(filename: 'file', purpose: ' ', bytes: Uint8List(0)),
+    ]) {
+      expect(upload.validate, throwsA(isA<OpenAIFileException>()));
+    }
+    expect(
+      () => OpenAIFileUpload(filename: 'file', purpose: 'batch'),
+      throwsA(isA<AssertionError>()),
+    );
+    for (final json in [
+      {'id': '', 'created_at': 1, 'bytes': 0, 'filename': 'f', 'purpose': 'p'},
+      {
+        'id': 'f',
+        'created_at': 1.5,
+        'bytes': 0,
+        'filename': 'f',
+        'purpose': 'p',
+      },
+      {
+        'id': 'f',
+        'created_at': 1,
+        'bytes': -1,
+        'filename': 'f',
+        'purpose': 'p',
+      },
+      {'id': 'f', 'created_at': 1, 'bytes': 0, 'filename': '', 'purpose': 'p'},
+      {
+        'id': 'f',
+        'created_at': 1,
+        'bytes': 0,
+        'filename': 'f',
+        'purpose': 'p',
+        'expires_at': 'soon',
+      },
+      {
+        'id': 'f',
+        'created_at': 1,
+        'bytes': 0,
+        'filename': 'f',
+        'purpose': 'p',
+        'status': false,
+      },
+    ]) {
+      expect(
+        () => OpenAIFileMetadata.fromJson(json),
+        throwsA(isA<OpenAIFileException>()),
+      );
+    }
+    expect(
+      OpenAIFileTimeoutException().toString(),
+      'OpenAIFileTimeoutException',
+    );
+  });
+
+  test('maps transport failures for each file operation', () async {
+    final dio = Dio()
+      ..httpClientAdapter = FakeHttpAdapter(
+        (_) async => ResponseBody.fromString(
+          '{"error":{"message":"failed"}}',
+          503,
+          headers: {
+            Headers.contentTypeHeader: [Headers.jsonContentType],
+          },
+        ),
+      );
+    addTearDown(() => dio.close(force: true));
+    final files = OpenAIFiles(
+      client: dio,
+      headers: () async => const {},
+      baseUrl: 'https://api.openai.test/v1/',
+    );
+    const reference = DataContentProviderReference(
+      namespace: 'openai',
+      id: 'file-1',
+    );
+    final upload = OpenAIFileUpload(
+      filename: 'file.txt',
+      purpose: 'batch',
+      bytes: Uint8List(0),
+    );
+    await expectLater(files.upload(upload), throwsA(isA<AiApiCallError>()));
+    await expectLater(
+      files.retrieve(reference),
+      throwsA(isA<AiApiCallError>()),
+    );
+    await expectLater(
+      files.download(reference),
+      throwsA(isA<AiApiCallError>()),
+    );
+    await expectLater(files.delete(reference), throwsA(isA<AiApiCallError>()));
+    await expectLater(
+      files.download(
+        const DataContentProviderReference(namespace: 'openai', id: '  '),
+      ),
+      throwsArgumentError,
+    );
+  });
 }
 
 class _TestSignal implements AbortSignal {
@@ -734,19 +836,4 @@ class _StreamingServer {
     }
     await _server.close();
   }
-}
-
-class _Adapter implements HttpClientAdapter {
-  _Adapter(this.handler);
-  final Future<ResponseBody> Function(RequestOptions) handler;
-
-  @override
-  Future<ResponseBody> fetch(
-    RequestOptions options,
-    Stream<Uint8List>? requestStream,
-    Future<void>? cancelFuture,
-  ) => handler(options);
-
-  @override
-  void close({bool force = false}) {}
 }

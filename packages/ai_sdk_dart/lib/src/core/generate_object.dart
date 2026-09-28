@@ -108,7 +108,7 @@ Future<GenerateObjectResult<T>> generateObject<T>({
           throw AiNoObjectGeneratedError(
             message: 'Failed to generate a valid object.',
             text: text,
-            response: _filterObjectMetadata(response.response, bodyInclusion),
+            response: filterResponseMetadata(response.response, bodyInclusion),
             usage: response.usage,
             cause: error,
           );
@@ -146,16 +146,3 @@ LanguageModelV4GenerateResult _filterObjectResult(
         ),
   providerMetadata: response.providerMetadata,
 );
-
-LanguageModelV4ResponseMetadata? _filterObjectMetadata(
-  LanguageModelV4ResponseMetadata? metadata,
-  BodyInclusionPolicy policy,
-) => metadata == null
-    ? null
-    : LanguageModelV4ResponseMetadata(
-        id: metadata.id,
-        modelId: metadata.modelId,
-        timestamp: metadata.timestamp,
-        headers: metadata.headers,
-        body: policy.responseBody ? metadata.body : null,
-      );

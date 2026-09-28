@@ -980,7 +980,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
             request: LanguageModelV4RequestMetadata(
               body: bodyInclusion.requestBody ? lastRequestBody : null,
             ),
-            response: _streamFilteredResponseMetadata(
+            response: filterResponseMetadata(
               lastResponseMetadata,
               bodyInclusion,
             ),
@@ -1069,10 +1069,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
       final responseInfo = GenerateTextResponse(
         messages: List.unmodifiable(responseMessages),
         body: lastResponseBody,
-        metadata: _streamFilteredResponseMetadata(
-          lastResponseMetadata,
-          bodyInclusion,
-        ),
+        metadata: filterResponseMetadata(lastResponseMetadata, bodyInclusion),
       );
       final resolvedFinish =
           lastFinishPart ??
@@ -1316,25 +1313,12 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   );
 }
 
-LanguageModelV4ResponseMetadata? _streamFilteredResponseMetadata(
-  LanguageModelV4ResponseMetadata? metadata,
-  BodyInclusionPolicy policy,
-) => metadata == null
-    ? null
-    : LanguageModelV4ResponseMetadata(
-        id: metadata.id,
-        modelId: metadata.modelId,
-        timestamp: metadata.timestamp,
-        headers: metadata.headers,
-        body: policy.responseBody ? metadata.body : null,
-      );
-
 LanguageModelV4StreamPart _filterStreamPart(
   LanguageModelV4StreamPart part,
   BodyInclusionPolicy policy,
 ) => switch (part) {
   StreamPartResponseMetadata(:final metadata) => StreamPartResponseMetadata(
-    metadata: _streamFilteredResponseMetadata(metadata, policy)!,
+    metadata: filterResponseMetadata(metadata, policy)!,
   ),
   StreamPartError(:final error) => StreamPartError(
     error: filterBodyBearingError(error, policy),

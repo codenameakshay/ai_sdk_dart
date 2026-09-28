@@ -7,7 +7,7 @@ import 'package:test/test.dart';
 
 import 'helpers/fake_models.dart';
 
-Schema<Map<String, dynamic>> _objectSchema() => Schema<Map<String, dynamic>>(
+Schema<Map<String, dynamic>> _objectSchema() => Schema.decoderOnly(
   jsonSchema: const {'type': 'object'},
   fromJson: (json) => json,
 );

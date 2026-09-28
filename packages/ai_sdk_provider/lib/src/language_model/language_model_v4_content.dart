@@ -240,10 +240,6 @@ class LanguageModelV4SourcePart extends LanguageModelV4ContentPart {
   final String url;
   final String? title;
   final Map<String, dynamic>? providerMetadata;
-
-  /// The upstream v4 source discriminator. URL sources are the legacy
-  /// constructor shape; document sources use [LanguageModelV4DocumentSourcePart].
-  String get sourceType => 'url';
 }
 
 /// A document citation that has no URL and carries its media identity.
@@ -261,8 +257,6 @@ class LanguageModelV4DocumentSourcePart extends LanguageModelV4ContentPart {
   final String title;
   final String? filename;
   final Map<String, dynamic>? providerMetadata;
-
-  String get sourceType => 'document';
 }
 
 /// A tool approval response (user approved or denied a tool call).

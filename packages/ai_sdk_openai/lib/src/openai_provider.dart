@@ -177,20 +177,7 @@ class _OpenAIEmbeddingModel implements EmbeddingModelV2<String> {
     EmbeddingModelV2CallOptions<String> options,
   ) async {
     final cancellation = DioCancellationScope(options.abortSignal);
-    late final Map<String, String> resolvedHeaders;
-    try {
-      resolvedHeaders = await runWithAbortSignal(
-        () async => await headers(),
-        options.abortSignal,
-      );
-    } catch (_) {
-      await cancellation.dispose();
-      rethrow;
-    }
-    if (options.abortSignal?.isCancelled == true) {
-      await cancellation.dispose();
-      throw const AiOperationCancelledError();
-    }
+    final resolvedHeaders = await cancellation.run(headers);
     final providerOptions = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
@@ -243,20 +230,7 @@ class _OpenAIImageModel implements ImageModelV3 {
     ImageModelV3CallOptions options,
   ) async {
     final cancellation = DioCancellationScope(options.abortSignal);
-    late final Map<String, String> resolvedHeaders;
-    try {
-      resolvedHeaders = await runWithAbortSignal(
-        () async => await headers(),
-        options.abortSignal,
-      );
-    } catch (_) {
-      await cancellation.dispose();
-      rethrow;
-    }
-    if (options.abortSignal?.isCancelled == true) {
-      await cancellation.dispose();
-      throw const AiOperationCancelledError();
-    }
+    final resolvedHeaders = await cancellation.run(headers);
     final providerOptions = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
@@ -355,20 +329,7 @@ class _OpenAISpeechModel implements SpeechModelV1 {
     SpeechModelV1CallOptions options,
   ) async {
     final cancellation = DioCancellationScope(options.abortSignal);
-    late final Map<String, String> resolvedHeaders;
-    try {
-      resolvedHeaders = await runWithAbortSignal(
-        () async => await headers(),
-        options.abortSignal,
-      );
-    } catch (_) {
-      await cancellation.dispose();
-      rethrow;
-    }
-    if (options.abortSignal?.isCancelled == true) {
-      await cancellation.dispose();
-      throw const AiOperationCancelledError();
-    }
+    final resolvedHeaders = await cancellation.run(headers);
     final providerOptions = options.providerOptions?['openai'];
     final requestBody = {
       'model': modelId,
@@ -429,20 +390,7 @@ class _OpenAITranscriptionModel implements TranscriptionModelV1 {
     TranscriptionModelV1CallOptions options,
   ) async {
     final cancellation = DioCancellationScope(options.abortSignal);
-    late final Map<String, String> resolvedHeaders;
-    try {
-      resolvedHeaders = await runWithAbortSignal(
-        () async => await headers(),
-        options.abortSignal,
-      );
-    } catch (_) {
-      await cancellation.dispose();
-      rethrow;
-    }
-    if (options.abortSignal?.isCancelled == true) {
-      await cancellation.dispose();
-      throw const AiOperationCancelledError();
-    }
+    final resolvedHeaders = await cancellation.run(headers);
     final providerOptions = options.providerOptions?['openai'];
     final formData = FormData.fromMap({
       ...?providerOptions,

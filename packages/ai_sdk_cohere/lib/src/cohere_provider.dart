@@ -313,20 +313,7 @@ class _CohereLanguageModel extends LanguageModelV4 {
     LanguageModelV4CallOptions options,
   ) async {
     final cancellation = DioCancellationScope(options.abortSignal);
-    late final Map<String, String> resolvedHeaders;
-    try {
-      resolvedHeaders = await runWithAbortSignal(
-        () async => await headers(),
-        options.abortSignal,
-      );
-    } catch (_) {
-      await cancellation.dispose();
-      rethrow;
-    }
-    if (options.abortSignal?.isCancelled == true) {
-      await cancellation.dispose();
-      throw const AiOperationCancelledError();
-    }
+    final resolvedHeaders = await cancellation.run(headers);
     final body = _buildBody(options);
 
     final Response<Map<String, dynamic>> response;
@@ -401,20 +388,7 @@ class _CohereLanguageModel extends LanguageModelV4 {
     LanguageModelV4CallOptions options,
   ) async {
     final cancellation = DioCancellationScope(options.abortSignal);
-    late final Map<String, String> resolvedHeaders;
-    try {
-      resolvedHeaders = await runWithAbortSignal(
-        () async => await headers(),
-        options.abortSignal,
-      );
-    } catch (_) {
-      await cancellation.dispose();
-      rethrow;
-    }
-    if (options.abortSignal?.isCancelled == true) {
-      await cancellation.dispose();
-      throw const AiOperationCancelledError();
-    }
+    final resolvedHeaders = await cancellation.run(headers);
     final body = _buildBody(options)..['stream'] = true;
 
     final Response<ResponseBody> response;
@@ -695,20 +669,7 @@ class _CohereEmbeddingModel implements EmbeddingModelV2<String> {
     EmbeddingModelV2CallOptions<String> options,
   ) async {
     final cancellation = DioCancellationScope(options.abortSignal);
-    late final Map<String, String> resolvedHeaders;
-    try {
-      resolvedHeaders = await runWithAbortSignal(
-        () async => await headers(),
-        options.abortSignal,
-      );
-    } catch (_) {
-      await cancellation.dispose();
-      rethrow;
-    }
-    if (options.abortSignal?.isCancelled == true) {
-      await cancellation.dispose();
-      throw const AiOperationCancelledError();
-    }
+    final resolvedHeaders = await cancellation.run(headers);
     final providerOptions = options.providerOptions?['cohere'];
 
     final body = <String, dynamic>{
@@ -786,20 +747,7 @@ class _CohereRerankModel implements RerankModelV1 {
   @override
   Future<RerankModelV1Result> doRerank(RerankModelV1CallOptions options) async {
     final cancellation = DioCancellationScope(options.abortSignal);
-    late final Map<String, String> resolvedHeaders;
-    try {
-      resolvedHeaders = await runWithAbortSignal(
-        () async => await headers(),
-        options.abortSignal,
-      );
-    } catch (_) {
-      await cancellation.dispose();
-      rethrow;
-    }
-    if (options.abortSignal?.isCancelled == true) {
-      await cancellation.dispose();
-      throw const AiOperationCancelledError();
-    }
+    final resolvedHeaders = await cancellation.run(headers);
 
     final body = <String, dynamic>{
       'model': modelId,

@@ -257,6 +257,26 @@ void main() {
     expect(seen, isNull);
   });
 
+  test('a plain tool sees no tool context but keeps runtime context', () async {
+    Object? seenToolContext;
+    Map<String, Object?>? seenRuntimeContext;
+    await generateText(
+      model: _TwoStepModel(),
+      prompt: 'go',
+      maxSteps: 1,
+      runtimeContext: const {'runtime-secret': 'must-not-bind'},
+      tools: {
+        'danger': _tool((_, options) async {
+          seenToolContext = options.toolContext;
+          seenRuntimeContext = options.runtimeContext;
+          return 'done';
+        }),
+      },
+    );
+    expect(seenToolContext, isNull);
+    expect(seenRuntimeContext, {'runtime-secret': 'must-not-bind'});
+  });
+
   test('approval responses require complete exact binding', () async {
     final first = await generateText(
       model: _TwoStepModel(),

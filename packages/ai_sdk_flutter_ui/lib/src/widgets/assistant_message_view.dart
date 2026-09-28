@@ -8,6 +8,7 @@ import 'source_citations.dart';
 import 'tool_approval_card.dart';
 import 'tool_call_card.dart';
 import 'ui_strings.dart';
+import 'content_direction.dart';
 
 /// Signature for rendering a text segment of an assistant message. Use it to
 /// plug in a markdown renderer of your choice — the package stays dependency
@@ -159,7 +160,9 @@ class AssistantMessageView extends StatelessWidget {
       excludeSemantics: true,
       label: text,
       readOnly: true,
-      child: SelectionArea(child: Text(text, style: style)),
+      child: SelectionArea(
+        child: Text(text, textDirection: contentDirection(text), style: style),
+      ),
     );
   }
 

@@ -926,6 +926,35 @@ void main() {
       },
     );
 
+    for (final streaming in [false, true]) {
+      test('pre-cancelled request skips auth (stream=$streaming)', () async {
+        var authCalls = 0;
+        final client = Dio();
+        addTearDown(() => client.close(force: true));
+        final model = OpenAICompatibleChatLanguageModel(
+          modelId: 'fixture',
+          config: OpenAICompatibleConfig(
+            provider: 'fixture',
+            baseUrl: 'http://provider.test',
+            client: client,
+            headers: () async {
+              authCalls++;
+              return const {};
+            },
+          ),
+        );
+        final options = LanguageModelV4CallOptions(
+          prompt: const LanguageModelV4Prompt(messages: []),
+          abortSignal: TestAbortSignal()..cancel(),
+        );
+        await expectLater(
+          streaming ? model.doStream(options) : model.doGenerate(options),
+          throwsA(anything),
+        );
+        expect(authCalls, 0);
+      });
+    }
+
     test('doStream cancels the Dio handshake via abortSignal', () async {
       final adapter = CancellationHttpClientAdapter();
       final client = _cancellationClient(adapter, 'http://localhost/v1');
@@ -2203,6 +2232,54 @@ void main() {
       );
     });
   });
+
+  group('cancellation observer lifetime', () {
+    for (final streaming in [false, true]) {
+      test(
+        'actual Chat requests release each observer (stream=$streaming)',
+        () async {
+          final signal = _ObserverSignal();
+          addTearDown(signal.close);
+          final adapter = _ObserverAdapter();
+          final dio = Dio()..httpClientAdapter = adapter;
+          addTearDown(() => dio.close(force: true));
+          final model = OpenAICompatibleChatLanguageModel(
+            modelId: 'fixture',
+            config: OpenAICompatibleConfig(
+              provider: 'fixture',
+              baseUrl: 'http://fixture.test',
+              client: dio,
+              headers: () async => const {},
+            ),
+          );
+          for (var iteration = 0; iteration < 10; iteration++) {
+            adapter.fail = iteration.isOdd;
+            final options = LanguageModelV4CallOptions(
+              prompt: const LanguageModelV4Prompt(messages: []),
+              abortSignal: signal,
+            );
+            Future<void> request() async {
+              if (streaming) {
+                final result = await model.doStream(options);
+                await result.stream.toList();
+              } else {
+                await model.doGenerate(options);
+              }
+            }
+
+            if (adapter.fail) {
+              await expectLater(request(), throwsA(isA<AiApiCallError>()));
+            } else {
+              await request();
+            }
+            expect(signal.active, 0, reason: 'request $iteration');
+            expect(signal.detached, signal.attached);
+          }
+          expect(signal.attached, greaterThanOrEqualTo(10));
+        },
+      );
+    }
+  });
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -2294,6 +2371,57 @@ class _ErroredStreamHttpClientAdapter implements HttpClientAdapter {
       200,
       headers: {
         Headers.contentTypeHeader: ['text/event-stream'],
+      },
+    );
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
+class _ObserverSignal implements ObservableAbortSignal {
+  final events = StreamController<void>.broadcast();
+  var active = 0;
+  var attached = 0;
+  var detached = 0;
+  @override
+  bool get isCancelled => false;
+  @override
+  Future<void> get onCancelled => Completer<void>().future;
+  @override
+  Stream<void> get cancellationEvents => Stream.multi((controller) {
+    attached++;
+    active++;
+    final subscription = events.stream.listen(controller.addSync);
+    controller.onCancel = () {
+      active--;
+      detached++;
+      return subscription.cancel();
+    };
+  }, isBroadcast: true);
+  Future<void> close() => events.close();
+}
+
+class _ObserverAdapter implements HttpClientAdapter {
+  bool fail = false;
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    final streaming = (options.data as Map)['stream'] == true;
+    return ResponseBody.fromString(
+      fail
+          ? '{"error":{"message":"fixture failure","code":"invalid_request"}}'
+          : streaming
+          ? 'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
+          : '{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}',
+      fail ? 400 : 200,
+      headers: {
+        'content-type': [
+          streaming && !fail ? 'text/event-stream' : 'application/json',
+        ],
       },
     );
   }

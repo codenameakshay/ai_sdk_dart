@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:ai_sdk_conversation/ai_sdk_conversation.dart';
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_dart/test.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
@@ -631,5 +632,70 @@ class FakeFrameNotificationScheduler implements FrameNotificationScheduler {
     for (final callback in callbacks) {
       callback();
     }
+  }
+}
+
+/// A minimal, configurable [ConversationBackend] fake shared across
+/// lifecycle and widget tests: a change stream, dispose/cancel tracking, and
+/// helpers to push a full snapshot or a fresh conversation by id.
+class FakeConversationBackend implements ConversationBackend {
+  factory FakeConversationBackend({
+    Conversation? initial,
+    bool broadcast = true,
+    Future<void>? onCancelDelay,
+  }) {
+    late final FakeConversationBackend backend;
+    FutureOr<void> onCancel() {
+      backend.cancelCount++;
+      return onCancelDelay;
+    }
+
+    final controller = broadcast
+        ? StreamController<Conversation>.broadcast(onCancel: onCancel)
+        : StreamController<Conversation>(onCancel: onCancel);
+    return backend = FakeConversationBackend._(
+      initial ?? Conversation(id: 'chat-1', messages: const []),
+      controller,
+    );
+  }
+
+  FakeConversationBackend._(this._conversation, this.streamController);
+
+  Conversation _conversation;
+  final StreamController<Conversation> streamController;
+  int cancelCount = 0;
+  int disposeCount = 0;
+  final disposeSignal = Completer<void>();
+
+  @override
+  Conversation get conversation => _conversation;
+  @override
+  Stream<Conversation> get changes => streamController.stream;
+
+  /// Publishes a fresh, empty conversation with the given [id].
+  void emit(String id) => publish(Conversation(id: id, messages: const []));
+
+  /// Publishes an arbitrary snapshot.
+  void publish(Conversation value) {
+    _conversation = value;
+    streamController.add(value);
+  }
+
+  @override
+  Future<void> send(String text) async {}
+  @override
+  Future<void> interrupt() async {}
+  @override
+  Future<void> restore(Map<String, dynamic> encoded) async {}
+  @override
+  Future<void> respondToApproval({
+    required String approvalId,
+    required bool approved,
+    String? reason,
+  }) async {}
+  @override
+  Future<void> dispose() async {
+    disposeCount++;
+    if (!disposeSignal.isCompleted) disposeSignal.complete();
   }
 }

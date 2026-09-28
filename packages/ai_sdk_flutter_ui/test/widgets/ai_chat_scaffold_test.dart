@@ -16,46 +16,6 @@ import '../helpers.dart';
 
 Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
 
-class _LifecycleBackend implements ConversationBackend {
-  _LifecycleBackend([Conversation? initial])
-    : _conversation =
-          initial ?? Conversation(id: 'lifecycle', messages: const []);
-
-  final Conversation _conversation;
-  final _changes = StreamController<Conversation>.broadcast();
-  final disposeSignal = Completer<void>();
-  int disposeCount = 0;
-
-  @override
-  Conversation get conversation => _conversation;
-
-  @override
-  Stream<Conversation> get changes => _changes.stream;
-
-  @override
-  Future<void> send(String text) async {}
-
-  @override
-  Future<void> interrupt() async {}
-
-  @override
-  Future<void> restore(Map<String, dynamic> encoded) async {}
-
-  @override
-  Future<void> respondToApproval({
-    required String approvalId,
-    required bool approved,
-    String? reason,
-  }) async {}
-
-  @override
-  Future<void> dispose() async {
-    disposeCount++;
-    if (!disposeSignal.isCompleted) disposeSignal.complete();
-    await _changes.close();
-  }
-}
-
 const _approvalRequest = LanguageModelV4ToolApprovalRequestPart(
   approvalId: 'approval_c1',
   toolCall: LanguageModelV4ToolCallPart(
@@ -363,7 +323,7 @@ void main() {
     testWidgets('conversation scaffold disposes an owned controller', (
       tester,
     ) async {
-      final backend = _LifecycleBackend();
+      final backend = FakeConversationBackend();
       final conversation = ConversationController(backend);
 
       await tester.pumpWidget(
@@ -383,7 +343,7 @@ void main() {
     testWidgets(
       'conversation scaffold can leave caller-owned controller alive',
       (tester) async {
-        final backend = _LifecycleBackend();
+        final backend = FakeConversationBackend();
         final conversation = ConversationController(backend);
 
         await tester.pumpWidget(
@@ -405,8 +365,8 @@ void main() {
     testWidgets('conversation scaffold replaces adapters with new backends', (
       tester,
     ) async {
-      final firstBackend = _LifecycleBackend(
-        Conversation(
+      final firstBackend = FakeConversationBackend(
+        initial: Conversation(
           id: 'first',
           messages: [
             ConversationMessage(
@@ -417,8 +377,8 @@ void main() {
           ],
         ),
       );
-      final secondBackend = _LifecycleBackend(
-        Conversation(
+      final secondBackend = FakeConversationBackend(
+        initial: Conversation(
           id: 'second',
           messages: [
             ConversationMessage(
@@ -463,8 +423,8 @@ void main() {
           toolName: 'deleteFile',
           status: ApprovalStatus.pending,
         );
-        final backend = _LifecycleBackend(
-          Conversation(
+        final backend = FakeConversationBackend(
+          initial: Conversation(
             id: 'restored',
             messages: [
               ConversationMessage(

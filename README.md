@@ -118,6 +118,14 @@ above.
     <td><img src="docs/screenshots/07_completion_haiku_result.png" width="280" alt="Completion result"/></td>
     <td><img src="docs/screenshots/09_object_japan_result.png" width="280" alt="Object stream result"/></td>
   </tr>
+  <tr>
+    <td align="center"><b>Tool Approval (Local tab)</b></td>
+    <td align="center"><b>Localized RTL Strings</b></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/11_conversation_approval.png" width="280" alt="Local conversation waiting for tool approval"/></td>
+    <td><img src="docs/screenshots/12_conversation_rtl.png" width="280" alt="Conversation with Arabic UI strings and right-to-left layout"/></td>
+  </tr>
 </table>
 
 ### Advanced App (`examples/advanced_app`)
@@ -138,6 +146,14 @@ above.
   <tr>
     <td><img src="docs/screenshots/adv_03_image_gen.png" width="280" alt="Image generation"/></td>
     <td><img src="docs/screenshots/adv_04_multimodal.png" width="280" alt="Multimodal"/></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Persisted Conversation</b></td>
+    <td align="center"><b>Responses + Web Search</b></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/adv_10_conversation.png" width="280" alt="Persisted conversation with a pending tool approval"/></td>
+    <td><img src="docs/screenshots/adv_11_responses.png" width="280" alt="OpenAI Responses answer with reasoning and web-search citations"/></td>
   </tr>
 </table>
 
@@ -687,7 +703,7 @@ cd examples/advanced_app && fvm flutter run \
 | Example | Command | What it shows |
 |---------|---------|---------------|
 | Dart CLI (`examples/basic`) | `OPENAI_API_KEY=sk-... make run-basic` | `generateText`, streaming, structured output, tools, embeddings, middleware |
-| Flutter chat (`examples/flutter_chat`) | `cd examples/flutter_chat && fvm flutter run --dart-define=OPENAI_API_KEY=sk-...` | Chat / Completion / Object stream tabs (`ChatController`, `CompletionController`, `ObjectStreamController`), plus Conversation and Remote tabs backed by `ConversationController` (`LocalConversationBackend` / `RemoteConversationBackend` against `examples/remote_backend`) |
+| Flutter chat (`examples/flutter_chat`) | `cd examples/flutter_chat && fvm flutter run --dart-define=OPENAI_API_KEY=sk-...` | Chat / Completion / Object stream tabs (`ChatController`, `CompletionController`, `ObjectStreamController`), plus Local and Remote conversation tabs backed by `ConversationController` (`LocalConversationBackend` / `RemoteConversationBackend` against `examples/remote_backend`) |
 | Flutter chat (web) | `cd examples/flutter_chat && fvm flutter run -d chrome --dart-define=OPENAI_API_KEY=sk-...` | Same as above on Chrome |
 | Advanced app (`examples/advanced_app`) | `cd examples/advanced_app && fvm flutter run --dart-define=OPENAI_API_KEY=sk-... --dart-define=ANTHROPIC_API_KEY=sk-ant-... --dart-define=GOOGLE_API_KEY=AIza...` | All providers, tools, image gen, TTS, STT, multimodal, embeddings, completion, object stream, widget gallery, plus a Conversation page (persisted/interrupted/approval turns) and a Responses page (OpenAI Responses API + hosted tools) |
 | Advanced app (web) | `cd examples/advanced_app && fvm flutter run -d chrome --dart-define=OPENAI_API_KEY=sk-... --dart-define=ANTHROPIC_API_KEY=sk-ant-... --dart-define=GOOGLE_API_KEY=AIza...` | Same as above on Chrome |

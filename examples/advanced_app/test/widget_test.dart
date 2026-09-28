@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_dart/test.dart';
@@ -14,6 +13,8 @@ import 'package:advanced_app/pages/conversation_page.dart';
 import 'package:advanced_app/pages/responses_page.dart';
 import 'package:advanced_app/pages/tools_chat_page.dart';
 import 'package:advanced_app/pages/widget_gallery_page.dart';
+
+import 'support/scripted_models.dart';
 
 void main() {
   testWidgets('app boots and shows the prebuilt chat composer', (tester) async {
@@ -299,7 +300,7 @@ void main() {
   testWidgets(
     'conversation page runs an approval then a retried turn against a fake model',
     (tester) async {
-      final model = _QueuedLanguageModel([
+      final model = QueuedLanguageModel([
         [
           mockToolCall(
             toolName: 'deleteFile',
@@ -376,7 +377,7 @@ void main() {
     tester,
   ) async {
     final agent = ToolLoopAgent(
-      model: _QueuedLanguageModel([
+      model: QueuedLanguageModel([
         [mockText('Hello from the fake model.')],
       ]),
     );
@@ -438,7 +439,7 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      MaterialApp(home: ResponsesPage(testModel: _ResponsesFakeModel())),
+      MaterialApp(home: ResponsesPage(testModel: ResponsesFakeModel())),
     );
     await tester.pump();
 
@@ -592,117 +593,3 @@ StreamTextResult<Object?> _completedStreamResult({
 /// always returns the same response, this lets a test drive a multi-call
 /// flow (e.g. a tool call that needs approval, then a follow-up reply after
 /// [ToolLoopAgent.resume]) deterministically and without any network access.
-class _QueuedLanguageModel extends LanguageModelV4 {
-  _QueuedLanguageModel(this._responses);
-
-  final List<List<LanguageModelV4ContentPart>> _responses;
-  int _index = 0;
-
-  @override
-  String get provider => 'mock';
-  @override
-  String get modelId => 'mock-queued-model';
-  @override
-  String get specificationVersion => 'v4';
-
-  List<LanguageModelV4ContentPart> _next() {
-    final content =
-        _responses[_index < _responses.length ? _index : _responses.length - 1];
-    _index++;
-    return content;
-  }
-
-  @override
-  Future<LanguageModelV4GenerateResult> doGenerate(
-    LanguageModelV4CallOptions options,
-  ) async => LanguageModelV4GenerateResult(
-    content: _next(),
-    finishReason: LanguageModelV4FinishReason.stop,
-  );
-
-  @override
-  Future<LanguageModelV4StreamResult> doStream(
-    LanguageModelV4CallOptions options,
-  ) async {
-    final parts = <LanguageModelV4StreamPart>[
-      const StreamPartStreamStart(warnings: []),
-    ];
-    for (final part in _next()) {
-      if (part case LanguageModelV4TextPart(:final text)) {
-        parts.addAll([
-          const StreamPartTextStart(id: 'text-1'),
-          StreamPartTextDelta(id: 'text-1', delta: text),
-          const StreamPartTextEnd(id: 'text-1'),
-        ]);
-      } else if (part case final LanguageModelV4ToolCallPart call) {
-        parts.addAll([
-          StreamPartToolInputStart(
-            id: call.toolCallId,
-            toolName: call.toolName,
-          ),
-          StreamPartToolInputDelta(
-            id: call.toolCallId,
-            delta: jsonEncode(call.input),
-          ),
-          StreamPartToolInputEnd(id: call.toolCallId),
-          StreamPartToolCall(toolCall: call),
-        ]);
-      }
-    }
-    parts.add(
-      const StreamPartFinish(
-        finishReason: LanguageModelV4FinishReason.stop,
-        usage: LanguageModelV4Usage(),
-      ),
-    );
-    return LanguageModelV4StreamResult(stream: Stream.fromIterable(parts));
-  }
-}
-
-/// A fake model for the Responses page: streams reasoning, text, and a
-/// hosted-tool source citation, so the page's ReasoningView/SourceCitations
-/// rendering can be exercised without a network call.
-class _ResponsesFakeModel extends LanguageModelV4 {
-  @override
-  String get provider => 'mock';
-  @override
-  String get modelId => 'mock-responses-model';
-  @override
-  String get specificationVersion => 'v4';
-
-  @override
-  Future<LanguageModelV4GenerateResult> doGenerate(
-    LanguageModelV4CallOptions options,
-  ) async => const LanguageModelV4GenerateResult(
-    content: [LanguageModelV4TextPart(text: 'Flutter 3.44 is current.')],
-    finishReason: LanguageModelV4FinishReason.stop,
-  );
-
-  @override
-  Future<LanguageModelV4StreamResult> doStream(
-    LanguageModelV4CallOptions options,
-  ) async {
-    return LanguageModelV4StreamResult(
-      stream: Stream.fromIterable(const [
-        StreamPartStreamStart(warnings: []),
-        StreamPartReasoningStart(id: 'r1'),
-        StreamPartReasoningDelta(id: 'r1', delta: 'Checking sources…'),
-        StreamPartReasoningEnd(id: 'r1'),
-        StreamPartTextStart(id: 't1'),
-        StreamPartTextDelta(id: 't1', delta: 'Flutter 3.44 is current.'),
-        StreamPartTextEnd(id: 't1'),
-        StreamPartSource(
-          source: LanguageModelV4SourcePart(
-            id: 'source-1',
-            url: 'https://flutter.dev/docs/release',
-            title: 'Flutter release notes',
-          ),
-        ),
-        StreamPartFinish(
-          finishReason: LanguageModelV4FinishReason.stop,
-          usage: LanguageModelV4Usage(),
-        ),
-      ]),
-    );
-  }
-}

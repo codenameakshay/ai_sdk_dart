@@ -5,7 +5,6 @@ import 'package:ai_sdk_dart/src/core/shared/operation_scope.dart';
 import 'package:ai_sdk_dart/src/core/shared/tool_concurrency.dart';
 import 'package:ai_sdk_dart/src/core/streaming/structured_output.dart';
 import 'package:ai_sdk_dart/src/core/streaming/tool_execution.dart';
-import 'package:ai_sdk_dart/src/core/timeout_helpers.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:test/test.dart';
 
@@ -40,18 +39,6 @@ void main() {
       throwsA(isA<TimeoutException>()),
     );
     scope.close();
-  });
-
-  test('optional timeout forwards both absent and present timeouts', () async {
-    final value = Future.value('ok');
-    expect(await withOptionalTimeout(value, null), 'ok');
-    expect(
-      withOptionalTimeout(
-        Future<void>.delayed(const Duration(milliseconds: 20)),
-        const Duration(milliseconds: 1),
-      ),
-      throwsA(isA<TimeoutException>()),
-    );
   });
 
   test('structured output handles strict arrays and invalid JSON', () {

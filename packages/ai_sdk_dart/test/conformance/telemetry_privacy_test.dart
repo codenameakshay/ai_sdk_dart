@@ -227,4 +227,27 @@ void main() {
       );
     },
   );
+
+  test(
+    'streamObject telemetry captures the prompt when explicitly opted in',
+    () async {
+      final recorder = _CapturingRecorder();
+      final schema = Schema<Map<String, dynamic>>(
+        jsonSchema: const {'type': 'object'},
+        fromJson: (json) => json,
+      );
+      final result = await streamObject(
+        model: textDeltaStream(['{"ok":true}']),
+        schema: schema,
+        prompt: 'captured prompt',
+        telemetry: TelemetrySettings(
+          isEnabled: true,
+          captureInputs: true,
+          recorder: recorder,
+        ),
+      );
+      await result.object;
+      expect(recorder.attributes, containsValue('captured prompt'));
+    },
+  );
 }

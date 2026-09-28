@@ -103,6 +103,15 @@ void main() {
         );
       },
     );
+
+    test('forwards the canonical end callback', () async {
+      final model = FakeCapturingModel(responseText: 'ok');
+      var ends = 0;
+      final agent = ToolLoopAgent(model: model, instructions: 'agent guidance');
+      await agent.generate(prompt: 'hi', onEnd: (_) => ends++);
+      expect(ends, 1);
+      expect(model.capturedOptions.single.prompt.system, 'agent guidance');
+    });
   });
 
   group('ToolLoopAgent.stream', () {

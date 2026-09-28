@@ -3,10 +3,14 @@
 /// Demonstrates using `ai_sdk_mcp` to:
 ///
 ///   1. Connect to an MCP server over HTTP (`StreamableHttpClientTransport`)
-///   2. Run the `initialize` handshake and discover the server's tools
+///      using the modern protocol strategy (`MCPProtocolMode.modern`)
+///   2. Run the discovery handshake and discover the server's tools
 ///   3. Call a discovered tool directly
 ///   4. Hand the discovered `ToolSet` to `generateText` so the model can call
 ///      the MCP tools itself
+///   5. Handle `MCPAmbiguousToolCompletionException` when a `tools/call`
+///      response is lost in transit, and use `retryOnTransportFailure` only
+///      for a call whose replay is safe
 ///
 /// To keep the example self-contained and runnable with zero external setup, it
 /// spins up a tiny in-process MCP server (a `dart:io` `HttpServer` speaking
@@ -48,9 +52,12 @@ Future<void> main() async {
   final baseUrl = 'http://${server.address.address}:${server.port}/mcp';
   print('Mock MCP server listening at $baseUrl');
 
-  // 2. Connect over HTTP and run the MCP initialize handshake.
+  // 2. Connect over HTTP using the modern stateless strategy: it probes
+  //    `server/discover`, adds per-request protocol metadata, and skips MCP
+  //    sessions and the GET/DELETE lifecycle requests legacy mode uses.
   final client = MCPClient(
     transport: StreamableHttpClientTransport(url: Uri.parse(baseUrl)),
+    protocolMode: MCPProtocolMode.modern,
   );
 
   try {
@@ -72,7 +79,50 @@ Future<void> main() async {
     final dice = await client.callTool('rollDice', {'sides': 20});
     print('rollDice(20)      -> $dice');
 
-    // 5. Hand the discovered tools to the model so it can call them itself.
+    // 5. A lost `tools/call` response is ambiguous — the server may have
+    //    already run it. The client does not auto-retry; it surfaces
+    //    `MCPAmbiguousToolCompletionException` so the app can reconcile.
+    header('Replay-unsafe failure (no automatic retry)');
+    final unsafeClient = MCPClient(
+      transport: _FlakyTransport(),
+      protocolMode: MCPProtocolMode.modern,
+    );
+    await unsafeClient.initialize();
+    try {
+      await unsafeClient.callTool('rollDice', {'sides': 6});
+      print('unexpected: no ambiguity was raised');
+    } on MCPAmbiguousToolCompletionException catch (e) {
+      print(
+        'Ambiguous completion for "${e.toolName}": the die may already have '
+        'been rolled server-side. Reconcile before deciding whether to retry.',
+      );
+    } finally {
+      await unsafeClient.close();
+    }
+
+    // Set `retryOnTransportFailure` only for a call whose replay is safe —
+    // here a read-only lookup with no side effects.
+    header('Replay-safe retry (idempotent read)');
+    final safeClient = MCPClient(
+      transport: _FlakyTransport(),
+      protocolMode: MCPProtocolMode.modern,
+      reconnectPolicy: const MCPReconnectPolicy(
+        maxAttempts: 1,
+        initialDelayMs: 10,
+        maxDelayMs: 10,
+      ),
+    );
+    await safeClient.initialize();
+    try {
+      final recovered = await safeClient.callTool('getWeather', {
+        'city': 'Paris',
+      }, retryOnTransportFailure: true);
+      print('getWeather(Paris) -> $recovered (recovered after retry)');
+    } finally {
+      await safeClient.close();
+    }
+
+    // 6. Hand the discovered tools to the model so it can call them itself.
     //    Requires an OpenAI key; the MCP steps above work without one.
     final apiKey = Platform.environment['OPENAI_API_KEY'];
     if (apiKey == null || apiKey.isEmpty) {
@@ -209,15 +259,49 @@ Object? _dispatch(String? method, Object? params) {
         'capabilities': {'tools': <String, dynamic>{}},
         'serverInfo': {'name': 'mock-mcp-server', 'version': '1.0.0'},
       };
+    case 'server/discover':
+      return {
+        'supportedVersions': [MCPClient.modernProtocolVersion],
+        'serverInfo': {'name': 'mock-mcp-server', 'version': '1.0.0'},
+      };
     case 'tools/list':
-      return {'tools': _toolDescriptors};
+      return {'resultType': 'complete', 'tools': _toolDescriptors};
     case 'tools/call':
       final p = (params as Map?)?.cast<String, dynamic>() ?? const {};
       final args = (p['arguments'] as Map?)?.cast<String, dynamic>() ?? {};
-      return _callTool(p['name'] as String?, args);
+      return {
+        'resultType': 'complete',
+        ..._callTool(p['name'] as String?, args),
+      };
     default:
-      return <String, dynamic>{};
+      return <String, dynamic>{'resultType': 'complete'};
   }
+}
+
+/// A transport that loses the response to the first `tools/call` it sees,
+/// then answers normally. Simulates the "server may have already run the
+/// tool" scenario that makes an unacknowledged `tools/call` ambiguous.
+class _FlakyTransport extends MCPTransport {
+  var _toolCallAttempted = false;
+
+  @override
+  Future<JsonRpcResponse> send(JsonRpcRequest request) async {
+    if (request.method == 'tools/call' && !_toolCallAttempted) {
+      _toolCallAttempted = true;
+      throw MCPTransportException(
+        method: request.method,
+        uri: Uri.parse('mock://flaky-transport'),
+        context: 'response lost',
+      );
+    }
+    return JsonRpcResponse(result: _dispatch(request.method, request.params));
+  }
+
+  @override
+  Future<void> sendNotification(JsonRpcNotification notification) async {}
+
+  @override
+  Future<void> close() async {}
 }
 
 Map<String, dynamic> _callTool(String? name, Map<String, dynamic> args) {

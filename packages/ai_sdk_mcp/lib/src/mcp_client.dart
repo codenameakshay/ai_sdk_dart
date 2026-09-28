@@ -657,6 +657,29 @@ class MCPClient {
     );
   }
 
+  /// Sends [request] on the wire, minting a fresh id when in modern
+  /// protocol mode and [freshId] is set, and validates the modern result
+  /// envelope before returning the response.
+  Future<JsonRpcResponse> _sendWire(
+    JsonRpcRequest request, {
+    required bool freshId,
+  }) async {
+    final wireRequest = protocolMode == MCPProtocolMode.modern && freshId
+        ? JsonRpcRequest(
+            method: request.method,
+            id: _id,
+            params: request.params,
+          )
+        : request;
+    final wireResponse = await transport.send(
+      protocolMode == MCPProtocolMode.modern
+          ? _modernRequest(wireRequest)
+          : wireRequest,
+    );
+    _validateModernResult(wireRequest, wireResponse);
+    return wireResponse;
+  }
+
   Future<JsonRpcResponse> _send(
     JsonRpcRequest request, {
     bool? retryOnTransportFailure,
@@ -680,38 +703,11 @@ class MCPClient {
       if (_closed) throw const MCPException('Client is closed');
       try {
         try {
-          final wireRequest =
-              protocolMode == MCPProtocolMode.modern && attempt > 0
-              ? JsonRpcRequest(
-                  method: request.method,
-                  id: _id,
-                  params: request.params,
-                )
-              : request;
-          final wireResponse = await transport.send(
-            protocolMode == MCPProtocolMode.modern
-                ? _modernRequest(wireRequest)
-                : wireRequest,
-          );
-          _validateModernResult(wireRequest, wireResponse);
-          return wireResponse;
+          return await _sendWire(request, freshId: attempt > 0);
         } on MCPSessionExpiredException {
           await _recoverFromSessionExpiry();
           if (_closed) throw const MCPException('Client is closed');
-          final recoveredRequest = protocolMode == MCPProtocolMode.modern
-              ? JsonRpcRequest(
-                  method: request.method,
-                  id: _id,
-                  params: request.params,
-                )
-              : request;
-          final wireResponse = await transport.send(
-            protocolMode == MCPProtocolMode.modern
-                ? _modernRequest(recoveredRequest)
-                : recoveredRequest,
-          );
-          _validateModernResult(recoveredRequest, wireResponse);
-          return wireResponse;
+          return await _sendWire(request, freshId: true);
         }
       } catch (error, stackTrace) {
         if (error is MCPSessionExpiredException) rethrow;
@@ -740,7 +736,11 @@ class MCPClient {
           transport = _transportFactory();
           _listenToTransport();
           _initialized = false;
-          await _ensureInitialized(replayResourceSubscriptions: true);
+          try {
+            await _ensureInitialized(replayResourceSubscriptions: true);
+          } catch (_) {
+            // Will retry on the next loop iteration.
+          }
         }
       }
     }

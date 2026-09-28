@@ -16,9 +16,9 @@ pulling in `image_picker`/`file_selector`/`url_launcher`. Everything themes via
 
 ```yaml
 dependencies:
-  ai_sdk_dart: ^2.0.0
-  ai_sdk_flutter_ui: ^2.0.0
-  ai_sdk_openai: ^2.0.0   # or another provider
+  ai_sdk_dart: ^3.0.0
+  ai_sdk_flutter_ui: ^3.0.0
+  ai_sdk_openai: ^3.0.0   # or another provider
 ```
 
 ## How it works
@@ -269,6 +269,17 @@ either backend through the same bridge. `ConversationCodec.decode` is used for
 restore and does not execute tools. Unknown parts are retained as
 `UnknownPart`; provider-specific file payloads should remain opaque unless the
 backend supplies a verified URI.
+
+`AiChatScaffold.conversation(conversationController: controller)` renders the
+same scaffold from a `ConversationController` instead of a bare
+`ChatController` — inline `ToolApprovalCard`s and its `errorBuilder` work
+either way. When the backend also implements `ConversationRetryBackend`
+(`LocalConversationBackend` and `RemoteConversationBackend` both do),
+`controller.retryInfo`/`retryLastTurn()` report whether the last turn is
+safely retryable — a turn that already executed a tool or provider action is
+reported `unsafe` rather than silently replayed. Override any of the
+scaffold's built-in copy (button labels, status text, a11y labels) by wrapping
+it in `AiSdkUiStringsScope(strings: const AiSdkUiStrings(...))`.
 
 ## License
 

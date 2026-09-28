@@ -25,7 +25,7 @@ final result = await generateText(
   prompt: 'What is the speed of light?',
 );
 print(result.text);
-print('tokens used: ${result.usage?.totalTokens}');
+print('tokens used: ${result.usage}');
 ```
 
 ---
@@ -55,6 +55,64 @@ final result = await generateText(
   prompt: 'Tell me about Flutter.',
 );
 print(result.text);
+```
+
+`instructions` is the current canonical top-level instruction parameter;
+`system` remains a supported fallback and is used above for continuity with
+older code. Prefer `instructions` in new code:
+
+```dart
+final result = await generateText(
+  model: google('gemini-2.0-flash'),
+  instructions: 'You are a helpful assistant that replies only in haiku.',
+  prompt: 'Tell me about Flutter.',
+);
+print(result.text);
+```
+
+---
+
+## Reasoning
+
+The core `reasoning:` parameter (`LanguageModelV4Reasoning`, from
+`package:ai_sdk_provider`) works with Google models — it's mapped internally
+to Gemini's `thinkingConfig`/`thinkingBudget`:
+
+```dart
+import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+
+final result = await generateText(
+  model: google('gemini-2.0-flash'),
+  reasoning: LanguageModelV4Reasoning.high,
+  prompt: 'Solve step by step: if 3x + 5 = 20, what is x?',
+);
+print(result.text);
+print(result.reasoningText);
+```
+
+### Signed reasoning replay
+
+Google's reasoning parts carry an opaque `thoughtSignature` under
+`providerMetadata['google']['thoughtSignature']`. Don't read or construct it
+yourself — carry `result.responseMessages` through unchanged as history and it
+round-trips automatically:
+
+```dart
+final first = await generateText(
+  model: google('gemini-2.0-flash'),
+  reasoning: LanguageModelV4Reasoning.high,
+  prompt: 'Solve step by step: if 3x + 5 = 20, what is x?',
+);
+
+final second = await generateText(
+  model: google('gemini-2.0-flash'),
+  reasoning: LanguageModelV4Reasoning.high,
+  messages: [
+    ...first.responseMessages.map(ModelMessage.fromProvider),
+    const ModelMessage(role: ModelMessageRole.user, content: 'Now check your work.'),
+  ],
+);
+print(second.text);
 ```
 
 ---

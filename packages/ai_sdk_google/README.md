@@ -6,8 +6,8 @@ Google Generative AI provider for [AI SDK Dart](https://pub.dev/packages/ai_sdk_
 
 ```yaml
 dependencies:
-  ai_sdk_dart: ^2.0.0
-  ai_sdk_google: ^2.0.0
+  ai_sdk_dart: ^3.0.0
+  ai_sdk_google: ^3.0.0
 ```
 
 ## Usage
@@ -44,6 +44,28 @@ await for (final chunk in result.textStream) {
   stdout.write(chunk);
 }
 ```
+
+### Reasoning
+
+The core `reasoning:` parameter (`LanguageModelV4Reasoning`, from
+`package:ai_sdk_provider`) is mapped internally to Gemini's
+`thinkingConfig`/`thinkingBudget`:
+
+```dart
+import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+
+final result = await generateText(
+  model: google('gemini-2.0-flash'),
+  reasoning: LanguageModelV4Reasoning.high,
+  prompt: 'Solve step by step: if 3x + 5 = 20, what is x?',
+);
+print(result.reasoningText);
+```
+
+Gemini's reasoning parts carry an opaque `thoughtSignature` under
+`providerMetadata['google']`. Don't read or construct it yourself — reuse
+`result.responseMessages.map(ModelMessage.fromProvider)` as history in a
+follow-up call and it round-trips automatically.
 
 ### Embeddings
 

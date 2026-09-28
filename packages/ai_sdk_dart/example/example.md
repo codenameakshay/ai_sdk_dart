@@ -4,23 +4,33 @@
 
 ### `example.dart`
 
-A self-contained runnable example covering every core API — no API key or network
-connection required. Uses minimal in-memory fake models so you can run it instantly:
+The v3 public-contract showcase — runs real requests against OpenAI, so it
+needs a key:
 
 ```sh
-dart run example/example.dart
+dart run --define=OPENAI_API_KEY=sk-... example/example.dart
 ```
 
 Demonstrates:
 
 | Section | API |
 |---------|-----|
-| Text generation | `generateText` — text, finishReason, usage, steps |
-| Streaming | `streamText` — live token-by-token output |
-| Structured output | `Output.object` with a typed JSON schema |
-| Tool use (multi-step) | `tool<INPUT, OUTPUT>` + `maxSteps` agent loop |
-| Embeddings | `embed` + `cosineSimilarity` |
-| Middleware | `wrapLanguageModel` + `extractReasoningMiddleware` |
+| Instructions | `instructions` — the canonical top-level instruction |
+| Canonical stream | `result.stream` — the exhaustive typed event stream |
+| Lifecycle callbacks | `onStart`, `onStepStart`, `onToolExecutionStart`, `onToolExecutionEnd`, `onStepEnd`, `onEnd` |
+| Aggregate vs. final step | `result.usage`/`result.text` (aggregate) vs. `result.finalStep` |
+| History reuse | `responseMessages` + `ModelMessage.fromProvider` |
+| Context + approval | `toolWithContext` + `approvalPolicy` |
+| Bounded concurrency | `maxToolConcurrency` |
+| Cancellation & deadlines | `CancellationToken` + `TimeoutConfiguration` |
+| Payload retention | `BodyInclusionPolicy` |
+
+For a keyless, offline walk-through of the same contracts — useful when you
+just want to read compiling code without a provider key — see
+[`example/migration/v3_contracts.dart`](migration/v3_contracts.dart) and
+[`example/migration/v3_generation.dart`](migration/v3_generation.dart), which
+run against `MockLanguageModelV4` and are covered by
+`test/v3_contracts_example_test.dart` and `test/migration_examples_test.dart`.
 
 ---
 

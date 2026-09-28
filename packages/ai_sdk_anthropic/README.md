@@ -6,8 +6,8 @@ Anthropic provider for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart). Supp
 
 ```yaml
 dependencies:
-  ai_sdk_dart: ^2.0.0
-  ai_sdk_anthropic: ^2.0.0
+  ai_sdk_dart: ^3.0.0
+  ai_sdk_anthropic: ^3.0.0
 ```
 
 ## Usage
@@ -96,6 +96,11 @@ final fast = await generateText(
 );
 print(fast.text);
 ```
+
+Extended-thinking blocks carry a `signature` on `LanguageModelV4ReasoningPart`
+so Claude can verify its own prior reasoning in a follow-up turn. Don't read
+or reconstruct it yourself — reuse `result.responseMessages.map(ModelMessage.fromProvider)`
+as history in the next call and it round-trips automatically.
 
 ### Custom API key
 

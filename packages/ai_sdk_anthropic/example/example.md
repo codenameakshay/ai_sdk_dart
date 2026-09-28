@@ -25,7 +25,7 @@ final result = await generateText(
   prompt: 'Explain quantum entanglement in one sentence.',
 );
 print(result.text);
-print('tokens used: ${result.usage?.totalTokens}');
+print('tokens used: ${result.usage}');
 ```
 
 ---
@@ -55,6 +55,96 @@ final result = await generateText(
   prompt: 'What is the Dart programming language?',
 );
 print(result.text);
+```
+
+`instructions` is the current canonical top-level instruction parameter;
+`system` remains a supported fallback and is used above for continuity with
+older code. Prefer `instructions` in new code:
+
+```dart
+final result = await generateText(
+  model: anthropic('claude-sonnet-4-5'),
+  instructions: 'You are a concise assistant. Reply in at most two sentences.',
+  prompt: 'What is the Dart programming language?',
+);
+print(result.text);
+```
+
+---
+
+## Reasoning controls
+
+The core `reasoning:` parameter (`LanguageModelV4Reasoning`, from
+`package:ai_sdk_provider`) works across providers:
+
+```dart
+import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+
+final result = await generateText(
+  model: anthropic('claude-sonnet-4-5'),
+  reasoning: LanguageModelV4Reasoning.high,
+  prompt: 'Solve step by step: if 3x + 5 = 20, what is x?',
+);
+print(result.text);
+print(result.reasoningText);
+```
+
+For Anthropic-specific control over the thinking budget, use
+`AnthropicThinkingOptions` via `providerOptions`:
+
+```dart
+final result = await generateText(
+  model: anthropic('claude-sonnet-4-5'),
+  prompt: 'Solve step by step: if 3x + 5 = 20, what is x?',
+  providerOptions: {
+    'anthropic': AnthropicThinkingOptions(budgetTokens: 10000).toMap(),
+  },
+);
+print(result.reasoningText);
+```
+
+`AnthropicLanguageModelOptions` wraps thinking, prompt caching, and adaptive
+effort together:
+
+```dart
+final result = await generateText(
+  model: anthropic('claude-sonnet-4-5'),
+  prompt: 'Solve step by step: if 3x + 5 = 20, what is x?',
+  providerOptions: {
+    'anthropic': AnthropicLanguageModelOptions(
+      thinking: AnthropicThinkingOptions(budgetTokens: 10000, adaptive: true),
+      cacheControl: AnthropicCacheControlOptions(ttl: '5m'),
+    ).toMap(),
+  },
+);
+```
+
+---
+
+## Signed reasoning replay
+
+Anthropic's extended-thinking blocks carry a `signature` on
+`LanguageModelV4ReasoningPart` so the model can verify its own prior reasoning
+in a follow-up turn. Don't read or reconstruct the signature yourself — carry
+`result.responseMessages` through unchanged as history and Anthropic verifies
+it:
+
+```dart
+final first = await generateText(
+  model: anthropic('claude-sonnet-4-5'),
+  reasoning: LanguageModelV4Reasoning.high,
+  prompt: 'Solve step by step: if 3x + 5 = 20, what is x?',
+);
+
+final second = await generateText(
+  model: anthropic('claude-sonnet-4-5'),
+  reasoning: LanguageModelV4Reasoning.high,
+  messages: [
+    ...first.responseMessages.map(ModelMessage.fromProvider),
+    const ModelMessage(role: ModelMessageRole.user, content: 'Now check your work.'),
+  ],
+);
+print(second.text);
 ```
 
 ---

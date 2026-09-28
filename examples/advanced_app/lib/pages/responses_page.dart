@@ -156,10 +156,7 @@ class _ResponsesPageState extends State<ResponsesPage> {
             const SizedBox(height: 16),
             SegmentedButton<_Provider>(
               segments: const [
-                ButtonSegment(
-                  value: _Provider.openai,
-                  label: Text('OpenAI (Responses)'),
-                ),
+                ButtonSegment(value: _Provider.openai, label: Text('OpenAI')),
                 ButtonSegment(
                   value: _Provider.anthropic,
                   label: Text('Anthropic'),

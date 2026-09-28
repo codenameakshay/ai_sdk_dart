@@ -6,7 +6,7 @@ This catalog is the source of truth for the offline iOS Simulator suite in
 ## Navigation
 
 The app starts on the `Chat` tab. The bottom navigation labels are `Chat`,
-`Completion`, `Object`, `Conversation`, and `Remote`. The `Conversation` and
+`Completion`, `Object`, `Local`, and `Remote`. The `Local` and
 `Remote` tabs render the same `LocalConversationPage`/`RemoteConversationPage`
 widgets registered at the `/conversation` and `/remote` named routes. The
 integration tests still boot each page directly in a test `MaterialApp`, which

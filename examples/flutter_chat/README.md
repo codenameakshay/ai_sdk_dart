@@ -9,10 +9,10 @@ Flutter example app for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart) — 
 | **Chat** | `ChatController` | `AiChatScaffold` (→ `ChatMessageList`, `ChatMessageBubble`, `ChatComposer`) | Multi-turn streaming chat from a single drop-in widget — bubbles, auto-scroll, stop button, empty state, clear history |
 | **Completion** | `CompletionController` | `StreamingTextView` | Single-turn generation with preset chips; output grows token-by-token with a blinking cursor |
 | **Object** | `ObjectStreamController` | — | Streams a typed JSON object (country profile) via the `submit(prompt)` convenience — fields appear as they arrive |
-| **Conversation** | `ConversationController` + `LocalConversationBackend` | `AiChatScaffold.conversation` | A persisted, tool-approval conversation driven entirely locally by a `ToolLoopAgent`; the app bar has a language toggle that swaps in a demo Arabic `AiSdkUiStrings` set and flips the layout to RTL via `Directionality` |
+| **Local** | `ConversationController` + `LocalConversationBackend` | `AiChatScaffold.conversation` | A persisted, tool-approval conversation driven entirely locally by a `ToolLoopAgent`; the app bar has a language toggle that swaps in a demo Arabic `AiSdkUiStrings` set and flips the layout to RTL via `Directionality` |
 | **Remote** | `ConversationController` + `RemoteConversationBackend` | `AiChatScaffold.conversation` | The same conversation UI backed by the `examples/remote_backend` reference server over `ai_sdk_remote`; shows a clear message with the endpoint and startup command when the backend is unreachable |
 
-The Conversation and Remote screens are also reachable directly at the `/conversation` and `/remote` named routes (used by CI's browser and iOS Simulator smoke tests).
+The Local and Remote conversation screens are also reachable directly at the `/conversation` and `/remote` named routes (used by CI's browser and iOS Simulator smoke tests).
 
 ## Run
 

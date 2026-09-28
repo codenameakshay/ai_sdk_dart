@@ -109,7 +109,7 @@ class _ShellState extends State<_Shell> with RestorationMixin {
           NavigationDestination(
             icon: Icon(Icons.forum_outlined),
             selectedIcon: Icon(Icons.forum),
-            label: 'Conversation',
+            label: 'Local',
           ),
           NavigationDestination(
             icon: Icon(Icons.cloud_outlined),

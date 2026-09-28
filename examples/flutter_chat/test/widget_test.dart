@@ -36,7 +36,7 @@ void main() {
     expect(find.textContaining('Streams a typed JSON object'), findsOneWidget);
     expect(find.text('Generate'), findsOneWidget);
 
-    await tester.tap(find.text('Conversation'));
+    await tester.tap(find.text('Local'));
     await tester.pumpAndSettle();
 
     expect(find.text('Local conversation'), findsOneWidget);

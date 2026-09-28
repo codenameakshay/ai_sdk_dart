@@ -20,7 +20,7 @@ Five new parent loopback scenarios cover modern SSE notifications/results, misma
 
 `make test-mcp-reference` also passed. It runs the Dart legacy client against the real published TypeScript SDK **1.30.0** over stdio, checking handshake, discovery, Unicode tool input/output, tool failure and a subsequent successful call. The Node dependency and transitive integrity hashes are pinned under `examples/mcp_reference/js`. No external server or credentials are required after npm installation.
 
-The reference SDK's latest protocol constant is2025-11-25 and its supported versions include2025-06-18; it does **not** qualify Dart's2026-07-28 mode. This is bounded interoperability evidence, not full protocol conformance. New tests: `modern_http_lifecycle_review_test.dart` and `typescript_reference_test.dart`. Logs: `/tmp/v3-mcp-http-review.log`, `/tmp/v3-mcp-coverage-after.log`, `/tmp/v3-mcp-reference-target.log`.
+The reference SDK's latest protocol constant is2025-11-25 and its supported versions include2025-06-18; it does **not** qualify Dart's2026-07-28 mode. This is bounded interoperability evidence, not full protocol conformance. New tests: `mcp_protocol_edges_test.dart` and `typescript_reference_test.dart`. Logs: `/tmp/v3-mcp-http-review.log`, `/tmp/v3-mcp-coverage-after.log`, `/tmp/v3-mcp-reference-target.log`.
 
 ## Modern MRTR and host-auth follow-up
 

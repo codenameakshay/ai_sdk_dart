@@ -77,9 +77,19 @@ composer.
 
 The harness also drives the conversation scaffold with a failing backend. The
 error banner shows the backend error text, `Retry`, and `Dismiss`; dismissing it
-removes the banner. The shipped conversation adapter currently exposes a retry
-button while its `reload()` implementation is empty, so retry behavior is
-cataloged as a follow-up app fix rather than asserted as a successful retry.
+removes the banner. That fixture backend has no retry support, so tapping
+`Retry` reports an unsupported-retry error.
+
+Local retry is asserted separately: after a failed text turn, retry succeeds
+with stable message IDs and one user message (`conversation-local-retry`). The
+remote conversation does not support retry, so its error banner shows only
+`Dismiss`.
+
+## Persisted restart
+
+The local approval flow is run in two processes. The first run writes the
+pending approval (`conversation-persisted-write`) and the second restores it
+and completes the turn (`conversation-persisted-restore`).
 
 ## Fixture limits
 

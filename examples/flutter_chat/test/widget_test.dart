@@ -54,6 +54,26 @@ void main() {
     expect(find.byKey(const ValueKey('chat-composer-field')), findsOneWidget);
   });
 
+  testWidgets('remote conversation error offers dismiss but no retry', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const MaterialApp(home: RemoteConversationPage()));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('chat-composer-field')),
+      'hello',
+    );
+    await tester.tap(find.byKey(const ValueKey('chat-composer-send')));
+    for (var i = 0; i < 20; i++) {
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+
+    expect(find.byType(ChatErrorView), findsOneWidget);
+    expect(find.byKey(const ValueKey('chat-error-dismiss')), findsOneWidget);
+    expect(find.byKey(const ValueKey('chat-error-retry')), findsNothing);
+  });
+
   testWidgets('completion page streams text and stop cancels offline', (
     WidgetTester tester,
   ) async {

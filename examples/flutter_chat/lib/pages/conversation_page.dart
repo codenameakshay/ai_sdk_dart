@@ -164,7 +164,7 @@ class _RemoteConversationPageState extends State<RemoteConversationPage> {
                     'backend with `cd examples/remote_backend/js && npm ci '
                     '&& node server.mjs`, or pass a different '
                     '--dart-define=REMOTE_BACKEND_URL.\n$error',
-                onRetry: onRetry,
+                onRetry: _conversation.retryInfo.isAvailable ? onRetry : null,
                 onDismiss: onDismiss,
               ),
         ),

@@ -153,7 +153,12 @@ class AssistantMessageView extends StatelessWidget {
 
   Widget _text(BuildContext context, String text) {
     final builder = textBuilder;
-    if (builder != null) return builder(context, text);
+    if (builder != null) {
+      return Directionality(
+        textDirection: contentDirection(text) ?? Directionality.of(context),
+        child: Builder(builder: (context) => builder(context, text)),
+      );
+    }
     final style = Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.5);
     return Semantics(
       container: true,

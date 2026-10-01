@@ -460,8 +460,10 @@ class LocalConversationBackend
       );
     }
 
-    await interrupt();
-    final epoch = ++_epoch;
+    final interruption = interrupt();
+    final epoch = _epoch;
+    await interruption;
+    if (_disposed || epoch != _epoch) return;
     final cancellation = CancellationToken();
     _cancellation = cancellation;
     _conversation = Conversation(
@@ -539,8 +541,10 @@ class LocalConversationBackend
   @override
   Future<void> send(String text) async {
     if (_disposed) throw StateError('Conversation backend is disposed');
-    await interrupt();
-    final epoch = ++_epoch;
+    final interruption = interrupt();
+    final epoch = _epoch;
+    await interruption;
+    if (_disposed || epoch != _epoch) return;
     _pendingReplay = null;
     _restoredBindingInvalid = false;
     _pendingApprovalRequests.clear();
@@ -964,7 +968,10 @@ class LocalConversationBackend
   @override
   Future<void> restore(Map<String, dynamic> encoded) async {
     if (_disposed) throw StateError('Conversation backend is disposed');
-    await interrupt();
+    final interruption = interrupt();
+    final epoch = _epoch;
+    await interruption;
+    if (_disposed || epoch != _epoch) return;
     // ConversationCodec.decode is intentionally pure. No agent call occurs.
     final restored = ConversationCodec.decode(encoded);
     _restorePendingApproval(restored);
@@ -1401,8 +1408,10 @@ class RemoteConversationBackend
   @override
   Future<void> send(String text) async {
     if (_disposed) throw StateError('Conversation backend is disposed');
-    await interrupt();
-    final epoch = ++_epoch;
+    final interruption = interrupt();
+    final epoch = _epoch;
+    await interruption;
+    if (_disposed || epoch != _epoch) return;
     final userId = _freshId(_conversation, 'message');
     final message = ConversationMessage(
       id: userId,
@@ -1449,7 +1458,10 @@ class RemoteConversationBackend
   @override
   Future<void> restore(Map<String, dynamic> encoded) async {
     if (_disposed) throw StateError('Conversation backend is disposed');
-    await interrupt();
+    final interruption = interrupt();
+    final epoch = _epoch;
+    await interruption;
+    if (_disposed || epoch != _epoch) return;
     _conversation = ConversationCodec.decode(encoded);
     _restoreApprovalRound();
     _changes.add(_conversation);

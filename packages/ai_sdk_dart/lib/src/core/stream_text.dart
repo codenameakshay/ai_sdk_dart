@@ -164,11 +164,11 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
 
   var currentInstructions = instructions ?? system;
   final initialInstructions = currentInstructions;
+  final approvalById = indexApprovalResponses(toolApprovalResponses);
   final scope = OperationScope(
     abortSignal: abortSignal,
     timeout: timeout?.total,
   );
-  final approvalById = indexApprovalResponses(toolApprovalResponses);
 
   final rawController = StreamController<LanguageModelV4StreamPart>.broadcast();
   final textController = StreamController<String>.broadcast();

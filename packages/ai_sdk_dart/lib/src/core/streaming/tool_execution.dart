@@ -311,6 +311,7 @@ Future<T> _awaitToolOperation<T>(
   CancellationToken? abortSignal,
   Duration? timeout,
 }) {
+  throwIfCancelled(abortSignal);
   final guarded = raceWithCancellation(Future.sync(operation), abortSignal);
   if (timeout == null) return guarded;
   return guarded.timeout(

@@ -31,8 +31,8 @@ class MyCustomModel extends LanguageModelV4 {
     LanguageModelV4CallOptions options,
   ) async {
     // Extract the user prompt from the last message.
-    final prompt = options.prompt
-        .whereType<LanguageModelV4UserMessage>()
+    final prompt = options.prompt.messages
+        .where((m) => m.role == LanguageModelV4Role.user)
         .lastOrNull
         ?.content
         .whereType<LanguageModelV4TextPart>()

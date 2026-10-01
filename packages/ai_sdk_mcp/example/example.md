@@ -241,9 +241,15 @@ try {
 
 Set `retryOnTransportFailure: true` only for a call whose replay is safe —
 for example a read-only lookup — and leave it at its default `false` for a
-mutating call like `deleteRecord` above:
+mutating call like `deleteRecord` above. The flag only takes effect when the
+client has a `reconnectPolicy`:
 
 ```dart
+final client = MCPClient(
+  transport: transport,
+  reconnectPolicy: const MCPReconnectPolicy(maxAttempts: 1),
+);
+
 final price = await client.callTool(
   'lookupPrice',
   {'sku': 'ABC-123'},

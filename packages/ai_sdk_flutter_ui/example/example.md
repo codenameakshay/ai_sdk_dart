@@ -323,14 +323,14 @@ RemoteConversationBackend(
 
 ### Persistence
 
-Persist `ConversationCodec.encode(controller.conversation)`, and restore with
-`backend.restore(encoded)` before attaching the screen. Restore only decodes
-the snapshot — it never executes a tool or calls a provider.
+Persist `ConversationCodec.encode(_conversation.conversation)`, and restore
+with `_conversation.restore(encoded)` before attaching the screen. Restore only
+decodes the snapshot — it never executes a tool or calls a provider.
 
 ```dart
 final saved = ConversationCodec.encode(_conversation.conversation);
 // ...persist `saved` (e.g. to local storage) and later:
-await backend.restore(saved);
+await _conversation.restore(saved);
 ```
 
 ### Approvals
@@ -363,6 +363,8 @@ AiChatScaffold.conversation(
 
 `ConversationRetryBackend` (implemented by both `LocalConversationBackend`
 and `RemoteConversationBackend`) exposes `retryInfo` and `retryLastTurn()`.
+`RemoteConversationBackend` always reports `unsupported` today; only
+`LocalConversationBackend` can report a retryable turn.
 `ConversationController` forwards both, so callers don't need to cast the
 backend:
 

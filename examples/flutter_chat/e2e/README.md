@@ -35,10 +35,9 @@ Run that command twice. The extended integration driver writes the named PNG
 screenshots into the current directory. The test also includes a backend error
 fixture for the scaffold's `Retry`/`Dismiss` presentation.
 
-The `/conversation` and `/remote` routes are not reachable from the shipped
-navigation shell, so the integration test boots those public page widgets
-directly. The app has no tracked iOS `Podfile`, native integration-test target,
-or `flutter_driver` dependency; Flutter's SDK integration-test package and the
+The integration test boots the public page widgets directly instead of
+navigating the shell. The app has no tracked iOS `Podfile`, native
+integration-test target, or `flutter_driver` dependency; Flutter's SDK integration-test package and the
 existing Runner project are sufficient for this harness. The workflow does not
 claim physical-device coverage or provider/API coverage.
 

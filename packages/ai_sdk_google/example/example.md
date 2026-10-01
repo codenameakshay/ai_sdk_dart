@@ -92,8 +92,8 @@ print(result.reasoningText);
 
 ### Signed reasoning replay
 
-Google's reasoning parts carry an opaque `thoughtSignature` under
-`providerMetadata['google']['thoughtSignature']`. Don't read or construct it
+Google's reasoning parts carry an opaque `thoughtSignature` in
+`providerOptions['google']['thoughtSignature']`. Don't read or construct it
 yourself — carry `result.responseMessages` through unchanged as history and it
 round-trips automatically:
 

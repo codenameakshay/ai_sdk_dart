@@ -277,7 +277,9 @@ either way. When the backend also implements `ConversationRetryBackend`
 (`LocalConversationBackend` and `RemoteConversationBackend` both do),
 `controller.retryInfo`/`retryLastTurn()` report whether the last turn is
 safely retryable — a turn that already executed a tool or provider action is
-reported `unsafe` rather than silently replayed. Override any of the
+reported `unsafe` rather than silently replayed. `RemoteConversationBackend`
+always reports `unsupported` today; only `LocalConversationBackend` can report
+a retryable turn. Override any of the
 scaffold's built-in copy (button labels, status text, a11y labels) by wrapping
 it in `AiSdkUiStringsScope(strings: const AiSdkUiStrings(...))`.
 

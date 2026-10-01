@@ -62,8 +62,8 @@ final result = await generateText(
 print(result.reasoningText);
 ```
 
-Gemini's reasoning parts carry an opaque `thoughtSignature` under
-`providerMetadata['google']`. Don't read or construct it yourself — reuse
+Gemini's reasoning parts carry an opaque `thoughtSignature` in
+`providerOptions['google']`. Don't read or construct it yourself — reuse
 `result.responseMessages.map(ModelMessage.fromProvider)` as history in a
 follow-up call and it round-trips automatically.
 

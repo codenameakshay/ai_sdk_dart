@@ -40,7 +40,7 @@ void main() {
           expect(params['protocolVersion'], '2025-06-18');
           expect(
             (params['clientInfo'] as Map<String, dynamic>)['version'],
-            '2.0.0',
+            '3.0.0',
           );
           final caps = params['capabilities'] as Map<String, dynamic>;
           expect(caps, isEmpty);

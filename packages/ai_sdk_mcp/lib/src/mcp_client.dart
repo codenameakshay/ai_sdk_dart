@@ -509,7 +509,7 @@ class MCPClient {
         params: {
           'protocolVersion': legacyProtocolVersion,
           'capabilities': <String, dynamic>{},
-          'clientInfo': {'name': 'ai_sdk_dart', 'version': '2.0.0'},
+          'clientInfo': {'name': 'ai_sdk_dart', 'version': '3.0.0'},
         },
       ),
     );
@@ -591,7 +591,7 @@ class MCPClient {
       'io.modelcontextprotocol/clientCapabilities': <String, dynamic>{},
       'io.modelcontextprotocol/clientInfo': {
         'name': 'ai_sdk_dart',
-        'version': '2.0.0',
+        'version': '3.0.0',
       },
     },
   };

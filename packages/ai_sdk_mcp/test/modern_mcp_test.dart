@@ -195,7 +195,7 @@ void main() {
       'io.modelcontextprotocol/clientCapabilities': <String, dynamic>{},
       'io.modelcontextprotocol/clientInfo': {
         'name': 'ai_sdk_dart',
-        'version': '2.0.0',
+        'version': '3.0.0',
       },
     });
     expect(server.requests[1].params?['_meta'], isA<Map>());

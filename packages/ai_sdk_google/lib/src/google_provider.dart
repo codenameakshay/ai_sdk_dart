@@ -196,7 +196,12 @@ class _GoogleLanguageModel extends LanguageModelV4 {
                 ),
               );
             } else {
-              content.add(LanguageModelV4TextPart(text: text));
+              content.add(
+                LanguageModelV4TextPart(
+                  text: text,
+                  providerOptions: _googleThoughtOptions(partMap),
+                ),
+              );
             }
           }
         }
@@ -371,6 +376,7 @@ class _GoogleLanguageModel extends LanguageModelV4 {
       await cancellation.dispose();
     };
     var textStarted = false;
+    ProviderMetadata? textProviderOptions;
     var streamStarted = false;
     final activeToolCalls = <int, _GoogleStreamFunctionCallState>{};
     final activeReasoning = <int, _GoogleStreamReasoningState>{};
@@ -414,6 +420,10 @@ class _GoogleLanguageModel extends LanguageModelV4 {
             final part = parts[partIndex];
             final map = (part as Map).cast<String, dynamic>();
             final text = map['text']?.toString();
+            if (text != null && map['thought'] != true) {
+              textProviderOptions =
+                  _googleThoughtOptions(map) ?? textProviderOptions;
+            }
             if (text != null && text.isNotEmpty) {
               if (map['thought'] == true) {
                 final id = 'reasoning-$partIndex';
@@ -547,7 +557,12 @@ class _GoogleLanguageModel extends LanguageModelV4 {
           final finishReason = first['finishReason']?.toString();
           if (finishReason != null) {
             if (textStarted) {
-              controller.add(const StreamPartTextEnd(id: 'text-0'));
+              controller.add(
+                StreamPartTextEnd(
+                  id: 'text-0',
+                  providerMetadata: textProviderOptions,
+                ),
+              );
             }
             for (final state in activeToolCalls.values.toList()) {
               _emitGoogleToolCall(controller, state);
@@ -851,7 +866,12 @@ List<Map<String, dynamic>> _toGoogleContents(
     final parts = <Map<String, dynamic>>[];
     for (final part in message.content) {
       if (part is LanguageModelV4TextPart) {
-        parts.add({'text': part.text});
+        final thought = part.providerOptions?['google'];
+        parts.add({
+          'text': part.text,
+          if (thought is Map && thought['thoughtSignature'] != null)
+            'thoughtSignature': thought['thoughtSignature'],
+        });
       } else if (part is LanguageModelV4ImagePart) {
         final imagePart = _toGoogleInlinePart(part.image, part.mediaType);
         if (imagePart != null) {
@@ -1191,7 +1211,7 @@ Map<String, dynamic> _googleToolChoicePayload(
 /// Maps a [DioException] from a non-2xx response to a typed [AiApiCallError]
 /// carrying the provider's message/status/code. Drains a streamed error body
 /// (`ResponseType.stream`) when present so the message is recoverable.
-Map<String, dynamic>? _googleThoughtOptions(Map<String, dynamic> functionCall) {
+ProviderMetadata? _googleThoughtOptions(Map<String, dynamic> functionCall) {
   final signature = functionCall['thoughtSignature'];
   if (signature == null) return null;
   return {

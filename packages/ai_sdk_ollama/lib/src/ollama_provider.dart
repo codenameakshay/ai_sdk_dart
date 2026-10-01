@@ -374,6 +374,20 @@ class _OllamaLanguageModel extends LanguageModelV4 {
         if (includeRawChunks) {
           controller.add(StreamPartRaw(rawValue: event));
         }
+        final errorMessage = event['error'];
+        if (errorMessage is String) {
+          controller.add(
+            StreamPartError(
+              error: AiApiCallError(
+                errorMessage,
+                responseBody: trimmed,
+                responseHeaders: responseHeaders,
+              ),
+            ),
+          );
+          await controller.close();
+          return;
+        }
         final message = event['message'] as Map<String, dynamic>?;
         final content = message?['content'] as String?;
         if (content != null && content.isNotEmpty) {

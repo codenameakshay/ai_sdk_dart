@@ -49,6 +49,36 @@ void main() {
       },
     );
   }
+
+  test('reports a mid-stream error line as a stream error', () async {
+    final body = [
+      jsonEncode({
+        'message': {'content': 'partial'},
+        'done': false,
+      }),
+      jsonEncode({'error': 'llama runner process has terminated'}),
+    ].join('\n');
+    final client = Dio()
+      ..httpClientAdapter = _StreamAdapter(
+        Stream.value(Uint8List.fromList(utf8.encode(body))),
+      );
+    addTearDown(() => client.close(force: true));
+    final result = await OllamaProvider(client: client)
+        .call('llama3')
+        .doStream(
+          const LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(messages: []),
+          ),
+        );
+    final parts = await result.stream.toList();
+    final error = parts.whereType<StreamPartError>().single.error;
+    expect(error, isA<AiApiCallError>());
+    expect(
+      (error as AiApiCallError).message,
+      'llama runner process has terminated',
+    );
+    expect(parts.whereType<StreamPartFinish>(), isEmpty);
+  });
 }
 
 class _StreamAdapter implements HttpClientAdapter {

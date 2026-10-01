@@ -83,7 +83,7 @@ void main() {
     final sub = session.events.listen((_) {}, onError: errors.add);
     transport.controller.addError(StateError('transport failed'));
     await Future<void>.delayed(Duration.zero);
-    expect(session.state, RealtimeConnectionState.closed);
+    expect(session.state, RealtimeConnectionState.failed);
     expect(errors, contains(isA<StateError>()));
     expect(transport.closeCount, 1);
     await sub.cancel();

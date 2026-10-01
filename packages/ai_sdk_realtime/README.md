@@ -35,7 +35,10 @@ The default authenticated connector uses `dart:io`. Browser applications must
 provide a browser-safe `RealtimeTransportConnector` and a short-lived or
 ephemeral credential flow. The package does not capture microphone input,
 decode or play audio, request permissions, or select an audio route; those
-responsibilities stay with the host application.
+responsibilities stay with the host application. After playing or consuming
+each `RealtimeAudioDelta`, call `session.acknowledgeAudio(audio.length)`.
+Unacknowledged audio counts against `maxBufferedAudioBytes` (4 MiB by default),
+and further deltas are dropped once that limit is reached.
 
 The deterministic transport and loopback tests cover wire shape, queue bounds,
 startup, cancellation, and cleanup. Live OpenAI service behavior and physical

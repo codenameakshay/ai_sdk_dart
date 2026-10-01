@@ -7,10 +7,11 @@ Future<void> main() async {
     apiKey: const String.fromEnvironment('OPENAI_API_KEY'),
     config: const RealtimeSessionConfig(outputModalities: ['audio', 'text']),
   );
-  final subscription = session.events.listen((event) {
+  final subscription = session.events.listen((event) async {
     if (event case RealtimeAudioDelta(:final audio)) {
       // Forward audio to a host playback device. Device routing is host-owned.
       print('received ${audio.length} bytes');
+      await session.acknowledgeAudio(audio.length);
     }
   });
   await session.sendText('Say hello briefly.');

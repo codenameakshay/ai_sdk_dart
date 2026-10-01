@@ -634,6 +634,11 @@ class RealtimeSession {
   /// Events are dropped while no listener is attached. Each paused listener
   /// receives a separately bounded queue, so a slow host cannot retain frames
   /// without limit.
+  ///
+  /// Hosts must call [acknowledgeAudio] with the decoded byte length of each
+  /// [RealtimeAudioDelta] after playing or consuming it. Unacknowledged audio
+  /// counts against `maxBufferedAudioBytes`, and further deltas are dropped
+  /// once that limit is reached.
   Stream<RealtimeEvent> get events => _eventHub.stream;
 
   static Future<RealtimeSession> connect({
@@ -884,6 +889,8 @@ class RealtimeSession {
     );
   }
 
+  /// Releases [bytes] of the audio buffer budget after the host has played or
+  /// consumed that much audio from [RealtimeAudioDelta] events.
   Future<void> acknowledgeAudio(int bytes) async {
     if (bytes < 0 || bytes > _bufferedAudioBytes) {
       throw ArgumentError.value(bytes, 'bytes');
@@ -1048,7 +1055,8 @@ class RealtimeSession {
       _eventHub.close();
       return;
     }
-    state = RealtimeConnectionState.closing;
+    final failed = state == RealtimeConnectionState.failed;
+    if (!failed) state = RealtimeConnectionState.closing;
     _terminal = true;
     _failStartup(
       const RealtimeException('Realtime session closed'),
@@ -1100,7 +1108,7 @@ class RealtimeSession {
       cleanupError ??= error;
       cleanupStack ??= stack;
     } finally {
-      state = RealtimeConnectionState.closed;
+      if (!failed) state = RealtimeConnectionState.closed;
       _eventHub.close();
     }
     if (cleanupError != null) {

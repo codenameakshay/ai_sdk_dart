@@ -934,6 +934,7 @@ class _ConversationReducer {
 
   void _unknown(Map<String, dynamic> e) {
     final type = e['type'] as String;
+    if (type.startsWith('data-') && e['transient'] == true) return;
     final n = (_unknownCounts[type] ?? 0) + 1;
     _unknownCounts[type] = n;
     final raw = {...e, 'id': e['id'] is String ? e['id'] : 'remote-$type-$n'};

@@ -1284,10 +1284,7 @@ class _BoundedEventHub {
     controller.onResume = listener.drain;
     controller.onCancel = () {
       listener.cancelled = true;
-      onAudioDropped?.call(listener.queuedAudioBytes);
-      listener.queue.clear();
-      listener.queuedBytes = 0;
-      listener.queuedAudioBytes = 0;
+      listener.dropQueue();
       _listeners.remove(listener);
     };
   }
@@ -1295,8 +1292,9 @@ class _BoundedEventHub {
   bool add(RealtimeEvent event, {required int frameBytes, int audioBytes = 0}) {
     if (_closed) return false;
     var accepted = false;
+    final item = _HubItem.data(event, frameBytes, audioBytes);
     for (final listener in List<_HubListener>.of(_listeners)) {
-      accepted |= listener.add(_HubItem.data(event, frameBytes, audioBytes));
+      accepted |= listener.add(item);
     }
     return accepted;
   }
@@ -1330,6 +1328,8 @@ class _HubItem {
   final StackTrace? stack;
   final int bytes;
   final int audioBytes;
+  int queuedListeners = 0;
+  bool delivered = false;
 }
 
 class _HubListener {
@@ -1338,7 +1338,6 @@ class _HubListener {
   final MultiStreamController<RealtimeEvent> controller;
   final List<_HubItem> queue = [];
   int queuedBytes = 0;
-  int queuedAudioBytes = 0;
   bool cancelled = false;
   bool closing = false;
 
@@ -1352,10 +1351,11 @@ class _HubListener {
       }
       queue.add(item);
       queuedBytes += item.bytes;
-      queuedAudioBytes += item.audioBytes;
+      item.queuedListeners++;
       return true;
     }
     if (item.event != null) {
+      item.delivered = true;
       controller.addSync(item.event!);
     } else {
       controller.addErrorSync(item.error!, item.stack);
@@ -1367,8 +1367,9 @@ class _HubListener {
     while (!cancelled && !controller.isPaused && queue.isNotEmpty) {
       final item = queue.removeAt(0);
       queuedBytes -= item.bytes;
-      queuedAudioBytes -= item.audioBytes;
+      item.queuedListeners--;
       if (item.event != null) {
+        item.delivered = true;
         controller.addSync(item.event!);
       } else {
         controller.addErrorSync(item.error!, item.stack);
@@ -1381,18 +1382,26 @@ class _HubListener {
 
   void overflow() {
     if (cancelled || closing) return;
-    hub.onAudioDropped?.call(queuedAudioBytes);
-    queue.clear();
-    queuedBytes = 0;
-    queuedAudioBytes = 0;
+    dropQueue();
     closing = true;
     queue.add(
       _HubItem.error(
         const RealtimeEventBufferOverflowException(),
         StackTrace.current,
-      ),
+      )..queuedListeners = 1,
     );
     queuedBytes = 1;
+  }
+
+  void dropQueue() {
+    for (final item in queue) {
+      item.queuedListeners--;
+      if (item.queuedListeners == 0 && !item.delivered && item.audioBytes > 0) {
+        hub.onAudioDropped?.call(item.audioBytes);
+      }
+    }
+    queue.clear();
+    queuedBytes = 0;
   }
 
   void closeAfterDrain() {

@@ -5,6 +5,52 @@ import 'package:ai_sdk_realtime/ai_sdk_realtime.dart';
 import 'package:test/test.dart';
 
 void main() {
+  for (final retainedState in ['queued', 'delivered']) {
+    test(
+      'one listener cancellation retains another listener $retainedState audio budget',
+      () async {
+        final transport = _Transport();
+        transport.add({
+          'type': 'session.created',
+          'session': {'id': 'session-1'},
+        });
+        final session = await RealtimeSession.connect(
+          apiKey: 'fixture',
+          maxBufferedAudioBytes: 2,
+          connector: (_, _) async => transport,
+        );
+        addTearDown(session.close);
+        final first = session.events.listen((_) {}, onError: (_) {});
+        final second = session.events.listen((_) {}, onError: (_) {});
+        first.pause();
+        if (retainedState == 'queued') second.pause();
+        addTearDown(second.cancel);
+        transport.add({
+          'type': 'response.output_audio.delta',
+          'delta': base64Encode([1, 2]),
+        });
+        await Future<void>.delayed(Duration.zero);
+        await first.cancel();
+        var audioEvents = 0;
+        final errors = <Object>[];
+        final active = session.events.listen((event) {
+          if (event is RealtimeAudioDelta) audioEvents++;
+        }, onError: errors.add);
+        addTearDown(active.cancel);
+        transport.add({
+          'type': 'response.output_audio.delta',
+          'delta': base64Encode([3, 4]),
+        });
+        await Future<void>.delayed(Duration.zero);
+        expect(audioEvents, 0);
+        expect(errors, contains(isA<RealtimeException>()));
+        second.resume();
+        await Future<void>.delayed(Duration.zero);
+        await session.acknowledgeAudio(2);
+      },
+    );
+  }
+
   test('paused queued text precedes done after peer EOF', () async {
     final transport = _Transport();
     final session = await _connect(transport);

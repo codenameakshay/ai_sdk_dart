@@ -164,9 +164,9 @@ class ChatController extends StreamingControllerBase {
     activeRequestId = null;
     _activeAbortSignal?.cancel();
     _activeAbortSignal = null;
-    await _activeSubscription?.cancel();
+    final subscription = _activeSubscription;
+    final errorSubscription = _errorSubscription;
     _activeSubscription = null;
-    await _errorSubscription?.cancel();
     _errorSubscription = null;
     if (commitPartial && _streamBuffer.isNotEmpty) {
       _messages.add(
@@ -178,6 +178,8 @@ class ChatController extends StreamingControllerBase {
     }
     _streamBuffer.clear();
     _streamingReasoning = '';
+    await subscription?.cancel();
+    await errorSubscription?.cancel();
   }
 
   void _discardApprovalState() {
@@ -526,7 +528,9 @@ class ChatController extends StreamingControllerBase {
   /// Cancel the active stream.
   Future<void> stop() async {
     if (isDisposed) return;
+    final generation = nextRequestId;
     await _cancelActiveRequest(commitPartial: true);
+    if (isDisposed || generation != nextRequestId) return;
     _discardApprovalState();
     _status = ChatStatus.ready;
     notifyListenersSafely(immediate: true, status: true, content: true);

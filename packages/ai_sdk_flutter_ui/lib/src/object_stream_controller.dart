@@ -91,8 +91,9 @@ class ObjectStreamController<T> extends StreamingControllerBase {
     activeRequestId = null;
     _activeAbortSignal?.cancel();
     _activeAbortSignal = null;
-    await _subscription?.cancel();
+    final subscription = _subscription;
     _subscription = null;
+    await subscription?.cancel();
   }
 
   int _beginRequest({required bool clearValue}) {
@@ -213,7 +214,9 @@ class ObjectStreamController<T> extends StreamingControllerBase {
 
   Future<void> stop() async {
     if (isDisposed) return;
+    final generation = nextRequestId;
     await _cancelActiveRequest();
+    if (isDisposed || generation != nextRequestId) return;
     _isLoading = false;
     _isStreaming = false;
     notifyTerminalListeners(statusChanged: true);

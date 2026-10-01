@@ -74,10 +74,12 @@ class CompletionController extends StreamingControllerBase {
     activeRequestId = null;
     _activeAbortSignal?.cancel();
     _activeAbortSignal = null;
-    await _activeSubscription?.cancel();
+    final subscription = _activeSubscription;
+    final errorSubscription = _errorSubscription;
     _activeSubscription = null;
-    await _errorSubscription?.cancel();
     _errorSubscription = null;
+    await subscription?.cancel();
+    await errorSubscription?.cancel();
   }
 
   /// Submit [prompt] and stream the completion.
@@ -174,7 +176,9 @@ class CompletionController extends StreamingControllerBase {
 
   Future<void> stop() async {
     if (isDisposed) return;
+    final generation = nextRequestId;
     await _cancelActiveRequest();
+    if (isDisposed || generation != nextRequestId) return;
     _isLoading = false;
     _isStreaming = false;
     notifyTerminalListeners(statusChanged: true);

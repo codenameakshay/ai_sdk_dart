@@ -263,6 +263,7 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
     var reasoningStarted = false;
     var streamStarted = false;
     LanguageModelV4Usage? streamUsage;
+    String? finishReason;
     final streamWarnings = <LanguageModelV4Warning>[];
     String? responseId;
     String? responseModel;
@@ -369,56 +370,56 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
             }
           }
 
-          final finishReason = choice['finish_reason']?.toString();
-          if (finishReason != null) {
-            if (textStarted) {
-              controller.add(const StreamPartTextEnd(id: 'text-0'));
-            }
-            if (reasoningStarted) {
-              controller.add(const StreamPartReasoningEnd(id: 'reasoning-0'));
-            }
-            for (final state in toolState.values) {
-              controller.add(StreamPartToolInputEnd(id: state.id));
-              controller.add(
-                StreamPartToolCall(
-                  toolCall: LanguageModelV4ToolCallPart(
-                    toolCallId: state.id,
-                    toolName: state.name,
-                    input: safeParseJson(state.argumentsBuffer.toString()),
-                  ),
-                ),
-              );
-            }
+          finishReason ??= choice['finish_reason']?.toString();
+        }
+        if (finishReason != null) {
+          if (textStarted) {
+            controller.add(const StreamPartTextEnd(id: 'text-0'));
+          }
+          if (reasoningStarted) {
+            controller.add(const StreamPartReasoningEnd(id: 'reasoning-0'));
+          }
+          for (final state in toolState.values) {
+            controller.add(StreamPartToolInputEnd(id: state.id));
             controller.add(
-              StreamPartResponseMetadata(
-                metadata: LanguageModelV4ResponseMetadata(
-                  id: responseId,
-                  modelId: responseModel,
-                  timestamp: responseTimestamp,
-                  headers: responseHeaders,
-                  body: lastChunk,
+              StreamPartToolCall(
+                toolCall: LanguageModelV4ToolCallPart(
+                  toolCallId: state.id,
+                  toolName: state.name,
+                  input: safeParseJson(state.argumentsBuffer.toString()),
                 ),
-              ),
-            );
-            controller.add(
-              StreamPartFinish(
-                finishReason: _mapFinishReason(finishReason),
-                rawFinishReason: finishReason,
-                usage: streamUsage ?? const LanguageModelV4Usage(),
-                providerMetadata: {
-                  provider: {
-                    'id': ?responseId,
-                    'model': ?responseModel,
-                    'timestamp': DateTime.now().toUtc().toIso8601String(),
-                    if (streamWarnings.isNotEmpty)
-                      'warnings': streamWarnings
-                          .map((warning) => warning.type)
-                          .toList(growable: false),
-                  },
-                },
               ),
             );
           }
+          controller.add(
+            StreamPartResponseMetadata(
+              metadata: LanguageModelV4ResponseMetadata(
+                id: responseId,
+                modelId: responseModel,
+                timestamp: responseTimestamp,
+                headers: responseHeaders,
+                body: lastChunk,
+              ),
+            ),
+          );
+          controller.add(
+            StreamPartFinish(
+              finishReason: _mapFinishReason(finishReason),
+              rawFinishReason: finishReason,
+              usage: streamUsage ?? const LanguageModelV4Usage(),
+              providerMetadata: {
+                provider: {
+                  'id': ?responseId,
+                  'model': ?responseModel,
+                  'timestamp': DateTime.now().toUtc().toIso8601String(),
+                  if (streamWarnings.isNotEmpty)
+                    'warnings': streamWarnings
+                        .map((warning) => warning.type)
+                        .toList(growable: false),
+                },
+              },
+            ),
+          );
         }
       } catch (error) {
         if (!streamStarted) {

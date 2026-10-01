@@ -449,6 +449,28 @@ void main() {
       );
     });
 
+    test('stream finish includes trailing usage after the choice ends', () async {
+      final server = await _startServer((request) async {
+        _writeSse(request, [
+          '{"choices":[{"delta":{"content":"Hi"}}]}',
+          '{"choices":[{"delta":{},"finish_reason":"stop"}]}',
+          '{"choices":[],"usage":{"prompt_tokens":9,"completion_tokens":3,"total_tokens":12}}',
+          '[DONE]',
+        ]);
+      });
+      addTearDown(server.close);
+
+      final result = await _bearerModel(
+        server.baseUrl,
+      ).doStream(LanguageModelV4CallOptions(prompt: userPrompt('hi')));
+      final parts = await result.stream.toList();
+      final finish = parts.whereType<StreamPartFinish>().single;
+      expect(finish.usage.inputTokens.total, 9);
+      expect(finish.usage.outputTokens.total, 3);
+      expect(parts.last, same(finish));
+      expect(parts.whereType<StreamPartTextEnd>(), hasLength(1));
+    });
+
     test('stream finish includes usage and provider metadata', () async {
       final server = await _startServer((request) async {
         _writeSse(request, [

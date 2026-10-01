@@ -566,7 +566,10 @@ class _ConversationReducer {
       case 'reasoning-file':
         _file(event, reasoning: true);
       case 'message-metadata':
-        _messageMetadata = _map(event['messageMetadata'], 'messageMetadata');
+        _messageMetadata = _mergeProviderMetadata(
+          _messageMetadata,
+          _optionalMap(event, 'messageMetadata'),
+        );
       case 'error':
         _status = ConversationMessageStatus.failed;
         _messageMetadata['error'] = _string(event, 'errorText');
@@ -574,6 +577,10 @@ class _ConversationReducer {
         _status = ConversationMessageStatus.interrupted;
         _hasTerminalEvent = true;
       case 'finish':
+        _messageMetadata = _mergeProviderMetadata(
+          _messageMetadata,
+          _optionalMap(event, 'messageMetadata'),
+        );
         _hasTerminalEvent = true;
         if (_status == ConversationMessageStatus.streaming) {
           _status = ConversationMessageStatus.complete;

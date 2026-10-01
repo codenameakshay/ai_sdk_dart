@@ -83,40 +83,60 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
   Future<LanguageModelV4GenerateResult> doGenerate(
     LanguageModelV4CallOptions options,
   ) async {
-    final resolvedHeaders = await headers();
-    final cancelToken = _cancelTokenFor(options.abortSignal);
+    final cancellation = DioCancellationScope(options.abortSignal);
+    final resolvedHeaders = await cancellation.run(headers);
     final po = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
-    final (thinking, cacheControl, cleanedPo) = _extractAnthropicOptions(po);
-    final requestBody = {
-      'model': modelId,
-      'max_tokens': options.maxOutputTokens ?? 1024,
-      'system': options.prompt.system,
-      'messages': _toAnthropicMessages(options.prompt),
-      if (options.temperature != null) 'temperature': options.temperature,
-      if (options.topP != null) 'top_p': options.topP,
-      if (options.stopSequences.isNotEmpty)
-        'stop_sequences': options.stopSequences,
-      if (options.tools.isNotEmpty)
-        'tools': options.tools.map(_toAnthropicTool).toList(),
-      if (options.toolChoice != null)
-        'tool_choice': _toAnthropicToolChoice(options.toolChoice!),
-      'thinking': ?thinking,
-      'cache_control': ?cacheControl,
-      ...?cleanedPo,
-    };
+    var (thinking, cacheControl, effort, cleanedPo) = await cancellation.run(
+      () => _extractAnthropicOptions(po),
+    );
+    if (effort == null) {
+      final mapped = await cancellation.run(
+        () => _anthropicReasoning(
+          options.reasoning,
+          modelId: modelId,
+          maxOutputTokens: options.maxOutputTokens,
+        ),
+      );
+      if (mapped != null) {
+        thinking ??= mapped.thinking;
+        effort = mapped.effort;
+      }
+    }
+    final requestBody = await cancellation.run(
+      () => {
+        'model': modelId,
+        'max_tokens': options.maxOutputTokens ?? 1024,
+        'system': options.prompt.system,
+        'messages': _toAnthropicMessages(options.prompt),
+        if (options.temperature != null) 'temperature': options.temperature,
+        if (options.topP != null) 'top_p': options.topP,
+        if (options.stopSequences.isNotEmpty)
+          'stop_sequences': options.stopSequences,
+        if (options.tools.isNotEmpty)
+          'tools': options.tools.map(_toAnthropicTool).toList(),
+        if (options.toolChoice != null)
+          'tool_choice': _toAnthropicToolChoice(options.toolChoice!),
+        'thinking': ?thinking,
+        'cache_control': ?cacheControl,
+        ..._anthropicOutputConfig(options.responseFormat, effort: effort),
+        ...?cleanedPo,
+      },
+    );
     final Response<Map<String, dynamic>> response;
     try {
       response = await client.post<Map<String, dynamic>>(
         '/messages',
         data: requestBody,
         options: Options(headers: {...?options.headers, ...resolvedHeaders}),
-        cancelToken: cancelToken,
+        cancelToken: cancellation.token,
       );
     } on DioException catch (e) {
+      await cancellation.dispose();
       throw await apiErrorFromDioException(e, provider: provider);
     }
+    await cancellation.dispose();
 
     final data = response.data;
     if (data == null) throw _invalidResponse(response);
@@ -228,30 +248,51 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
   Future<LanguageModelV4StreamResult> doStream(
     LanguageModelV4CallOptions options,
   ) async {
-    final resolvedHeaders = await headers();
-    final cancelToken = _cancelTokenFor(options.abortSignal);
+    final cancellation = DioCancellationScope(
+      options.abortSignal,
+      alwaysCreateToken: true,
+    );
+    final resolvedHeaders = await cancellation.run(headers);
     final po = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
-    final (thinking, cacheControl, cleanedPo) = _extractAnthropicOptions(po);
-    final requestBody = {
-      'model': modelId,
-      'max_tokens': options.maxOutputTokens ?? 1024,
-      'system': options.prompt.system,
-      'messages': _toAnthropicMessages(options.prompt),
-      'stream': true,
-      if (options.temperature != null) 'temperature': options.temperature,
-      if (options.topP != null) 'top_p': options.topP,
-      if (options.stopSequences.isNotEmpty)
-        'stop_sequences': options.stopSequences,
-      if (options.tools.isNotEmpty)
-        'tools': options.tools.map(_toAnthropicTool).toList(),
-      if (options.toolChoice != null)
-        'tool_choice': _toAnthropicToolChoice(options.toolChoice!),
-      'thinking': ?thinking,
-      'cache_control': ?cacheControl,
-      ...?cleanedPo,
-    };
+    var (thinking, cacheControl, effort, cleanedPo) = await cancellation.run(
+      () => _extractAnthropicOptions(po),
+    );
+    if (effort == null) {
+      final mapped = await cancellation.run(
+        () => _anthropicReasoning(
+          options.reasoning,
+          modelId: modelId,
+          maxOutputTokens: options.maxOutputTokens,
+        ),
+      );
+      if (mapped != null) {
+        thinking ??= mapped.thinking;
+        effort = mapped.effort;
+      }
+    }
+    final requestBody = await cancellation.run(
+      () => {
+        'model': modelId,
+        'max_tokens': options.maxOutputTokens ?? 1024,
+        'system': options.prompt.system,
+        'messages': _toAnthropicMessages(options.prompt),
+        'stream': true,
+        if (options.temperature != null) 'temperature': options.temperature,
+        if (options.topP != null) 'top_p': options.topP,
+        if (options.stopSequences.isNotEmpty)
+          'stop_sequences': options.stopSequences,
+        if (options.tools.isNotEmpty)
+          'tools': options.tools.map(_toAnthropicTool).toList(),
+        if (options.toolChoice != null)
+          'tool_choice': _toAnthropicToolChoice(options.toolChoice!),
+        'thinking': ?thinking,
+        'cache_control': ?cacheControl,
+        ..._anthropicOutputConfig(options.responseFormat, effort: effort),
+        ...?cleanedPo,
+      },
+    );
     final Response<ResponseBody> response;
     try {
       response = await client.post<ResponseBody>(
@@ -261,9 +302,10 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
           responseType: ResponseType.stream,
           headers: {...?options.headers, ...resolvedHeaders},
         ),
-        cancelToken: cancelToken,
+        cancelToken: cancellation.token,
       );
     } on DioException catch (e) {
+      await cancellation.dispose();
       throw await apiErrorFromDioException(e, provider: provider);
     }
 
@@ -272,11 +314,19 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
     // response, so this guard is unreachable under normal operation.
     // coverage:ignore-start
     if (body == null) {
+      await cancellation.dispose();
       throw StateError('Anthropic stream response body is null.');
     }
     // coverage:ignore-end
 
     final controller = StreamController<LanguageModelV4StreamPart>();
+    controller.onCancel = () async {
+      final token = cancellation.token;
+      if (token != null && !token.isCancelled) {
+        token.cancel('stream subscription cancelled');
+      }
+      await cancellation.dispose();
+    };
     final toolState = <int, _ToolState>{};
     final reasoningState = <int, _ReasoningState>{};
     var textStarted = false;
@@ -399,6 +449,14 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
                     StreamPartReasoningDelta(id: state.id, delta: reasoning),
                   );
                 }
+              } else if (deltaType == 'signature_delta') {
+                final signature = delta['signature']?.toString();
+                if (signature != null && signature.isNotEmpty) {
+                  final state = reasoningState[index];
+                  if (state != null) {
+                    state.signature = '${state.signature ?? ''}$signature';
+                  }
+                }
               }
               break;
             case 'content_block_stop':
@@ -418,7 +476,17 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
               }
               final reasoning = reasoningState.remove(index);
               if (reasoning != null) {
-                controller.add(StreamPartReasoningEnd(id: reasoning.id));
+                controller.add(
+                  StreamPartReasoningEnd(
+                    id: reasoning.id,
+                    signature: reasoning.signature,
+                    providerMetadata: reasoning.signature == null
+                        ? null
+                        : {
+                            provider: {'signature': reasoning.signature},
+                          },
+                  ),
+                );
               }
               break;
             case 'message_delta':
@@ -450,7 +518,17 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
                 }
                 toolState.clear();
                 for (final state in reasoningState.values.toList()) {
-                  controller.add(StreamPartReasoningEnd(id: state.id));
+                  controller.add(
+                    StreamPartReasoningEnd(
+                      id: state.id,
+                      signature: state.signature,
+                      providerMetadata: state.signature == null
+                          ? null
+                          : {
+                              provider: {'signature': state.signature},
+                            },
+                    ),
+                  );
                 }
                 reasoningState.clear();
                 controller.add(
@@ -500,6 +578,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
           controller.add(const StreamPartStreamStart());
         }
         await controller.close();
+        await cancellation.dispose();
       }
     }());
 
@@ -568,12 +647,29 @@ List<Map<String, dynamic>> _toAnthropicMessages(LanguageModelV4Prompt prompt) {
             _withAnthropicCacheControl(document, part.providerOptions),
           );
         }
+      } else if (part is LanguageModelV4ReasoningFilePart ||
+          part is LanguageModelV4DocumentSourcePart) {
+        throw UnsupportedError(
+          'Anthropic cannot serialize ${part.runtimeType} in a prompt.',
+        );
       } else if (part is LanguageModelV4ToolCallPart) {
         contentParts.add({
           'type': 'tool_use',
           'id': part.toolCallId,
           'name': part.toolName,
           'input': part.input,
+        });
+      } else if (part is LanguageModelV4ReasoningPart &&
+          part.signature != null) {
+        contentParts.add({
+          'type': 'thinking',
+          'thinking': part.text,
+          'signature': part.signature,
+        });
+      } else if (part is LanguageModelV4RedactedReasoningPart) {
+        contentParts.add({
+          'type': 'redacted_thinking',
+          'data': utf8.decode(part.data, allowMalformed: true),
         });
       } else if (part is LanguageModelV4ToolResultPart) {
         contentParts.add(
@@ -597,7 +693,7 @@ List<Map<String, dynamic>> _toAnthropicMessages(LanguageModelV4Prompt prompt) {
 Map<String, dynamic> _toAnthropicToolChoice(LanguageModelV4ToolChoice choice) {
   return switch (choice) {
     ToolChoiceAuto() => {'type': 'auto'},
-    ToolChoiceNone() => {'type': 'auto'},
+    ToolChoiceNone() => {'type': 'none'},
     ToolChoiceRequired() => {'type': 'any'},
     ToolChoiceSpecific(:final toolName) => {'type': 'tool', 'name': toolName},
   };
@@ -730,7 +826,15 @@ Map<String, dynamic>? _toAnthropicFilePart(LanguageModelV4FilePart part) {
 
 Object _toAnthropicToolResultContent(LanguageModelV4ToolResultOutput output) {
   if (output is ToolResultOutputText) return output.text;
-  if (output is! ToolResultOutputContent) return '';
+  if (output is ToolResultOutputErrorText) return output.text;
+  if (output is ToolResultOutputJson) return jsonEncode(output.value);
+  if (output is ToolResultOutputErrorJson) return jsonEncode(output.value);
+  if (output is ToolResultOutputExecutionDenied) return output.reason;
+  if (output is! ToolResultOutputContent) {
+    throw UnsupportedError(
+      'Anthropic cannot serialize ${output.runtimeType} tool result output.',
+    );
+  }
   return output.parts.map(_toAnthropicToolResultPart).toList();
 }
 
@@ -751,7 +855,9 @@ Map<String, dynamic> _toAnthropicToolResultPart(
     if (file != null) return file;
   }
 
-  return {'type': 'text', 'text': '[unsupported tool result content]'};
+  throw UnsupportedError(
+    'Anthropic cannot serialize ${part.runtimeType} tool result content.',
+  );
 }
 
 Map<String, dynamic> _toAnthropicTool(LanguageModelV4Tool tool) =>
@@ -760,8 +866,8 @@ Map<String, dynamic> _toAnthropicTool(LanguageModelV4Tool tool) =>
         'name': tool.name,
         if (tool.description != null) 'description': tool.description,
         'input_schema': tool.inputSchema,
-        if (tool.inputExamples case final examples? when examples.isNotEmpty)
-          'input_examples': examples,
+        if (tool.inputExamples?.isNotEmpty ?? false)
+          'input_examples': tool.inputExamples,
         ..._anthropicCacheControlEntry(tool.providerOptions),
       },
       LanguageModelV4ProviderDefinedTool() => {
@@ -851,6 +957,7 @@ class _ReasoningState {
   _ReasoningState({required this.id});
 
   final String id;
+  String? signature;
 }
 
 /// Extracts Anthropic-specific request options from raw [providerOptions].
@@ -863,12 +970,13 @@ class _ReasoningState {
 ///
 /// Returns the thinking map, cache control map, and a cleaned copy of [po]
 /// with the handled keys removed.
-(Map<String, dynamic>?, Map<String, dynamic>?, Map<String, dynamic>?)
+(Map<String, dynamic>?, Map<String, dynamic>?, String?, Map<String, dynamic>?)
 _extractAnthropicOptions(Map<String, dynamic>? po) {
-  if (po == null) return (null, null, null);
+  if (po == null) return (null, null, null, null);
 
   Map<String, dynamic>? thinking;
   Map<String, dynamic>? cacheControl;
+  String? effort;
   final cleaned = Map<String, dynamic>.from(po);
 
   if (po['thinking'] is Map) {
@@ -887,29 +995,81 @@ _extractAnthropicOptions(Map<String, dynamic>? po) {
       ..remove('cacheControl');
   }
 
-  return (thinking, cacheControl, cleaned.isEmpty ? null : cleaned);
+  if (po['effort'] is String) {
+    effort = po['effort'] as String;
+    cleaned.remove('effort');
+  }
+
+  return (thinking, cacheControl, effort, cleaned.isEmpty ? null : cleaned);
+}
+
+Map<String, dynamic> _anthropicOutputConfig(
+  LanguageModelV4ResponseFormat? responseFormat, {
+  String? effort,
+}) {
+  if (responseFormat case final LanguageModelV4JsonResponseFormat format
+      when format.schema != null) {
+    return {
+      'output_config': {
+        'effort': ?effort,
+        'format': {'type': 'json_schema', 'schema': format.schema},
+      },
+    };
+  }
+  return effort == null
+      ? const {}
+      : {
+          'output_config': {'effort': effort},
+        };
+}
+
+({Map<String, dynamic>? thinking, String? effort})? _anthropicReasoning(
+  LanguageModelV4Reasoning reasoning, {
+  required String modelId,
+  required int? maxOutputTokens,
+}) {
+  if (reasoning == LanguageModelV4Reasoning.providerDefault) return null;
+  final lower = modelId.toLowerCase();
+  final adaptive =
+      lower.contains('claude-') &&
+      !lower.contains('claude-3') &&
+      !lower.contains('claude-2') &&
+      !lower.contains('claude-instant');
+  if (reasoning == LanguageModelV4Reasoning.none) {
+    return adaptive
+        ? (thinking: null, effort: 'low')
+        : (thinking: {'type': 'disabled'}, effort: null);
+  }
+  if (adaptive) {
+    final effort = switch (reasoning) {
+      LanguageModelV4Reasoning.minimal || LanguageModelV4Reasoning.low => 'low',
+      LanguageModelV4Reasoning.medium => 'medium',
+      LanguageModelV4Reasoning.high => 'high',
+      LanguageModelV4Reasoning.xhigh => 'max',
+      LanguageModelV4Reasoning.providerDefault ||
+      LanguageModelV4Reasoning.none => null,
+    };
+    return (thinking: {'type': 'adaptive'}, effort: effort);
+  }
+  final maximum = maxOutputTokens ?? 4096;
+  final fraction = switch (reasoning) {
+    LanguageModelV4Reasoning.minimal => 0.02,
+    LanguageModelV4Reasoning.low => 0.10,
+    LanguageModelV4Reasoning.medium => 0.30,
+    LanguageModelV4Reasoning.high => 0.60,
+    LanguageModelV4Reasoning.xhigh => 0.90,
+    LanguageModelV4Reasoning.providerDefault ||
+    LanguageModelV4Reasoning.none => 0,
+  };
+  return (
+    thinking: {
+      'type': 'enabled',
+      'budget_tokens': (maximum * fraction).round().clamp(1024, maximum),
+    },
+    effort: null,
+  );
 }
 
 /// Maps a [DioException] from a non-2xx response to a typed [AiApiCallError]
 /// carrying the provider's message/status/code. Drains a streamed error body
 /// (`ResponseType.stream`) when present so the message is recoverable.
-CancelToken? _cancelTokenFor(LanguageModelV4AbortSignal? abortSignal) {
-  if (abortSignal == null) {
-    return null;
-  }
-
-  final cancelToken = CancelToken();
-  if (abortSignal.isCancelled) {
-    cancelToken.cancel('abortSignal');
-    return cancelToken;
-  }
-
-  unawaited(
-    abortSignal.onCancelled.then((_) {
-      if (!cancelToken.isCancelled) {
-        cancelToken.cancel('abortSignal');
-      }
-    }),
-  );
-  return cancelToken;
-}

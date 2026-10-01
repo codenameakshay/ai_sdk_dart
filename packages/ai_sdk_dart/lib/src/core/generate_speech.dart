@@ -2,7 +2,8 @@ import 'dart:typed_data';
 
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
-import 'timeout_helpers.dart';
+import '../tools/tool.dart';
+import 'shared/operation_scope.dart';
 
 /// Result returned by [generateSpeech].
 ///
@@ -29,18 +30,23 @@ Future<GenerateSpeechResult> generateSpeech({
   Map<String, String>? headers,
   ProviderOptions? providerOptions,
   Duration? timeout,
+  CancellationToken? abortSignal,
 }) async {
-  final call = model.doGenerate(
-    SpeechModelV1CallOptions(
-      text: text,
-      voice: voice,
-      format: format,
-      speed: speed,
-      headers: headers,
-      providerOptions: providerOptions,
+  final result = await runOperation(
+    abortSignal: abortSignal,
+    timeout: timeout,
+    operation: (signal) => model.doGenerate(
+      SpeechModelV1CallOptions(
+        text: text,
+        voice: voice,
+        format: format,
+        speed: speed,
+        headers: headers,
+        providerOptions: providerOptions,
+        abortSignal: signal,
+      ),
     ),
   );
-  final result = await withOptionalTimeout(call, timeout);
   if (result.audio.isEmpty) {
     throw const AiNoSpeechGeneratedError(message: 'No speech was generated.');
   }

@@ -704,7 +704,6 @@ void main() {
               {
                 'embedding': [1, 2, 3],
               },
-              {'embedding': 'ignored malformed extra row'},
             ],
             'usage': {'total_tokens': 20},
           }),
@@ -1807,6 +1806,19 @@ void main() {
               ),
         ),
       );
+    });
+
+    test('exposes provider escape hatches and embedding metadata', () {
+      final dio = Dio();
+      final provider = OpenAIProvider(apiKey: 'fixture', client: dio);
+      addTearDown(() => dio.close(force: true));
+      expect(provider.chat('gpt-4.1-mini').modelId, 'gpt-4.1-mini');
+      final embedding = provider.embedding('text-embedding-3-small');
+      expect(embedding.modelId, 'text-embedding-3-small');
+      expect(embedding.provider, 'openai');
+      expect(embedding.specificationVersion, 'v2');
+      expect(embedding.maxEmbeddingsPerCall, 2048);
+      expect(embedding.supportsParallelCalls, isTrue);
     });
 
     runProviderContractTests(

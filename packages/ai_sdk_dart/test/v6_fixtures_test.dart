@@ -108,9 +108,12 @@ String _eventName(StreamTextEvent event) {
     StreamTextFinishEvent() => 'finish',
     StreamTextSourceEvent() => 'source',
     StreamTextFileEvent() => 'file',
+    StreamTextOpaqueEvent() => 'opaque',
     StreamTextUsageEvent() => 'usage',
     StreamTextErrorEvent() => 'error',
     StreamTextRawEvent() => 'raw',
+    StreamTextDocumentSourceEvent() => 'document-source',
+    StreamTextReasoningFileEvent() => 'reasoning-file',
   };
 }
 

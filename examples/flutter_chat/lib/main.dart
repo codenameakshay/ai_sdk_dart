@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'pages/chat_page.dart';
 import 'pages/completion_page.dart';
+import 'pages/conversation_page.dart';
 import 'pages/object_stream_page.dart';
 
 void main() {
@@ -34,6 +35,10 @@ class App extends StatelessWidget {
         useMaterial3: true,
       ),
       home: _Shell(initialIndex: initialIndex),
+      routes: {
+        '/conversation': (_) => const LocalConversationPage(),
+        '/remote': (_) => const RemoteConversationPage(),
+      },
     );
   }
 }
@@ -54,6 +59,8 @@ class _ShellState extends State<_Shell> with RestorationMixin {
     const ChatPage(),
     const CompletionPage(),
     const ObjectStreamPage(),
+    const LocalConversationPage(),
+    const RemoteConversationPage(),
   ];
 
   @override
@@ -98,6 +105,16 @@ class _ShellState extends State<_Shell> with RestorationMixin {
             icon: Icon(Icons.data_object_outlined),
             selectedIcon: Icon(Icons.data_object),
             label: 'Object',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.forum_outlined),
+            selectedIcon: Icon(Icons.forum),
+            label: 'Local',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.cloud_outlined),
+            selectedIcon: Icon(Icons.cloud),
+            label: 'Remote',
           ),
         ],
       ),

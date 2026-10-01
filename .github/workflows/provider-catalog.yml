@@ -1,0 +1,20 @@
+name: Provider catalog freshness
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 9 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: '3.12.2'
+      - name: Validate dated evidence and generated documentation
+        run: dart tool/provider_capability_catalog.dart check docs/provider-capability-catalog.json --fail-on-stale

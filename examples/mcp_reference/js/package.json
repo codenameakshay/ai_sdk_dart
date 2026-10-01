@@ -1,0 +1,8 @@
+{
+  "name": "ai-sdk-dart-mcp-reference",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0"
+  }
+}

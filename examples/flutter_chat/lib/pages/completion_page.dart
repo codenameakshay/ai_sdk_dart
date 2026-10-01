@@ -18,6 +18,7 @@ class CompletionPage extends StatefulWidget {
 }
 
 class _CompletionPageState extends State<CompletionPage> {
+  OpenAIProvider? _ownedProvider;
   CompletionController? _ownedCompletion;
   late final CompletionController _completion;
   final _promptController = TextEditingController();
@@ -36,7 +37,9 @@ class _CompletionPageState extends State<CompletionPage> {
         widget.controller ??
         (_ownedCompletion = CompletionController(
           agent: ToolLoopAgent(
-            model: OpenAIProvider(apiKey: openAiApiKey)('gpt-4.1-mini'),
+            model: (_ownedProvider = OpenAIProvider(apiKey: openAiApiKey))(
+              'gpt-4.1-mini',
+            ),
             instructions: 'You are a helpful assistant. Be concise.',
           ),
           onError: (err) => _showSnackBar('Error: $err'),
@@ -46,6 +49,7 @@ class _CompletionPageState extends State<CompletionPage> {
   @override
   void dispose() {
     _ownedCompletion?.dispose();
+    _ownedProvider?.dispose();
     _promptController.dispose();
     super.dispose();
   }

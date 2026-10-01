@@ -49,6 +49,65 @@ class _SlowTextModel extends LanguageModelV4 {
   }
 }
 
+class _HangingObjectModel extends LanguageModelV4 {
+  final started = Completer<void>();
+  AbortSignal? signal;
+
+  @override
+  String get provider => 'fake';
+  @override
+  String get modelId => 'hanging-object';
+  @override
+  String get specificationVersion => 'v4';
+
+  @override
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
+  ) {
+    signal = options.abortSignal;
+    if (!started.isCompleted) started.complete();
+    return Completer<LanguageModelV4GenerateResult>().future;
+  }
+
+  @override
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
+  ) => throw UnimplementedError();
+}
+
+class _MetadataObjectModel extends LanguageModelV4 {
+  _MetadataObjectModel(this.text);
+
+  final String text;
+
+  @override
+  String get provider => 'fake';
+
+  @override
+  String get modelId => 'metadata-object';
+
+  @override
+  String get specificationVersion => 'v4';
+
+  @override
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
+  ) async => LanguageModelV4GenerateResult(
+    content: [LanguageModelV4TextPart(text: text)],
+    finishReason: LanguageModelV4FinishReason.stop,
+    request: const LanguageModelV4RequestMetadata(body: {'request': true}),
+    response: LanguageModelV4ResponseMetadata(
+      id: 'response-1',
+      body: const {'response': true},
+    ),
+  );
+
+  @override
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
+  ) => throw UnimplementedError();
+}
+
 void main() {
   group('generateObject conformance', () {
     final schema = Schema<Map<String, dynamic>>(
@@ -71,6 +130,43 @@ void main() {
       expect(result.object['name'], 'Alice');
       expect(result.rawJson, {'name': 'Alice'});
       expect(result.response, isNotNull);
+    });
+
+    test(
+      'filters request and response bodies according to body inclusion',
+      () async {
+        final model = _MetadataObjectModel('{"name":"Alice"}');
+        final omitted = await generateObject(
+          model: model,
+          schema: schema,
+          prompt: 'name?',
+        );
+        expect(omitted.response.request?.body, isNull);
+        expect(omitted.response.response?.body, isNull);
+
+        final included = await generateObject(
+          model: model,
+          schema: schema,
+          prompt: 'name?',
+          bodyInclusion: const BodyInclusionPolicy.all(),
+        );
+        expect(included.response.request?.body, {'request': true});
+        expect(included.response.response?.body, {'response': true});
+      },
+    );
+
+    test('includes response metadata on structured output errors', () async {
+      final model = _MetadataObjectModel('not json');
+      await expectLater(
+        generateObject(model: model, schema: schema, prompt: 'name?'),
+        throwsA(
+          isA<AiNoObjectGeneratedError>().having(
+            (error) => error.response?.id,
+            'response id',
+            'response-1',
+          ),
+        ),
+      );
     });
 
     test('recovers JSON from ```json``` fences', () async {
@@ -138,6 +234,7 @@ void main() {
           ModelMessage(role: ModelMessageRole.assistant, content: 'hello'),
           ModelMessage(role: ModelMessageRole.tool, content: 'result'),
         ],
+        allowSystemInMessages: true,
       );
       final messages = model.lastCallOptions!.prompt.messages;
       // prompt is null here, so messages == the 4 converted messages.
@@ -180,6 +277,55 @@ void main() {
         ),
         throwsA(isA<TimeoutException>()),
       );
+    });
+
+    test('timeout also covers synchronous schema decoding', () async {
+      final model = FakeTextModel('{"name":"x"}');
+      final decodingSchema = Schema<Map<String, dynamic>>(
+        jsonSchema: schema.jsonSchema,
+        fromJson: (json) {
+          final stopwatch = Stopwatch()..start();
+          while (stopwatch.elapsed < const Duration(milliseconds: 20)) {}
+          return json;
+        },
+      );
+
+      await expectLater(
+        generateObject(
+          model: model,
+          schema: decodingSchema,
+          prompt: 'x',
+          timeout: const Duration(milliseconds: 1),
+        ),
+        throwsA(isA<TimeoutException>()),
+      );
+    });
+
+    test('pre-cancelled generateObject does not invoke the model', () async {
+      final model = _HangingObjectModel();
+      await expectLater(
+        generateObject(
+          model: model,
+          schema: schema,
+          abortSignal: CancellationToken()..cancel(),
+        ),
+        throwsA(isA<AiOperationCancelledError>()),
+      );
+      expect(model.signal, isNull);
+    });
+
+    test('active generateObject cancellation aborts provider work', () async {
+      final model = _HangingObjectModel();
+      final token = CancellationToken();
+      final pending = generateObject(
+        model: model,
+        schema: schema,
+        abortSignal: token,
+      );
+      await model.started.future;
+      token.cancel();
+      await expectLater(pending, throwsA(isA<AiOperationCancelledError>()));
+      expect(model.signal?.isCancelled, isTrue);
     });
   });
 }

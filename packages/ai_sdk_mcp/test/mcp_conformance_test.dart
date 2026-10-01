@@ -22,7 +22,7 @@ void main() {
 
     group('initialize()', () {
       test(
-        'sends protocol version "2025-06-18" and tools capability',
+        'sends protocol version "2025-06-18" and implemented client capabilities',
         () async {
           final server = await FakeStreamableHttpServer.start();
           addTearDown(server.close);
@@ -40,10 +40,10 @@ void main() {
           expect(params['protocolVersion'], '2025-06-18');
           expect(
             (params['clientInfo'] as Map<String, dynamic>)['version'],
-            '2.0.0',
+            '3.0.0',
           );
           final caps = params['capabilities'] as Map<String, dynamic>;
-          expect(caps.keys, contains('tools'));
+          expect(caps, isEmpty);
         },
       );
 
@@ -948,32 +948,6 @@ void main() {
         final delay = policy.delayFor(10);
         expect(delay.inMilliseconds, lessThanOrEqualTo(3000));
       });
-    });
-
-    // ── capabilities advertised in initialize() ───────────────────────────────
-
-    group('capabilities', () {
-      test(
-        'initialize advertises prompts and resources capabilities',
-        () async {
-          final server = await FakeStreamableHttpServer.start();
-          addTearDown(server.close);
-          server.queueInitializeResponse();
-
-          final client = _client(server);
-          addTearDown(client.close);
-
-          await client.initialize();
-
-          final initReq = server.requestLog.first;
-          final caps =
-              (initReq.body?['params'] as Map)['capabilities']
-                  as Map<String, dynamic>;
-          expect(caps.keys, contains('prompts'));
-          expect(caps.keys, contains('resources'));
-          expect((caps['resources'] as Map)['subscribe'], isTrue);
-        },
-      );
     });
 
     // ── MCPException ─────────────────────────────────────────────────────────

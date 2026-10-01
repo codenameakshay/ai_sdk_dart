@@ -5,6 +5,10 @@ import 'package:ai_sdk_openai_compatible/ai_sdk_openai_compatible.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
 
+import 'openai_responses_language_model.dart';
+import 'openai_files.dart';
+import 'openai_batch.dart';
+
 const _defaultBaseUrl = 'https://api.openai.com/v1';
 
 /// OpenAI provider for language models, embeddings, images, speech, and transcription.
@@ -66,6 +70,31 @@ class OpenAIProvider {
     ),
   );
 
+  /// Returns a model backed by the OpenAI Responses API.
+  LanguageModelV4 responses(String modelId) => OpenAIResponsesLanguageModel(
+    modelId: modelId,
+    baseUrl: baseUrl ?? _defaultBaseUrl,
+    headers: _headers,
+    client: _client,
+  );
+
+  /// Returns explicit file lifecycle operations for OpenAI file references.
+  OpenAIFiles files() => OpenAIFiles(
+    client: _client,
+    headers: _headers,
+    baseUrl: baseUrl ?? _defaultBaseUrl,
+  );
+
+  OpenAIBatches batches() => OpenAIBatches(
+    client: _client,
+    headers: _headers,
+    baseUrl: baseUrl ?? _defaultBaseUrl,
+    files: files(),
+  );
+
+  /// Explicit Chat Completions escape hatch.
+  LanguageModelV4 chat(String modelId) => call(modelId);
+
   /// Returns an embedding model for the given [modelId].
   EmbeddingModelV2<String> embedding(String modelId) => _OpenAIEmbeddingModel(
     modelId: modelId,
@@ -120,6 +149,12 @@ Map<String, dynamic>? _openAiExtraBody(LanguageModelV4CallOptions options) {
 }
 
 class _OpenAIEmbeddingModel implements EmbeddingModelV2<String> {
+  @override
+  int? get maxEmbeddingsPerCall => 2048;
+
+  @override
+  bool get supportsParallelCalls => true;
+
   _OpenAIEmbeddingModel({
     required this.modelId,
     required this.client,
@@ -141,7 +176,8 @@ class _OpenAIEmbeddingModel implements EmbeddingModelV2<String> {
   Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
     EmbeddingModelV2CallOptions<String> options,
   ) async {
-    final resolvedHeaders = await headers();
+    final cancellation = DioCancellationScope(options.abortSignal);
+    final resolvedHeaders = await cancellation.run(headers);
     final providerOptions = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
@@ -151,61 +187,20 @@ class _OpenAIEmbeddingModel implements EmbeddingModelV2<String> {
         '/embeddings',
         data: {'model': modelId, 'input': options.values, ...?providerOptions},
         options: Options(headers: {...?options.headers, ...resolvedHeaders}),
+        cancelToken: cancellation.token,
       );
     } on DioException catch (e) {
+      await cancellation.dispose();
       throw await apiErrorFromDioException(e, provider: provider);
     }
+    await cancellation.dispose();
 
     final data = response.data;
     if (data == null) {
       throw _invalidResponse(response);
     }
     try {
-      final rawEmbeddings = data['data'];
-      if (rawEmbeddings != null) {
-        if (rawEmbeddings is! List) {
-          throw const FormatException(
-            'The embeddings data field is not a list.',
-          );
-        }
-        for (final item in rawEmbeddings.take(options.values.length)) {
-          if (item is! Map || item['embedding'] is! List) {
-            throw const FormatException('An embedding item is malformed.');
-          }
-          if ((item['embedding'] as List).any((value) => value is! num)) {
-            throw const FormatException('An embedding vector is malformed.');
-          }
-        }
-      }
-
-      final embeddingsData = (rawEmbeddings as List?) ?? const [];
-      final embeddings = <EmbeddingModelV2Embedding<String>>[];
-      for (
-        var i = 0;
-        i < embeddingsData.length && i < options.values.length;
-        i++
-      ) {
-        final row = (embeddingsData[i] as Map).cast<String, dynamic>();
-        final vector = (row['embedding'] as List)
-            .map((value) => (value as num).toDouble())
-            .toList();
-        embeddings.add(
-          EmbeddingModelV2Embedding<String>(
-            value: options.values[i],
-            embedding: vector,
-          ),
-        );
-      }
-
-      final rawUsage = data['usage'];
-      if (rawUsage != null && rawUsage is! Map) {
-        throw const FormatException('The embeddings usage field is malformed.');
-      }
-      final usage = (rawUsage as Map?)?.cast<String, dynamic>();
-      return EmbeddingModelV2GenerateResult<String>(
-        embeddings: embeddings,
-        usage: EmbeddingModelV2Usage(tokens: intOrNull(usage?['total_tokens'])),
-      );
+      return parseOpenAiEmbeddings(data, options.values);
     } on Object catch (error) {
       throw _invalidResponse(response, error);
     }
@@ -234,7 +229,8 @@ class _OpenAIImageModel implements ImageModelV3 {
   Future<ImageModelV3GenerateResult> doGenerate(
     ImageModelV3CallOptions options,
   ) async {
-    final resolvedHeaders = await headers();
+    final cancellation = DioCancellationScope(options.abortSignal);
+    final resolvedHeaders = await cancellation.run(headers);
     final providerOptions = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
@@ -253,10 +249,13 @@ class _OpenAIImageModel implements ImageModelV3 {
           ...?providerOptions,
         },
         options: Options(headers: {...?options.headers, ...resolvedHeaders}),
+        cancelToken: cancellation.token,
       );
     } on DioException catch (e) {
+      await cancellation.dispose();
       throw await apiErrorFromDioException(e, provider: provider);
     }
+    await cancellation.dispose();
 
     final data = response.data;
     if (data == null) {
@@ -329,7 +328,8 @@ class _OpenAISpeechModel implements SpeechModelV1 {
   Future<SpeechModelV1GenerateResult> doGenerate(
     SpeechModelV1CallOptions options,
   ) async {
-    final resolvedHeaders = await headers();
+    final cancellation = DioCancellationScope(options.abortSignal);
+    final resolvedHeaders = await cancellation.run(headers);
     final providerOptions = options.providerOptions?['openai'];
     final requestBody = {
       'model': modelId,
@@ -348,10 +348,13 @@ class _OpenAISpeechModel implements SpeechModelV1 {
           responseType: ResponseType.bytes,
           headers: {...?options.headers, ...resolvedHeaders},
         ),
+        cancelToken: cancellation.token,
       );
     } on DioException catch (e) {
+      await cancellation.dispose();
       throw await apiErrorFromDioException(e, provider: provider);
     }
+    await cancellation.dispose();
     if (response.data == null) {
       throw _invalidResponse(response);
     }
@@ -386,29 +389,35 @@ class _OpenAITranscriptionModel implements TranscriptionModelV1 {
   Future<TranscriptionModelV1GenerateResult> doGenerate(
     TranscriptionModelV1CallOptions options,
   ) async {
-    final resolvedHeaders = await headers();
+    final cancellation = DioCancellationScope(options.abortSignal);
+    final resolvedHeaders = await cancellation.run(headers);
     final providerOptions = options.providerOptions?['openai'];
-    final formData = FormData.fromMap({
-      ...?providerOptions,
-      'model': modelId,
-      'file': MultipartFile.fromBytes(
-        options.audio,
-        filename: 'audio.${_audioExtension(options.audioMediaType)}',
-        contentType: DioMediaType.parse(options.audioMediaType ?? 'audio/mpeg'),
-      ),
-      'response_format': 'json',
-      if (options.language != null) 'language': options.language,
-      if (options.prompt != null) 'prompt': options.prompt,
-    });
     final Response<Map<String, dynamic>> response;
     try {
+      final formData = FormData.fromMap({
+        ...?providerOptions,
+        'model': modelId,
+        'file': MultipartFile.fromBytes(
+          options.audio,
+          filename: 'audio.${_audioExtension(options.audioMediaType)}',
+          contentType: DioMediaType.parse(
+            options.audioMediaType ?? 'audio/mpeg',
+          ),
+        ),
+        'response_format': 'json',
+        if (options.language != null) 'language': options.language,
+        if (options.prompt != null) 'prompt': options.prompt,
+      });
       response = await client.post<Map<String, dynamic>>(
         '/audio/transcriptions',
         data: formData,
         options: Options(headers: {...?options.headers, ...resolvedHeaders}),
+        cancelToken: cancellation.token,
       );
     } on DioException catch (e) {
       throw await apiErrorFromDioException(e, provider: provider);
+    } finally {
+      await cancellation.dispose();
     }
     final data = response.data;
     if (data == null) {

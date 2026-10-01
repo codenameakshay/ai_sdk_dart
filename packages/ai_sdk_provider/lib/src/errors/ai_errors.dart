@@ -13,6 +13,20 @@ sealed class AiSdkError implements Exception {
   String toString() => '$runtimeType: $message';
 }
 
+/// A provider returned embeddings that cannot be associated with every input.
+class AiInvalidEmbeddingResponseError extends AiSdkError {
+  const AiInvalidEmbeddingResponseError(
+    super.message, {
+    required this.expectedCount,
+    required this.actualCount,
+    this.index,
+  });
+
+  final int expectedCount;
+  final int actualCount;
+  final int? index;
+}
+
 /// Thrown when a provider API call fails.
 ///
 /// For non-2xx HTTP responses this carries the provider's parsed [message]

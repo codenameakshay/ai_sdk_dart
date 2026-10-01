@@ -1,4 +1,4 @@
-## 2.0.0
+## 3.0.0
 
 - Migrated language generation and streaming to V4 lifecycle, metadata,
   structured warnings, nested usage, and unified tool contracts.

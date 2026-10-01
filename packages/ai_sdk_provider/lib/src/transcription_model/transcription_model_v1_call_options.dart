@@ -1,3 +1,4 @@
+import '../shared/abort_signal.dart';
 import 'dart:typed_data';
 
 import '../shared/json_value.dart';
@@ -11,6 +12,7 @@ class TranscriptionModelV1CallOptions {
     this.prompt,
     this.headers,
     this.providerOptions,
+    this.abortSignal,
   });
 
   final Uint8List audio;
@@ -19,4 +21,5 @@ class TranscriptionModelV1CallOptions {
   final String? prompt;
   final Map<String, String>? headers;
   final ProviderOptions? providerOptions;
+  final AbortSignal? abortSignal;
 }

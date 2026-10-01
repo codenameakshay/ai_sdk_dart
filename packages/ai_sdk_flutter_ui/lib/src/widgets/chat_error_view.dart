@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/ai_motion.dart';
+import 'ui_strings.dart';
 
 /// An inline error banner with optional retry and dismiss actions.
 ///
@@ -28,7 +29,7 @@ class ChatErrorView extends StatelessWidget {
     this.message,
     this.onRetry,
     this.onDismiss,
-    this.retryLabel = 'Retry',
+    this.retryLabel,
   });
 
   /// The error to surface. Rendered via [Object.toString] unless [message] is
@@ -45,12 +46,13 @@ class ChatErrorView extends StatelessWidget {
   final VoidCallback? onDismiss;
 
   /// Label for the retry button.
-  final String retryLabel;
+  final String? retryLabel;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final strings = AiSdkUiStringsScope.of(context);
     final text = message ?? error.toString();
     final onRetry = this.onRetry;
     final onDismiss = this.onDismiss;
@@ -94,14 +96,14 @@ class ChatErrorView extends StatelessWidget {
                   style: TextButton.styleFrom(
                     foregroundColor: scheme.onErrorContainer,
                   ),
-                  child: Text(retryLabel),
+                  child: Text(retryLabel ?? strings.retry),
                 ),
               ),
             if (onDismiss != null)
               PressableScale(
                 child: IconButton(
                   key: const ValueKey('chat-error-dismiss'),
-                  tooltip: 'Dismiss',
+                  tooltip: strings.dismiss,
                   onPressed: () {
                     AiHaptics.selection();
                     onDismiss();

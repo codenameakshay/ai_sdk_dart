@@ -91,8 +91,9 @@ class ObjectStreamController<T> extends StreamingControllerBase {
     activeRequestId = null;
     _activeAbortSignal?.cancel();
     _activeAbortSignal = null;
-    await _subscription?.cancel();
+    final subscription = _subscription;
     _subscription = null;
+    await subscription?.cancel();
   }
 
   int _beginRequest({required bool clearValue}) {
@@ -163,6 +164,7 @@ class ObjectStreamController<T> extends StreamingControllerBase {
   /// constructor. For full control over the request, build the stream yourself
   /// and call [bind] instead.
   Future<void> submit(String prompt) async {
+    if (isDisposed) return;
     final model = this.model;
     final schema = this.schema;
     if (model == null || schema == null) {
@@ -205,12 +207,16 @@ class ObjectStreamController<T> extends StreamingControllerBase {
 
   /// Attach to [stream]; emits partial values as they arrive.
   Future<void> bind(Stream<T> stream) async {
+    if (isDisposed) return;
     final requestId = _beginRequest(clearValue: true);
     _listenToStream(stream, requestId);
   }
 
   Future<void> stop() async {
+    if (isDisposed) return;
+    final generation = nextRequestId;
     await _cancelActiveRequest();
+    if (isDisposed || generation != nextRequestId) return;
     _isLoading = false;
     _isStreaming = false;
     notifyTerminalListeners(statusChanged: true);
@@ -220,6 +226,7 @@ class ObjectStreamController<T> extends StreamingControllerBase {
   ///
   /// Mirrors the JS `experimental_useObject` `clear()` method.
   void clear() {
+    if (isDisposed) return;
     _cancelActiveRequestSync();
     _value = null;
     _error = null;

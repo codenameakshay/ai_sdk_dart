@@ -19,6 +19,7 @@ class AnthropicThinkingOptions {
     this.budgetTokens,
     this.enabled = true,
     this.speed,
+    this.adaptive = false,
   });
 
   /// Token budget for extended thinking.
@@ -43,6 +44,10 @@ class AnthropicThinkingOptions {
   /// [enabled] and [budgetTokens].
   final String? speed;
 
+  /// Use Anthropic's adaptive thinking mode. When enabled, Anthropic chooses
+  /// the reasoning budget for the request; [budgetTokens] is ignored.
+  final bool adaptive;
+
   /// Serialises this object to the `thinking` map expected by the Anthropic API.
   ///
   /// Returns a map suitable for use as the value of `providerOptions['anthropic']`.
@@ -50,8 +55,11 @@ class AnthropicThinkingOptions {
     final isEnabled = speed == 'fast' ? false : enabled;
     return {
       'thinking': {
-        'type': isEnabled ? 'enabled' : 'disabled',
-        if (isEnabled && budgetTokens != null) 'budget_tokens': budgetTokens,
+        'type': adaptive && speed != 'fast'
+            ? 'adaptive'
+            : (isEnabled ? 'enabled' : 'disabled'),
+        if (!(adaptive && speed != 'fast') && isEnabled && budgetTokens != null)
+          'budget_tokens': budgetTokens,
       },
     };
   }
@@ -86,7 +94,11 @@ class AnthropicCacheControlOptions {
 /// );
 /// ```
 class AnthropicLanguageModelOptions {
-  const AnthropicLanguageModelOptions({this.thinking, this.cacheControl});
+  const AnthropicLanguageModelOptions({
+    this.thinking,
+    this.cacheControl,
+    this.effort,
+  });
 
   /// Extended thinking configuration.
   final AnthropicThinkingOptions? thinking;
@@ -94,9 +106,13 @@ class AnthropicLanguageModelOptions {
   /// Prompt cache breakpoint configuration.
   final AnthropicCacheControlOptions? cacheControl;
 
+  /// Adaptive thinking effort forwarded under Anthropic `output_config`.
+  final String? effort;
+
   /// Serialises this object to a map for use in [providerOptions].
   Map<String, dynamic> toMap() => {
     if (thinking != null) ...thinking!.toMap(),
     if (cacheControl != null) ...cacheControl!.toMap(),
+    if (effort != null) 'effort': effort,
   };
 }

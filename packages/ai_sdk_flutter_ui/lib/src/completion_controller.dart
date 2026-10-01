@@ -74,14 +74,17 @@ class CompletionController extends StreamingControllerBase {
     activeRequestId = null;
     _activeAbortSignal?.cancel();
     _activeAbortSignal = null;
-    await _activeSubscription?.cancel();
+    final subscription = _activeSubscription;
+    final errorSubscription = _errorSubscription;
     _activeSubscription = null;
-    await _errorSubscription?.cancel();
     _errorSubscription = null;
+    await subscription?.cancel();
+    await errorSubscription?.cancel();
   }
 
   /// Submit [prompt] and stream the completion.
   Future<void> complete(String prompt) async {
+    if (isDisposed) return;
     _cancelActiveRequestSync();
     final requestId = ++nextRequestId;
     final abortSignal = CancellationToken();
@@ -104,14 +107,14 @@ class CompletionController extends StreamingControllerBase {
       notifyListenersSafely(immediate: true, status: true);
 
       // The result's `text`/`output` futures reject on a streaming error; we
-      // surface errors via [fullStream] instead, so swallow those completions
+      // surface errors via [stream] instead, so swallow those completions
       // to keep them from becoming unhandled async errors.
       streamResult.text.then((_) {}, onError: (_) {});
       streamResult.output.then((_) {}, onError: (_) {});
 
       // Streaming errors surface on the full event stream (not the text
-      // stream), so watch both: text for content, fullStream for errors.
-      _errorSubscription = streamResult.fullStream.listen((event) {
+      // stream), so watch both: text for content, stream for errors.
+      _errorSubscription = streamResult.stream.listen((event) {
         if (!isCurrentRequest(requestId)) return;
         if (event is StreamTextErrorEvent) _handleError(event.error, requestId);
       }, onError: (Object err) => _handleError(err, requestId));
@@ -172,13 +175,17 @@ class CompletionController extends StreamingControllerBase {
   }
 
   Future<void> stop() async {
+    if (isDisposed) return;
+    final generation = nextRequestId;
     await _cancelActiveRequest();
+    if (isDisposed || generation != nextRequestId) return;
     _isLoading = false;
     _isStreaming = false;
     notifyTerminalListeners(statusChanged: true);
   }
 
   void clear() {
+    if (isDisposed) return;
     _cancelActiveRequestSync();
     _completion = '';
     _error = null;

@@ -449,6 +449,28 @@ void main() {
       );
     });
 
+    test('stream finish includes trailing usage after the choice ends', () async {
+      final server = await _startServer((request) async {
+        _writeSse(request, [
+          '{"choices":[{"delta":{"content":"Hi"}}]}',
+          '{"choices":[{"delta":{},"finish_reason":"stop"}]}',
+          '{"choices":[],"usage":{"prompt_tokens":9,"completion_tokens":3,"total_tokens":12}}',
+          '[DONE]',
+        ]);
+      });
+      addTearDown(server.close);
+
+      final result = await _bearerModel(
+        server.baseUrl,
+      ).doStream(LanguageModelV4CallOptions(prompt: userPrompt('hi')));
+      final parts = await result.stream.toList();
+      final finish = parts.whereType<StreamPartFinish>().single;
+      expect(finish.usage.inputTokens.total, 9);
+      expect(finish.usage.outputTokens.total, 3);
+      expect(parts.last, same(finish));
+      expect(parts.whereType<StreamPartTextEnd>(), hasLength(1));
+    });
+
     test('stream finish includes usage and provider metadata', () async {
       final server = await _startServer((request) async {
         _writeSse(request, [
@@ -925,6 +947,35 @@ void main() {
         expect(adapter.fetchCount, 0);
       },
     );
+
+    for (final streaming in [false, true]) {
+      test('pre-cancelled request skips auth (stream=$streaming)', () async {
+        var authCalls = 0;
+        final client = Dio();
+        addTearDown(() => client.close(force: true));
+        final model = OpenAICompatibleChatLanguageModel(
+          modelId: 'fixture',
+          config: OpenAICompatibleConfig(
+            provider: 'fixture',
+            baseUrl: 'http://provider.test',
+            client: client,
+            headers: () async {
+              authCalls++;
+              return const {};
+            },
+          ),
+        );
+        final options = LanguageModelV4CallOptions(
+          prompt: const LanguageModelV4Prompt(messages: []),
+          abortSignal: TestAbortSignal()..cancel(),
+        );
+        await expectLater(
+          streaming ? model.doStream(options) : model.doGenerate(options),
+          throwsA(anything),
+        );
+        expect(authCalls, 0);
+      });
+    }
 
     test('doStream cancels the Dio handshake via abortSignal', () async {
       final adapter = CancellationHttpClientAdapter();
@@ -1657,10 +1708,11 @@ void main() {
                           mediaType: 'application/pdf',
                           filename: 'a.pdf',
                         ),
-                        // An unsupported-for-this-path part (source) -> 'unsupported'.
-                        LanguageModelV4SourcePart(
-                          id: 's1',
-                          url: 'https://src.example',
+                        LanguageModelV4FilePart(
+                          data: DataContentBytes(
+                            Uint8List.fromList(utf8.encode('file')),
+                          ),
+                          mediaType: 'text/plain',
                         ),
                       ]),
                     ),
@@ -1686,7 +1738,8 @@ void main() {
         expect(outParts[2]['type'], 'file');
         expect(outParts[2]['url'], 'https://files.example/a.pdf');
         expect(outParts[2]['filename'], 'a.pdf');
-        expect(outParts[3]['type'], 'unsupported');
+        expect(outParts[3]['base64'], base64Encode(utf8.encode('file')));
+        expect(outParts, hasLength(4));
       },
     );
 
@@ -2021,6 +2074,233 @@ void main() {
         ),
       );
     });
+
+    test(
+      'rejects reasoning files and document sources before dispatch',
+      () async {
+        var requests = 0;
+        final server = await _startServer((request) async {
+          requests++;
+          _writeOk(request);
+        });
+        addTearDown(server.close);
+        final model = _bearerModel(server.baseUrl);
+
+        for (final part in [
+          LanguageModelV4ReasoningFilePart(
+            data: DataContentBytes(Uint8List.fromList([1])),
+            mediaType: 'application/pdf',
+          ),
+          const LanguageModelV4DocumentSourcePart(
+            id: 'doc-1',
+            mediaType: 'application/pdf',
+            title: 'Document',
+          ),
+        ]) {
+          await expectLater(
+            model.doGenerate(
+              LanguageModelV4CallOptions(
+                prompt: LanguageModelV4Prompt(
+                  messages: [
+                    LanguageModelV4Message(
+                      role: LanguageModelV4Role.user,
+                      content: [part],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            throwsA(isA<UnsupportedError>()),
+          );
+        }
+        expect(requests, 0);
+      },
+    );
+
+    test('serializes denied tool results with approval identity', () async {
+      late Map<String, dynamic> captured;
+      final server = await _startServer((request) async {
+        captured = await _captureBody(request);
+        _writeOk(request);
+      });
+      addTearDown(server.close);
+      final model = _bearerModel(server.baseUrl);
+      await model.doGenerate(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
+            messages: [
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.tool,
+                content: [
+                  const LanguageModelV4ToolResultPart(
+                    toolCallId: 'call-denied',
+                    toolName: 'dangerous',
+                    output: ToolResultOutputExecutionDenied(
+                      'needs approval',
+                      'approval-1',
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+      final message = (captured['messages'] as List).single as Map;
+      final content = jsonDecode(message['content'] as String) as Map;
+      expect(content['output'], {
+        'type': 'execution-denied',
+        'reason': 'needs approval',
+        'approvalId': 'approval-1',
+      });
+    });
+
+    test('rejects provider references in rich tool content', () async {
+      final server = await _startServer((request) async {
+        fail('foreign provider content must fail before dispatch');
+      });
+      addTearDown(server.close);
+      final model = _bearerModel(server.baseUrl);
+      await expectLater(
+        model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.tool,
+                  content: [
+                    LanguageModelV4ToolResultPart(
+                      toolCallId: 'call-1',
+                      toolName: 'lookup',
+                      output: ToolResultOutputContent([
+                        LanguageModelV4ImagePart(
+                          image: const DataContentProviderReference(
+                            namespace: 'other',
+                            id: 'asset-1',
+                          ),
+                        ),
+                      ]),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        throwsA(isA<UnsupportedError>()),
+      );
+      await expectLater(
+        model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.tool,
+                  content: [
+                    const LanguageModelV4ToolResultPart(
+                      toolCallId: 'call-2',
+                      toolName: 'lookup',
+                      output: ToolResultOutputContent([
+                        LanguageModelV4FilePart(
+                          data: DataContentProviderReference(
+                            namespace: 'other',
+                            id: 'file-1',
+                          ),
+                          mediaType: 'text/plain',
+                        ),
+                      ]),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        throwsA(isA<UnsupportedError>()),
+      );
+    });
+
+    test('rejects unsupported source parts in rich tool content', () async {
+      final server = await _startServer((request) async {
+        fail('unsupported tool content must fail before dispatch');
+      });
+      addTearDown(server.close);
+      final model = _bearerModel(server.baseUrl);
+      await expectLater(
+        model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.tool,
+                  content: [
+                    const LanguageModelV4ToolResultPart(
+                      toolCallId: 'call-1',
+                      toolName: 'lookup',
+                      output: ToolResultOutputContent([
+                        LanguageModelV4SourcePart(
+                          id: 'source-1',
+                          url: 'https://example.test/source',
+                        ),
+                      ]),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        throwsA(isA<UnsupportedError>()),
+      );
+    });
+  });
+
+  group('cancellation observer lifetime', () {
+    for (final streaming in [false, true]) {
+      test(
+        'actual Chat requests release each observer (stream=$streaming)',
+        () async {
+          final signal = _ObserverSignal();
+          addTearDown(signal.close);
+          final adapter = _ObserverAdapter();
+          final dio = Dio()..httpClientAdapter = adapter;
+          addTearDown(() => dio.close(force: true));
+          final model = OpenAICompatibleChatLanguageModel(
+            modelId: 'fixture',
+            config: OpenAICompatibleConfig(
+              provider: 'fixture',
+              baseUrl: 'http://fixture.test',
+              client: dio,
+              headers: () async => const {},
+            ),
+          );
+          for (var iteration = 0; iteration < 10; iteration++) {
+            adapter.fail = iteration.isOdd;
+            final options = LanguageModelV4CallOptions(
+              prompt: const LanguageModelV4Prompt(messages: []),
+              abortSignal: signal,
+            );
+            Future<void> request() async {
+              if (streaming) {
+                final result = await model.doStream(options);
+                await result.stream.toList();
+              } else {
+                await model.doGenerate(options);
+              }
+            }
+
+            if (adapter.fail) {
+              await expectLater(request(), throwsA(isA<AiApiCallError>()));
+            } else {
+              await request();
+            }
+            expect(signal.active, 0, reason: 'request $iteration');
+            expect(signal.detached, signal.attached);
+          }
+          expect(signal.attached, greaterThanOrEqualTo(10));
+        },
+      );
+    }
   });
 }
 
@@ -2113,6 +2393,57 @@ class _ErroredStreamHttpClientAdapter implements HttpClientAdapter {
       200,
       headers: {
         Headers.contentTypeHeader: ['text/event-stream'],
+      },
+    );
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
+class _ObserverSignal implements ObservableAbortSignal {
+  final events = StreamController<void>.broadcast();
+  var active = 0;
+  var attached = 0;
+  var detached = 0;
+  @override
+  bool get isCancelled => false;
+  @override
+  Future<void> get onCancelled => Completer<void>().future;
+  @override
+  Stream<void> get cancellationEvents => Stream.multi((controller) {
+    attached++;
+    active++;
+    final subscription = events.stream.listen(controller.addSync);
+    controller.onCancel = () {
+      active--;
+      detached++;
+      return subscription.cancel();
+    };
+  }, isBroadcast: true);
+  Future<void> close() => events.close();
+}
+
+class _ObserverAdapter implements HttpClientAdapter {
+  bool fail = false;
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    final streaming = (options.data as Map)['stream'] == true;
+    return ResponseBody.fromString(
+      fail
+          ? '{"error":{"message":"fixture failure","code":"invalid_request"}}'
+          : streaming
+          ? 'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
+          : '{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}',
+      fail ? 400 : 200,
+      headers: {
+        'content-type': [
+          streaming && !fail ? 'text/event-stream' : 'application/json',
+        ],
       },
     );
   }

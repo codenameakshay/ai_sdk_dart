@@ -2,6 +2,7 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/ai_motion.dart';
+import 'ui_strings.dart';
 
 /// A wrap of citation chips, one per [LanguageModelV4SourcePart].
 ///
@@ -20,7 +21,7 @@ class SourceCitations extends StatelessWidget {
     super.key,
     required this.sources,
     this.onTap,
-    this.label = 'Sources',
+    this.label,
   });
 
   /// Source parts to render as chips.
@@ -30,7 +31,7 @@ class SourceCitations extends StatelessWidget {
   final void Function(LanguageModelV4SourcePart source)? onTap;
 
   /// Optional section label shown above the chips. Pass an empty string to hide.
-  final String label;
+  final String? label;
 
   @override
   Widget build(BuildContext context) {
@@ -38,6 +39,7 @@ class SourceCitations extends StatelessWidget {
 
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final label = this.label ?? AiSdkUiStringsScope.of(context).sources;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

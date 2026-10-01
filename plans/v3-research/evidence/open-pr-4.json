@@ -1,0 +1,85 @@
+{
+  "number": 4,
+  "title": "Migrate AI SDK Dart to Vercel AI SDK v7 \u2014 coordinated 2.0.0 release",
+  "state": "OPEN",
+  "isDraft": true,
+  "headRefOid": "688da70c3025127fef146218ea6fa3a98bbb92f8",
+  "mergeable": "CONFLICTING",
+  "mergeStateStatus": "DIRTY",
+  "files": [
+    {
+      "path": "packages/ai_sdk_dart/lib/src/core/generate_text.dart",
+      "additions": 2,
+      "deletions": 0
+    },
+    {
+      "path": "packages/ai_sdk_dart/lib/src/core/stream_text.dart",
+      "additions": 2,
+      "deletions": 0
+    },
+    {
+      "path": "packages/ai_sdk_openai/lib/src/openai_provider.dart",
+      "additions": 23,
+      "deletions": 2
+    },
+    {
+      "path": "packages/ai_sdk_provider/lib/ai_sdk_provider.dart",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": "packages/ai_sdk_provider/lib/src/language_model/language_model_v3_call_options.dart",
+      "additions": 9,
+      "deletions": 0
+    },
+    {
+      "path": "packages/ai_sdk_provider/lib/src/language_model/language_model_v3_reasoning_effort.dart",
+      "additions": 34,
+      "deletions": 0
+    }
+  ],
+  "commits": [
+    {
+      "authoredDate": "2026-06-29T05:22:10Z",
+      "authors": [
+        {
+          "email": "noreply@anthropic.com",
+          "id": "MDQ6VXNlcjgxODQ3",
+          "login": "claude",
+          "name": "Claude"
+        }
+      ],
+      "committedDate": "2026-06-29T05:22:10Z",
+      "messageBody": "Introduce LanguageModelV3ReasoningEffort enum (providerDefault/none/\nminimal/low/medium/high/xhigh) and an optional `reasoning` field on\nLanguageModelV3CallOptions, mirroring the AI SDK v7 top-level `reasoning`\ncontrol. Additive and non-breaking: providers that do not support\nreasoning ignore the field; provider-specific reasoning settings in\nproviderOptions take precedence.\n\nFirst increment of the v6 -> v7 migration (spec layer).\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_013JQbcq2nLKjvFZzB1hAhFL",
+      "messageHeadline": "feat(provider): add standardized reasoning effort to call options (v7)",
+      "oid": "892c46999e9b23f9e62e6f21a2d395100cf5f232"
+    },
+    {
+      "authoredDate": "2026-06-29T05:24:38Z",
+      "authors": [
+        {
+          "email": "noreply@anthropic.com",
+          "id": "MDQ6VXNlcjgxODQ3",
+          "login": "claude",
+          "name": "Claude"
+        }
+      ],
+      "committedDate": "2026-06-29T05:24:38Z",
+      "messageBody": "\u2026nAI (v7)\n\nThread the new top-level `reasoning` option through generateText and\nstreamText into LanguageModelV3CallOptions.reasoning, and map it to\nOpenAI's native `reasoning_effort` in the request body. Provider-specific\nreasoning settings in providerOptions still take precedence (v7 semantics);\n`xhigh` is coerced to OpenAI's `high`.\n\nAnthropic/Google reasoning mapping will land alongside the Anthropic\nmax_tokens fix in the provider-fixes phase.\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_013JQbcq2nLKjvFZzB1hAhFL",
+      "messageHeadline": "feat(core,openai): wire standardized reasoning control through to Ope\u2026",
+      "oid": "688da70c3025127fef146218ea6fa3a98bbb92f8"
+    }
+  ],
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-06-29T06:13:36Z",
+      "conclusion": "FAILURE",
+      "detailsUrl": "https://github.com/codenameakshay/ai_sdk_dart/actions/runs/28352341031/job/83987620069",
+      "name": "analyze-and-test",
+      "startedAt": "2026-06-29T06:12:11Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    }
+  ]
+}

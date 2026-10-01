@@ -11,15 +11,19 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  ai_sdk_dart: ^2.0.0
-  ai_sdk_openai: ^2.0.0
-  ai_sdk_flutter_ui: ^2.0.0
+  ai_sdk_dart: ^3.0.0
+  ai_sdk_openai: ^3.0.0
+  ai_sdk_flutter_ui: ^3.0.0
+  ai_sdk_conversation: ^3.0.0
+  ai_sdk_remote: ^3.0.0
+  ai_sdk_provider: ^3.0.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  integration_test:
+    sdk: flutter
   flutter_lints: ^6.0.0
 
-  ai_sdk_provider: ^2.0.0
 flutter:
   uses-material-design: true

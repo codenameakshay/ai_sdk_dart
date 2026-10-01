@@ -215,6 +215,11 @@ class _CohereLanguageModel extends LanguageModelV4 {
             'image_url': {'url': url},
           });
         }
+      } else if (part is LanguageModelV4ReasoningFilePart ||
+          part is LanguageModelV4DocumentSourcePart) {
+        throw UnsupportedError(
+          'Cohere cannot serialize ${part.runtimeType} in a prompt.',
+        );
       }
     }
     return out;
@@ -223,13 +228,24 @@ class _CohereLanguageModel extends LanguageModelV4 {
   String _toolResultText(LanguageModelV4ToolResultPart result) {
     final output = result.output;
     if (output is ToolResultOutputText) return output.text;
+    if (output is ToolResultOutputErrorText) return output.text;
+    if (output is ToolResultOutputJson) return jsonEncode(output.value);
+    if (output is ToolResultOutputErrorJson) return jsonEncode(output.value);
+    if (output is ToolResultOutputExecutionDenied) return output.reason;
     if (output is ToolResultOutputContent) {
+      if (output.parts.any((part) => part is! LanguageModelV4TextPart)) {
+        throw UnsupportedError(
+          'Cohere cannot serialize non-text tool result content.',
+        );
+      }
       return output.parts
           .whereType<LanguageModelV4TextPart>()
           .map((p) => p.text)
           .join('\n');
     }
-    return '';
+    throw UnsupportedError(
+      'Cohere cannot serialize ${output.runtimeType} tool result output.',
+    );
   }
 
   /// Serialize function tools into the Cohere v2 `tools` field.
@@ -296,9 +312,9 @@ class _CohereLanguageModel extends LanguageModelV4 {
   Future<LanguageModelV4GenerateResult> doGenerate(
     LanguageModelV4CallOptions options,
   ) async {
-    final resolvedHeaders = await headers();
-    final body = _buildBody(options);
-    final cancelToken = _cancelTokenFor(options.abortSignal);
+    final cancellation = DioCancellationScope(options.abortSignal);
+    final resolvedHeaders = await cancellation.run(headers);
+    final body = await cancellation.run(() => _buildBody(options));
 
     final Response<Map<String, dynamic>> response;
     try {
@@ -306,11 +322,13 @@ class _CohereLanguageModel extends LanguageModelV4 {
         '/chat',
         data: body,
         options: Options(headers: {...?options.headers, ...resolvedHeaders}),
-        cancelToken: cancelToken,
+        cancelToken: cancellation.token,
       );
     } on DioException catch (e) {
+      await cancellation.dispose();
       throw await apiErrorFromDioException(e, provider: provider);
     }
+    await cancellation.dispose();
     final data = response.data;
     if (data == null) {
       throw _invalidResponse(response);
@@ -369,9 +387,13 @@ class _CohereLanguageModel extends LanguageModelV4 {
   Future<LanguageModelV4StreamResult> doStream(
     LanguageModelV4CallOptions options,
   ) async {
-    final resolvedHeaders = await headers();
-    final body = _buildBody(options)..['stream'] = true;
-    final cancelToken = _cancelTokenFor(options.abortSignal);
+    final cancellation = DioCancellationScope(
+      options.abortSignal,
+      alwaysCreateToken: true,
+    );
+    final resolvedHeaders = await cancellation.run(headers);
+    final body = await cancellation.run(() => _buildBody(options))
+      ..['stream'] = true;
 
     final Response<ResponseBody> response;
     try {
@@ -382,15 +404,24 @@ class _CohereLanguageModel extends LanguageModelV4 {
           responseType: ResponseType.stream,
           headers: {...?options.headers, ...resolvedHeaders},
         ),
-        cancelToken: cancelToken,
+        cancelToken: cancellation.token,
       );
     } on DioException catch (e) {
+      await cancellation.dispose();
       throw await apiErrorFromDioException(e, provider: provider);
     }
 
     final controller = StreamController<LanguageModelV4StreamPart>();
+    controller.onCancel = () async {
+      final token = cancellation.token;
+      if (token != null && !token.isCancelled) {
+        token.cancel('stream subscription cancelled');
+      }
+      await cancellation.dispose();
+    };
     final responseBody = response.data;
     if (responseBody == null) {
+      await cancellation.dispose();
       throw _invalidResponse(response);
     }
     final byteStream = responseBody.stream;
@@ -399,20 +430,24 @@ class _CohereLanguageModel extends LanguageModelV4 {
     );
     final responseTimestamp = DateTime.now().toUtc();
 
-    unawaited(
-      _processStream(
-        byteStream,
-        controller,
-        includeRawChunks: options.includeRawChunks,
-        responseHeaders: responseHeaders,
-        responseTimestamp: responseTimestamp,
-      ).catchError((Object e) {
+    unawaited(() async {
+      try {
+        await _processStream(
+          byteStream,
+          controller,
+          includeRawChunks: options.includeRawChunks,
+          responseHeaders: responseHeaders,
+          responseTimestamp: responseTimestamp,
+        );
+      } catch (e) {
         if (!controller.isClosed) {
           controller.add(StreamPartError(error: e));
-          controller.close();
+          await controller.close();
         }
-      }),
-    );
+      } finally {
+        await cancellation.dispose();
+      }
+    }());
 
     return LanguageModelV4StreamResult(
       stream: controller.stream,
@@ -432,116 +467,109 @@ class _CohereLanguageModel extends LanguageModelV4 {
     required Map<String, String> responseHeaders,
     required DateTime responseTimestamp,
   }) async {
-    var buffer = '';
     var textStarted = false;
     Map<String, dynamic>? lastEvent;
     // Per-index tool-call streaming state.
     final toolStates = <int, _CohereToolState>{};
     controller.add(const StreamPartStreamStart());
-    await for (final bytes in byteStream) {
-      buffer += utf8.decode(bytes);
-      final lines = buffer.split('\n');
-      buffer = lines.removeLast();
-      for (final line in lines) {
-        final trimmed = line.trim();
-        if (trimmed.isEmpty) continue;
-        try {
-          final event = jsonDecode(trimmed) as Map<String, dynamic>;
-          lastEvent = event;
-          if (includeRawChunks) {
-            controller.add(StreamPartRaw(rawValue: event));
+    await for (final line
+        in utf8.decoder.bind(byteStream).transform(const LineSplitter())) {
+      final trimmed = line.trim();
+      if (trimmed.isEmpty) continue;
+      try {
+        final event = jsonDecode(trimmed) as Map<String, dynamic>;
+        lastEvent = event;
+        if (includeRawChunks) {
+          controller.add(StreamPartRaw(rawValue: event));
+        }
+        final type = event['type'] as String?;
+        final delta = event['delta'] as Map<String, dynamic>?;
+        final message = delta?['message'] as Map<String, dynamic>?;
+        if (type == 'content-delta') {
+          final content = message?['content'] as Map<String, dynamic>?;
+          final text = content?['text'] as String?;
+          if (text != null && text.isNotEmpty) {
+            if (!textStarted) {
+              textStarted = true;
+              controller.add(const StreamPartTextStart(id: 'text-0'));
+            }
+            controller.add(StreamPartTextDelta(id: 'text-0', delta: text));
           }
-          final type = event['type'] as String?;
-          final delta = event['delta'] as Map<String, dynamic>?;
-          final message = delta?['message'] as Map<String, dynamic>?;
-          if (type == 'content-delta') {
-            final content = message?['content'] as Map<String, dynamic>?;
-            final text = content?['text'] as String?;
-            if (text != null && text.isNotEmpty) {
-              if (!textStarted) {
-                textStarted = true;
-                controller.add(const StreamPartTextStart(id: 'text-0'));
-              }
-              controller.add(StreamPartTextDelta(id: 'text-0', delta: text));
-            }
-          } else if (type == 'tool-call-start') {
-            final index = (event['index'] as num?)?.toInt() ?? 0;
-            final toolCall = message?['tool_calls'] as Map<String, dynamic>?;
-            final function = toolCall?['function'] as Map<String, dynamic>?;
-            final id = toolCall?['id']?.toString() ?? prefixedId('cohere-tool');
-            final name = function?['name']?.toString() ?? 'unknown_tool';
-            final state = _CohereToolState(id: id, name: name);
-            toolStates[index] = state;
-            controller.add(StreamPartToolInputStart(id: id, toolName: name));
-            final args = function?['arguments']?.toString();
-            if (args != null && args.isNotEmpty) {
-              state.args.write(args);
-              controller.add(StreamPartToolInputDelta(id: id, delta: args));
-            }
-          } else if (type == 'tool-call-delta') {
-            final index = (event['index'] as num?)?.toInt() ?? 0;
-            final state = toolStates[index];
-            final toolCall = message?['tool_calls'] as Map<String, dynamic>?;
-            final function = toolCall?['function'] as Map<String, dynamic>?;
-            final args = function?['arguments']?.toString();
-            if (state != null && args != null && args.isNotEmpty) {
-              state.args.write(args);
-              controller.add(
-                StreamPartToolInputDelta(id: state.id, delta: args),
-              );
-            }
-          } else if (type == 'tool-call-end') {
-            final index = (event['index'] as num?)?.toInt() ?? 0;
+        } else if (type == 'tool-call-start') {
+          final index = (event['index'] as num?)?.toInt() ?? 0;
+          final toolCall = message?['tool_calls'] as Map<String, dynamic>?;
+          final function = toolCall?['function'] as Map<String, dynamic>?;
+          final id = toolCall?['id']?.toString() ?? prefixedId('cohere-tool');
+          final name = function?['name']?.toString() ?? 'unknown_tool';
+          final state = _CohereToolState(id: id, name: name);
+          toolStates[index] = state;
+          controller.add(StreamPartToolInputStart(id: id, toolName: name));
+          final args = function?['arguments']?.toString();
+          if (args != null && args.isNotEmpty) {
+            state.args.write(args);
+            controller.add(StreamPartToolInputDelta(id: id, delta: args));
+          }
+        } else if (type == 'tool-call-delta') {
+          final index = (event['index'] as num?)?.toInt() ?? 0;
+          final state = toolStates[index];
+          final toolCall = message?['tool_calls'] as Map<String, dynamic>?;
+          final function = toolCall?['function'] as Map<String, dynamic>?;
+          final args = function?['arguments']?.toString();
+          if (state != null && args != null && args.isNotEmpty) {
+            state.args.write(args);
+            controller.add(StreamPartToolInputDelta(id: state.id, delta: args));
+          }
+        } else if (type == 'tool-call-end') {
+          final index = (event['index'] as num?)?.toInt() ?? 0;
+          _finalizeToolCall(
+            index: index,
+            toolStates: toolStates,
+            controller: controller,
+          );
+        } else if (type == 'message-end') {
+          // Emit ends for any tool calls that never got an explicit end.
+          final pendingIndexes = toolStates.keys.toList()..sort();
+          for (final index in pendingIndexes) {
             _finalizeToolCall(
               index: index,
               toolStates: toolStates,
               controller: controller,
             );
-          } else if (type == 'message-end') {
-            // Emit ends for any tool calls that never got an explicit end.
-            final pendingIndexes = toolStates.keys.toList()..sort();
-            for (final index in pendingIndexes) {
-              _finalizeToolCall(
-                index: index,
-                toolStates: toolStates,
-                controller: controller,
-              );
-            }
-            if (textStarted) {
-              controller.add(const StreamPartTextEnd(id: 'text-0'));
-            }
-            final usage = delta?['usage'] as Map<String, dynamic>?;
-            final tokens = usage?['tokens'] as Map<String, dynamic>?;
-            controller.add(
-              StreamPartResponseMetadata(
-                metadata: LanguageModelV4ResponseMetadata(
-                  modelId: modelId,
-                  timestamp: responseTimestamp,
-                  headers: responseHeaders,
-                  body: lastEvent,
-                ),
-              ),
-            );
-            controller.add(
-              StreamPartFinish(
-                finishReason: _mapFinishReason(
-                  delta?['finish_reason'] as String?,
-                ),
-                rawFinishReason: delta?['finish_reason'] as String?,
-                usage: LanguageModelV4Usage(
-                  inputTokens: LanguageModelV4InputTokenUsage(
-                    total: _tokenCount(tokens?['input_tokens']),
-                  ),
-                  outputTokens: LanguageModelV4OutputTokenUsage(
-                    total: _tokenCount(tokens?['output_tokens']),
-                  ),
-                ),
-              ),
-            );
           }
-        } catch (_) {
-          // Ignore malformed JSON lines.
+          if (textStarted) {
+            controller.add(const StreamPartTextEnd(id: 'text-0'));
+          }
+          final usage = delta?['usage'] as Map<String, dynamic>?;
+          final tokens = usage?['tokens'] as Map<String, dynamic>?;
+          controller.add(
+            StreamPartResponseMetadata(
+              metadata: LanguageModelV4ResponseMetadata(
+                modelId: modelId,
+                timestamp: responseTimestamp,
+                headers: responseHeaders,
+                body: lastEvent,
+              ),
+            ),
+          );
+          controller.add(
+            StreamPartFinish(
+              finishReason: _mapFinishReason(
+                delta?['finish_reason'] as String?,
+              ),
+              rawFinishReason: delta?['finish_reason'] as String?,
+              usage: LanguageModelV4Usage(
+                inputTokens: LanguageModelV4InputTokenUsage(
+                  total: _tokenCount(tokens?['input_tokens']),
+                ),
+                outputTokens: LanguageModelV4OutputTokenUsage(
+                  total: _tokenCount(tokens?['output_tokens']),
+                ),
+              ),
+            ),
+          );
         }
+      } catch (_) {
+        // Ignore malformed JSON lines.
       }
     }
     await controller.close();
@@ -596,6 +624,9 @@ String? _imageUrl(LanguageModelV4DataContent data, String? mediaType) {
     DataContentBase64(:final base64) => base64,
     // coverage:ignore-start
     DataContentUrl() => null, // unreachable: URL data early-returns above
+    DataContentProviderReference() => throw UnsupportedError(
+      'Cohere does not accept provider file references',
+    ),
     // coverage:ignore-end
   };
   if (b64 == null) return null;
@@ -607,6 +638,12 @@ String? _imageUrl(LanguageModelV4DataContent data, String? mediaType) {
 // ---------------------------------------------------------------------------
 
 class _CohereEmbeddingModel implements EmbeddingModelV2<String> {
+  @override
+  int? get maxEmbeddingsPerCall => 96;
+
+  @override
+  bool get supportsParallelCalls => true;
+
   _CohereEmbeddingModel({
     required this.modelId,
     required this.client,
@@ -628,7 +665,8 @@ class _CohereEmbeddingModel implements EmbeddingModelV2<String> {
   Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
     EmbeddingModelV2CallOptions<String> options,
   ) async {
-    final resolvedHeaders = await headers();
+    final cancellation = DioCancellationScope(options.abortSignal);
+    final resolvedHeaders = await cancellation.run(headers);
     final providerOptions = options.providerOptions?['cohere'];
 
     final body = <String, dynamic>{
@@ -645,10 +683,13 @@ class _CohereEmbeddingModel implements EmbeddingModelV2<String> {
         '/embed',
         data: body,
         options: Options(headers: {...?options.headers, ...resolvedHeaders}),
+        cancelToken: cancellation.token,
       );
     } on DioException catch (e) {
+      await cancellation.dispose();
       throw await apiErrorFromDioException(e, provider: provider);
     }
+    await cancellation.dispose();
     final data = response.data;
     if (data == null) {
       throw _invalidResponse(response);
@@ -656,9 +697,12 @@ class _CohereEmbeddingModel implements EmbeddingModelV2<String> {
     try {
       final embeddingsData = data['embeddings'] as Map<String, dynamic>?;
       final floats = (embeddingsData?['float'] as List?) ?? [];
-      final embeddings = floats.take(options.values.length).indexed.map((
-        entry,
-      ) {
+      if (floats.length != options.values.length) {
+        throw const FormatException(
+          'Expected one embedding row for each input.',
+        );
+      }
+      final embeddings = floats.indexed.map((entry) {
         final vector = (entry.$2 as List)
             .map((value) => (value as num).toDouble())
             .toList();
@@ -699,7 +743,8 @@ class _CohereRerankModel implements RerankModelV1 {
 
   @override
   Future<RerankModelV1Result> doRerank(RerankModelV1CallOptions options) async {
-    final resolvedHeaders = await headers();
+    final cancellation = DioCancellationScope(options.abortSignal);
+    final resolvedHeaders = await cancellation.run(headers);
 
     final body = <String, dynamic>{
       'model': modelId,
@@ -714,10 +759,13 @@ class _CohereRerankModel implements RerankModelV1 {
         '/rerank',
         data: body,
         options: Options(headers: {...?options.headers, ...resolvedHeaders}),
+        cancelToken: cancellation.token,
       );
     } on DioException catch (e) {
+      await cancellation.dispose();
       throw await apiErrorFromDioException(e, provider: provider);
     }
+    await cancellation.dispose();
     final data = response.data;
     if (data == null) {
       throw _invalidResponse(response);
@@ -753,23 +801,3 @@ AiApiCallError _invalidResponse<T>(Response<T> response, [Object? cause]) =>
 /// Maps a [DioException] from a non-2xx response to a typed [AiApiCallError]
 /// carrying the provider's message/status/code. Drains a streamed error body
 /// (`ResponseType.stream`) when present so the message is recoverable.
-CancelToken? _cancelTokenFor(LanguageModelV4AbortSignal? abortSignal) {
-  if (abortSignal == null) {
-    return null;
-  }
-
-  final cancelToken = CancelToken();
-  if (abortSignal.isCancelled) {
-    cancelToken.cancel('abortSignal');
-    return cancelToken;
-  }
-
-  unawaited(
-    abortSignal.onCancelled.then((_) {
-      if (!cancelToken.isCancelled) {
-        cancelToken.cancel('abortSignal');
-      }
-    }),
-  );
-  return cancelToken;
-}

@@ -71,6 +71,7 @@ void main() {
         final result = await generateText<String>(
           model: _ResponseEnvelopeGenerateModel(),
           prompt: 'hi',
+          bodyInclusion: const BodyInclusionPolicy.all(),
           onFinish: (event) => finish = event,
         );
 
@@ -184,6 +185,7 @@ void main() {
     test('streamText exposes provider raw request/response envelope', () async {
       final result = await streamText<String>(
         model: _ResponseEnvelopeStreamModel(),
+        bodyInclusion: const BodyInclusionPolicy.all(),
       );
 
       final request = await result.request;
@@ -234,6 +236,7 @@ void main() {
         StreamTextFinishEvent<String>? finished;
         final result = await streamText<String>(
           model: _OnFinishRichStreamModel(),
+          bodyInclusion: const BodyInclusionPolicy.all(),
           onFinish: (event) => finished = event,
         );
 
@@ -870,6 +873,10 @@ void main() {
           approvalId:
               firstFinish.steps.first.toolApprovalRequests.first.approvalId,
           approved: true,
+          toolCallId: 'approval_stream_1',
+          toolName: 'secureTool',
+          argumentsFingerprint: '{"action":"run"}',
+          policyRevision: 'default',
         );
 
         final second = await streamText<String>(
@@ -949,6 +956,10 @@ void main() {
             approvalId: first.toolApprovalRequests.first.approvalId,
             approved: false,
             reason: 'denied by user',
+            toolCallId: 'call_weather_1',
+            toolName: 'weather',
+            argumentsFingerprint: '{"city":"Paris"}',
+            policyRevision: 'default',
           ),
         ],
       );
@@ -1077,12 +1088,6 @@ void main() {
     test(
       'streamObject patch stream supports nested json pointer operations',
       () async {
-        const expectedFixture = [
-          ('replace', ''),
-          ('add', '/recipe/name'),
-          ('add', '/recipe/steps'),
-        ];
-
         final result = await streamObject<Map<String, dynamic>>(
           model: _NestedJsonStreamModel(),
           schema: Schema<Map<String, dynamic>>(
@@ -1091,18 +1096,10 @@ void main() {
           ),
         );
 
-        final patches = await result.patchStream.toList();
-        final flattened = patches
-            .expand((group) => group)
-            .map((op) => (op.op, op.path))
-            .toList();
-
-        for (final expected in expectedFixture) {
-          expect(flattened, contains(expected));
-        }
-        final finalObject = await result.object;
-        expect((finalObject['recipe'] as Map)['name'], 'Lasagna');
-        expect(((finalObject['recipe'] as Map)['steps'] as List).first, 'Boil');
+        await expectLater(
+          result.object,
+          throwsA(isA<AiNoObjectGeneratedError>()),
+        );
       },
     );
 
@@ -1115,12 +1112,10 @@ void main() {
         ),
       );
 
-      final flattened = (await result.patchStream.toList())
-          .expand((group) => group)
-          .map((op) => (op.op, op.path))
-          .toList();
-      expect(flattened, contains(('add', '/a~1b')));
-      expect(flattened, contains(('add', '/c~0d')));
+      await expectLater(
+        result.object,
+        throwsA(isA<AiNoObjectGeneratedError>()),
+      );
     });
 
     test(

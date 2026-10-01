@@ -155,6 +155,12 @@ class _OllamaLanguageModel extends LanguageModelV4 {
   String _toolResultText(LanguageModelV4ToolResultPart result) {
     final output = result.output;
     if (output is ToolResultOutputText) return output.text;
+    if (output is ToolResultOutputErrorText) return output.text;
+    if (output is ToolResultOutputJson) return jsonEncode(output.value);
+    if (output is ToolResultOutputErrorJson) {
+      return jsonEncode(output.value);
+    }
+    if (output is ToolResultOutputExecutionDenied) return output.reason;
     if (output is ToolResultOutputContent) {
       return output.parts
           .whereType<LanguageModelV4TextPart>()
@@ -215,7 +221,11 @@ class _OllamaLanguageModel extends LanguageModelV4 {
     LanguageModelV4CallOptions options,
   ) async {
     final body = _buildBody(options);
-    final cancelToken = _cancelTokenFor(options.abortSignal);
+    final cancellation = DioCancellationScope(options.abortSignal);
+    if (options.abortSignal?.isCancelled == true) {
+      await cancellation.dispose();
+      throw const AiOperationCancelledError();
+    }
 
     final Response<Map<String, dynamic>> response;
     try {
@@ -223,11 +233,16 @@ class _OllamaLanguageModel extends LanguageModelV4 {
         '/chat',
         data: body,
         options: Options(headers: options.headers),
-        cancelToken: cancelToken,
+        cancelToken: cancellation.token,
       );
     } on DioException catch (e) {
+      await cancellation.dispose();
       throw await apiErrorFromDioException(e, provider: provider);
+    } catch (_) {
+      await cancellation.dispose();
+      rethrow;
     }
+    await cancellation.dispose();
     final data = response.data;
     if (data == null) {
       throw _invalidResponse(response);
@@ -264,7 +279,14 @@ class _OllamaLanguageModel extends LanguageModelV4 {
     // Override stream to true for streaming mode.
     final body = _buildBody(options);
     body['stream'] = true;
-    final cancelToken = _cancelTokenFor(options.abortSignal);
+    final cancellation = DioCancellationScope(
+      options.abortSignal,
+      alwaysCreateToken: true,
+    );
+    if (options.abortSignal?.isCancelled == true) {
+      await cancellation.dispose();
+      throw const AiOperationCancelledError();
+    }
 
     final Response<ResponseBody> response;
     try {
@@ -275,35 +297,50 @@ class _OllamaLanguageModel extends LanguageModelV4 {
           responseType: ResponseType.stream,
           headers: options.headers,
         ),
-        cancelToken: cancelToken,
+        cancelToken: cancellation.token,
       );
     } on DioException catch (e) {
+      await cancellation.dispose();
       throw await apiErrorFromDioException(e, provider: provider);
+    } catch (_) {
+      await cancellation.dispose();
+      rethrow;
     }
 
     final controller = StreamController<LanguageModelV4StreamPart>();
+    controller.onCancel = () async {
+      if (cancellation.token case final token?) {
+        if (!token.isCancelled) token.cancel('stream subscription cancelled');
+      }
+      await cancellation.dispose();
+    };
     final responseHeaders = response.headers.map.map(
       (key, value) => MapEntry(key, value.join(',')),
     );
     final responseTimestamp = DateTime.now().toUtc();
     final responseBody = response.data;
     if (responseBody == null) {
+      await cancellation.dispose();
       throw _invalidResponse(response);
     }
-    unawaited(
-      _processStream(
-        responseBody.stream,
-        controller,
-        includeRawChunks: options.includeRawChunks,
-        responseHeaders: responseHeaders,
-        responseTimestamp: responseTimestamp,
-      ).catchError((Object e) {
+    unawaited(() async {
+      try {
+        await _processStream(
+          responseBody.stream,
+          controller,
+          includeRawChunks: options.includeRawChunks,
+          responseHeaders: responseHeaders,
+          responseTimestamp: responseTimestamp,
+        );
+      } catch (e) {
         if (!controller.isClosed) {
           controller.add(StreamPartError(error: e));
-          controller.close();
+          await controller.close();
         }
-      }),
-    );
+      } finally {
+        await cancellation.dispose();
+      }
+    }());
 
     return LanguageModelV4StreamResult(
       stream: controller.stream,
@@ -323,83 +360,92 @@ class _OllamaLanguageModel extends LanguageModelV4 {
     required Map<String, String> responseHeaders,
     required DateTime responseTimestamp,
   }) async {
-    var buffer = '';
     var textStarted = false;
     var sawAnyToolCall = false;
     Map<String, dynamic>? lastEvent;
     controller.add(const StreamPartStreamStart());
-    await for (final bytes in byteStream) {
-      buffer += utf8.decode(bytes);
-      final lines = buffer.split('\n');
-      buffer = lines.removeLast();
-      for (final line in lines) {
-        final trimmed = line.trim();
-        if (trimmed.isEmpty) continue;
-        try {
-          final event = jsonDecode(trimmed) as Map<String, dynamic>;
-          lastEvent = event;
-          if (includeRawChunks) {
-            controller.add(StreamPartRaw(rawValue: event));
-          }
-          final message = event['message'] as Map<String, dynamic>?;
-          final content = message?['content'] as String?;
-          if (content != null && content.isNotEmpty) {
-            if (!textStarted) {
-              textStarted = true;
-              controller.add(const StreamPartTextStart(id: 'text-0'));
-            }
-            controller.add(StreamPartTextDelta(id: 'text-0', delta: content));
-          }
-
-          // Ollama emits whole tool calls (not incremental deltas).
-          final toolCalls = _parseToolCalls(message?['tool_calls'] as List?);
-          for (final call in toolCalls) {
-            sawAnyToolCall = true;
-            controller.add(
-              StreamPartToolInputStart(
-                id: call.toolCallId,
-                toolName: call.toolName,
-              ),
-            );
-            controller.add(
-              StreamPartToolInputDelta(
-                id: call.toolCallId,
-                delta: jsonEncode(call.input),
-              ),
-            );
-            controller.add(StreamPartToolInputEnd(id: call.toolCallId));
-            controller.add(StreamPartToolCall(toolCall: call));
-          }
-
-          final done = event['done'] as bool? ?? false;
-          if (done) {
-            final doneReason = event['done_reason'] as String?;
-            if (textStarted) {
-              controller.add(const StreamPartTextEnd(id: 'text-0'));
-            }
-            controller.add(
-              StreamPartResponseMetadata(
-                metadata: LanguageModelV4ResponseMetadata(
-                  modelId: model,
-                  timestamp: responseTimestamp,
-                  headers: responseHeaders,
-                  body: lastEvent,
-                ),
-              ),
-            );
-            controller.add(
-              StreamPartFinish(
-                finishReason: sawAnyToolCall
-                    ? LanguageModelV4FinishReason.toolCalls
-                    : _mapFinishReason(doneReason),
-                rawFinishReason: doneReason,
-                usage: _usageFrom(event),
-              ),
-            );
-          }
-        } catch (_) {
-          // Ignore malformed JSON lines.
+    await for (final line
+        in utf8.decoder.bind(byteStream).transform(const LineSplitter())) {
+      final trimmed = line.trim();
+      if (trimmed.isEmpty) continue;
+      try {
+        final event = jsonDecode(trimmed) as Map<String, dynamic>;
+        lastEvent = event;
+        if (includeRawChunks) {
+          controller.add(StreamPartRaw(rawValue: event));
         }
+        final errorMessage = event['error'];
+        if (errorMessage is String) {
+          controller.add(
+            StreamPartError(
+              error: AiApiCallError(
+                errorMessage,
+                responseBody: trimmed,
+                responseHeaders: responseHeaders,
+              ),
+            ),
+          );
+          await controller.close();
+          return;
+        }
+        final message = event['message'] as Map<String, dynamic>?;
+        final content = message?['content'] as String?;
+        if (content != null && content.isNotEmpty) {
+          if (!textStarted) {
+            textStarted = true;
+            controller.add(const StreamPartTextStart(id: 'text-0'));
+          }
+          controller.add(StreamPartTextDelta(id: 'text-0', delta: content));
+        }
+
+        // Ollama emits whole tool calls (not incremental deltas).
+        final toolCalls = _parseToolCalls(message?['tool_calls'] as List?);
+        for (final call in toolCalls) {
+          sawAnyToolCall = true;
+          controller.add(
+            StreamPartToolInputStart(
+              id: call.toolCallId,
+              toolName: call.toolName,
+            ),
+          );
+          controller.add(
+            StreamPartToolInputDelta(
+              id: call.toolCallId,
+              delta: jsonEncode(call.input),
+            ),
+          );
+          controller.add(StreamPartToolInputEnd(id: call.toolCallId));
+          controller.add(StreamPartToolCall(toolCall: call));
+        }
+
+        final done = event['done'] as bool? ?? false;
+        if (done) {
+          final doneReason = event['done_reason'] as String?;
+          if (textStarted) {
+            controller.add(const StreamPartTextEnd(id: 'text-0'));
+          }
+          controller.add(
+            StreamPartResponseMetadata(
+              metadata: LanguageModelV4ResponseMetadata(
+                modelId: model,
+                timestamp: responseTimestamp,
+                headers: responseHeaders,
+                body: lastEvent,
+              ),
+            ),
+          );
+          controller.add(
+            StreamPartFinish(
+              finishReason: sawAnyToolCall
+                  ? LanguageModelV4FinishReason.toolCalls
+                  : _mapFinishReason(doneReason),
+              rawFinishReason: doneReason,
+              usage: _usageFrom(event),
+            ),
+          );
+        }
+      } catch (_) {
+        // Ignore malformed JSON lines.
       }
     }
     await controller.close();
@@ -452,6 +498,9 @@ class _OllamaLanguageModel extends LanguageModelV4 {
       DataContentBase64(:final base64) => base64,
       // Ollama embeds images inline; remote URLs are not supported here.
       DataContentUrl() => null,
+      DataContentProviderReference() => throw UnsupportedError(
+        'Ollama does not accept provider file references',
+      ),
     };
   }
 }
@@ -461,6 +510,12 @@ class _OllamaLanguageModel extends LanguageModelV4 {
 // ---------------------------------------------------------------------------
 
 class _OllamaEmbeddingModel implements EmbeddingModelV2<String> {
+  @override
+  int? get maxEmbeddingsPerCall => null;
+
+  @override
+  bool get supportsParallelCalls => true;
+
   _OllamaEmbeddingModel({required this.model, required this.client});
 
   final String model;
@@ -486,33 +541,48 @@ class _OllamaEmbeddingModel implements EmbeddingModelV2<String> {
       ...?providerOptions,
     };
 
+    final cancellation = DioCancellationScope(options.abortSignal);
+    if (options.abortSignal?.isCancelled == true) {
+      await cancellation.dispose();
+      throw const AiOperationCancelledError();
+    }
+
     final Response<Map<String, dynamic>> response;
     try {
       response = await client.post<Map<String, dynamic>>(
         '/embed',
         data: body,
         options: Options(headers: options.headers),
+        cancelToken: cancellation.token,
       );
     } on DioException catch (e) {
+      await cancellation.dispose();
       throw await apiErrorFromDioException(e, provider: provider);
+    } catch (_) {
+      await cancellation.dispose();
+      rethrow;
     }
+    await cancellation.dispose();
     final data = response.data;
     if (data == null) {
       throw _invalidResponse(response);
     }
     try {
       final embeddingsList = (data['embeddings'] as List?) ?? [];
-      final embeddings = embeddingsList.take(options.values.length).indexed.map(
-        (entry) {
-          final vector = (entry.$2 as List)
-              .map((value) => (value as num).toDouble())
-              .toList();
-          return EmbeddingModelV2Embedding<String>(
-            value: options.values[entry.$1],
-            embedding: vector,
-          );
-        },
-      ).toList();
+      if (embeddingsList.length != options.values.length) {
+        throw const FormatException(
+          'Expected one embedding row for each input.',
+        );
+      }
+      final embeddings = embeddingsList.indexed.map((entry) {
+        final vector = (entry.$2 as List)
+            .map((value) => (value as num).toDouble())
+            .toList();
+        return EmbeddingModelV2Embedding<String>(
+          value: options.values[entry.$1],
+          embedding: vector,
+        );
+      }).toList();
 
       return EmbeddingModelV2GenerateResult<String>(embeddings: embeddings);
     } on Object catch (error) {
@@ -528,27 +598,3 @@ AiApiCallError _invalidResponse<T>(Response<T> response, [Object? cause]) =>
       url: response.requestOptions.uri.toString(),
       cause: cause,
     );
-
-/// Maps a [DioException] from a non-2xx response to a typed [AiApiCallError]
-/// carrying the provider's message/status/code. Drains a streamed error body
-/// (`ResponseType.stream`) when present so the message is recoverable.
-CancelToken? _cancelTokenFor(LanguageModelV4AbortSignal? abortSignal) {
-  if (abortSignal == null) {
-    return null;
-  }
-
-  final cancelToken = CancelToken();
-  if (abortSignal.isCancelled) {
-    cancelToken.cancel('abortSignal');
-    return cancelToken;
-  }
-
-  unawaited(
-    abortSignal.onCancelled.then((_) {
-      if (!cancelToken.isCancelled) {
-        cancelToken.cancel('abortSignal');
-      }
-    }),
-  );
-  return cancelToken;
-}

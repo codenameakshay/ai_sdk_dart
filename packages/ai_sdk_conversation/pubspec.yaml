@@ -1,0 +1,13 @@
+name: ai_sdk_conversation
+description: Typed, lossless conversation snapshots and persistence codecs for AI SDK Dart.
+version: 3.0.0
+homepage: https://github.com/codenameakshay/ai_sdk_dart
+repository: https://github.com/codenameakshay/ai_sdk_dart
+resolution: workspace
+
+environment:
+  sdk: ^3.11.1
+
+dev_dependencies:
+  lints: ^6.1.0
+  test: ^1.25.0

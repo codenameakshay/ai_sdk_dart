@@ -1,4 +1,4 @@
-## 2.0.0
+## 3.0.0
 
 - Hardened Streamable HTTP reconnection, session cleanup, cancellation
   notifications, response trust boundaries, and concurrent shutdown.

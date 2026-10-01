@@ -34,6 +34,7 @@ void main() {
           ModelMessage(role: ModelMessageRole.assistant, content: 'a'),
           ModelMessage(role: ModelMessageRole.tool, content: 't'),
         ],
+        allowSystemInMessages: true,
       );
       await result.fullStream.toList();
       final roles = model.lastOptions!.prompt.messages
@@ -78,14 +79,22 @@ void main() {
   });
 
   group('streamText output JSON extraction', () {
-    test('object output extracts JSON from surrounding prose', () async {
+    test('object output rejects JSON surrounded by extra prose', () async {
       final model = chunkedText('Here is the result: {"a":1} thanks!');
       final result = await streamText<Map<String, dynamic>>(
         model: model,
         prompt: 'json',
         output: Output.object(schema: objectSchema()),
       );
-      expect(await result.output, {'a': 1});
+      final outputExpectation = expectLater(
+        result.output,
+        throwsA(isA<AiNoObjectGeneratedError>()),
+      );
+      await expectLater(
+        result.fullStream.toList(),
+        throwsA(isA<AiNoObjectGeneratedError>()),
+      );
+      await outputExpectation;
     });
 
     test('object output extracts JSON from a fenced code block', () async {
@@ -129,22 +138,23 @@ void main() {
       expect((elements.last as Map)['i'], 3);
     });
 
-    test(
-      'array embedded in prose is extracted via the manual tokenizer',
-      () async {
-        // jsonDecode of the whole text fails, but _extractJsonCandidate finds
-        // the balanced [...] and the manual element tokenizer parses it.
-        final model = chunkedText('Here you go: [{"i":1}, {"i":2}] done.');
-        final result = await streamText<List<dynamic>>(
-          model: model,
-          prompt: 'json',
-          output: Output.array(element: objectSchema()),
-        );
-        final output = await result.output;
-        expect(output.length, 2);
-        expect((output.last as Map)['i'], 2);
-      },
-    );
+    test('array surrounded by extra prose is rejected', () async {
+      final model = chunkedText('Here you go: [{"i":1}, {"i":2}] done.');
+      final result = await streamText<List<dynamic>>(
+        model: model,
+        prompt: 'json',
+        output: Output.array(element: objectSchema()),
+      );
+      final outputExpectation = expectLater(
+        result.output,
+        throwsA(isA<AiNoObjectGeneratedError>()),
+      );
+      await expectLater(
+        result.fullStream.toList(),
+        throwsA(isA<AiNoObjectGeneratedError>()),
+      );
+      await outputExpectation;
+    });
 
     test(
       'malformed array element is skipped by the manual tokenizer',

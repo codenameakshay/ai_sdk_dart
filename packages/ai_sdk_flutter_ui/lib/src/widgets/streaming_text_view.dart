@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/ai_motion.dart';
+import 'content_direction.dart';
 
 /// Renders text that grows as it streams in, with a soft breathing cursor shown
 /// while [isStreaming] is true.
@@ -49,11 +50,22 @@ class StreamingTextView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final effectiveStyle = style ?? Theme.of(context).textTheme.bodyMedium;
+    final direction = contentDirection(text);
 
     if (!isStreaming) {
       return selectable
-          ? SelectableText(text, style: effectiveStyle, textAlign: textAlign)
-          : Text(text, style: effectiveStyle, textAlign: textAlign);
+          ? SelectableText(
+              text,
+              style: effectiveStyle,
+              textAlign: textAlign,
+              textDirection: direction,
+            )
+          : Text(
+              text,
+              style: effectiveStyle,
+              textAlign: textAlign,
+              textDirection: direction,
+            );
     }
 
     // While streaming, render the text plus an inline breathing caret. The
@@ -70,6 +82,7 @@ class StreamingTextView extends StatelessWidget {
         ],
       ),
       textAlign: textAlign,
+      textDirection: direction,
     );
   }
 }

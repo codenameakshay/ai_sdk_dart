@@ -2,10 +2,28 @@ import 'dart:async';
 
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
+import 'schema_validation.dart';
+
 typedef ToolExecutor<INPUT, OUTPUT> =
     Future<OUTPUT> Function(INPUT input, ToolExecutionOptions options);
+typedef ToolContextExecutor<INPUT, OUTPUT, CONTEXT> =
+    Future<OUTPUT> Function(
+      INPUT input,
+      CONTEXT context,
+      ToolExecutionOptions options,
+    );
 typedef UntypedToolExecutor =
     Future<Object?> Function(Object? input, ToolExecutionOptions options);
+
+/// Explicit context made available to one tool invocation.
+///
+/// The wrapper keeps application context out of provider messages and gives
+/// integrations a typed boundary for their per-tool value.
+class ToolExecutionContext<T> {
+  const ToolExecutionContext(this.value);
+
+  final T value;
+}
 
 /// A token that signals cancellation of an in-progress operation.
 ///
@@ -15,12 +33,13 @@ typedef UntypedToolExecutor =
 /// cancellation is requested.
 ///
 /// Mirrors the JS `AbortSignal` concept for the Dart/Flutter world.
-class CancellationToken implements LanguageModelV4AbortSignal {
+class CancellationToken implements ObservableAbortSignal {
   CancellationToken() {
     _completer = Completer<void>();
   }
 
   late final Completer<void> _completer;
+  StreamController<void>? _events;
   bool _isCancelled = false;
 
   /// Whether this token has been cancelled.
@@ -31,11 +50,22 @@ class CancellationToken implements LanguageModelV4AbortSignal {
   @override
   Future<void> get onCancelled => _completer.future;
 
+  /// A cancellable subscription for observers with a shorter lifetime than
+  /// this token. Late subscribers receive one event if already cancelled.
+  @override
+  Stream<void> get cancellationEvents => isCancelled
+      ? Stream<void>.value(null)
+      : (_events ??= StreamController<void>.broadcast(sync: true)).stream;
+
   /// Cancel the operation.  Idempotent — safe to call multiple times.
   void cancel() {
     if (!_isCancelled) {
       _isCancelled = true;
       if (!_completer.isCompleted) _completer.complete();
+      if (_events case final events?) {
+        events.add(null);
+        unawaited(events.close());
+      }
     }
   }
 }
@@ -55,6 +85,8 @@ class ToolExecutionOptions {
     this.messages,
     this.abortSignal,
     this.runtimeContext,
+    this.generationContext,
+    this.toolContext,
   });
 
   final String? toolCallId;
@@ -65,6 +97,13 @@ class ToolExecutionOptions {
 
   /// Caller-supplied context; strongly typed as a string-keyed map.
   final Map<String, Object?>? runtimeContext;
+
+  /// Per-tool context supplied by the generation request. It is not sent to
+  /// the provider or included in response history.
+  final Object? generationContext;
+
+  /// Typed per-tool context. This is never serialized or sent to a provider.
+  final Object? toolContext;
 }
 
 typedef ToolNeedsApproval<INPUT> =
@@ -84,6 +123,9 @@ enum ToolApprovalPolicy {
   always,
 }
 
+typedef ToolApprovalPolicySelector =
+    ToolApprovalPolicy? Function(String toolName, Object input);
+
 /// Example input for a tool; helps the model understand expected usage.
 class ToolInputExample {
   const ToolInputExample({required this.input});
@@ -96,10 +138,30 @@ class ToolInputExample {
 /// Pass any decoder that maps the provider's JSON object to your application
 /// type; code generation is optional.
 class Schema<T> {
-  const Schema({required this.jsonSchema, required this.fromJson});
+  const Schema({
+    required this.jsonSchema,
+    required T Function(Map<String, dynamic>) fromJson,
+    this.validator,
+  }) : _decoder = fromJson;
+
+  const Schema.decoderOnly({
+    required this.jsonSchema,
+    required T Function(Map<String, dynamic>) fromJson,
+  }) : _decoder = fromJson,
+       validator = null;
 
   final Map<String, dynamic> jsonSchema;
-  final T Function(Map<String, dynamic>) fromJson;
+  final T Function(Map<String, dynamic>) _decoder;
+
+  /// Optional runtime validation. Without it, the decoder determines acceptance.
+  final SchemaValidator? validator;
+
+  T fromJson(Map<String, dynamic> value) {
+    final issues =
+        validator?.validate(value) ?? const <SchemaValidationIssue>[];
+    if (issues.isNotEmpty) throw SchemaValidationException(issues);
+    return _decoder(value);
+  }
 }
 
 /// Core typed tool definition for [generateText] and [streamText].
@@ -118,6 +180,8 @@ class Tool<INPUT, OUTPUT> {
     this.needsApprovalDynamic,
     this.approvalPolicy = ToolApprovalPolicy.never,
     this.dynamic = false,
+    this.toolContext,
+    this.toolContextIsBound = false,
   });
 
   final String? description;
@@ -130,6 +194,10 @@ class Tool<INPUT, OUTPUT> {
   final UntypedToolNeedsApproval? needsApprovalDynamic;
   final ToolApprovalPolicy approvalPolicy;
   final bool dynamic;
+
+  /// Explicit application context bound to this tool's executor.
+  final Object? toolContext;
+  final bool toolContextIsBound;
 }
 
 /// Map of tool names to tools; used by [generateText] and [streamText].
@@ -153,6 +221,8 @@ Tool<INPUT, OUTPUT> tool<INPUT, OUTPUT>({
   List<ToolInputExample> inputExamples = const [],
   ToolNeedsApproval<INPUT>? needsApproval,
   ToolApprovalPolicy? approvalPolicy,
+  Object? toolContext,
+  bool toolContextIsBound = false,
 }) {
   return Tool<INPUT, OUTPUT>(
     inputSchema: inputSchema,
@@ -172,6 +242,39 @@ Tool<INPUT, OUTPUT> tool<INPUT, OUTPUT>({
         (needsApproval == null
             ? ToolApprovalPolicy.never
             : ToolApprovalPolicy.conditional),
+    toolContext: toolContext,
+    toolContextIsBound: toolContextIsBound || toolContext != null,
+  );
+}
+
+/// Defines a tool whose executor receives its bound context as a typed value.
+///
+/// The context is kept out of provider messages and response history. The
+/// existing [tool] helper remains source compatible for executors that prefer
+/// to read [ToolExecutionOptions.toolContext] directly.
+Tool<INPUT, OUTPUT> toolWithContext<INPUT, OUTPUT, CONTEXT>({
+  required Schema<INPUT> inputSchema,
+  required CONTEXT context,
+  required ToolContextExecutor<INPUT, OUTPUT, CONTEXT> execute,
+  String? description,
+  bool? strict,
+  List<ToolInputExample> inputExamples = const [],
+  ToolNeedsApproval<INPUT>? needsApproval,
+  ToolApprovalPolicy? approvalPolicy,
+}) {
+  return tool<INPUT, OUTPUT>(
+    inputSchema: inputSchema,
+    description: description,
+    strict: strict,
+    inputExamples: inputExamples,
+    needsApproval: needsApproval,
+    approvalPolicy: approvalPolicy,
+    toolContext: context,
+    toolContextIsBound: true,
+    execute: (input, options) {
+      final boundContext = options.toolContext as ToolExecutionContext<Object?>;
+      return execute(input, boundContext.value as CONTEXT, options);
+    },
   );
 }
 

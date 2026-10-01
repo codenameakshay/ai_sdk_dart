@@ -4,6 +4,13 @@ import 'package:flutter_test/flutter_test.dart';
 
 Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
 
+Widget _reduced(Widget child) => MaterialApp(
+  home: MediaQuery(
+    data: const MediaQueryData(disableAnimations: true),
+    child: Scaffold(body: child),
+  ),
+);
+
 void main() {
   group('PromptSuggestions', () {
     testWidgets('renders a chip per suggestion', (tester) async {
@@ -59,6 +66,30 @@ void main() {
       );
 
       expect(find.byType(ActionChip), findsNothing);
+    });
+
+    testWidgets('appears immediately when reduced motion is requested', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _reduced(
+          PromptSuggestions(
+            suggestions: const ['One', 'Two'],
+            onSelected: (_) {},
+          ),
+        ),
+      );
+
+      final opacities = find.byType(Opacity);
+      expect(opacities, findsNWidgets(2));
+      for (final element in opacities.evaluate()) {
+        expect(
+          tester.widget<Opacity>(find.byWidget(element.widget)).opacity,
+          1,
+        );
+      }
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.byType(ActionChip), findsNWidgets(2));
     });
   });
 }

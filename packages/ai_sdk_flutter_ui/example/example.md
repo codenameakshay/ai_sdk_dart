@@ -164,7 +164,7 @@ class _CompletionPageState extends State<CompletionPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               ElevatedButton(
-                onPressed: _completion.isStreaming
+                onPressed: _completion.isLoading
                     ? null
                     : () => _completion.complete('Write a haiku about Dart.'),
                 child: const Text('Generate haiku'),
@@ -240,7 +240,7 @@ class _ObjectStreamPageState extends State<ObjectStreamPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               ElevatedButton(
-                onPressed: _controller.isStreaming
+                onPressed: _controller.isLoading
                     ? null
                     : () => _controller.submit('Describe Japan as a JSON object.'),
                 child: const Text('Describe Japan'),
@@ -256,6 +256,158 @@ class _ObjectStreamPageState extends State<ObjectStreamPage> {
   }
 }
 ```
+
+---
+
+## ConversationController — persisted, replayable conversations
+
+`ConversationController` wraps a `ConversationBackend` and exposes typed
+`Conversation` snapshots instead of a plain message list, so a session can be
+persisted, restored, and replayed across app restarts or between local and
+remote execution.
+
+### Basic wiring
+
+```dart
+import 'package:ai_sdk_conversation/ai_sdk_conversation.dart';
+import 'package:ai_sdk_dart/ai_sdk_dart.dart';
+import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
+import 'package:ai_sdk_openai/ai_sdk_openai.dart';
+import 'package:flutter/material.dart';
+
+class ConversationPage extends StatefulWidget {
+  const ConversationPage({super.key});
+  @override
+  State<ConversationPage> createState() => _ConversationPageState();
+}
+
+class _ConversationPageState extends State<ConversationPage> {
+  late final ConversationController _conversation;
+
+  @override
+  void initState() {
+    super.initState();
+    _conversation = ConversationController(
+      LocalConversationBackend(
+        agent: ToolLoopAgent(model: openai('gpt-4.1-mini')),
+        initial: Conversation(id: 'conversation-1', messages: const []),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // AiChatScaffold.conversation disposes the controller (and its backend)
+    // by default, unlike the base AiChatScaffold constructor.
+    return AiChatScaffold.conversation(conversationController: _conversation);
+  }
+}
+```
+
+`LocalConversationBackend` wraps a `ToolLoopAgent` and runs the tool loop
+in-process. `RemoteConversationBackend` wraps a `RemoteConversationTransport`
+(from `ai_sdk_remote`) for a trusted-backend flow instead — both take the
+same `{required <agent|transport>, required Conversation initial}` shape:
+
+```dart
+LocalConversationBackend(
+  agent: ToolLoopAgent(model: openai('gpt-4.1-mini')),
+  initial: Conversation(id: 'conversation-1', messages: const []),
+);
+
+RemoteConversationBackend(
+  transport: myRemoteConversationTransport,
+  initial: Conversation(id: 'conversation-1', messages: const []),
+);
+```
+
+### Persistence
+
+Persist `ConversationCodec.encode(_conversation.conversation)`, and restore
+with `_conversation.restore(encoded)` before attaching the screen. Restore only
+decodes the snapshot — it never executes a tool or calls a provider.
+
+```dart
+final saved = ConversationCodec.encode(_conversation.conversation);
+// ...persist `saved` (e.g. to local storage) and later:
+await _conversation.restore(saved);
+```
+
+### Approvals
+
+`AiChatScaffold`/`AiChatScaffold.conversation` render a pending
+`LanguageModelV4ToolApprovalRequestPart` as an inline `ToolApprovalCard`
+automatically, the same as the base `ChatController` flow for tools with
+`needsApproval`. Pass `approvalBuilder` to render your own card instead:
+
+```dart
+AiChatScaffold.conversation(
+  conversationController: _conversation,
+  approvalBuilder: (context, controller, request) => ToolApprovalCard(
+    request: request,
+    onApprove: (reason) => controller.addToolApprovalResponse(
+      approvalId: request.approvalId,
+      approved: true,
+      reason: reason,
+    ),
+    onDeny: (reason) => controller.addToolApprovalResponse(
+      approvalId: request.approvalId,
+      approved: false,
+      reason: reason,
+    ),
+  ),
+);
+```
+
+### Retry
+
+`ConversationRetryBackend` (implemented by both `LocalConversationBackend`
+and `RemoteConversationBackend`) exposes `retryInfo` and `retryLastTurn()`.
+`RemoteConversationBackend` always reports `unsupported` today; only
+`LocalConversationBackend` can report a retryable turn.
+`ConversationController` forwards both, so callers don't need to cast the
+backend:
+
+```dart
+ElevatedButton(
+  onPressed: _conversation.retryInfo.isAvailable
+      ? () => _conversation.retryLastTurn()
+      : null,
+  child: const Text('Retry'),
+);
+```
+
+`ConversationRetryInfo.isAvailable` is only true when
+`retryInfo.availability == ConversationRetryAvailability.available`. The
+other values (`noFailedTurn`, `pendingApproval`, `unsafe`, `unsupported`)
+explain why not — in particular, a turn that already executed a tool,
+approval, or unknown part is reported `unsafe` rather than silently
+replayed.
+
+### Localizing/overriding UI copy
+
+Every user-facing string in the prebuilt widgets (button labels, a11y
+labels, status text) comes from `AiSdkUiStrings`. Override it by wrapping a
+subtree in `AiSdkUiStringsScope`:
+
+```dart
+AiSdkUiStringsScope(
+  strings: const AiSdkUiStrings(
+    sendMessage: 'Envoyer',
+    retry: 'Réessayer',
+  ),
+  child: AiChatScaffold.conversation(conversationController: _conversation),
+);
+```
+
+### Framework lifecycle recipes
+
+`example/recipes` has runnable patterns for wiring a `ConversationBackend`
+into common state-management setups:
+
+- [`conversation_scaffold.dart`](../example/recipes/conversation_scaffold.dart) — the minimal, keyless recipe above: a `LocalConversationBackend` with a mock model wired straight into `AiChatScaffold.conversation`.
+- [`bloc_conversation.dart`](../example/recipes/bloc_conversation.dart) — a `ConversationCubit` that owns the backend's change subscription and can dispose an injected backend on replacement or close.
+- [`riverpod_conversation.dart`](../example/recipes/riverpod_conversation.dart) — `autoDispose` providers that own a backend, its `ConversationController`, and a `StreamProvider` of snapshots for `ref.watch`.
 
 ---
 

@@ -14,6 +14,14 @@ class ResolvedToolSelection {
   final LanguageModelV4ToolChoice? toolChoice;
 }
 
+/// Returns true when a provider has already executed a hosted tool call.
+/// Provider adapters carry this marker in the typed tool-call contract so the
+/// core never invokes a same-named local tool by accident.
+@internal
+bool isProviderExecutedToolCall(LanguageModelV4ToolCallPart call) {
+  return call.providerExecuted;
+}
+
 @internal
 ToolSet selectActiveTools(ToolSet tools, List<String>? activeToolNames) {
   if (activeToolNames == null) {
@@ -95,6 +103,7 @@ void validateToolChoiceForCalls({
     }
   }
   for (final call in calls) {
+    if (isProviderExecutedToolCall(call)) continue;
     if (!tools.containsKey(call.toolName)) {
       throw AiNoSuchToolError(
         'Step $stepNumber called unknown tool "${call.toolName}".',

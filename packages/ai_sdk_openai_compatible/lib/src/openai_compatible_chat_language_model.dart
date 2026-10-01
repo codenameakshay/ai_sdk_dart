@@ -80,16 +80,18 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
     final responseFormat = options.responseFormat;
     if (config.supportsResponseFormatJsonSchema &&
         responseFormat is LanguageModelV4JsonResponseFormat) {
-      body['response_format'] = {
-        'type': 'json_schema',
-        'json_schema': {
-          'name': responseFormat.name ?? 'response',
-          'schema': responseFormat.schema,
-          if (responseFormat.description != null)
-            'description': responseFormat.description,
-          'strict': true,
-        },
-      };
+      body['response_format'] = responseFormat.schema == null
+          ? {'type': 'json_object'}
+          : {
+              'type': 'json_schema',
+              'json_schema': {
+                'name': responseFormat.name ?? 'response',
+                'schema': responseFormat.schema,
+                if (responseFormat.description != null)
+                  'description': responseFormat.description,
+                'strict': true,
+              },
+            };
     }
 
     final extra = config.extraBody?.call(options);

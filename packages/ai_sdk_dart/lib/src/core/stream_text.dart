@@ -544,15 +544,17 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                 );
                 final transformedStream =
                     experimentalTransform?.call(delta) ?? Stream.value(delta);
-                final transformedIterator = StreamIterator<String>(
-                  transformedStream,
-                );
+                final transformedIterator =
+                    StreamIterator<StreamOutcome<String>>(
+                      captureStreamErrors(transformedStream),
+                    );
                 try {
                   while (await raceWithCancellation(
                     transformedIterator.moveNext(),
                     scope.signal,
                   )) {
-                    final transformedDelta = transformedIterator.current;
+                    final transformedDelta = transformedIterator.current
+                        .unwrap();
                     final textBuffer = stepTextById.putIfAbsent(
                       id,
                       StringBuffer.new,
@@ -622,7 +624,9 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                     }
                   }
                 } finally {
-                  await transformedIterator.cancel();
+                  try {
+                    await transformedIterator.cancel();
+                  } catch (_) {}
                 }
               case StreamPartTextEnd(:final id, :final providerMetadata):
                 _mergeTextProviderMetadata(

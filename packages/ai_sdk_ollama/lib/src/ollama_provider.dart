@@ -357,83 +357,78 @@ class _OllamaLanguageModel extends LanguageModelV4 {
     required Map<String, String> responseHeaders,
     required DateTime responseTimestamp,
   }) async {
-    var buffer = '';
     var textStarted = false;
     var sawAnyToolCall = false;
     Map<String, dynamic>? lastEvent;
     controller.add(const StreamPartStreamStart());
-    await for (final bytes in byteStream) {
-      buffer += utf8.decode(bytes);
-      final lines = buffer.split('\n');
-      buffer = lines.removeLast();
-      for (final line in lines) {
-        final trimmed = line.trim();
-        if (trimmed.isEmpty) continue;
-        try {
-          final event = jsonDecode(trimmed) as Map<String, dynamic>;
-          lastEvent = event;
-          if (includeRawChunks) {
-            controller.add(StreamPartRaw(rawValue: event));
-          }
-          final message = event['message'] as Map<String, dynamic>?;
-          final content = message?['content'] as String?;
-          if (content != null && content.isNotEmpty) {
-            if (!textStarted) {
-              textStarted = true;
-              controller.add(const StreamPartTextStart(id: 'text-0'));
-            }
-            controller.add(StreamPartTextDelta(id: 'text-0', delta: content));
-          }
-
-          // Ollama emits whole tool calls (not incremental deltas).
-          final toolCalls = _parseToolCalls(message?['tool_calls'] as List?);
-          for (final call in toolCalls) {
-            sawAnyToolCall = true;
-            controller.add(
-              StreamPartToolInputStart(
-                id: call.toolCallId,
-                toolName: call.toolName,
-              ),
-            );
-            controller.add(
-              StreamPartToolInputDelta(
-                id: call.toolCallId,
-                delta: jsonEncode(call.input),
-              ),
-            );
-            controller.add(StreamPartToolInputEnd(id: call.toolCallId));
-            controller.add(StreamPartToolCall(toolCall: call));
-          }
-
-          final done = event['done'] as bool? ?? false;
-          if (done) {
-            final doneReason = event['done_reason'] as String?;
-            if (textStarted) {
-              controller.add(const StreamPartTextEnd(id: 'text-0'));
-            }
-            controller.add(
-              StreamPartResponseMetadata(
-                metadata: LanguageModelV4ResponseMetadata(
-                  modelId: model,
-                  timestamp: responseTimestamp,
-                  headers: responseHeaders,
-                  body: lastEvent,
-                ),
-              ),
-            );
-            controller.add(
-              StreamPartFinish(
-                finishReason: sawAnyToolCall
-                    ? LanguageModelV4FinishReason.toolCalls
-                    : _mapFinishReason(doneReason),
-                rawFinishReason: doneReason,
-                usage: _usageFrom(event),
-              ),
-            );
-          }
-        } catch (_) {
-          // Ignore malformed JSON lines.
+    await for (final line
+        in utf8.decoder.bind(byteStream).transform(const LineSplitter())) {
+      final trimmed = line.trim();
+      if (trimmed.isEmpty) continue;
+      try {
+        final event = jsonDecode(trimmed) as Map<String, dynamic>;
+        lastEvent = event;
+        if (includeRawChunks) {
+          controller.add(StreamPartRaw(rawValue: event));
         }
+        final message = event['message'] as Map<String, dynamic>?;
+        final content = message?['content'] as String?;
+        if (content != null && content.isNotEmpty) {
+          if (!textStarted) {
+            textStarted = true;
+            controller.add(const StreamPartTextStart(id: 'text-0'));
+          }
+          controller.add(StreamPartTextDelta(id: 'text-0', delta: content));
+        }
+
+        // Ollama emits whole tool calls (not incremental deltas).
+        final toolCalls = _parseToolCalls(message?['tool_calls'] as List?);
+        for (final call in toolCalls) {
+          sawAnyToolCall = true;
+          controller.add(
+            StreamPartToolInputStart(
+              id: call.toolCallId,
+              toolName: call.toolName,
+            ),
+          );
+          controller.add(
+            StreamPartToolInputDelta(
+              id: call.toolCallId,
+              delta: jsonEncode(call.input),
+            ),
+          );
+          controller.add(StreamPartToolInputEnd(id: call.toolCallId));
+          controller.add(StreamPartToolCall(toolCall: call));
+        }
+
+        final done = event['done'] as bool? ?? false;
+        if (done) {
+          final doneReason = event['done_reason'] as String?;
+          if (textStarted) {
+            controller.add(const StreamPartTextEnd(id: 'text-0'));
+          }
+          controller.add(
+            StreamPartResponseMetadata(
+              metadata: LanguageModelV4ResponseMetadata(
+                modelId: model,
+                timestamp: responseTimestamp,
+                headers: responseHeaders,
+                body: lastEvent,
+              ),
+            ),
+          );
+          controller.add(
+            StreamPartFinish(
+              finishReason: sawAnyToolCall
+                  ? LanguageModelV4FinishReason.toolCalls
+                  : _mapFinishReason(doneReason),
+              rawFinishReason: doneReason,
+              usage: _usageFrom(event),
+            ),
+          );
+        }
+      } catch (_) {
+        // Ignore malformed JSON lines.
       }
     }
     await controller.close();

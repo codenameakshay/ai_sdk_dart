@@ -463,116 +463,109 @@ class _CohereLanguageModel extends LanguageModelV4 {
     required Map<String, String> responseHeaders,
     required DateTime responseTimestamp,
   }) async {
-    var buffer = '';
     var textStarted = false;
     Map<String, dynamic>? lastEvent;
     // Per-index tool-call streaming state.
     final toolStates = <int, _CohereToolState>{};
     controller.add(const StreamPartStreamStart());
-    await for (final bytes in byteStream) {
-      buffer += utf8.decode(bytes);
-      final lines = buffer.split('\n');
-      buffer = lines.removeLast();
-      for (final line in lines) {
-        final trimmed = line.trim();
-        if (trimmed.isEmpty) continue;
-        try {
-          final event = jsonDecode(trimmed) as Map<String, dynamic>;
-          lastEvent = event;
-          if (includeRawChunks) {
-            controller.add(StreamPartRaw(rawValue: event));
+    await for (final line
+        in utf8.decoder.bind(byteStream).transform(const LineSplitter())) {
+      final trimmed = line.trim();
+      if (trimmed.isEmpty) continue;
+      try {
+        final event = jsonDecode(trimmed) as Map<String, dynamic>;
+        lastEvent = event;
+        if (includeRawChunks) {
+          controller.add(StreamPartRaw(rawValue: event));
+        }
+        final type = event['type'] as String?;
+        final delta = event['delta'] as Map<String, dynamic>?;
+        final message = delta?['message'] as Map<String, dynamic>?;
+        if (type == 'content-delta') {
+          final content = message?['content'] as Map<String, dynamic>?;
+          final text = content?['text'] as String?;
+          if (text != null && text.isNotEmpty) {
+            if (!textStarted) {
+              textStarted = true;
+              controller.add(const StreamPartTextStart(id: 'text-0'));
+            }
+            controller.add(StreamPartTextDelta(id: 'text-0', delta: text));
           }
-          final type = event['type'] as String?;
-          final delta = event['delta'] as Map<String, dynamic>?;
-          final message = delta?['message'] as Map<String, dynamic>?;
-          if (type == 'content-delta') {
-            final content = message?['content'] as Map<String, dynamic>?;
-            final text = content?['text'] as String?;
-            if (text != null && text.isNotEmpty) {
-              if (!textStarted) {
-                textStarted = true;
-                controller.add(const StreamPartTextStart(id: 'text-0'));
-              }
-              controller.add(StreamPartTextDelta(id: 'text-0', delta: text));
-            }
-          } else if (type == 'tool-call-start') {
-            final index = (event['index'] as num?)?.toInt() ?? 0;
-            final toolCall = message?['tool_calls'] as Map<String, dynamic>?;
-            final function = toolCall?['function'] as Map<String, dynamic>?;
-            final id = toolCall?['id']?.toString() ?? prefixedId('cohere-tool');
-            final name = function?['name']?.toString() ?? 'unknown_tool';
-            final state = _CohereToolState(id: id, name: name);
-            toolStates[index] = state;
-            controller.add(StreamPartToolInputStart(id: id, toolName: name));
-            final args = function?['arguments']?.toString();
-            if (args != null && args.isNotEmpty) {
-              state.args.write(args);
-              controller.add(StreamPartToolInputDelta(id: id, delta: args));
-            }
-          } else if (type == 'tool-call-delta') {
-            final index = (event['index'] as num?)?.toInt() ?? 0;
-            final state = toolStates[index];
-            final toolCall = message?['tool_calls'] as Map<String, dynamic>?;
-            final function = toolCall?['function'] as Map<String, dynamic>?;
-            final args = function?['arguments']?.toString();
-            if (state != null && args != null && args.isNotEmpty) {
-              state.args.write(args);
-              controller.add(
-                StreamPartToolInputDelta(id: state.id, delta: args),
-              );
-            }
-          } else if (type == 'tool-call-end') {
-            final index = (event['index'] as num?)?.toInt() ?? 0;
+        } else if (type == 'tool-call-start') {
+          final index = (event['index'] as num?)?.toInt() ?? 0;
+          final toolCall = message?['tool_calls'] as Map<String, dynamic>?;
+          final function = toolCall?['function'] as Map<String, dynamic>?;
+          final id = toolCall?['id']?.toString() ?? prefixedId('cohere-tool');
+          final name = function?['name']?.toString() ?? 'unknown_tool';
+          final state = _CohereToolState(id: id, name: name);
+          toolStates[index] = state;
+          controller.add(StreamPartToolInputStart(id: id, toolName: name));
+          final args = function?['arguments']?.toString();
+          if (args != null && args.isNotEmpty) {
+            state.args.write(args);
+            controller.add(StreamPartToolInputDelta(id: id, delta: args));
+          }
+        } else if (type == 'tool-call-delta') {
+          final index = (event['index'] as num?)?.toInt() ?? 0;
+          final state = toolStates[index];
+          final toolCall = message?['tool_calls'] as Map<String, dynamic>?;
+          final function = toolCall?['function'] as Map<String, dynamic>?;
+          final args = function?['arguments']?.toString();
+          if (state != null && args != null && args.isNotEmpty) {
+            state.args.write(args);
+            controller.add(StreamPartToolInputDelta(id: state.id, delta: args));
+          }
+        } else if (type == 'tool-call-end') {
+          final index = (event['index'] as num?)?.toInt() ?? 0;
+          _finalizeToolCall(
+            index: index,
+            toolStates: toolStates,
+            controller: controller,
+          );
+        } else if (type == 'message-end') {
+          // Emit ends for any tool calls that never got an explicit end.
+          final pendingIndexes = toolStates.keys.toList()..sort();
+          for (final index in pendingIndexes) {
             _finalizeToolCall(
               index: index,
               toolStates: toolStates,
               controller: controller,
             );
-          } else if (type == 'message-end') {
-            // Emit ends for any tool calls that never got an explicit end.
-            final pendingIndexes = toolStates.keys.toList()..sort();
-            for (final index in pendingIndexes) {
-              _finalizeToolCall(
-                index: index,
-                toolStates: toolStates,
-                controller: controller,
-              );
-            }
-            if (textStarted) {
-              controller.add(const StreamPartTextEnd(id: 'text-0'));
-            }
-            final usage = delta?['usage'] as Map<String, dynamic>?;
-            final tokens = usage?['tokens'] as Map<String, dynamic>?;
-            controller.add(
-              StreamPartResponseMetadata(
-                metadata: LanguageModelV4ResponseMetadata(
-                  modelId: modelId,
-                  timestamp: responseTimestamp,
-                  headers: responseHeaders,
-                  body: lastEvent,
-                ),
-              ),
-            );
-            controller.add(
-              StreamPartFinish(
-                finishReason: _mapFinishReason(
-                  delta?['finish_reason'] as String?,
-                ),
-                rawFinishReason: delta?['finish_reason'] as String?,
-                usage: LanguageModelV4Usage(
-                  inputTokens: LanguageModelV4InputTokenUsage(
-                    total: _tokenCount(tokens?['input_tokens']),
-                  ),
-                  outputTokens: LanguageModelV4OutputTokenUsage(
-                    total: _tokenCount(tokens?['output_tokens']),
-                  ),
-                ),
-              ),
-            );
           }
-        } catch (_) {
-          // Ignore malformed JSON lines.
+          if (textStarted) {
+            controller.add(const StreamPartTextEnd(id: 'text-0'));
+          }
+          final usage = delta?['usage'] as Map<String, dynamic>?;
+          final tokens = usage?['tokens'] as Map<String, dynamic>?;
+          controller.add(
+            StreamPartResponseMetadata(
+              metadata: LanguageModelV4ResponseMetadata(
+                modelId: modelId,
+                timestamp: responseTimestamp,
+                headers: responseHeaders,
+                body: lastEvent,
+              ),
+            ),
+          );
+          controller.add(
+            StreamPartFinish(
+              finishReason: _mapFinishReason(
+                delta?['finish_reason'] as String?,
+              ),
+              rawFinishReason: delta?['finish_reason'] as String?,
+              usage: LanguageModelV4Usage(
+                inputTokens: LanguageModelV4InputTokenUsage(
+                  total: _tokenCount(tokens?['input_tokens']),
+                ),
+                outputTokens: LanguageModelV4OutputTokenUsage(
+                  total: _tokenCount(tokens?['output_tokens']),
+                ),
+              ),
+            ),
+          );
         }
+      } catch (_) {
+        // Ignore malformed JSON lines.
       }
     }
     await controller.close();

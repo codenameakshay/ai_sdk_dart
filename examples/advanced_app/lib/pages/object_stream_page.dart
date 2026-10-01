@@ -91,11 +91,11 @@ class _ObjectStreamPageState extends State<ObjectStreamPage> {
         abortSignal: cancellation,
       );
       final partialSub = result.partialObjectStream.listen((snapshot) {
-        if (!mounted) return;
+        if (!mounted || cancellation.isCancelled) return;
         setState(() => _partial = snapshot);
       });
       final patchSub = result.patchStream.listen((patch) {
-        if (!mounted) return;
+        if (!mounted || cancellation.isCancelled) return;
         setState(() {
           _recentPatch
             ..clear()
@@ -107,7 +107,7 @@ class _ObjectStreamPageState extends State<ObjectStreamPage> {
         // an incomplete/invalid final document throws here rather than
         // silently becoming a "successful" object.
         final validated = await result.object;
-        if (!mounted) return;
+        if (!mounted || cancellation.isCancelled) return;
         setState(() {
           _validated = validated;
           _streaming = false;
@@ -117,7 +117,7 @@ class _ObjectStreamPageState extends State<ObjectStreamPage> {
         await patchSub.cancel();
       }
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || cancellation.isCancelled) return;
       setState(() {
         _error = '$e';
         _streaming = false;

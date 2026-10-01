@@ -297,81 +297,77 @@ void main() {
     expect(find.text('Copied to clipboard'), findsOneWidget);
   });
 
-  testWidgets(
-    'conversation page runs an approval then a retried turn against a fake model',
-    (tester) async {
-      final model = QueuedLanguageModel([
-        [
-          mockToolCall(
-            toolName: 'deleteFile',
-            input: {'path': 'q3.pdf'},
-            toolCallId: 'call-delete-1',
+  testWidgets('conversation page resumes a tool call after approval', (
+    tester,
+  ) async {
+    final model = QueuedLanguageModel([
+      [
+        mockToolCall(
+          toolName: 'deleteFile',
+          input: {'path': 'q3.pdf'},
+          toolCallId: 'call-delete-1',
+        ),
+      ],
+      [mockText('Deleted q3.pdf as requested.')],
+    ]);
+    final agent = ToolLoopAgent(
+      model: model,
+      tools: {
+        'deleteFile': tool<Map<String, dynamic>, String>(
+          inputSchema: Schema<Map<String, dynamic>>(
+            jsonSchema: const {'type': 'object'},
+            fromJson: (json) => json,
           ),
-        ],
-        [mockText('Deleted q3.pdf as requested.')],
-      ]);
-      final agent = ToolLoopAgent(
-        model: model,
-        tools: {
-          'deleteFile': tool<Map<String, dynamic>, String>(
-            inputSchema: Schema<Map<String, dynamic>>(
-              jsonSchema: const {'type': 'object'},
-              fromJson: (json) => json,
-            ),
-            execute: (input, _) async => 'Deleted ${input['path']}',
-          ),
-        },
-        approvalPolicy: ToolApprovalPolicy.always,
-      );
+          execute: (input, _) async => 'Deleted ${input['path']}',
+        ),
+      },
+      approvalPolicy: ToolApprovalPolicy.always,
+    );
 
-      await tester.pumpWidget(
-        MaterialApp(home: ConversationPage(testAgent: agent)),
-      );
+    await tester.pumpWidget(
+      MaterialApp(home: ConversationPage(testAgent: agent)),
+    );
+    await tester.pump();
+
+    await tester.enterText(
+      find.byKey(const ValueKey('chat-composer-field')),
+      'Delete q3.pdf',
+    );
+    // The SDK's tool-execution scheduling uses real timers (`Future(...)`
+    // schedules via `Timer.run`), which the default fake-async test zone
+    // never fires. The tap that kicks off the turn — and the polling for
+    // its result — must both run inside the same runAsync callback so the
+    // timer is created and fires in the same (real) zone.
+    await tester.runAsync(() async {
+      await tester.tap(find.byKey(const ValueKey('chat-composer-send')));
       await tester.pump();
-
-      await tester.enterText(
-        find.byKey(const ValueKey('chat-composer-field')),
-        'Delete q3.pdf',
-      );
-      // The SDK's tool-execution scheduling uses real timers (`Future(...)`
-      // schedules via `Timer.run`), which the default fake-async test zone
-      // never fires. The tap that kicks off the turn — and the polling for
-      // its result — must both run inside the same runAsync callback so the
-      // timer is created and fires in the same (real) zone.
-      await tester.runAsync(() async {
-        await tester.tap(find.byKey(const ValueKey('chat-composer-send')));
+      for (var i = 0; i < 50; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
         await tester.pump();
-        for (var i = 0; i < 50; i++) {
-          await Future<void>.delayed(const Duration(milliseconds: 20));
-          await tester.pump();
-          if (find.byType(ToolApprovalCard).evaluate().isNotEmpty) return;
-        }
-      });
+        if (find.byType(ToolApprovalCard).evaluate().isNotEmpty) return;
+      }
+    });
 
-      expect(find.byType(ToolApprovalCard), findsOneWidget);
+    expect(find.byType(ToolApprovalCard), findsOneWidget);
 
-      await tester.runAsync(() async {
-        await tester.tap(find.byKey(const ValueKey('tool-approval-approve')));
+    await tester.runAsync(() async {
+      await tester.tap(find.byKey(const ValueKey('tool-approval-approve')));
+      await tester.pump();
+      for (var i = 0; i < 50; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
         await tester.pump();
-        for (var i = 0; i < 50; i++) {
-          await Future<void>.delayed(const Duration(milliseconds: 20));
-          await tester.pump();
-          if (find
-              .textContaining('Deleted q3.pdf as requested.')
-              .evaluate()
-              .isNotEmpty) {
-            return;
-          }
+        if (find
+            .textContaining('Deleted q3.pdf as requested.')
+            .evaluate()
+            .isNotEmpty) {
+          return;
         }
-      });
+      }
+    });
 
-      expect(
-        find.textContaining('Deleted q3.pdf as requested.'),
-        findsOneWidget,
-      );
-      expect(tester.takeException(), isNull);
-    },
-  );
+    expect(find.textContaining('Deleted q3.pdf as requested.'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('conversation page saves and restores a snapshot', (
     tester,
@@ -433,6 +429,131 @@ void main() {
     });
 
     expect(find.textContaining('Hello from the fake model.'), findsOneWidget);
+  });
+
+  testWidgets(
+    'tools chat keeps history replayable after an approved tool turn',
+    (tester) async {
+      final model = QueuedLanguageModel([
+        [
+          mockText('Deleting now. '),
+          mockToolCall(
+            toolName: 'deleteFile',
+            input: {'path': 'q3.pdf'},
+            toolCallId: 'call-delete-1',
+          ),
+        ],
+        [mockText('Deleted q3.pdf.')],
+        [mockText('Anything else?')],
+      ]);
+
+      await tester.pumpWidget(
+        MaterialApp(home: ToolsChatPage(testModel: model)),
+      );
+      await tester.pump();
+
+      Future<void> sendAndWaitFor(String message, Finder expected) async {
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.enterText(
+          find.byKey(const ValueKey('chat-composer-field')),
+          message,
+        );
+        await tester.runAsync(() async {
+          await tester.tap(find.byKey(const ValueKey('chat-composer-send')));
+          await tester.pump();
+          for (var i = 0; i < 50; i++) {
+            await Future<void>.delayed(const Duration(milliseconds: 20));
+            await tester.pump();
+            if (expected.evaluate().isNotEmpty) return;
+          }
+        });
+      }
+
+      await sendAndWaitFor('Delete q3.pdf', find.byType(ToolApprovalCard));
+      expect(find.byType(ToolApprovalCard), findsOneWidget);
+
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const ValueKey('tool-approval-approve')));
+        await tester.pump();
+        for (var i = 0; i < 50; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+          await tester.pump();
+          if (find.textContaining('Deleted q3.pdf.').evaluate().isNotEmpty) {
+            return;
+          }
+        }
+      });
+      expect(find.textContaining('Deleted q3.pdf.'), findsOneWidget);
+
+      await sendAndWaitFor('Thanks', find.textContaining('Anything else?'));
+      expect(find.textContaining('Anything else?'), findsOneWidget);
+
+      final messages = model.calls.last.prompt.messages;
+      final callIds = {
+        for (final message in messages)
+          if (message.role == LanguageModelV4Role.assistant)
+            for (final part in message.content)
+              if (part is LanguageModelV4ToolCallPart) part.toolCallId,
+      };
+      final resultIds = {
+        for (final message in messages)
+          for (final part in message.content)
+            if (part is LanguageModelV4ToolResultPart) part.toolCallId,
+      };
+      expect(resultIds.containsAll(callIds), isTrue);
+
+      final assistantText = [
+        for (final message in messages)
+          if (message.role == LanguageModelV4Role.assistant)
+            for (final part in message.content)
+              if (part is LanguageModelV4TextPart) part.text,
+      ];
+      expect(
+        assistantText.where((text) => text.contains('Deleting now. ')),
+        hasLength(1),
+      );
+    },
+  );
+
+  testWidgets('tools chat ignores late events from a cleared turn', (
+    tester,
+  ) async {
+    final controller = StreamController<StreamTextEvent>();
+    final runner = _QueuedToolsRunner([
+      _completedStreamResult(
+        events: const [],
+        stream: controller.stream,
+        finalText: '',
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(home: ToolsChatPage(streamRunner: runner.call)),
+    );
+    await tester.pump();
+
+    await tester.enterText(
+      find.byKey(const ValueKey('chat-composer-field')),
+      'Stream something',
+    );
+    await tester.tap(find.byKey(const ValueKey('chat-composer-send')));
+    await tester.pump();
+
+    controller.add(const StreamTextStartStepEvent(stepNumber: 1));
+    controller.add(const StreamTextTextDeltaEvent(id: 't1', delta: 'Early.'));
+    await tester.pump();
+    expect(find.text('Early.'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Clear chat'));
+    await tester.pump();
+
+    controller.add(const StreamTextTextDeltaEvent(id: 't1', delta: 'Late.'));
+    unawaited(controller.close());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.text('Late.'), findsNothing);
+    expect(find.text('Early.'), findsNothing);
   });
 
   testWidgets('responses page renders reasoning and hosted-tool sources', (
@@ -525,6 +646,7 @@ class _QueuedToolsRunner {
 StreamTextResult<Object?> _completedStreamResult({
   required List<StreamTextEvent> events,
   required String finalText,
+  Stream<StreamTextEvent>? stream,
 }) {
   final content = <LanguageModelV4ContentPart>[
     if (finalText.isNotEmpty) LanguageModelV4TextPart(text: finalText),
@@ -543,7 +665,7 @@ StreamTextResult<Object?> _completedStreamResult({
     finishReason: LanguageModelV4FinishReason.stop,
   );
   return StreamTextResult<Object?>(
-    stream: Stream<StreamTextEvent>.fromIterable(events),
+    stream: stream ?? Stream<StreamTextEvent>.fromIterable(events),
     providerStream: const Stream<LanguageModelV4StreamPart>.empty(),
     textStream: const Stream<String>.empty(),
     partialOutputStream: const Stream<Object?>.empty(),
@@ -587,9 +709,3 @@ StreamTextResult<Object?> _completedStreamResult({
     ),
   );
 }
-
-/// A fake model that returns one queued content-part list per call (holding
-/// on the last entry once exhausted) — unlike [MockLanguageModelV4], which
-/// always returns the same response, this lets a test drive a multi-call
-/// flow (e.g. a tool call that needs approval, then a follow-up reply after
-/// [ToolLoopAgent.resume]) deterministically and without any network access.

@@ -37,11 +37,16 @@ class ToolsChatPage extends StatefulWidget {
     this.fixture,
     this.streamRunner,
     this.scrollController,
+    this.testModel,
   });
 
   final ToolsChatFixture? fixture;
   final ToolsChatStreamRunner? streamRunner;
   final ScrollController? scrollController;
+
+  /// When supplied, replaces the OpenAI-backed model so tests can drive the
+  /// agent with no network access.
+  final LanguageModelV4? testModel;
 
   @override
   State<ToolsChatPage> createState() => _ToolsChatPageState();
@@ -62,10 +67,12 @@ ToolApprovalPolicy? _approvalPolicyFor(String toolName, Object input) =>
 class _ToolsChatPageState extends State<ToolsChatPage> {
   // extractReasoningMiddleware turns `<think>…</think>` spans into reasoning
   // parts, so the model's chain-of-thought shows up in the ReasoningView.
-  late final LanguageModelV4 _model = wrapLanguageModel(
-    model: OpenAIProvider(apiKey: openAiApiKey)('gpt-4.1-mini'),
-    middleware: [extractReasoningMiddleware(tagName: 'think')],
-  );
+  late final LanguageModelV4 _model =
+      widget.testModel ??
+      wrapLanguageModel(
+        model: OpenAIProvider(apiKey: openAiApiKey)('gpt-4.1-mini'),
+        middleware: [extractReasoningMiddleware(tagName: 'think')],
+      );
 
   static const _instructions =
       'You are a helpful assistant. First think briefly inside '
@@ -103,6 +110,7 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
   bool _streaming = false;
   bool _pinnedToBottom = true;
   bool _scrollScheduled = false;
+  int _turn = 0;
 
   static final _weatherSchema = Schema<Map<String, dynamic>>(
     jsonSchema: const {
@@ -226,25 +234,38 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
   /// for pending tool approvals via `result.steps`. A stream error propagates
   /// out of the `await for` and is caught below.
   Future<void> _runTurn(Future<StreamTextResult> Function() runner) async {
+    final turn = ++_turn;
     try {
       final result = await runner();
       // The `text` future rejects on a streaming error; we surface errors via
       // the loop below, so swallow it to avoid an unhandled async error.
       result.text.then((_) {}, onError: (_) {});
       await for (final event in result.stream) {
-        if (!mounted) return;
+        if (!mounted || turn != _turn) return;
         _onEvent(event);
       }
       final steps = await result.steps;
+      if (!mounted || turn != _turn) return;
       final approvals = [
         for (final step in steps) ...step.toolApprovalRequests,
       ];
       if (approvals.isNotEmpty) {
         _pendingReplay = ToolApprovalReplay(
           messages: [
-            for (final step in steps)
-              for (final message in step.responseMessages)
-                ModelMessage.fromProvider(message),
+            for (final step in steps) ...[
+              ModelMessage.parts(
+                role: ModelMessageRole.assistant,
+                parts: [
+                  for (final part in step.content)
+                    if (part is! LanguageModelV4ToolApprovalRequestPart) part,
+                ],
+              ),
+              if (step.toolResults.isNotEmpty)
+                ModelMessage.parts(
+                  role: ModelMessageRole.tool,
+                  parts: step.toolResults,
+                ),
+            ],
           ],
           requests: approvals,
         );
@@ -259,6 +280,7 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
       }
       _finishTurn();
     } catch (err) {
+      if (turn != _turn) return;
       _onError(err);
     }
   }
@@ -289,13 +311,6 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
     ];
     _approvalResponses.clear();
     if (replay == null) return;
-    // Snapshot history before the replay's own messages are folded in — the
-    // agent concatenates messages + replay.messages itself, so passing the
-    // already-updated `_history` would duplicate the replayed turn.
-    final priorHistory = List<ModelMessage>.of(_history);
-    // Preserve the approved/denied tool turn in history so later turns keep
-    // its context, mirroring how a completed turn's text is retained below.
-    _history.addAll(replay.messages);
     setState(() {
       _pendingApprovals = const [];
       _streaming = true;
@@ -304,7 +319,7 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
     unawaited(
       _runTurn(
         () => _agent.resume(
-          messages: priorHistory,
+          messages: _history,
           replay: replay,
           toolApprovalResponses: responses,
           abortSignal: _cancellation,
@@ -413,6 +428,7 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
   }
 
   Future<void> _stop() async {
+    _turn++;
     _cancellation?.cancel();
     _cancellation = null;
     if (!mounted) return;
@@ -420,6 +436,7 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
   }
 
   void _clear() {
+    _turn++;
     _cancellation?.cancel();
     _cancellation = null;
     _pendingReplay = null;

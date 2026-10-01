@@ -33,8 +33,9 @@ class _WorkspaceContext {
 
 /// Demonstrates the conversation stack: [ConversationController] +
 /// [LocalConversationBackend] rendered through [AiChatScaffold.conversation],
-/// with snapshot persistence via [ConversationCodec], approval + retry
-/// ([ConversationRetryInfo]) support, and localized/RTL UI strings.
+/// with an in-memory snapshot saved and restored via [ConversationCodec],
+/// approval + retry ([ConversationRetryInfo]) support, and localized/RTL UI
+/// strings.
 ///
 /// [testAgent], when supplied, replaces the OpenAI-backed agent so tests can
 /// drive the whole flow — including tool approval — against a fake model

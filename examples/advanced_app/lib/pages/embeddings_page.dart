@@ -74,11 +74,13 @@ class _EmbeddingsPageState extends State<EmbeddingsPage> {
         maxEmbeddingsPerCall: _maxEmbeddingsPerCall,
         maxParallelCalls: _maxParallelCalls,
       );
+      if (!mounted) return;
       setState(() {
         _batchResult = result;
         _batchLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _batchError = '$e';
         _batchLoading = false;
@@ -121,6 +123,7 @@ class _EmbeddingsPageState extends State<EmbeddingsPage> {
           ).embedding('text-embedding-3-small'),
           value: text2,
         );
+        if (!mounted) return;
         setState(() {
           _similarity = cosineSimilarity(e1.embedding, e2.embedding);
           _loading = false;
@@ -138,12 +141,14 @@ class _EmbeddingsPageState extends State<EmbeddingsPage> {
           ).embedding('text-embedding-004'),
           value: text2,
         );
+        if (!mounted) return;
         setState(() {
           _similarity = cosineSimilarity(e1.embedding, e2.embedding);
           _loading = false;
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = e.toString();
         _loading = false;

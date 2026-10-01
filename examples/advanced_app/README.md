@@ -54,8 +54,8 @@ events off the canonical `stream` and render the full agentic turn:
 
 ### Conversation
 
-Persisted, resumable chat built on `ConversationController` +
-`LocalConversationBackend`, rendered through `AiChatScaffold.conversation`:
+Resumable chat with an in-memory snapshot, built on `ConversationController` +
+`LocalConversationBackend` and rendered through `AiChatScaffold.conversation`:
 
 - **Save / Restore** — `ConversationCodec.encode`/`decode` round-trip an
   in-memory snapshot; restoring only decodes state and never re-executes tools
@@ -78,8 +78,9 @@ selector lets Anthropic and Google join in through the shared top-level
 
 ## Tests
 
-A smoke widget test (`test/widget_test.dart`) boots the app and verifies the
-prebuilt chat surface and navigation render without a network call:
+`test/widget_test.dart` holds widget tests driven by scripted models, so no API
+keys are needed. `integration_test/readme_screenshots_test.dart` reproduces the
+README screenshots on an iOS simulator; its header has the capture command.
 
 ```bash
 fvm flutter test examples/advanced_app

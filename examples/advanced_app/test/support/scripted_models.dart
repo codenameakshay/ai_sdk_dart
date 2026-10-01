@@ -9,6 +9,9 @@ class QueuedLanguageModel extends LanguageModelV4 {
   final List<List<LanguageModelV4ContentPart>> _responses;
   int _index = 0;
 
+  /// Every call's options, in order.
+  final List<LanguageModelV4CallOptions> calls = [];
+
   @override
   String get provider => 'mock';
   @override
@@ -26,15 +29,19 @@ class QueuedLanguageModel extends LanguageModelV4 {
   @override
   Future<LanguageModelV4GenerateResult> doGenerate(
     LanguageModelV4CallOptions options,
-  ) async => LanguageModelV4GenerateResult(
-    content: _next(),
-    finishReason: LanguageModelV4FinishReason.stop,
-  );
+  ) async {
+    calls.add(options);
+    return LanguageModelV4GenerateResult(
+      content: _next(),
+      finishReason: LanguageModelV4FinishReason.stop,
+    );
+  }
 
   @override
   Future<LanguageModelV4StreamResult> doStream(
     LanguageModelV4CallOptions options,
   ) async {
+    calls.add(options);
     final parts = <LanguageModelV4StreamPart>[
       const StreamPartStreamStart(warnings: []),
     ];

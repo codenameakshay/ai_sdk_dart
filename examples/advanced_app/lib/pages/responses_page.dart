@@ -95,7 +95,7 @@ class _ResponsesPageState extends State<ResponsesPage> {
       );
       result.text.then((_) {}, onError: (_) {});
       await for (final event in result.stream) {
-        if (!mounted) return;
+        if (!mounted || cancellation.isCancelled) return;
         switch (event) {
           case StreamTextTextDeltaEvent(:final delta):
             setState(() => _text += delta);
@@ -109,9 +109,10 @@ class _ResponsesPageState extends State<ResponsesPage> {
             break;
         }
       }
-      if (mounted) setState(() => _streaming = false);
+      if (!mounted || cancellation.isCancelled) return;
+      setState(() => _streaming = false);
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || cancellation.isCancelled) return;
       setState(() {
         _error = '$e';
         _streaming = false;

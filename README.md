@@ -129,6 +129,14 @@ above.
     <td><img src="docs/screenshots/11_conversation_approval.png" width="280" alt="Local conversation waiting for tool approval"/></td>
     <td><img src="docs/screenshots/12_conversation_rtl.png" width="280" alt="Conversation with Arabic UI strings and right-to-left layout"/></td>
   </tr>
+  <tr>
+    <td align="center"><b>Remote Backend (Remote tab)</b></td>
+    <td align="center"><b>Chat Home</b></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/13_conversation_remote.png" width="280" alt="Two turns streamed from the reference backend through ai_sdk_remote"/></td>
+    <td><img src="docs/screenshots/01_chat_home.png" width="280" alt="Chat home with the Local and Remote tabs in the navigation bar"/></td>
+  </tr>
 </table>
 
 ### Advanced App (`examples/advanced_app`)

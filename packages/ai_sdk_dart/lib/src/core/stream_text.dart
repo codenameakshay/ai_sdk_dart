@@ -234,6 +234,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
     responseCompleter.future,
     providerMetadataCompleter.future,
     finishCompleter.future,
+    finalStepCompleter.future,
   ]) {
     future.ignore();
   }
@@ -1158,6 +1159,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
       textCompleter.completeErrorIfPending(filteredError, stackTrace);
       outputCompleter.completeErrorIfPending(filteredError, stackTrace);
       finishCompleter.completeErrorIfPending(filteredError, stackTrace);
+      finalStepCompleter.completeErrorIfPending(filteredError, stackTrace);
       contentCompleter.completeErrorIfPending(filteredError, stackTrace);
       reasoningCompleter.completeErrorIfPending(filteredError, stackTrace);
       reasoningTextCompleter.completeErrorIfPending(filteredError, stackTrace);

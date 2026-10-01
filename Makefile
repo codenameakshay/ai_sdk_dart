@@ -160,11 +160,11 @@ coverage-check:
 
 ## Format all Dart source files
 format:
-	$(DART) format packages/ examples/
+	$(DART) format packages/ examples/ tool/
 
 ## Verify formatting without writing changes
 format-check:
-	$(DART) format --output=none --set-exit-if-changed packages/ examples/
+	$(DART) format --output=none --set-exit-if-changed packages/ examples/ tool/
 
 # ── Publish ───────────────────────────────────────────────────────────────────
 

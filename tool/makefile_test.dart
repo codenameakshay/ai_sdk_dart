@@ -3,6 +3,14 @@ import 'dart:io';
 import 'package:test/test.dart';
 
 void main() {
+  for (final target in ['format', 'format-check']) {
+    test('$target includes repository Dart tooling', () async {
+      final result = await Process.run('make', ['-n', target, 'DART=fvm dart']);
+      expect(result.exitCode, 0, reason: result.stderr.toString());
+      expect(result.stdout, contains('packages/ examples/ tool/'));
+    });
+  }
+
   test('ordinary test matrix runs the basic CLI lifecycle assertions', () async {
     final result = await Process.run('make', ['-n', 'test', 'DART=fvm dart']);
     expect(result.exitCode, 0, reason: result.stderr.toString());

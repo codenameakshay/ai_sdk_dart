@@ -320,6 +320,52 @@ void main() {
       expect(find.text('remote reply'), findsOneWidget);
     });
 
+    testWidgets('conversation scaffold hides retry when the backend cannot', (
+      tester,
+    ) async {
+      final client = MockClient((request) async => Response('boom', 500));
+      final conversation = ConversationController(
+        RemoteConversationBackend(
+          transport: RemoteConversationTransport(
+            endpoint: Uri.parse('https://backend.test/chat'),
+            client: client,
+          ),
+          initial: Conversation(
+            id: 'remote',
+            messages: [
+              ConversationMessage(
+                id: 'user-1',
+                role: ConversationRole.user,
+                parts: [TextPart(id: 'user-part', text: 'hello')],
+              ),
+              ConversationMessage(
+                id: 'assistant-1',
+                role: ConversationRole.assistant,
+                status: ConversationMessageStatus.failed,
+                parts: [TextPart(id: 'partial', text: 'partial')],
+              ),
+            ],
+          ),
+        ),
+      );
+      addTearDown(conversation.dispose);
+      addTearDown(client.close);
+
+      await tester.pumpWidget(
+        _wrap(
+          AiChatScaffold.conversation(
+            conversationController: conversation,
+            disposeConversationController: false,
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.byKey(const ValueKey('chat-error-dismiss')), findsOneWidget);
+      expect(find.byKey(const ValueKey('chat-error-retry')), findsNothing);
+    });
+
     testWidgets('conversation scaffold disposes an owned controller', (
       tester,
     ) async {

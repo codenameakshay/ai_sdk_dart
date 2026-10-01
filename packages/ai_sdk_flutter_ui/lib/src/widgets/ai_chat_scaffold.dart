@@ -287,7 +287,9 @@ class _AiChatScaffoldState extends State<AiChatScaffold> {
 
     return ChatErrorView(
       error: error,
-      onRetry: _retryLastRequest,
+      onRetry: (_conversationAdapter?.retryInfo.isAvailable ?? true)
+          ? _retryLastRequest
+          : null,
       onDismiss: _controller.clearError,
     );
   }

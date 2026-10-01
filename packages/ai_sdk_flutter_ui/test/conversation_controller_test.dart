@@ -2122,6 +2122,64 @@ void main() {
     chat.dispose();
   });
 
+  test('stopping a remote stream settles the chat as ready', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final release = Completer<void>();
+    addTearDown(() async {
+      if (!release.isCompleted) release.complete();
+      await server.close(force: true);
+    });
+    server.listen((request) async {
+      request.response.bufferOutput = false;
+      request.response
+        ..statusCode = 200
+        ..headers.contentType = ContentType('text', 'event-stream')
+        ..headers.set('x-vercel-ai-ui-message-stream', 'v1')
+        ..write(
+          'data: ${jsonEncode({'type': 'start', 'messageId': 'assistant-live'})}\n\n',
+        )
+        ..write(
+          'data: ${jsonEncode({'type': 'text-start', 'id': 'live-text'})}\n\n',
+        )
+        ..write(
+          'data: ${jsonEncode({'type': 'text-delta', 'id': 'live-text', 'delta': 'partial'})}\n\n',
+        );
+      await request.response.flush();
+      await release.future;
+      await request.response.close();
+    });
+    final chat = ConversationChatController(
+      ConversationController(
+        RemoteConversationBackend(
+          transport: RemoteConversationTransport(
+            endpoint: Uri.parse('http://127.0.0.1:${server.port}'),
+          ),
+          initial: _empty(),
+        ),
+      ),
+    );
+    addTearDown(chat.dispose);
+
+    unawaited(chat.sendMessage(agent: _textAgent('unused'), text: 'hi'));
+    for (var i = 0; i < 200; i++) {
+      if (chat.conversationController.conversation.messages.any(
+        (message) => message.role == ConversationRole.assistant,
+      )) {
+        break;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+
+    await chat.stop();
+
+    expect(chat.status, ChatStatus.ready);
+    expect(chat.isLoading, isFalse);
+    expect(
+      chat.conversationController.conversation.messages.last.status,
+      ConversationMessageStatus.interrupted,
+    );
+  });
+
   test('chat adapter maps tool message roles', () async {
     final backend = _NoRetryBackend(
       Conversation(

@@ -256,7 +256,9 @@ class ConversationChatController extends ChatController {
     _sending = false;
     _awaitingBackendSnapshot = false;
     await conversationController.interrupt();
-    if (!isDisposed) _refreshFromSnapshot();
+    if (isDisposed) return;
+    _snapshot = conversationController.conversation;
+    _refreshFromSnapshot();
   }
 
   @override
@@ -1453,6 +1455,21 @@ class RemoteConversationBackend
     _cancellation = null;
     _resumeCancellation?.cancel();
     _resumeCancellation = null;
+    if (_disposed) return;
+    final lastUser = _conversation.messages.lastIndexWhere(
+      (message) => message.role == ConversationRole.user,
+    );
+    final streaming = _conversation.messages
+        .skip(lastUser + 1)
+        .where(
+          (message) =>
+              message.role == ConversationRole.assistant &&
+              message.status == ConversationMessageStatus.streaming,
+        )
+        .lastOrNull;
+    if (streaming != null) {
+      _setAssistantStatus(streaming.id, ConversationMessageStatus.interrupted);
+    }
   }
 
   @override

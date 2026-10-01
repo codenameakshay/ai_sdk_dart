@@ -642,7 +642,7 @@ class MCPClient {
         );
       }
       if (protocolMode == MCPProtocolMode.modern) {
-        _modernSubscriptionRequestIds[entry.key] = requestId;
+        await _retainModernSubscription(entry.key, subscription, requestId);
       }
     }
   }
@@ -1143,7 +1143,7 @@ class MCPClient {
 
     // Send subscribe request (best-effort; server may not support it).
     unawaited(
-      _subscribeResourceOnServer(uri).catchError(
+      _subscribeResourceOnServer(uri, controller).catchError(
         (_) {}, // Silently ignore if server doesn't support subscriptions.
       ),
     );
@@ -1151,8 +1151,12 @@ class MCPClient {
     return controller.stream;
   }
 
-  Future<void> _subscribeResourceOnServer(String uri) async {
+  Future<void> _subscribeResourceOnServer(
+    String uri,
+    StreamController<MCPResourceContent> subscription,
+  ) async {
     await initialize();
+    if (!identical(_resourceSubscriptions[uri], subscription)) return;
     if (protocolMode == MCPProtocolMode.modern) {
       final requestId = _id;
       final response = await _send(
@@ -1171,7 +1175,7 @@ class MCPClient {
           'subscriptions/listen "$uri" failed: ${response.error}',
         );
       }
-      _modernSubscriptionRequestIds[uri] = requestId;
+      await _retainModernSubscription(uri, subscription, requestId);
       return;
     }
     final response = await _send(
@@ -1188,6 +1192,34 @@ class MCPClient {
     }
   }
 
+  Future<void> _retainModernSubscription(
+    String uri,
+    StreamController<MCPResourceContent> subscription,
+    int requestId,
+  ) async {
+    if (_closed || !identical(_resourceSubscriptions[uri], subscription)) {
+      await _cancelModernSubscription(requestId);
+      return;
+    }
+    _modernSubscriptionRequestIds[uri] = requestId;
+  }
+
+  Future<void> _cancelModernSubscription(int requestId) async {
+    if (transport case final StreamableHttpClientTransport http) {
+      await http.cancelSubscription(requestId);
+    }
+    if (_closed) return;
+    await transport.sendNotification(
+      JsonRpcNotification(
+        method: 'notifications/cancelled',
+        params: {
+          'requestId': requestId,
+          'reason': 'resource subscription cancelled',
+        },
+      ),
+    );
+  }
+
   Future<void> _unsubscribeResource(String uri) async {
     _resourceSubscriptions.remove(uri);
     _resourceRefreshStates.remove(uri);
@@ -1196,18 +1228,7 @@ class MCPClient {
       if (protocolMode == MCPProtocolMode.modern) {
         final requestId = _modernSubscriptionRequestIds.remove(uri);
         if (requestId != null) {
-          if (transport case final StreamableHttpClientTransport http) {
-            await http.cancelSubscription(requestId);
-          }
-          await transport.sendNotification(
-            JsonRpcNotification(
-              method: 'notifications/cancelled',
-              params: {
-                'requestId': requestId,
-                'reason': 'resource subscription cancelled',
-              },
-            ),
-          );
+          await _cancelModernSubscription(requestId);
         }
         return;
       }

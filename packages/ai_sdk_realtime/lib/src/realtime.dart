@@ -695,6 +695,7 @@ class RealtimeSession {
       tools: config.tools,
     );
     final realtimeClock = clock ?? _SystemRealtimeClock();
+    final deadline = realtimeClock.elapsed + timeout;
     final pending = connector(uri, {'Authorization': 'Bearer $apiKey'});
     var settled = false;
     pending.then((lateTransport) {
@@ -702,7 +703,12 @@ class RealtimeSession {
     }, onError: (_, _) {});
     RealtimeTransport transport;
     try {
-      transport = await _race(pending, abortSignal, timeout);
+      transport = await _race(
+        pending,
+        abortSignal,
+        timeout,
+        timerFactory: realtimeClock.schedule,
+      );
     } finally {
       settled = true;
     }
@@ -736,19 +742,19 @@ class RealtimeSession {
       await _race(
         session._created.future,
         abortSignal,
-        _remaining(realtimeClock, timeout),
+        _remaining(realtimeClock, deadline),
         timerFactory: realtimeClock.schedule,
       );
       await _race(
         session._sendConfiguration(effective),
         abortSignal,
-        _remaining(realtimeClock, timeout),
+        _remaining(realtimeClock, deadline),
         timerFactory: realtimeClock.schedule,
       );
       await _race(
         session._updated.future,
         abortSignal,
-        _remaining(realtimeClock, timeout),
+        _remaining(realtimeClock, deadline),
         timerFactory: realtimeClock.schedule,
       );
       if (!session._terminal) session.state = RealtimeConnectionState.ready;
@@ -763,7 +769,7 @@ class RealtimeSession {
       // Cleanup is bounded and cannot replace the startup error (including
       // cancellation) with a transport or subscription cleanup failure.
       try {
-        await session.close(timeout: _remainingOrZero(realtimeClock, timeout));
+        await session.close(timeout: _remainingOrZero(realtimeClock, deadline));
       } catch (_) {
         // The operation which caused startup to fail is the useful error.
       }
@@ -1103,16 +1109,16 @@ class RealtimeSession {
   }
 }
 
-Duration _remaining(RealtimeClock clock, Duration timeout) {
-  final remaining = timeout - clock.elapsed;
+Duration _remaining(RealtimeClock clock, Duration deadline) {
+  final remaining = deadline - clock.elapsed;
   if (remaining <= Duration.zero) {
     throw const RealtimeException('Realtime operation timed out');
   }
   return remaining;
 }
 
-Duration _remainingOrZero(RealtimeClock clock, Duration timeout) {
-  final remaining = timeout - clock.elapsed;
+Duration _remainingOrZero(RealtimeClock clock, Duration deadline) {
+  final remaining = deadline - clock.elapsed;
   return remaining.isNegative ? Duration.zero : remaining;
 }
 

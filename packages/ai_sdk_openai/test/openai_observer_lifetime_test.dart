@@ -8,6 +8,31 @@ import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test(
+    'transcription multipart failures release the caller observer',
+    () async {
+      final signal = _CountingSignal();
+      addTearDown(signal.close);
+      final client = Dio();
+      addTearDown(() => client.close(force: true));
+      final provider = OpenAIProvider(apiKey: 'fixture', client: client);
+      await expectLater(
+        provider
+            .transcription('whisper-1')
+            .doGenerate(
+              TranscriptionModelV1CallOptions(
+                audio: Uint8List.fromList([1]),
+                audioMediaType: 'invalid',
+                abortSignal: signal,
+              ),
+            ),
+        throwsA(isA<FormatException>()),
+      );
+      expect(signal.active, 0);
+      expect(signal.detached, signal.attached);
+    },
+  );
+
   test('Files timeout during headers releases the caller observer', () async {
     final signal = _CountingSignal();
     addTearDown(signal.close);

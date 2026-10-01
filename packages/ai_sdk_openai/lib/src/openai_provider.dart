@@ -392,20 +392,22 @@ class _OpenAITranscriptionModel implements TranscriptionModelV1 {
     final cancellation = DioCancellationScope(options.abortSignal);
     final resolvedHeaders = await cancellation.run(headers);
     final providerOptions = options.providerOptions?['openai'];
-    final formData = FormData.fromMap({
-      ...?providerOptions,
-      'model': modelId,
-      'file': MultipartFile.fromBytes(
-        options.audio,
-        filename: 'audio.${_audioExtension(options.audioMediaType)}',
-        contentType: DioMediaType.parse(options.audioMediaType ?? 'audio/mpeg'),
-      ),
-      'response_format': 'json',
-      if (options.language != null) 'language': options.language,
-      if (options.prompt != null) 'prompt': options.prompt,
-    });
     final Response<Map<String, dynamic>> response;
     try {
+      final formData = FormData.fromMap({
+        ...?providerOptions,
+        'model': modelId,
+        'file': MultipartFile.fromBytes(
+          options.audio,
+          filename: 'audio.${_audioExtension(options.audioMediaType)}',
+          contentType: DioMediaType.parse(
+            options.audioMediaType ?? 'audio/mpeg',
+          ),
+        ),
+        'response_format': 'json',
+        if (options.language != null) 'language': options.language,
+        if (options.prompt != null) 'prompt': options.prompt,
+      });
       response = await client.post<Map<String, dynamic>>(
         '/audio/transcriptions',
         data: formData,
@@ -413,10 +415,10 @@ class _OpenAITranscriptionModel implements TranscriptionModelV1 {
         cancelToken: cancellation.token,
       );
     } on DioException catch (e) {
-      await cancellation.dispose();
       throw await apiErrorFromDioException(e, provider: provider);
+    } finally {
+      await cancellation.dispose();
     }
-    await cancellation.dispose();
     final data = response.data;
     if (data == null) {
       throw _invalidResponse(response);

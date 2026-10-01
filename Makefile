@@ -123,7 +123,7 @@ test:
 	$(foreach p,$(FLUTTER_PKGS),$(FLUTTER) test packages/$(p)/test/ &&) true
 	$(FLUTTER) test $(FLUTTER_APP)/test/
 	$(FLUTTER) test $(ADVANCED_APP)/test/
-	$(FLUTTER) test --dart-define=OPENAI_API_KEY=fixture --dart-define=ANTHROPIC_API_KEY=fixture --dart-define=GOOGLE_API_KEY=fixture $(ADVANCED_APP)/test/provider_lifecycle_test.dart $(ADVANCED_APP)/test/media_page_lifetime_test.dart
+	$(FLUTTER) test --dart-define=OPENAI_API_KEY=fixture --dart-define=ANTHROPIC_API_KEY=fixture --dart-define=GOOGLE_API_KEY=fixture $(ADVANCED_APP)/test/provider_lifecycle_test.dart $(ADVANCED_APP)/test/media_page_lifetime_test.dart $(ADVANCED_APP)/test/media_picker_lifetime_test.dart
 	$(DART) test $(DART_EXAMPLES)/test/
 
 ## Run dart analyze across all packages

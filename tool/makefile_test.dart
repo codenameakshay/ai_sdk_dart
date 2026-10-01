@@ -51,7 +51,7 @@ void main() {
       expect(
         result.stdout,
         contains(
-          'examples/advanced_app/test/provider_lifecycle_test.dart examples/advanced_app/test/media_page_lifetime_test.dart',
+          'examples/advanced_app/test/provider_lifecycle_test.dart examples/advanced_app/test/media_page_lifetime_test.dart examples/advanced_app/test/media_picker_lifetime_test.dart',
         ),
       );
     },

@@ -33,7 +33,7 @@ class _SttPageState extends State<SttPage> {
 
     if (_recording) {
       final path = await _recorder.stop();
-      if (path == null) return;
+      if (!mounted || path == null) return;
       setState(() {
         _recording = false;
         _loading = true;
@@ -64,11 +64,14 @@ class _SttPageState extends State<SttPage> {
         _abortSignal = null;
       }
     } else {
-      if (await _recorder.hasPermission()) {
+      final hasPermission = await _recorder.hasPermission();
+      if (!mounted) return;
+      if (hasPermission) {
         final tempDir = Directory.systemTemp;
         final path =
             '${tempDir.path}/recording_${DateTime.now().millisecondsSinceEpoch}.m4a';
         await _recorder.start(const RecordConfig(), path: path);
+        if (!mounted) return;
         setState(() {
           _recording = true;
           _error = null;

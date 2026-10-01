@@ -35,8 +35,9 @@ class _MultimodalPageState extends State<MultimodalPage> {
       maxWidth: 1024,
       imageQuality: 85,
     );
-    if (xfile == null) return;
+    if (!mounted || xfile == null) return;
     final bytes = await xfile.readAsBytes();
+    if (!mounted) return;
     setState(() {
       _imageBytes = bytes;
       _mediaType = 'image/jpeg';
@@ -52,8 +53,9 @@ class _MultimodalPageState extends State<MultimodalPage> {
       maxWidth: 1024,
       imageQuality: 85,
     );
-    if (xfile == null) return;
+    if (!mounted || xfile == null) return;
     final bytes = await xfile.readAsBytes();
+    if (!mounted) return;
     setState(() {
       _imageBytes = bytes;
       _mediaType = 'image/jpeg';

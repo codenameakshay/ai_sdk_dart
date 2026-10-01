@@ -866,8 +866,8 @@ Map<String, dynamic> _toAnthropicTool(LanguageModelV4Tool tool) =>
         'name': tool.name,
         if (tool.description != null) 'description': tool.description,
         'input_schema': tool.inputSchema,
-        if (tool.inputExamples case final examples? when examples.isNotEmpty)
-          'input_examples': examples,
+        if (tool.inputExamples?.isNotEmpty ?? false)
+          'input_examples': tool.inputExamples,
         ..._anthropicCacheControlEntry(tool.providerOptions),
       },
       LanguageModelV4ProviderDefinedTool() => {

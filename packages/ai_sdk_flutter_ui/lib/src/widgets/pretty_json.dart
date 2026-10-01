@@ -44,6 +44,7 @@ class CodeBlock extends StatelessWidget {
       child: SelectionArea(
         child: Text(
           text,
+          textDirection: TextDirection.ltr,
           style: TextStyle(
             fontFamily: 'monospace',
             fontSize: 12,

@@ -59,6 +59,8 @@ class _ShellState extends State<_Shell> with RestorationMixin {
     const ChatPage(),
     const CompletionPage(),
     const ObjectStreamPage(),
+    const LocalConversationPage(),
+    const RemoteConversationPage(),
   ];
 
   @override
@@ -103,6 +105,16 @@ class _ShellState extends State<_Shell> with RestorationMixin {
             icon: Icon(Icons.data_object_outlined),
             selectedIcon: Icon(Icons.data_object),
             label: 'Object',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.forum_outlined),
+            selectedIcon: Icon(Icons.forum),
+            label: 'Local',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.cloud_outlined),
+            selectedIcon: Icon(Icons.cloud),
+            label: 'Remote',
           ),
         ],
       ),

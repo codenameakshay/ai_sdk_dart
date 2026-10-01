@@ -6,8 +6,8 @@ Anthropic provider for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart). Supp
 
 ```yaml
 dependencies:
-  ai_sdk_dart: ^2.0.0
-  ai_sdk_anthropic: ^2.0.0
+  ai_sdk_dart: ^3.0.0
+  ai_sdk_anthropic: ^3.0.0
 ```
 
 ## Usage
@@ -47,19 +47,20 @@ await for (final chunk in result.textStream) {
 
 ### Extended thinking (reasoning)
 
-Use `extractReasoningMiddleware` to surface `<think>` blocks from reasoning models:
+Claude's native thinking blocks become `LanguageModelV4ReasoningPart`s without
+middleware. Enable thinking and give the output more tokens than the thinking
+budget:
 
 ```dart
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_anthropic/ai_sdk_anthropic.dart';
 
-final model = wrapLanguageModel(
-  model: anthropic('claude-sonnet-4-5'),
-  middleware: extractReasoningMiddleware(tagName: 'think'),
-);
-
 final result = await generateText(
-  model: model,
+  model: anthropic('claude-sonnet-4-5'),
+  maxOutputTokens: 8192,
+  providerOptions: {
+    'anthropic': AnthropicThinkingOptions(budgetTokens: 5000).toMap(),
+  },
   prompt: 'Solve: if 3x + 5 = 20, what is x?',
 );
 print('Answer   : ${result.text}');
@@ -77,6 +78,7 @@ import 'package:ai_sdk_anthropic/ai_sdk_anthropic.dart';
 // Enable thinking with a 5000-token budget
 final result = await generateText(
   model: anthropic('claude-opus-4-5'),
+  maxOutputTokens: 8192,
   prompt: 'Prove that √2 is irrational.',
   providerOptions: {
     'anthropic': AnthropicThinkingOptions(
@@ -96,6 +98,11 @@ final fast = await generateText(
 );
 print(fast.text);
 ```
+
+Extended-thinking blocks carry a `signature` on `LanguageModelV4ReasoningPart`
+so Claude can verify its own prior reasoning in a follow-up turn. Don't read
+or reconstruct it yourself — reuse `result.responseMessages.map(ModelMessage.fromProvider)`
+as history in the next call and it round-trips automatically.
 
 ### Custom API key
 

@@ -109,5 +109,33 @@ void main() {
 
       expect(rtlLeft, lessThan(ltrLeft));
     });
+
+    testWidgets('message text keeps its own direction', (tester) async {
+      Widget bubble(String content) => MaterialApp(
+        home: Directionality(
+          textDirection: TextDirection.rtl,
+          child: Scaffold(
+            body: ChatMessageBubble(
+              message: ModelMessage(
+                role: ModelMessageRole.user,
+                content: content,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(bubble('Delete the file.'));
+      expect(
+        tester.widget<Text>(find.text('Delete the file.')).textDirection,
+        TextDirection.ltr,
+      );
+
+      await tester.pumpWidget(bubble('احذف الملف.'));
+      expect(
+        tester.widget<Text>(find.text('احذف الملف.')).textDirection,
+        TextDirection.rtl,
+      );
+    });
   });
 }

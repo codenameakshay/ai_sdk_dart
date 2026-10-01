@@ -17,12 +17,16 @@ dependencies:
   ai_sdk_anthropic: ^3.0.0
   ai_sdk_google: ^3.0.0
   ai_sdk_flutter_ui: ^3.0.0
+  ai_sdk_conversation: ^3.0.0
+  ai_sdk_json_schema: ^3.0.0
   image_picker: ^1.0.7
   record: ^6.2.0
   audioplayers: ^6.0.0
 
 dev_dependencies:
   flutter_test:
+    sdk: flutter
+  integration_test:
     sdk: flutter
   flutter_lints: ^6.0.0
 

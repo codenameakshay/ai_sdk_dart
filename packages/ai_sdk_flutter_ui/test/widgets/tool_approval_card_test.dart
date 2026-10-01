@@ -18,6 +18,26 @@ const _request = LanguageModelV4ToolApprovalRequestPart(
 
 void main() {
   group('ToolApprovalCard', () {
+    testWidgets('keeps JSON input left-to-right in an RTL UI', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Directionality(
+            textDirection: TextDirection.rtl,
+            child: Scaffold(
+              body: ToolApprovalCard(
+                request: _request,
+                onApprove: (_) {},
+                onDeny: (_) {},
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final json = tester.widget<Text>(find.textContaining('"path"'));
+      expect(json.textDirection, TextDirection.ltr);
+    });
+
     testWidgets('shows the tool name and pretty-printed input', (tester) async {
       await tester.pumpWidget(
         _wrap(

@@ -40,3 +40,28 @@ The Dart smoke tests start the Dart fixture on an ephemeral loopback port and
 exercise it through `RemoteConversationTransport`. They qualify the transport
 and SSE framing, request validation, lifecycle, and local CORS preflight only;
 they do not qualify hosted authentication or a real provider connection.
+
+## Running with the flutter_chat Remote tab
+
+The `js/` reference server pairs with the **Remote** tab (also reachable at
+the `/remote` route) in [`examples/flutter_chat`](../flutter_chat/README.md).
+Start the server first:
+
+```sh
+cd examples/remote_backend/js
+npm ci
+node server.mjs
+```
+
+Then, from the repository root, run the app pointed at it — the app's default
+`REMOTE_BACKEND_URL` already matches the server's loopback address, so this
+is only required when the server runs elsewhere:
+
+```sh
+cd examples/flutter_chat
+fvm flutter run --dart-define=REMOTE_BACKEND_URL=http://127.0.0.1:8081/chat
+```
+
+Open the Remote tab and send a message. If the server isn't running, the tab
+shows an inline error with the endpoint URL and the startup command above
+instead of a raw connection error.

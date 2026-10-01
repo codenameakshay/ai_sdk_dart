@@ -7,7 +7,47 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:ai_sdk_remote/ai_sdk_remote.dart';
 import 'package:flutter/material.dart';
 
+import '../config.dart';
+
 const _localTool = 'deleteFile';
+
+const _englishStrings = AiSdkUiStrings();
+const _arabicStrings = AiSdkUiStrings(
+  messageHint: 'رسالة…',
+  sendMessage: 'إرسال الرسالة',
+  stopResponse: 'إيقاف الاستجابة',
+  retry: 'إعادة المحاولة',
+  dismiss: 'إغلاق',
+  assistantResponding: 'المساعد يستجيب…',
+  approveToolCall: 'وافق على استدعاء الأداة للمتابعة.',
+  toolApprovalTitle: 'الموافقة على استدعاء الأداة؟',
+  approve: 'موافقة',
+  deny: 'رفض',
+  userMessage: 'رسالة المستخدم',
+  assistantMessage: 'رسالة المساعد',
+  error: 'خطأ',
+  toolResult: 'نتيجة الأداة',
+  toolError: 'خطأ الأداة',
+);
+
+/// App bar toggle that swaps the scaffold's [AiSdkUiStrings] between English
+/// (LTR) and a demo Arabic (RTL) localization.
+class _LanguageToggleButton extends StatelessWidget {
+  const _LanguageToggleButton({required this.arabic, required this.onToggle});
+
+  final bool arabic;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      key: const ValueKey('conversation-language-toggle'),
+      icon: const Icon(Icons.language),
+      tooltip: arabic ? 'Switch to English' : 'التبديل إلى العربية',
+      onPressed: onToggle,
+    );
+  }
+}
 
 /// Keyless local conversation route. The scripted model emits a tool call,
 /// waits for the scaffold's approval card, executes the tool, then streams a
@@ -20,6 +60,7 @@ class LocalConversationPage extends StatefulWidget {
 }
 
 class _LocalConversationPageState extends State<LocalConversationPage> {
+  bool _arabic = false;
   final _model = _ApprovalModel();
   late final ConversationController _conversation = ConversationController(
     LocalConversationBackend(
@@ -51,9 +92,25 @@ class _LocalConversationPageState extends State<LocalConversationPage> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Local conversation')),
-    body: AiChatScaffold.conversation(conversationController: _conversation),
+  Widget build(BuildContext context) => Directionality(
+    textDirection: _arabic ? TextDirection.rtl : TextDirection.ltr,
+    child: Scaffold(
+      appBar: AppBar(
+        title: const Text('Local conversation'),
+        actions: [
+          _LanguageToggleButton(
+            arabic: _arabic,
+            onToggle: () => setState(() => _arabic = !_arabic),
+          ),
+        ],
+      ),
+      body: AiSdkUiStringsScope(
+        strings: _arabic ? _arabicStrings : _englishStrings,
+        child: AiChatScaffold.conversation(
+          conversationController: _conversation,
+        ),
+      ),
+    ),
   );
 }
 
@@ -66,15 +123,11 @@ class RemoteConversationPage extends StatefulWidget {
 }
 
 class _RemoteConversationPageState extends State<RemoteConversationPage> {
+  bool _arabic = false;
   late final ConversationController _conversation = ConversationController(
     RemoteConversationBackend(
       transport: RemoteConversationTransport(
-        endpoint: Uri.parse(
-          const String.fromEnvironment(
-            'REMOTE_BACKEND_URL',
-            defaultValue: 'http://127.0.0.1:8081/chat',
-          ),
-        ),
+        endpoint: Uri.parse(remoteBackendUrl),
       ),
       initial: Conversation(id: 'remote-demo', messages: const []),
     ),
@@ -87,14 +140,42 @@ class _RemoteConversationPageState extends State<RemoteConversationPage> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Remote conversation')),
-    body: AiChatScaffold.conversation(conversationController: _conversation),
+  Widget build(BuildContext context) => Directionality(
+    textDirection: _arabic ? TextDirection.rtl : TextDirection.ltr,
+    child: Scaffold(
+      appBar: AppBar(
+        title: const Text('Remote conversation'),
+        actions: [
+          _LanguageToggleButton(
+            arabic: _arabic,
+            onToggle: () => setState(() => _arabic = !_arabic),
+          ),
+        ],
+      ),
+      body: AiSdkUiStringsScope(
+        strings: _arabic ? _arabicStrings : _englishStrings,
+        child: AiChatScaffold.conversation(
+          conversationController: _conversation,
+          errorBuilder: (context, controller, error, onRetry, onDismiss) =>
+              ChatErrorView(
+                error: error,
+                message:
+                    "Can't reach $remoteBackendUrl. Start the reference "
+                    'backend with `cd examples/remote_backend/js && npm ci '
+                    '&& node server.mjs`, or pass a different '
+                    '--dart-define=REMOTE_BACKEND_URL.\n$error',
+                onRetry: onRetry,
+                onDismiss: onDismiss,
+              ),
+        ),
+      ),
+    ),
   );
 }
 
 class _ApprovalModel extends LanguageModelV4 {
   int _calls = 0;
+  int _executionsBeforeCall = 0;
   int executions = 0;
 
   @override
@@ -115,19 +196,26 @@ class _ApprovalModel extends LanguageModelV4 {
   Future<LanguageModelV4StreamResult> doStream(
     LanguageModelV4CallOptions options,
   ) async {
-    _calls++;
+    final lastMessage = options.prompt.messages.last;
+    final continuing = lastMessage.role == LanguageModelV4Role.tool;
+    if (!continuing) {
+      _calls++;
+      _executionsBeforeCall = executions;
+    }
+    final callId = 'local-call-$_calls';
     String? continuation;
-    if (_calls > 1) {
-      final result = options.prompt.messages
-          .expand((message) => message.content)
+    if (continuing) {
+      final result = lastMessage.content
           .whereType<LanguageModelV4ToolResultPart>()
           .single;
       if (result.isError) {
-        if (executions != 0) throw StateError('Denied tool executed');
+        if (executions != _executionsBeforeCall) {
+          throw StateError('Denied tool executed');
+        }
         continuation = 'Tool denied; no local action ran.';
       } else {
         final output = result.output;
-        if (executions != 1 ||
+        if (executions != _executionsBeforeCall + 1 ||
             output is! ToolResultOutputText ||
             output.text != 'deleted /tmp/example') {
           throw StateError('Expected one execution and its actual tool result');
@@ -135,22 +223,19 @@ class _ApprovalModel extends LanguageModelV4 {
         continuation = 'Tool result: ${output.text}';
       }
     }
-    final parts = _calls == 1
+    final parts = !continuing
         ? <LanguageModelV4StreamPart>[
-            const StreamPartToolInputStart(
-              id: 'local-call-1',
-              toolName: _localTool,
-            ),
-            const StreamPartToolInputDelta(
-              id: 'local-call-1',
+            StreamPartToolInputStart(id: callId, toolName: _localTool),
+            StreamPartToolInputDelta(
+              id: callId,
               delta: '{"path":"/tmp/example"}',
             ),
-            const StreamPartToolInputEnd(id: 'local-call-1'),
-            const StreamPartToolCall(
+            StreamPartToolInputEnd(id: callId),
+            StreamPartToolCall(
               toolCall: LanguageModelV4ToolCallPart(
-                toolCallId: 'local-call-1',
+                toolCallId: callId,
                 toolName: _localTool,
-                input: {'path': '/tmp/example'},
+                input: const {'path': '/tmp/example'},
               ),
             ),
           ]

@@ -8,6 +8,7 @@ import 'source_citations.dart';
 import 'tool_approval_card.dart';
 import 'tool_call_card.dart';
 import 'ui_strings.dart';
+import 'content_direction.dart';
 
 /// Signature for rendering a text segment of an assistant message. Use it to
 /// plug in a markdown renderer of your choice — the package stays dependency
@@ -152,14 +153,21 @@ class AssistantMessageView extends StatelessWidget {
 
   Widget _text(BuildContext context, String text) {
     final builder = textBuilder;
-    if (builder != null) return builder(context, text);
+    if (builder != null) {
+      return Directionality(
+        textDirection: contentDirection(text) ?? Directionality.of(context),
+        child: Builder(builder: (context) => builder(context, text)),
+      );
+    }
     final style = Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.5);
     return Semantics(
       container: true,
       excludeSemantics: true,
       label: text,
       readOnly: true,
-      child: SelectionArea(child: Text(text, style: style)),
+      child: SelectionArea(
+        child: Text(text, textDirection: contentDirection(text), style: style),
+      ),
     );
   }
 

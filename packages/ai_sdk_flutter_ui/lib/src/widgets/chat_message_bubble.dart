@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/ai_motion.dart';
 import 'ui_strings.dart';
+import 'content_direction.dart';
 
 /// A single chat message rendered as a bubble, styled by its [role].
 ///
@@ -106,6 +107,7 @@ class ChatMessageBubble extends StatelessWidget {
                   child: SelectionArea(
                     child: Text(
                       text.isEmpty ? '…' : text,
+                      textDirection: contentDirection(text),
                       style: TextStyle(color: foreground, height: 1.4),
                     ),
                   ),

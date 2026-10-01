@@ -6,8 +6,8 @@ Cohere provider for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart). Support
 
 ```yaml
 dependencies:
-  ai_sdk_dart: ^2.0.0
-  ai_sdk_cohere: ^2.0.0
+  ai_sdk_dart: ^3.0.0
+  ai_sdk_cohere: ^3.0.0
 ```
 
 ## Usage
@@ -67,8 +67,8 @@ final result = await rerank(
     'Rome is the capital of Italy.',
   ],
 );
-for (final item in result.rerankedDocuments) {
-  print('${item.score}: ${item.document}');
+for (final item in result.documents) {
+  print('${item.relevanceScore}: ${item.document}');
 }
 ```
 

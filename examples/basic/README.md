@@ -4,22 +4,39 @@ Dart CLI examples for [AI SDK Dart](https://github.com/codenameakshay/ai_sdk_dar
 
 ## Demos
 
-### `lib/main.dart` — core features tour
+### `lib/main.dart` — v3 feature tour
 
-A single run that walks through the major core APIs:
+A concise walk through the v3 public contract. Runs every demo by default, or
+pass a demo number to run just one:
+
+```sh
+fvm dart run lib/main.dart        # run every demo
+fvm dart run lib/main.dart 5      # run only demo 5
+```
 
 | # | Demo | API |
 |---|------|-----|
-| 1 | Single-turn text | `generateText` |
-| 2 | Streaming text | `streamText` + `onChunk` |
-| 3 | Structured output | `Output.object` + `Schema` |
-| 4 | Tools + multi-step loop | `tool`, `maxSteps`, `onStepFinish` |
-| 5 | Embeddings | `embed`, `cosineSimilarity` |
-| 6 | Middleware | `defaultSettingsMiddleware`, `extractReasoningMiddleware` |
-| 7 | Provider registry | `createProviderRegistry` |
+| 1 | `generateText` | `instructions`, aggregate `usage` vs `finalStep.usage` |
+| 2 | `streamText` | canonical `result.stream` events (switch over event types); `providerStream` for raw provider parts |
+| 3 | Lifecycle callbacks | `onStart`, `onStepStart`, `onToolExecutionStart`, `onToolExecutionEnd`, `onStepEnd`, `onEnd` |
+| 4 | Multi-turn history | `result.responseMessages.map(ModelMessage.fromProvider)` appended to caller-owned history |
+| 5 | Tools v3 | `toolWithContext`, `maxToolConcurrency`, `approvalPolicy: ToolApprovalPolicy.always`, resuming with a bound `LanguageModelV4ToolApprovalResponse` |
+| 6 | Cancellation and deadlines | `abortSignal: CancellationToken` cancelled mid-stream, `timeout: TimeoutConfiguration(...)` |
+| 7 | Structured output | `Schema.decoderOnly` vs `validatedJsonSchema` (`ai_sdk_json_schema`) |
+| 8 | `streamObject` | immutable partial snapshots, `patchStream`, awaiting the validated `object` |
+| 9 | `embedMany` | `maxEmbeddingsPerCall` + `maxParallelCalls`, input order preserved |
+| 10 | OpenAI Responses API | `openai.responses(...)` + hosted `OpenAIWebSearchTool`, printing `result.sources` |
+| 11 | Reasoning | `reasoning: LanguageModelV4Reasoning.medium`, final-step `result.reasoning` |
+| 12 | Body inclusion | default omits request/response bodies; `BodyInclusionPolicy.all()` opts in |
+| 13 | Conversation persistence | `Conversation` built from an exchange, round-tripped via `ConversationCodec.encode`/`decode` (`ai_sdk_conversation`) |
+| 14 | Middleware | `defaultSettingsMiddleware`, `extractReasoningMiddleware` |
+| 15 | Provider registry | `createProviderRegistry` |
 
-Requires an OpenAI key. Prefer the repo target, which forwards the key to the
-provider factory correctly:
+Requires `OPENAI_API_KEY`. Demos that need it print a skip line and return
+instead of crashing when it is absent — `fvm dart run lib/main.dart` with no
+key runs demo 7's local schema comparison, then exits cleanly after printing
+15 skip lines for the provider requests. Prefer the repo target, which
+forwards the key to the provider factory correctly:
 
 ```sh
 OPENAI_API_KEY=sk-... make run-basic
@@ -37,22 +54,33 @@ OPENAI_API_KEY=sk-... \
 Uses [`ai_sdk_mcp`](../../packages/ai_sdk_mcp) to connect to an MCP server,
 discover its tools, and hand them to the model:
 
-1. Connect over HTTP with `StreamableHttpClientTransport`.
-2. Run the `initialize` handshake and discover tools with `client.tools()` —
-   which returns a `ToolSet` ready for `generateText`/`streamText`.
+1. Connect over HTTP with `StreamableHttpClientTransport`, selecting the
+   modern stateless strategy with `protocolMode: MCPProtocolMode.modern` — it
+   probes `server/discover`, adds per-request protocol metadata, and skips
+   MCP sessions and the GET/DELETE lifecycle requests legacy mode uses.
+2. Discover tools with `client.tools()` — which returns a `ToolSet` ready for
+   `generateText`/`streamText`.
 3. Call a discovered tool directly via `client.callTool(...)`.
-4. Pass the discovered `ToolSet` to `generateText` so the model invokes the
+4. Handle a lost `tools/call` response: the server may have already executed
+   the tool, so the client raises `MCPAmbiguousToolCompletionException`
+   instead of silently retrying. Set `retryOnTransportFailure: true` only for
+   a call whose replay is safe (a read-only lookup here); a
+   non-idempotent call (rolling a die) is left to surface the exception so the
+   app can reconcile before deciding whether to retry.
+5. Pass the discovered `ToolSet` to `generateText` so the model invokes the
    MCP tools itself.
 
 So the example runs with **zero external setup**, it spins up a tiny in-process
 MCP server (a `dart:io` `HttpServer` speaking MCP's JSON-RPC) and connects to it
 over loopback. Point the transport at a real server URL to talk to a remote one.
 
-The remote transport path matches MCP Streamable HTTP (`2025-06-18`): it
-negotiates the protocol version during `initialize()`, sends
-`notifications/initialized`, accepts JSON or SSE responses to request `POST`s,
-starts the optional `GET` SSE listener for server-pushed notifications, and
-reconnects that listener with `Last-Event-ID` if the stream drops unexpectedly.
+The remote transport path matches MCP Streamable HTTP: in modern mode it
+negotiates via `server/discover`, sends the modern `_meta` protocol metadata
+on every request, and does not use MCP sessions or GET/DELETE lifecycle
+requests. Legacy mode (`MCPProtocolMode.legacy`, the default) negotiates the
+protocol version during `initialize()`, sends `notifications/initialized`,
+and starts the optional `GET` SSE listener for server-pushed notifications,
+reconnecting it with `Last-Event-ID` if the stream drops unexpectedly.
 
 ```sh
 # Tool discovery + a direct tool call — no API key needed:

@@ -421,6 +421,33 @@ void main() {
       );
     });
 
+    test('capability descriptors retain evidence and lifecycle metadata', () {
+      final descriptor = ProviderCapabilityDescriptor(
+        provider: 'fake',
+        modelId: 'fake-model',
+        apiSurface: 'chat',
+        source: Uri.parse('https://example.com/capabilities'),
+        verifiedOn: DateTime.utc(2026, 8, 10),
+        maxEmbeddingsPerCall: 128,
+        supportsParallelCalls: true,
+        features: const {'tools', 'vision'},
+        feature: 'reasoning',
+        lifecycle: ProviderCapabilityLifecycle.preview,
+        confidence: ProviderCapabilityConfidence.fixture,
+        evidenceId: 'fixture-1',
+      );
+
+      expect(descriptor.provider, 'fake');
+      expect(descriptor.modelId, 'fake-model');
+      expect(descriptor.maxEmbeddingsPerCall, 128);
+      expect(descriptor.supportsParallelCalls, isTrue);
+      expect(descriptor.features, containsAll(['tools', 'vision']));
+      expect(descriptor.feature, 'reasoning');
+      expect(descriptor.lifecycle, ProviderCapabilityLifecycle.preview);
+      expect(descriptor.confidence, ProviderCapabilityConfidence.fixture);
+      expect(descriptor.evidenceId, 'fixture-1');
+    });
+
     test(
       'embedding, image, speech, transcription, and rerank types retain data',
       () {

@@ -50,6 +50,7 @@ export 'src/shared/json_helpers.dart';
 export 'src/shared/json_value.dart';
 export 'src/shared/provider_options.dart';
 export 'src/shared/provider_metadata.dart';
+export 'src/shared/provider_capability.dart';
 export 'src/shared/sse.dart';
 
 // Error hierarchy (shared across all provider packages)

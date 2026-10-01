@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/ai_motion.dart';
+import 'content_direction.dart';
 
 /// A collapsible panel for reasoning ("thinking") text.
 ///
@@ -103,6 +104,7 @@ class _ReasoningViewState extends State<ReasoningView> {
                     child: SelectionArea(
                       child: Text(
                         widget.text,
+                        textDirection: contentDirection(widget.text),
                         style: textTheme.bodySmall?.copyWith(
                           color: scheme.onSurfaceVariant,
                           height: 1.5,

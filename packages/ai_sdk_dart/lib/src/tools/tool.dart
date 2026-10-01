@@ -144,6 +144,12 @@ class Schema<T> {
     this.validator,
   }) : _decoder = fromJson;
 
+  const Schema.decoderOnly({
+    required this.jsonSchema,
+    required T Function(Map<String, dynamic>) fromJson,
+  }) : _decoder = fromJson,
+       validator = null;
+
   final Map<String, dynamic> jsonSchema;
   final T Function(Map<String, dynamic>) _decoder;
 

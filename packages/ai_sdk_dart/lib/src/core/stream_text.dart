@@ -449,6 +449,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
         final textProviderMetadataById = <String, ProviderMetadata?>{};
         final stepToolCalls = <LanguageModelV4ToolCallPart>[];
         final stepToolResults = <LanguageModelV4ToolResultPart>[];
+        final localToolResults = <LanguageModelV4ToolResultPart>[];
         final stepApprovalRequests = <LanguageModelV4ToolApprovalRequestPart>[];
         final stepContent = <LanguageModelV4ContentPart>[];
         final toolInputBuffers = <String, StringBuffer>{};
@@ -907,6 +908,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
             }
             if (execution.toolResult != null) {
               stepToolResults.add(execution.toolResult!);
+              localToolResults.add(execution.toolResult!);
               fullController.add(
                 StreamTextToolResultEvent(
                   toolResult: execution.toolResult!,
@@ -932,12 +934,12 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
           }
         }
 
-        if (stepToolResults.isNotEmpty) {
+        if (localToolResults.isNotEmpty) {
           normalizedMessages = [
             ...normalizedMessages,
             LanguageModelV4Message(
               role: LanguageModelV4Role.tool,
-              content: stepToolResults,
+              content: localToolResults,
             ),
           ];
           responseMessages.add(normalizedMessages.last);

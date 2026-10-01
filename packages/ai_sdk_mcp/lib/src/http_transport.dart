@@ -488,6 +488,7 @@ class StreamableHttpClientTransport implements MCPTransport {
   bool _sessionExpired = false;
   bool _closed = false;
   Future<String?>? _refreshFuture;
+  final _activeRequests = <_HttpRequestLifetime>{};
 
   @override
   Stream<Map<String, dynamic>> get notifications => _notifications.stream;
@@ -673,30 +674,84 @@ class StreamableHttpClientTransport implements MCPTransport {
     unawaited(_stopListener());
   }
 
-  Future<http.StreamedResponse> _sendRequest(http.BaseRequest request) async {
-    try {
-      final token = await auth?.accessToken?.call();
+  Future<http.StreamedResponse> _sendRequest(
+    http.Request request, {
+    bool persistent = false,
+  }) async {
+    final lifetime = _HttpRequestLifetime(
+      requestTimeout,
+      _transportError(
+        method: request.method,
+        uri: request.url,
+        context: 'request timed out',
+      ),
+    );
+    _activeRequests.add(lifetime);
+    lifetime.onFinished = () => _activeRequests.remove(lifetime);
+    Future<http.StreamedResponse> dispatch(String? token) async {
+      lifetime.checkActive();
+      final abortable =
+          http.AbortableRequest(
+              request.method,
+              request.url,
+              abortTrigger: lifetime.aborted.future,
+            )
+            ..headers.addAll(request.headers)
+            ..bodyBytes = request.bodyBytes;
       if (token != null && token.isNotEmpty) {
-        request.headers['Authorization'] = 'Bearer $token';
+        abortable.headers['Authorization'] = 'Bearer $token';
       }
-      var response = await _client.send(request).timeout(requestTimeout);
+      final response = await _client.send(abortable);
+      if (lifetime.expired) {
+        await _cancelResponse(response);
+        lifetime.checkActive();
+      }
+      return response;
+    }
+
+    Future<http.StreamedResponse> execute() async {
+      final token = await auth?.accessToken?.call();
+      var response = await dispatch(token);
       if (response.statusCode == 401 &&
           auth?.refreshAccessToken != null &&
           auth?.retryAfterUnauthorized == true) {
-        await response.stream.drain<void>();
+        await lifetime.wrap(response.stream, finishOnDone: false).drain<void>();
         final refreshed = await _refreshAccessToken();
-        if (refreshed != null &&
-            refreshed.isNotEmpty &&
-            request is http.Request) {
-          final retry = http.Request(request.method, request.url)
-            ..headers.addAll(request.headers)
-            ..body = request.body;
-          retry.headers['Authorization'] = 'Bearer $refreshed';
-          response = await _client.send(retry).timeout(requestTimeout);
+        lifetime.checkActive();
+        if (refreshed != null && refreshed.isNotEmpty) {
+          response = await dispatch(refreshed);
         }
       }
       return response;
+    }
+
+    try {
+      final response = await Future.any([
+        execute(),
+        lifetime.aborted.future.then<http.StreamedResponse>(
+          (_) => throw lifetime.error,
+        ),
+      ]);
+      if (persistent &&
+          response.statusCode >= 200 &&
+          response.statusCode < 300 &&
+          _isSseContentType(
+            _responseHeader(response.headers, 'content-type'),
+          )) {
+        lifetime.stopDeadline();
+      }
+      return http.StreamedResponse(
+        lifetime.wrap(response.stream),
+        response.statusCode,
+        contentLength: response.contentLength,
+        request: response.request,
+        headers: response.headers,
+        isRedirect: response.isRedirect,
+        persistentConnection: response.persistentConnection,
+        reasonPhrase: response.reasonPhrase,
+      );
     } catch (error) {
+      lifetime.finish();
       throw _transportError(
         method: request.method,
         uri: request.url,
@@ -734,6 +789,12 @@ class StreamableHttpClientTransport implements MCPTransport {
 
   Future<void> _drainResponse(http.StreamedResponse response) async {
     await response.stream.drain<void>();
+  }
+
+  Future<void> _cancelResponse(http.StreamedResponse response) async {
+    try {
+      await response.stream.listen((_) {}, onError: (_) {}).cancel();
+    } catch (_) {}
   }
 
   Future<JsonRpcResponse> _parseJsonResponse(
@@ -838,6 +899,13 @@ class StreamableHttpClientTransport implements MCPTransport {
         _dispatchMessage(message);
       },
       onError: (Object error, StackTrace stackTrace) {
+        if (!_modern &&
+            error is MCPTransportException &&
+            error.context == 'request timed out') {
+          unawaited(
+            _sendCancelledNotification(request.id, 'Request timed out'),
+          );
+        }
         if (!completer.isCompleted) {
           completer.completeError(
             MCPException('SSE response stream error: $error'),
@@ -933,7 +1001,12 @@ class StreamableHttpClientTransport implements MCPTransport {
     }
 
     if (isInitialize) {
-      _capturePendingSessionId(response);
+      try {
+        _capturePendingSessionId(response);
+      } catch (_) {
+        await _cancelResponse(response);
+        rethrow;
+      }
     }
 
     final contentType = _responseHeader(response.headers, 'content-type');
@@ -954,7 +1027,10 @@ class StreamableHttpClientTransport implements MCPTransport {
     final httpRequest = http.Request('POST', url)
       ..headers.addAll(_modernPostHeaders(request))
       ..body = jsonEncode(request.toJson());
-    final response = await _sendRequest(httpRequest);
+    final response = await _sendRequest(
+      httpRequest,
+      persistent: request.method == 'subscriptions/listen',
+    );
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final bodyText = await _readBoundedResponseBody(response, method: 'POST');
       throw _transportError(
@@ -1047,7 +1123,7 @@ class StreamableHttpClientTransport implements MCPTransport {
     try {
       final request = http.Request('GET', url);
       request.headers.addAll(_getHeaders());
-      final response = await _sendRequest(request);
+      final response = await _sendRequest(request, persistent: true);
 
       if (_closed || !_listenerStarted) {
         await _drainResponse(response);
@@ -1157,7 +1233,6 @@ class StreamableHttpClientTransport implements MCPTransport {
       await subscription.cancel();
     }
     _subscriptionStreams.clear();
-
     if (!_modern &&
         _sessionId != null &&
         !_sessionExpired &&
@@ -1184,6 +1259,12 @@ class StreamableHttpClientTransport implements MCPTransport {
       } catch (error) {
         closeError = error;
       }
+    }
+
+    for (final lifetime in _activeRequests.toList()) {
+      lifetime.abort(
+        _transportError(method: 'CLOSE', uri: url, context: 'transport closed'),
+      );
     }
 
     _sessionId = null;
@@ -1230,6 +1311,73 @@ class StreamableHttpClientTransport implements MCPTransport {
         'Unexpected JSON-RPC response id: ${message['id']} (expected $expectedId)',
       );
     }
+  }
+}
+
+class _HttpRequestLifetime {
+  _HttpRequestLifetime(Duration timeout, this.error) {
+    _timer = Timer(timeout, abort);
+  }
+
+  MCPTransportException error;
+  final aborted = Completer<void>();
+  Timer? _timer;
+  bool expired = false;
+  void Function()? onFinished;
+  void Function()? _interruptBody;
+
+  void checkActive() {
+    if (expired) throw error;
+  }
+
+  void abort([MCPTransportException? reason]) {
+    if (expired) return;
+    if (reason != null) error = reason;
+    expired = true;
+    if (!aborted.isCompleted) aborted.complete();
+    _interruptBody?.call();
+    finish();
+  }
+
+  void stopDeadline() => _timer?.cancel();
+
+  void finish() {
+    stopDeadline();
+    onFinished?.call();
+  }
+
+  Stream<List<int>> wrap(Stream<List<int>> source, {bool finishOnDone = true}) {
+    return Stream.multi((controller) {
+      if (expired) {
+        unawaited(
+          source.listen((_) {}, onError: (_) {}).cancel().catchError((_) {}),
+        );
+        controller.addError(error);
+        controller.close();
+        return;
+      }
+      final subscription = source.listen(
+        controller.add,
+        onError: controller.addError,
+        onDone: () {
+          _interruptBody = null;
+          if (finishOnDone) finish();
+          controller.close();
+        },
+      );
+      _interruptBody = () {
+        controller.addError(error);
+        controller.close();
+        unawaited(subscription.cancel().catchError((_) {}));
+      };
+      controller.onPause = subscription.pause;
+      controller.onResume = subscription.resume;
+      controller.onCancel = () {
+        _interruptBody = null;
+        if (finishOnDone) finish();
+        return Future<void>.sync(subscription.cancel).catchError((_) {});
+      };
+    });
   }
 }
 

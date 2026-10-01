@@ -10,7 +10,7 @@ environment:
 
 dependencies:
   ai_sdk_dart: ^3.0.0
-  http: ^1.2.0
+  http: ^1.6.0
 
 dev_dependencies:
   lints: ^6.1.0

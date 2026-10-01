@@ -478,6 +478,7 @@ class StreamableHttpClientTransport implements MCPTransport {
   final _subscriptionStreams = <int, StreamSubscription<_SseEvent>>{};
   Timer? _listenerReconnectTimer;
   bool _listenerConnecting = false;
+  int _listenerEpoch = 0;
   bool _listenerStarted = false;
   bool _listenerUnsupported = false;
 
@@ -1130,18 +1131,20 @@ class StreamableHttpClientTransport implements MCPTransport {
     }
 
     _listenerConnecting = true;
+    final epoch = _listenerEpoch;
     try {
       final request = http.Request('GET', url);
       request.headers.addAll(_getHeaders());
       final response = await _sendRequest(request, persistent: true);
 
-      if (_closed || !_listenerStarted) {
-        await _drainResponse(response);
+      if (_closed || !_listenerStarted || epoch != _listenerEpoch) {
+        await _cancelResponse(response);
         return;
       }
 
       if (_sessionId != null && response.statusCode == 404) {
         await _drainResponse(response);
+        if (epoch != _listenerEpoch) return;
         _markSessionExpired();
         if (!_notifications.isClosed) {
           _notifications.addError(
@@ -1153,6 +1156,7 @@ class StreamableHttpClientTransport implements MCPTransport {
 
       if (response.statusCode == 405) {
         await _drainResponse(response);
+        if (epoch != _listenerEpoch) return;
         _listenerUnsupported = true;
         _listenerStarted = false;
         return;
@@ -1163,26 +1167,30 @@ class StreamableHttpClientTransport implements MCPTransport {
           response.statusCode >= 300 ||
           !_isSseContentType(contentType)) {
         await _drainResponse(response);
-        _scheduleListenerReconnect();
+        if (epoch == _listenerEpoch) _scheduleListenerReconnect();
         return;
       }
 
       _listenerSubscription = _parseSse(response.stream).listen(
-        _handleListenerEvent,
+        (event) {
+          if (epoch == _listenerEpoch) _handleListenerEvent(event);
+        },
         onError: (_, _) {
+          if (epoch != _listenerEpoch) return;
           _listenerSubscription = null;
           _scheduleListenerReconnect();
         },
         onDone: () {
+          if (epoch != _listenerEpoch) return;
           _listenerSubscription = null;
           _scheduleListenerReconnect();
         },
-        cancelOnError: false,
+        cancelOnError: true,
       );
     } catch (_) {
-      _scheduleListenerReconnect();
+      if (epoch == _listenerEpoch) _scheduleListenerReconnect();
     } finally {
-      _listenerConnecting = false;
+      if (epoch == _listenerEpoch) _listenerConnecting = false;
     }
   }
 
@@ -1223,10 +1231,15 @@ class StreamableHttpClientTransport implements MCPTransport {
   }
 
   Future<void> _stopListener() async {
+    _listenerEpoch++;
+    _listenerConnecting = false;
     _listenerReconnectTimer?.cancel();
     _listenerReconnectTimer = null;
     final subscription = _listenerSubscription;
     _listenerSubscription = null;
+    for (final lifetime in _activeRequests.toList()) {
+      if (lifetime.error.method == 'GET') lifetime.abort();
+    }
     await subscription?.cancel();
   }
 

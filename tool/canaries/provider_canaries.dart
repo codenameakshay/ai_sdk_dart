@@ -153,20 +153,38 @@ Future<void> runProviderCanary(
   if (key == null || modelId == null) {
     throw ArgumentError('Provider canary configuration is incomplete.');
   }
-  final model =
-      modelOverride ??
-      switch (configuration.name) {
-        'openai' => OpenAIProvider(apiKey: key).responses(modelId),
-        'anthropic' => AnthropicProvider(apiKey: key).call(modelId),
-        'google' => GoogleGenerativeAIProvider(apiKey: key).call(modelId),
-        _ => throw ArgumentError('Unknown provider ${configuration.name}.'),
-      };
+  late final LanguageModelV4 model;
+  void Function()? dispose;
+  if (modelOverride != null) {
+    model = modelOverride;
+  } else {
+    switch (configuration.name) {
+      case 'openai':
+        final provider = OpenAIProvider(apiKey: key);
+        model = provider.responses(modelId);
+        dispose = provider.dispose;
+      case 'anthropic':
+        final provider = AnthropicProvider(apiKey: key);
+        model = provider.call(modelId);
+        dispose = provider.dispose;
+      case 'google':
+        final provider = GoogleGenerativeAIProvider(apiKey: key);
+        model = provider.call(modelId);
+        dispose = provider.dispose;
+      default:
+        throw ArgumentError('Unknown provider ${configuration.name}.');
+    }
+  }
 
-  await _textCanary(model);
-  await _streamingCanary(model);
-  await _structuredCanary(model);
-  await _toolContinuationCanary(model);
-  await _reasoningContinuationCanary(model, configuration.name);
+  try {
+    await _textCanary(model);
+    await _streamingCanary(model);
+    await _structuredCanary(model);
+    await _toolContinuationCanary(model);
+    await _reasoningContinuationCanary(model, configuration.name);
+  } finally {
+    dispose?.call();
+  }
 }
 
 Future<void> _textCanary(LanguageModelV4 model) async {

@@ -708,7 +708,7 @@ class _ConversationReducer {
     final providerOptions = _optionalMap(e, 'providerMetadata');
     if (reasoning && old is ReasoningPart) {
       _parts[index] = ReasoningPart(
-        id: id,
+        id: old.id,
         text: old.text,
         providerOptions: _mergeProviderMetadata(
           old.providerOptions,

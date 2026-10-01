@@ -1377,6 +1377,57 @@ void main() {
     expect(parts.map((part) => part.id).toSet(), hasLength(2));
   });
 
+  test(
+    'reasoning-end preserves unique ids for reused and suffixed wire ids',
+    () async {
+      late Map<String, dynamic> replayBody;
+      final client = MockClient((request) async {
+        replayBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return _response(
+          'data: {"type":"start","messageId":"m1"}\n\n'
+          'data: {"type":"reasoning-start","id":"0"}\n\n'
+          'data: {"type":"reasoning-delta","id":"0","delta":"one"}\n\n'
+          'data: {"type":"reasoning-end","id":"0"}\n\n'
+          'data: {"type":"finish-step"}\n\n'
+          'data: {"type":"reasoning-start","id":"0"}\n\n'
+          'data: {"type":"reasoning-delta","id":"0","delta":"two"}\n\n'
+          'data: {"type":"reasoning-end","id":"0"}\n\n'
+          'data: {"type":"finish-step"}\n\n'
+          'data: {"type":"reasoning-start","id":"0#2"}\n\n'
+          'data: {"type":"reasoning-delta","id":"0#2","delta":"three"}\n\n'
+          'data: {"type":"reasoning-end","id":"0#2"}\n\n'
+          'data: {"type":"finish"}\n\n'
+          'data: [DONE]\n\n',
+        );
+      });
+      final transport = RemoteConversationTransport(
+        endpoint: Uri.parse('https://backend.test/chat'),
+        client: client,
+      );
+      addTearDown(transport.dispose);
+      addTearDown(client.close);
+
+      final snapshots = await transport
+          .send(Conversation(id: 'c1', messages: const []))
+          .toList();
+
+      final parts = snapshots.last.messages.single.parts
+          .whereType<ReasoningPart>();
+      expect(parts.map((part) => part.text), ['one', 'two', 'three']);
+      expect(parts.map((part) => part.id), ['0', '0#2', '0#2#2']);
+
+      await transport.send(snapshots.last).toList();
+      final history = (replayBody['messages'] as List).cast<Map>();
+      final assistant = history.singleWhere((message) => message['id'] == 'm1');
+      final replayedParts = (assistant['parts'] as List).cast<Map>();
+      expect(replayedParts.map((part) => part['text']), [
+        'one',
+        'two',
+        'three',
+      ]);
+    },
+  );
+
   test('sequential sends may reuse wire and synthesized part ids', () async {
     var turn = 0;
     final client = MockClient((request) async {

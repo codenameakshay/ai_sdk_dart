@@ -66,7 +66,7 @@ ifdef GOOGLE_API_KEY
 endif
 
 .PHONY: all get run run-web run-advanced run-advanced-web run-basic run-mcp \
-        test analyze format format-check dry-run publish help \
+        test test-examples analyze format format-check dry-run publish help \
         coverage coverage-check benchmark
 
 all: help
@@ -112,20 +112,19 @@ run-mcp:
 
 # ── Quality ───────────────────────────────────────────────────────────────────
 
-## Run tests across all packages
+## Run tests across all packages and examples
 test:
-	$(foreach p,$(DART_PKGS),$(DART) test packages/$(p)/test/ &&) true
-	$(foreach p,$(FLUTTER_PKGS),$(FLUTTER) test packages/$(p)/ &&) true
-	$(FLUTTER) test $(FLUTTER_APP)/
-	$(FLUTTER) test $(ADVANCED_APP)/
+	$(DART) test $(foreach p,$(DART_PKGS),packages/$(p)/test/)
+	$(FLUTTER) test $(foreach p,$(FLUTTER_PKGS),packages/$(p)/)
+	$(FLUTTER) test $(FLUTTER_APP)/ $(ADVANCED_APP)/
 
-## Run dart analyze across all packages
+## Run the example app tests only (CI pairs this with coverage-check)
+test-examples:
+	$(FLUTTER) test $(FLUTTER_APP)/ $(ADVANCED_APP)/
+
+## Run one analyzer over the whole workspace (packages, examples, tool)
 analyze:
-	$(DART) analyze $(DART_APP)/
-	$(foreach p,$(DART_PKGS),$(DART) analyze packages/$(p)/ &&) true
-	$(foreach p,$(FLUTTER_PKGS),$(FLUTTER) analyze packages/$(p)/ &&) true
-	$(FLUTTER) analyze $(FLUTTER_APP)/
-	$(FLUTTER) analyze $(ADVANCED_APP)/
+	$(DART) analyze --fatal-infos
 
 ## Run the structured-stream benchmark and print JSON results
 benchmark:
@@ -133,12 +132,10 @@ benchmark:
 
 ## Run tests with coverage across all packages and print a summary
 coverage:
-	$(DART) pub global activate coverage >/dev/null
 	DART="$(DART)" FLUTTER="$(FLUTTER)" tool/coverage.sh
 
 ## Run coverage and fail if total line coverage is below the 99% gate
 coverage-check:
-	$(DART) pub global activate coverage >/dev/null
 	DART="$(DART)" FLUTTER="$(FLUTTER)" tool/coverage.sh 99
 
 ## Format all Dart source files
@@ -175,6 +172,7 @@ help:
 	@echo "  make run-basic         Run Dart CLI example"
 	@echo "  make run-mcp           Run the MCP CLI demo (works without a key)"
 	@echo "  make test              Run all package tests"
+	@echo "  make test-examples     Run the example app tests only"
 	@echo "  make analyze           Run dart analyze across all packages"
 	@echo "  make format            Format all Dart source files"
 	@echo "  make format-check      Verify Dart formatting without writing changes"

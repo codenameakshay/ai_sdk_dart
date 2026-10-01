@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Runs tests with coverage across every published package, merges the per-package LCOV
+# Runs every published package's tests once with coverage, merges the LCOV
 # into coverage/lcov.info, prints a per-package + total line-coverage summary,
 # and (optionally) enforces a minimum total threshold.
 #
@@ -9,8 +9,8 @@
 #   tool/coverage.sh 99         # also fail if total line coverage < 99%
 #
 # `// coverage:ignore-line` / `ignore-start` / `ignore-end` comments are
-# honored via format_coverage --check-ignore. Set DART/FLUTTER to override the
-# executables (e.g. `DART="fvm dart" FLUTTER="fvm flutter" tool/coverage.sh`).
+# honored. Set DART/FLUTTER to override the executables
+# (e.g. `DART="fvm dart" FLUTTER="fvm flutter" tool/coverage.sh`).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -22,47 +22,60 @@ THRESHOLD="${1:-0}"
 PKG_CONFIG="$ROOT/.dart_tool/package_config.json"
 MERGED="$ROOT/coverage/lcov.info"
 
-mkdir -p "$ROOT/coverage"
-: > "$MERGED"
+# Pure-Dart packages (run with `dart test --coverage-path`).
+DART_PKGS="ai_sdk_dart ai_sdk_provider ai_sdk_openai ai_sdk_openai_compatible ai_sdk_anthropic ai_sdk_google ai_sdk_azure ai_sdk_cohere ai_sdk_groq ai_sdk_mistral ai_sdk_ollama ai_sdk_mcp"
 
+# Flutter packages (run with `flutter test --coverage`).
+FLUTTER_PKGS="ai_sdk_flutter_ui"
+
+summarize() { # $1 = label, LCOV on stdin
+  awk -F: -v label="$1" '
+    /^LF:/{lf+=$2} /^LH:/{lh+=$2}
+    END{ if (lf>0) printf "  %-26s %6.2f%%  (%d/%d)\n", label, 100*lh/lf, lh, lf;
+         else { printf "  %-26s   no data\n", label; exit 1 } }'
+}
+
+mkdir -p "$ROOT/coverage"
+rm -f "$MERGED"
+for p in $FLUTTER_PKGS; do
+  rm -f "$ROOT/packages/$p/coverage/lcov.info"
+done
 if [ ! -f "$PKG_CONFIG" ]; then
-  echo "Missing $PKG_CONFIG. Run '$DART pub get' first."
+  echo "Missing $PKG_CONFIG. Run '$FLUTTER pub get' first."
   exit 1
 fi
 
-# Pure-Dart packages (run with `dart test --coverage`).
-DART_PKGS="ai_sdk_dart ai_sdk_provider ai_sdk_openai ai_sdk_openai_compatible ai_sdk_anthropic ai_sdk_google ai_sdk_azure ai_sdk_cohere ai_sdk_groq ai_sdk_mistral ai_sdk_ollama ai_sdk_mcp"
+# One `dart test` process for all pure-Dart packages: a process per package
+# spent most of its time on start-up. It runs from the repo root so tests that
+# read repo-relative fixtures pass.
+dart_test_dirs=""
+for p in $DART_PKGS; do
+  dart_test_dirs="$dart_test_dirs packages/$p/test/"
+done
+# shellcheck disable=SC2086
+$DART test --reporter=failures-only --coverage-path="$MERGED" \
+  --coverage-package="^(${DART_PKGS// /|})\$" $dart_test_dirs
+if [ ! -f "$MERGED" ]; then
+  echo "Missing Dart coverage output at $MERGED."
+  exit 1
+fi
 
-# Flutter packages (run with `flutter test --coverage`, which emits lcov directly).
-FLUTTER_PKGS="ai_sdk_flutter_ui"
-
-summarize() { # $1 = lcov file, $2 = label
-  awk -F: -v label="$2" '
-    /^LF:/{lf+=$2} /^LH:/{lh+=$2}
-    END{ if (lf>0) printf "  %-26s %6.2f%%  (%d/%d)\n", label, 100*lh/lf, lh, lf;
-         else printf "  %-26s   no data\n", label }' "$1"
-}
+for p in $FLUTTER_PKGS; do
+  ( cd "$ROOT/packages/$p"; $FLUTTER test --no-pub --reporter=failures-only --coverage )
+done
 
 echo "== Coverage =="
 for p in $DART_PKGS; do
-  [ -d "$ROOT/packages/$p/test" ] || continue
-  cov="$ROOT/packages/$p/coverage"
-  rm -rf "$cov"
-  # Run from the repo root so tests that read repo-relative fixtures pass.
-  $DART test --coverage="$cov" "packages/$p/test/" >/dev/null
-  $DART pub global run coverage:format_coverage \
-    --lcov --check-ignore --in="$cov" --out="$cov/lcov.info" \
-    --report-on="packages/$p/lib" --packages="$PKG_CONFIG" >/dev/null
-  summarize "$cov/lcov.info" "$p"
-  cat "$cov/lcov.info" >> "$MERGED"
+  awk -v dir="/packages/$p/lib/" '/^SF:/{keep=index($0, dir)} keep' "$MERGED" | summarize "$p"
 done
-
 for p in $FLUTTER_PKGS; do
-  [ -d "$ROOT/packages/$p/test" ] || continue
-  rm -rf "$ROOT/packages/$p/coverage"
-  ( cd "$ROOT/packages/$p"; $FLUTTER test --coverage >/dev/null )
-  summarize "$ROOT/packages/$p/coverage/lcov.info" "$p"
-  cat "$ROOT/packages/$p/coverage/lcov.info" >> "$MERGED"
+  flutter_lcov="$ROOT/packages/$p/coverage/lcov.info"
+  if [ ! -f "$flutter_lcov" ]; then
+    echo "Missing Flutter coverage output at $flutter_lcov."
+    exit 1
+  fi
+  summarize "$p" < "$flutter_lcov"
+  cat "$flutter_lcov" >> "$MERGED"
 done
 
 echo "-------------------------------------------------"

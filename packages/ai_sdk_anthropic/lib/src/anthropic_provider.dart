@@ -693,7 +693,7 @@ List<Map<String, dynamic>> _toAnthropicMessages(LanguageModelV4Prompt prompt) {
 Map<String, dynamic> _toAnthropicToolChoice(LanguageModelV4ToolChoice choice) {
   return switch (choice) {
     ToolChoiceAuto() => {'type': 'auto'},
-    ToolChoiceNone() => {'type': 'auto'},
+    ToolChoiceNone() => {'type': 'none'},
     ToolChoiceRequired() => {'type': 'any'},
     ToolChoiceSpecific(:final toolName) => {'type': 'tool', 'name': toolName},
   };

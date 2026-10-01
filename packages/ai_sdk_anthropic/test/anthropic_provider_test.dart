@@ -800,7 +800,7 @@ void main() {
       await call(const ToolChoiceSpecific(toolName: 'weather'));
 
       expect(seenBodies[0]['tool_choice'], {'type': 'auto'});
-      expect(seenBodies[1]['tool_choice'], {'type': 'auto'});
+      expect(seenBodies[1]['tool_choice'], {'type': 'none'});
       expect(seenBodies[2]['tool_choice'], {'type': 'any'});
       expect(seenBodies[3]['tool_choice'], {'type': 'tool', 'name': 'weather'});
     });

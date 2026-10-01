@@ -458,7 +458,9 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
                   approvalRequestCallIds[approvalId] = itemId;
                 }
               }
-            } else if (item != null && item['type'] != 'reasoning') {
+            } else if (item != null &&
+                item['type'] != 'reasoning' &&
+                item['type'] != 'message') {
               controller.add(
                 StreamPartOpaque(
                   opaque: LanguageModelV4OpaquePart(

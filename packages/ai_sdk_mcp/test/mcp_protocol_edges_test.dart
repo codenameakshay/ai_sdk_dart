@@ -657,7 +657,7 @@ void main() {
         await subscription.cancel();
         await Future<void>.delayed(const Duration(milliseconds: 10));
         expect(cancelled, isTrue);
-        expect(methods, contains('notifications/cancelled'));
+        expect(methods, isNot(contains('notifications/cancelled')));
         await mcpClient.close();
         await stream.close();
       },

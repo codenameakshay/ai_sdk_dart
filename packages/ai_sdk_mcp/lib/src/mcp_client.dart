@@ -1207,6 +1207,7 @@ class MCPClient {
   Future<void> _cancelModernSubscription(int requestId) async {
     if (transport case final StreamableHttpClientTransport http) {
       await http.cancelSubscription(requestId);
+      return;
     }
     if (_closed) return;
     await transport.sendNotification(

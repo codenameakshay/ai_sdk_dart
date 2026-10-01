@@ -26,16 +26,23 @@ Future<void> main() async {
       'Pass a key with --define=OPENAI_API_KEY=sk-... to run this example.',
     );
   }
-  final model = openai('gpt-4.1-mini');
+  await runExamples(OpenAIProvider(apiKey: apiKey));
+}
 
-  await _instructionsAndUsage(model);
-  await _streamingCanonicalEvents(model);
-  await _canonicalCallbacksAndAggregate(model);
-  await _responseMessagesReuse(model);
-  await _toolWithContextAndApproval(model);
-  await _maxToolConcurrency(model);
-  await _cancellationAndTimeout(model);
-  await _bodyInclusionPolicy(model);
+Future<void> runExamples(OpenAIProvider provider) async {
+  try {
+    final model = provider('gpt-4.1-mini');
+    await _instructionsAndUsage(model);
+    await _streamingCanonicalEvents(model);
+    await _canonicalCallbacksAndAggregate(model);
+    await _responseMessagesReuse(model);
+    await _toolWithContextAndApproval(model);
+    await _maxToolConcurrency(model);
+    await _cancellationAndTimeout(model);
+    await _bodyInclusionPolicy(model);
+  } finally {
+    provider.dispose();
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -84,7 +84,7 @@ Future<void> main() async {
     //    `MCPAmbiguousToolCompletionException` so the app can reconcile.
     header('Replay-unsafe failure (no automatic retry)');
     final unsafeClient = MCPClient(
-      transport: _FlakyTransport(),
+      transport: ResponseLossTransport(),
       protocolMode: MCPProtocolMode.modern,
     );
     try {
@@ -104,7 +104,7 @@ Future<void> main() async {
     // here a read-only lookup with no side effects.
     header('Replay-safe retry (idempotent read)');
     final safeClient = MCPClient(
-      transport: _FlakyTransport(),
+      transport: ResponseLossTransport(),
       protocolMode: MCPProtocolMode.modern,
       reconnectPolicy: const MCPReconnectPolicy(
         maxAttempts: 1,
@@ -149,6 +149,7 @@ Future<void> main() async {
   } on MCPException catch (e) {
     print('MCP error: ${e.message}');
   } finally {
+    openai.dispose();
     await client.close();
     await server.close(force: true);
     print('\nDone.');
@@ -168,8 +169,13 @@ Future<MCPClient> connectViaHttp(Uri endpoint) async {
   final client = MCPClient(
     transport: StreamableHttpClientTransport(url: endpoint),
   );
-  await client.initialize();
-  return client;
+  try {
+    await client.initialize();
+    return client;
+  } catch (_) {
+    await client.close();
+    rethrow;
+  }
 }
 
 // ─── in-process mock MCP server (JSON-RPC over HTTP) ──────────────────────────
@@ -281,11 +287,14 @@ Object? _dispatch(String? method, Object? params) {
 /// A transport that loses the response to the first `tools/call` it sees,
 /// then answers normally. Simulates the "server may have already run the
 /// tool" scenario that makes an unacknowledged `tools/call` ambiguous.
-class _FlakyTransport extends MCPTransport {
+class ResponseLossTransport extends MCPTransport {
   var _toolCallAttempted = false;
+  int executedToolCalls = 0;
 
   @override
   Future<JsonRpcResponse> send(JsonRpcRequest request) async {
+    final result = _dispatch(request.method, request.params);
+    if (request.method == 'tools/call') executedToolCalls++;
     if (request.method == 'tools/call' && !_toolCallAttempted) {
       _toolCallAttempted = true;
       throw MCPTransportException(
@@ -294,7 +303,7 @@ class _FlakyTransport extends MCPTransport {
         context: 'response lost',
       );
     }
-    return JsonRpcResponse(result: _dispatch(request.method, request.params));
+    return JsonRpcResponse(result: result);
   }
 
   @override

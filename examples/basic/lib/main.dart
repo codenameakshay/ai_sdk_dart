@@ -364,15 +364,20 @@ Future<void> demo8StreamObject() async {
   // events already emitted on the other.
   final partials = result.partialObjectStream.listen(
     (partial) => print('  partial: $partial'),
+    onError: (Object _) {},
   );
   final patches = result.patchStream.listen(
     (patch) =>
         print('  patch  : ${patch.map((p) => '${p.op} ${p.path}').join(', ')}'),
+    onError: (Object _) {},
   );
-  final object = await result.object;
-  await partials.cancel();
-  await patches.cancel();
-  print('Final validated object: $object');
+  try {
+    final object = await result.object;
+    print('Final validated object: $object');
+  } finally {
+    await partials.cancel();
+    await patches.cancel();
+  }
 }
 
 // ─── 9. embedMany — batching and parallelism ─────────────────────────────────
@@ -428,7 +433,7 @@ Future<void> demo10ResponsesApiWebSearch() async {
 // ─── 11. Reasoning ────────────────────────────────────────────────────────────
 
 Future<void> demo11Reasoning() async {
-  header('11 · Reasoning (aggregate vs finalStep)');
+  header('11 · Reasoning (final-step output)');
   if (requireOpenAiKey() == null) return;
 
   final result = await generateText(
@@ -438,8 +443,7 @@ Future<void> demo11Reasoning() async {
     maxSteps: 2,
   );
   print('Answer               : ${result.text}');
-  print('Aggregate reasoning  : ${result.reasoning.length} part(s)');
-  print('Final-step reasoning : ${result.finalStep.reasoning.length} part(s)');
+  print('Final-step reasoning : ${result.reasoning.length} part(s)');
 }
 
 // ─── 12. Body inclusion policy ────────────────────────────────────────────────
@@ -570,17 +574,21 @@ Future<void> main(List<String> args) async {
   }
 
   final toRun = selected == null ? _demos.keys.toList() : [selected];
-  for (final number in toRun) {
-    final entry = _demos[number];
-    if (entry == null) {
-      print('No such demo: $number (valid: 1-${_demos.length})');
-      exit(64);
+  try {
+    for (final number in toRun) {
+      final entry = _demos[number];
+      if (entry == null) {
+        print('No such demo: $number (valid: 1-${_demos.length})');
+        exit(64);
+      }
+      try {
+        await entry.$2();
+      } on AiApiCallError catch (e) {
+        print('\nAPI error in demo $number: ${e.message}');
+      }
     }
-    try {
-      await entry.$2();
-    } on AiApiCallError catch (e) {
-      print('\nAPI error in demo $number: ${e.message}');
-    }
+  } finally {
+    openai.dispose();
   }
 
   print('\nAll requested demos complete.');

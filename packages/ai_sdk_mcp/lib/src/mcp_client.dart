@@ -731,7 +731,11 @@ class MCPClient {
         if (!retrySafe || attempt >= maxAttempts) rethrow;
         await _waitForReconnect(policy!.delayFor(attempt));
         if (_transportFactory != null) {
-          await transport.close();
+          try {
+            await transport.close();
+          } catch (_) {
+            // Closing the dead transport is best-effort during reconnect.
+          }
           if (_closed) throw const MCPException('Client is closed');
           transport = _transportFactory();
           _listenToTransport();

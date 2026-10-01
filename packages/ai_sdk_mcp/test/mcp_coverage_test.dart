@@ -173,6 +173,16 @@ class _ScriptedTransport implements MCPTransport {
   }
 }
 
+class _ThrowingCloseTransport extends _ScriptedTransport {
+  _ThrowingCloseTransport(super.handler);
+
+  @override
+  Future<void> close() async {
+    await super.close();
+    throw const MCPException('DELETE failed');
+  }
+}
+
 /// A transport that does NOT override [notifications], so the abstract default
 /// (`json_rpc.dart`) getter is exercised.
 class _DefaultNotificationsTransport extends MCPTransport {
@@ -1667,6 +1677,39 @@ void main() {
         expect(toolSet, isEmpty);
         expect(built, greaterThanOrEqualTo(1));
         expect(first.closed, isTrue); // old transport was closed on reconnect
+      },
+    );
+
+    test(
+      'reconnects with the factory transport when closing the old one throws',
+      () async {
+        final first = _ThrowingCloseTransport((req) {
+          if (req.method == 'initialize') return _initResult(req);
+          if (req.method == 'notifications/initialized') return _ok(req, {});
+          throw const MCPException('server down');
+        });
+        var built = 0;
+        final client = MCPClient(
+          transport: first,
+          reconnectPolicy: const MCPReconnectPolicy(
+            maxAttempts: 2,
+            initialDelayMs: 1,
+            maxDelayMs: 2,
+          ),
+          transportFactory: () {
+            built++;
+            return _ScriptedTransport((req) {
+              if (req.method == 'initialize') return _initResult(req);
+              if (req.method == 'tools/list') return _ok(req, {'tools': []});
+              return _ok(req, {});
+            });
+          },
+        );
+        addTearDown(client.close);
+
+        expect(await client.tools(), isEmpty);
+        expect(built, 1);
+        expect(first.closeCount, 1);
       },
     );
 

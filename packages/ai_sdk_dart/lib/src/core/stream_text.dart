@@ -852,55 +852,57 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
           final executableCalls = stepToolCalls
               .where((call) => !isProviderExecutedToolCall(call))
               .toList(growable: false);
-          final executions = await executeToolCallsBounded(
-            calls: executableCalls,
-            maxConcurrency: maxToolConcurrency,
-            abortSignal: scope.signal,
-            execute: (call) => executeToolCall(
-              tools: toolSelection.exposedTools,
-              call: call,
-              messages: normalizedMessages,
-              approvalById: approvalById,
+          final executions = await scope.run(
+            () => executeToolCallsBounded(
+              calls: executableCalls,
+              maxConcurrency: maxToolConcurrency,
               abortSignal: scope.signal,
-              timeout: minTimeout(
-                remainingTimeout(
-                  timeout: timeout?.total,
-                  elapsed: overallStopwatch.elapsed,
+              execute: (call) => executeToolCall(
+                tools: toolSelection.exposedTools,
+                call: call,
+                messages: normalizedMessages,
+                approvalById: approvalById,
+                abortSignal: scope.signal,
+                timeout: minTimeout(
+                  remainingTimeout(
+                    timeout: timeout?.total,
+                    elapsed: overallStopwatch.elapsed,
+                  ),
+                  timeout?.toolTimeoutFor(call.toolName),
                 ),
-                timeout?.toolTimeoutFor(call.toolName),
+                approvalPolicy:
+                    approvalPolicyFor?.call(call.toolName, call.input) ??
+                    approvalPolicy,
+                policyRevision: approvalPolicyRevision,
+                generationContext: generationContext ?? runtimeContext,
+                runtimeContext: runtimeContext,
+                requireExactApprovalBinding: true,
+                onToolCallStart:
+                    onToolExecutionStart ?? experimentalOnToolCallStart,
+                onToolCallFinish:
+                    onToolExecutionEnd ?? experimentalOnToolCallFinish,
+                onPreliminaryResult: (preliminary) {
+                  final result = LanguageModelV4ToolResultPart(
+                    toolCallId: call.toolCallId,
+                    toolName: call.toolName,
+                    output: ToolResultOutputText(
+                      stringifyToolOutput(preliminary),
+                    ),
+                  );
+                  fullController.add(
+                    StreamTextToolResultEvent(
+                      toolResult: result,
+                      preliminary: true,
+                    ),
+                  );
+                  onChunk?.call(
+                    StreamTextToolResultChunk(
+                      toolResult: result,
+                      preliminary: true,
+                    ),
+                  );
+                },
               ),
-              approvalPolicy:
-                  approvalPolicyFor?.call(call.toolName, call.input) ??
-                  approvalPolicy,
-              policyRevision: approvalPolicyRevision,
-              generationContext: generationContext ?? runtimeContext,
-              runtimeContext: runtimeContext,
-              requireExactApprovalBinding: true,
-              onToolCallStart:
-                  onToolExecutionStart ?? experimentalOnToolCallStart,
-              onToolCallFinish:
-                  onToolExecutionEnd ?? experimentalOnToolCallFinish,
-              onPreliminaryResult: (preliminary) {
-                final result = LanguageModelV4ToolResultPart(
-                  toolCallId: call.toolCallId,
-                  toolName: call.toolName,
-                  output: ToolResultOutputText(
-                    stringifyToolOutput(preliminary),
-                  ),
-                );
-                fullController.add(
-                  StreamTextToolResultEvent(
-                    toolResult: result,
-                    preliminary: true,
-                  ),
-                );
-                onChunk?.call(
-                  StreamTextToolResultChunk(
-                    toolResult: result,
-                    preliminary: true,
-                  ),
-                );
-              },
             ),
           );
           for (
@@ -1006,7 +1008,11 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
         fullController.add(StreamTextFinishStepEvent(step: stepFinish));
 
         final shouldStop = shouldStopAfterStep(
-          toolResultsEmpty: stepToolResults.isEmpty,
+          toolResultsEmpty:
+              localToolResults.isEmpty &&
+              !(stepToolResults.isNotEmpty &&
+                  resolvedFinish.finishReason ==
+                      LanguageModelV4FinishReason.toolCalls),
           hasApprovalRequests: stepApprovalRequests.isNotEmpty,
           snapshot: StepSnapshot(
             stepCount: stepNumber + 1,

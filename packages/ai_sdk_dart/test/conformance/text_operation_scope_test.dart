@@ -34,7 +34,79 @@ class _HangingTextModel extends LanguageModelV4 {
   }
 }
 
+class _ToolCallModel extends LanguageModelV4 {
+  @override
+  String get provider => 'test';
+  @override
+  String get modelId => 'tool-call';
+  @override
+  String get specificationVersion => 'v4';
+
+  static const _call = LanguageModelV4ToolCallPart(
+    toolCallId: 'c1',
+    toolName: 'slow',
+    input: {},
+  );
+
+  @override
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
+  ) async => LanguageModelV4GenerateResult(
+    content: const [_call],
+    finishReason: LanguageModelV4FinishReason.toolCalls,
+  );
+
+  @override
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
+  ) async => LanguageModelV4StreamResult(
+    stream: Stream.fromIterable(const [
+      StreamPartToolCall(toolCall: _call),
+      StreamPartFinish(finishReason: LanguageModelV4FinishReason.toolCalls),
+    ]),
+  );
+}
+
 void main() {
+  for (final streaming in [false, true]) {
+    test('${streaming ? 'streamText' : 'generateText'} total deadline expiring '
+        'during a tool surfaces TimeoutException', () async {
+      final model = _ToolCallModel();
+      final tools = {
+        'slow': dynamicTool<String>(
+          execute: (_, _) async {
+            await Future<void>.delayed(const Duration(seconds: 5));
+            return 'late';
+          },
+        ),
+      };
+      const timeout = TimeoutConfiguration(total: Duration(milliseconds: 50));
+      final Future<Object?> outcome;
+      if (streaming) {
+        final result = await streamText(
+          model: model,
+          prompt: 'hi',
+          tools: tools,
+          maxSteps: 2,
+          timeout: timeout,
+        );
+        outcome = result.text.then<Object?>((_) => null);
+      } else {
+        outcome = generateText(
+          model: model,
+          prompt: 'hi',
+          tools: tools,
+          maxSteps: 2,
+          timeout: timeout,
+        ).then<Object?>((_) => null);
+      }
+      await expectLater(
+        outcome.timeout(const Duration(seconds: 2)),
+        throwsA(isA<TimeoutException>()),
+      );
+    });
+  }
+
   for (final startOnly in [false, true]) {
     test(
       startOnly

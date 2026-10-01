@@ -470,4 +470,63 @@ void main() {
       expect(recorder.spans.first.endError, isNotNull);
     });
   });
+
+  group('operation outcome metrics', () {
+    Set<String> outcomes(_MetricSink sink) => sink.metrics
+        .map((m) => m.name)
+        .where(
+          (n) =>
+              n == AiTelemetryMetrics.failure ||
+              n == AiTelemetryMetrics.cancelled ||
+              n == AiTelemetryMetrics.success,
+        )
+        .toSet();
+
+    final schema = Schema<Map<String, dynamic>>(
+      jsonSchema: const {'type': 'object'},
+      fromJson: (json) => json,
+    );
+
+    test('generateText records failure for a model error', () async {
+      final sink = _MetricSink();
+      await expectLater(
+        generateText(
+          model: FakeErrorModel(StateError('bad request')),
+          prompt: 'Hi',
+          maxRetries: 0,
+          telemetry: TelemetrySettings(isEnabled: true, metricSink: sink),
+        ),
+        throwsA(isA<StateError>()),
+      );
+      expect(outcomes(sink), {AiTelemetryMetrics.failure});
+    });
+
+    test('generateText records cancelled for caller cancellation', () async {
+      final sink = _MetricSink();
+      final caller = CancellationToken()..cancel();
+      await expectLater(
+        generateText(
+          model: FakeTextModel('x'),
+          prompt: 'Hi',
+          abortSignal: caller,
+          telemetry: TelemetrySettings(isEnabled: true, metricSink: sink),
+        ),
+        throwsA(isA<AiOperationCancelledError>()),
+      );
+      expect(outcomes(sink), {AiTelemetryMetrics.cancelled});
+    });
+
+    test('streamObject records failure for a model error', () async {
+      final sink = _MetricSink();
+      await expectLater(
+        streamObject(
+          model: FakeErrorModel(StateError('bad request')),
+          schema: schema,
+          telemetry: TelemetrySettings(isEnabled: true, metricSink: sink),
+        ),
+        throwsA(isA<StateError>()),
+      );
+      expect(outcomes(sink), {AiTelemetryMetrics.failure});
+    });
+  });
 }

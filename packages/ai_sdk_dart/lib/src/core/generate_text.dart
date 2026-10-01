@@ -687,34 +687,36 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
         final executableCalls = toolCalls
             .where((call) => !isProviderExecutedToolCall(call))
             .toList(growable: false);
-        final executions = await executeToolCallsBounded(
-          calls: executableCalls,
-          maxConcurrency: maxToolConcurrency,
-          abortSignal: scope.signal,
-          execute: (call) => executeToolCall(
-            tools: toolSelection.exposedTools,
-            call: call,
-            messages: normalizedMessages,
-            approvalById: approvalById,
+        final executions = await scope.run(
+          () => executeToolCallsBounded(
+            calls: executableCalls,
+            maxConcurrency: maxToolConcurrency,
             abortSignal: scope.signal,
-            timeout: minTimeout(
-              remainingTimeout(
-                timeout: timeout?.total,
-                elapsed: overallStopwatch.elapsed,
+            execute: (call) => executeToolCall(
+              tools: toolSelection.exposedTools,
+              call: call,
+              messages: normalizedMessages,
+              approvalById: approvalById,
+              abortSignal: scope.signal,
+              timeout: minTimeout(
+                remainingTimeout(
+                  timeout: timeout?.total,
+                  elapsed: overallStopwatch.elapsed,
+                ),
+                timeout?.toolTimeoutFor(call.toolName),
               ),
-              timeout?.toolTimeoutFor(call.toolName),
+              approvalPolicy:
+                  approvalPolicyFor?.call(call.toolName, call.input) ??
+                  approvalPolicy,
+              policyRevision: approvalPolicyRevision,
+              generationContext: generationContext ?? runtimeContext,
+              runtimeContext: runtimeContext,
+              requireExactApprovalBinding: true,
+              onToolCallStart:
+                  onToolExecutionStart ?? experimentalOnToolCallStart,
+              onToolCallFinish:
+                  onToolExecutionEnd ?? experimentalOnToolCallFinish,
             ),
-            approvalPolicy:
-                approvalPolicyFor?.call(call.toolName, call.input) ??
-                approvalPolicy,
-            policyRevision: approvalPolicyRevision,
-            generationContext: generationContext ?? runtimeContext,
-            runtimeContext: runtimeContext,
-            requireExactApprovalBinding: true,
-            onToolCallStart:
-                onToolExecutionStart ?? experimentalOnToolCallStart,
-            onToolCallFinish:
-                onToolExecutionEnd ?? experimentalOnToolCallFinish,
           ),
         );
         for (final execution in executions) {
@@ -777,7 +779,10 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
         finishReason: response.finishReason,
       );
       final shouldStop = shouldStopAfterStep(
-        toolResultsEmpty: providerToolResults.isEmpty && toolResults.isEmpty,
+        toolResultsEmpty:
+            toolResults.isEmpty &&
+            !(providerToolResults.isNotEmpty &&
+                response.finishReason == LanguageModelV4FinishReason.toolCalls),
         hasApprovalRequests: approvalRequests.isNotEmpty,
         snapshot: snapshot,
         conditions: allStopConditions,
@@ -922,7 +927,7 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
     return result;
   } catch (e, st) {
     final filtered = filterBodyBearingError(e, bodyInclusion);
-    final cancelled = scope.signal.isCancelled;
+    final cancelled = isCallerCancellation(abortSignal, e);
     recordMetric(
       AiTelemetryMetrics.totalMs,
       metricStopwatch.elapsedMicroseconds / 1000,

@@ -743,7 +743,7 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
       final publicResponse = _bodyFilteredResult(response, bodyInclusion);
       final step = GenerateTextStep(
         stepNumber: stepNumber,
-        content: stepContent,
+        content: [...stepContent, ...toolResults],
         toolCalls: toolCalls.toList(),
         toolResults: [...providerToolResults, ...toolResults],
         toolApprovalRequests: approvalRequests,

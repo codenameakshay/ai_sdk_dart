@@ -965,7 +965,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
 
         final step = GenerateTextStep(
           stepNumber: stepNumber,
-          content: stepContent,
+          content: [...stepContent, ...localToolResults],
           toolCalls: stepToolCalls,
           toolResults: stepToolResults,
           toolApprovalRequests: stepApprovalRequests,

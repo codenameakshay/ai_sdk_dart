@@ -842,7 +842,7 @@ class ConversationCodec {
           arguments: _requiredMap(json, 'arguments'),
           metadata: _optionalMap(json, 'metadata'),
           providerOptions: _optionalMap(json, 'providerOptions'),
-          providerExecuted: json['providerExecuted'] == true,
+          providerExecuted: _optionalBool(json, 'providerExecuted'),
           extra: _extras(json, {
             'id',
             'type',
@@ -873,8 +873,8 @@ class ConversationCodec {
           isError: isError,
           toolName: _optionalString(json, 'toolName'),
           outputKind: _optionalString(json, 'outputKind'),
-          preliminary: json['preliminary'] == true,
-          isDynamic: json['isDynamic'] == true,
+          preliminary: _optionalBool(json, 'preliminary'),
+          isDynamic: _optionalBool(json, 'isDynamic'),
           executionDeniedReason: _optionalString(json, 'executionDeniedReason'),
           executionDeniedApprovalId: _optionalString(
             json,
@@ -951,6 +951,15 @@ String? _optionalString(Map<String, dynamic> json, String key) {
   if (value == null) return null;
   if (value is! String) {
     throw ConversationValidationException('Expected string "$key"');
+  }
+  return value;
+}
+
+bool _optionalBool(Map<String, dynamic> json, String key) {
+  final value = json[key];
+  if (value == null) return false;
+  if (value is! bool) {
+    throw ConversationValidationException('Expected boolean "$key"');
   }
   return value;
 }

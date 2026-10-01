@@ -52,7 +52,7 @@ class JsonSchemaValidator implements SchemaValidator {
       );
     }
     return js.JsonSchema.create(
-      schema,
+      (jsonDecode(jsonEncode(schema)) as Map).cast<String, dynamic>(),
       schemaVersion: _version(schema[r'$schema']),
       refProvider: js.RefProvider.sync(
         (ref) => throw UnsupportedError(

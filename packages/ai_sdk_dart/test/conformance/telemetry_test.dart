@@ -516,6 +516,75 @@ void main() {
       expect(outcomes(sink), {AiTelemetryMetrics.cancelled});
     });
 
+    test(
+      'generateText records failure for provider cancellation error',
+      () async {
+        final sink = _MetricSink();
+        await expectLater(
+          generateText(
+            model: FakeErrorModel(const AiOperationCancelledError()),
+            prompt: 'Hi',
+            telemetry: TelemetrySettings(isEnabled: true, metricSink: sink),
+          ),
+          throwsA(isA<AiOperationCancelledError>()),
+        );
+        expect(outcomes(sink), {AiTelemetryMetrics.failure});
+      },
+    );
+
+    test(
+      'streamText records failure for provider cancellation error',
+      () async {
+        final sink = _MetricSink();
+        final caller = CancellationToken();
+        final result = await streamText(
+          model: FakeErrorModel(const AiOperationCancelledError()),
+          prompt: 'Hi',
+          abortSignal: caller,
+          telemetry: TelemetrySettings(isEnabled: true, metricSink: sink),
+        );
+        await expectLater(
+          result.text,
+          throwsA(isA<AiOperationCancelledError>()),
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(outcomes(sink), {AiTelemetryMetrics.failure});
+      },
+    );
+
+    test(
+      'streamObject records failure for provider acquisition cancellation',
+      () async {
+        final sink = _MetricSink();
+        await expectLater(
+          streamObject(
+            model: FakeErrorModel(const AiOperationCancelledError()),
+            schema: schema,
+            telemetry: TelemetrySettings(isEnabled: true, metricSink: sink),
+          ),
+          throwsA(isA<AiOperationCancelledError>()),
+        );
+        expect(outcomes(sink), {AiTelemetryMetrics.failure});
+      },
+    );
+
+    test(
+      'streamObject records failure for in-stream cancellation error',
+      () async {
+        final sink = _MetricSink();
+        final result = await streamObject(
+          model: FakeErrorStreamModel(const AiOperationCancelledError()),
+          schema: schema,
+          telemetry: TelemetrySettings(isEnabled: true, metricSink: sink),
+        );
+        await expectLater(
+          result.object,
+          throwsA(isA<AiOperationCancelledError>()),
+        );
+        expect(outcomes(sink), {AiTelemetryMetrics.failure});
+      },
+    );
+
     test('streamObject records failure for a model error', () async {
       final sink = _MetricSink();
       await expectLater(

@@ -927,7 +927,7 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
     return result;
   } catch (e, st) {
     final filtered = filterBodyBearingError(e, bodyInclusion);
-    final cancelled = isCallerCancellation(abortSignal, e);
+    final cancelled = isCallerCancellation(abortSignal);
     recordMetric(
       AiTelemetryMetrics.totalMs,
       metricStopwatch.elapsedMicroseconds / 1000,

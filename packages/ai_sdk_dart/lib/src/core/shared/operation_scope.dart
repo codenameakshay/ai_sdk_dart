@@ -23,8 +23,8 @@ Future<T> runOperation<T>({
   }
 }
 
-bool isCallerCancellation(CancellationToken? abortSignal, Object error) =>
-    abortSignal?.isCancelled == true || error is AiOperationCancelledError;
+bool isCallerCancellation(CancellationToken? abortSignal) =>
+    abortSignal?.isCancelled == true;
 
 class OperationScope {
   OperationScope({CancellationToken? abortSignal, Duration? timeout}) {

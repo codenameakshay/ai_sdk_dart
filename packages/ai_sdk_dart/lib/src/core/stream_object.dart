@@ -193,7 +193,7 @@ Future<StreamObjectResult<T>> streamObject<T>({
     telemetrySpan.recordException(filtered, stackTrace: stackTrace);
     recordTerminal(
       success: false,
-      cancelled: isCallerCancellation(abortSignal, error),
+      cancelled: isCallerCancellation(abortSignal),
     );
     Error.throwWithStackTrace(filtered, stackTrace);
   }
@@ -300,7 +300,7 @@ Future<StreamObjectResult<T>> streamObject<T>({
       recordTerminal(success: true, cancelled: false);
     } catch (error, stackTrace) {
       final filtered = filterBodyBearingError(error, bodyInclusion);
-      final wasCancelled = isCallerCancellation(abortSignal, error);
+      final wasCancelled = isCallerCancellation(abortSignal);
       scope.signal.cancel();
       objectCompleter.completeError(filtered, stackTrace);
       objectController.addError(filtered, stackTrace);

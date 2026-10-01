@@ -129,9 +129,9 @@ void main() {
 
     expect(find.text('Message…'), findsOneWidget);
     expect(
-      tester
-          .widget<Directionality>(find.byType(Directionality).last)
-          .textDirection,
+      Directionality.of(
+        tester.element(find.byKey(const ValueKey('chat-composer-field'))),
+      ),
       TextDirection.ltr,
     );
 
@@ -142,9 +142,9 @@ void main() {
 
     expect(find.text('رسالة…'), findsOneWidget);
     expect(
-      tester
-          .widget<Directionality>(find.byType(Directionality).last)
-          .textDirection,
+      Directionality.of(
+        tester.element(find.byKey(const ValueKey('chat-composer-field'))),
+      ),
       TextDirection.rtl,
     );
   });

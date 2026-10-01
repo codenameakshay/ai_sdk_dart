@@ -1,7 +1,7 @@
 import 'package:flutter/widgets.dart';
 
 final _firstLetter = RegExp(r'\p{L}', unicode: true);
-final _rtlLetter = RegExp(r'[֐-ࣿיִ-﷿ﹰ-﻿]');
+final _rtlLetter = RegExp(r'[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]');
 
 /// The paragraph direction implied by [text]'s first letter, or null when it
 /// has none, so the ambient [Directionality] applies.

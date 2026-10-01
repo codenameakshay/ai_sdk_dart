@@ -276,6 +276,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
           prompt: prompt,
           messages: List.unmodifiable(normalizedMessages),
           runtimeContext: runtimeContext,
+          generationContext: generationContext,
         ),
       ),
     );
@@ -305,6 +306,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
               messages: List.unmodifiable(normalizedMessages),
               stopConditions: allStopConditions,
               runtimeContext: runtimeContext,
+              generationContext: generationContext,
             ),
           ),
           raceCancellation: true,
@@ -350,6 +352,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
               model: stepModel,
               messages: List.unmodifiable(stepMessages),
               steps: List.unmodifiable(steps),
+              instructions: currentInstructions,
             ),
           ),
         );

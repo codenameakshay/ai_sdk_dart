@@ -1040,19 +1040,10 @@ ConversationFileData? _fileData(Object? value) {
 
 ConversationFileData? _fileDataFromUrl(String url) {
   if (!url.startsWith('data:')) return null;
-  final comma = url.indexOf(',');
-  if (comma < 0) {
-    throw const RemoteProtocolException('Data URL has no payload');
-  }
-  final header = url.substring(5, comma);
-  final payload = url.substring(comma + 1);
   try {
-    if (header.endsWith(';base64')) {
-      return ConversationFileBytes(Uint8List.fromList(base64Decode(payload)));
-    }
-    return ConversationFileBytes(Uint8List.fromList(utf8.encode(payload)));
+    return ConversationFileBytes(UriData.parse(url).contentAsBytes());
   } on FormatException {
-    throw const RemoteProtocolException('Data URL has invalid base64');
+    throw const RemoteProtocolException('Invalid data URL');
   }
 }
 

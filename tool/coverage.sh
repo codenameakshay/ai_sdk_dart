@@ -19,6 +19,7 @@ cd "$ROOT"
 DART="${DART:-dart}"
 FLUTTER="${FLUTTER:-flutter}"
 THRESHOLD="${1:-0}"
+PKG_CONFIG="$ROOT/.dart_tool/package_config.json"
 MERGED="$ROOT/coverage/lcov.info"
 
 # Pure-Dart packages (run with `dart test --coverage-path`).
@@ -31,10 +32,18 @@ summarize() { # $1 = label, LCOV on stdin
   awk -F: -v label="$1" '
     /^LF:/{lf+=$2} /^LH:/{lh+=$2}
     END{ if (lf>0) printf "  %-26s %6.2f%%  (%d/%d)\n", label, 100*lh/lf, lh, lf;
-         else printf "  %-26s   no data\n", label }'
+         else { printf "  %-26s   no data\n", label; exit 1 } }'
 }
 
 mkdir -p "$ROOT/coverage"
+rm -f "$MERGED"
+for p in $FLUTTER_PKGS; do
+  rm -f "$ROOT/packages/$p/coverage/lcov.info"
+done
+if [ ! -f "$PKG_CONFIG" ]; then
+  echo "Missing $PKG_CONFIG. Run '$FLUTTER pub get' first."
+  exit 1
+fi
 
 # One `dart test` process for all pure-Dart packages: a process per package
 # spent most of its time on start-up. It runs from the repo root so tests that
@@ -46,6 +55,10 @@ done
 # shellcheck disable=SC2086
 $DART test --reporter=failures-only --coverage-path="$MERGED" \
   --coverage-package="^(${DART_PKGS// /|})\$" $dart_test_dirs
+if [ ! -f "$MERGED" ]; then
+  echo "Missing Dart coverage output at $MERGED."
+  exit 1
+fi
 
 for p in $FLUTTER_PKGS; do
   ( cd "$ROOT/packages/$p"; $FLUTTER test --no-pub --reporter=failures-only --coverage )
@@ -56,8 +69,13 @@ for p in $DART_PKGS; do
   awk -v dir="/packages/$p/lib/" '/^SF:/{keep=index($0, dir)} keep' "$MERGED" | summarize "$p"
 done
 for p in $FLUTTER_PKGS; do
-  summarize "$p" < "$ROOT/packages/$p/coverage/lcov.info"
-  cat "$ROOT/packages/$p/coverage/lcov.info" >> "$MERGED"
+  flutter_lcov="$ROOT/packages/$p/coverage/lcov.info"
+  if [ ! -f "$flutter_lcov" ]; then
+    echo "Missing Flutter coverage output at $flutter_lcov."
+    exit 1
+  fi
+  summarize "$p" < "$flutter_lcov"
+  cat "$flutter_lcov" >> "$MERGED"
 done
 
 echo "-------------------------------------------------"

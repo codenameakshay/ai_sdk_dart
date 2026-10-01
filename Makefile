@@ -120,7 +120,7 @@ test:
 
 ## Run the example app tests only (CI pairs this with coverage-check)
 test-examples:
-	$(FLUTTER) test $(FLUTTER_APP)/ $(ADVANCED_APP)/
+	$(FLUTTER) test --no-pub $(FLUTTER_APP)/ $(ADVANCED_APP)/
 
 ## Run one analyzer over the whole workspace (packages, examples, tool)
 analyze:

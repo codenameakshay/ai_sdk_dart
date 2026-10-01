@@ -9,8 +9,9 @@
 /// See README.md for the full demo list and the APIs each one exercises.
 ///
 /// Prerequisites:
-///   Set OPENAI_API_KEY before running. Demos that need it print a skip
-///   line and return instead of crashing when it is absent.
+///   Pass the key with --define=OPENAI_API_KEY=... or through
+///   `make run-basic`. Demos that need it print a skip line and return
+///   instead of crashing when it is absent.
 library;
 
 import 'dart:async';
@@ -34,9 +35,11 @@ void header(String title) {
 
 /// Returns the OpenAI key, or prints a skip line and returns null.
 String? requireOpenAiKey() {
-  final key = Platform.environment['OPENAI_API_KEY'];
-  if (key == null || key.isEmpty) {
-    print('  ⏭ skipped: set OPENAI_API_KEY to run this demo.');
+  const key = String.fromEnvironment('OPENAI_API_KEY');
+  if (key.isEmpty) {
+    print(
+      '  ⏭ skipped: pass --define=OPENAI_API_KEY=sk-... (or use make run-basic) to run this demo.',
+    );
     return null;
   }
   return key;
@@ -276,12 +279,9 @@ Future<void> demo6CancellationAndDeadlines() async {
     await generateText(
       model: openai('gpt-4.1-mini'),
       prompt: 'Say hello.',
-      timeout: const TimeoutConfiguration(
-        total: Duration(seconds: 30),
-        firstChunk: Duration(seconds: 10),
-      ),
+      timeout: const TimeoutConfiguration(total: Duration(seconds: 30)),
     );
-  } on AiOperationCancelledError {
+  } on TimeoutException {
     print('Deadline exceeded.');
   }
 }
@@ -290,7 +290,6 @@ Future<void> demo6CancellationAndDeadlines() async {
 
 Future<void> demo7StructuredOutput() async {
   header('7 · Structured output (Schema.decoderOnly vs validatedJsonSchema)');
-  if (requireOpenAiKey() == null) return;
 
   const jsonSchema = {
     'type': 'object',
@@ -313,16 +312,22 @@ Future<void> demo7StructuredOutput() async {
     fromJson: (json) => json,
   );
 
+  const malformed = {'capital': 42};
+  print('decoderOnly accepted: ${decoderOnly.fromJson(malformed)}');
+  try {
+    validated.fromJson(malformed);
+  } on SchemaValidationException catch (e) {
+    print('validatedJsonSchema rejected: $e');
+  }
+
+  if (requireOpenAiKey() == null) return;
+
   final result = await generateText<Map<String, dynamic>>(
     model: openai('gpt-4.1-mini'),
     prompt: 'Capital and approximate population of France?',
     output: Output.object(schema: validated),
   );
   print('Validated object : ${result.output}');
-  print(
-    'decoderOnly schema is the same shape without pre-decode validation: '
-    '${decoderOnly.jsonSchema.keys}',
-  );
 }
 
 // ─── 8. streamObject — partial snapshots + patchStream ──────────────────────
@@ -569,7 +574,7 @@ Future<void> main(List<String> args) async {
     final entry = _demos[number];
     if (entry == null) {
       print('No such demo: $number (valid: 1-${_demos.length})');
-      continue;
+      exit(64);
     }
     try {
       await entry.$2();

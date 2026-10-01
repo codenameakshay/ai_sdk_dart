@@ -46,9 +46,7 @@ A pure-Dart command-line program that exercises the full SDK against real provid
 OPENAI_API_KEY=sk-... make run-basic
 ```
 
-Covers: `generateText`, `streamText`, structured output (`Output.object` / `array` /
-`choice` / `json`), type-safe tools, multi-step agent loops, `embed` +
-`cosineSimilarity`, and the middleware system.
+A 15-demo tour of the v3 contracts, selectable by number (`dart run lib/main.dart 5`).
 
 ---
 

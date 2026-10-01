@@ -24,7 +24,7 @@
 ///
 /// Run:
 ///   dart run lib/mcp_demo.dart                          # discovery + tool call
-///   OPENAI_API_KEY=sk-... dart run lib/mcp_demo.dart    # also runs the LLM step
+///   dart run --define=OPENAI_API_KEY=sk-... lib/mcp_demo.dart    # also runs the LLM step
 library;
 
 import 'dart:convert';
@@ -87,8 +87,8 @@ Future<void> main() async {
       transport: _FlakyTransport(),
       protocolMode: MCPProtocolMode.modern,
     );
-    await unsafeClient.initialize();
     try {
+      await unsafeClient.initialize();
       await unsafeClient.callTool('rollDice', {'sides': 6});
       print('unexpected: no ambiguity was raised');
     } on MCPAmbiguousToolCompletionException catch (e) {
@@ -112,8 +112,8 @@ Future<void> main() async {
         maxDelayMs: 10,
       ),
     );
-    await safeClient.initialize();
     try {
+      await safeClient.initialize();
       final recovered = await safeClient.callTool('getWeather', {
         'city': 'Paris',
       }, retryOnTransportFailure: true);
@@ -124,12 +124,12 @@ Future<void> main() async {
 
     // 6. Hand the discovered tools to the model so it can call them itself.
     //    Requires an OpenAI key; the MCP steps above work without one.
-    final apiKey = Platform.environment['OPENAI_API_KEY'];
-    if (apiKey == null || apiKey.isEmpty) {
+    const apiKey = String.fromEnvironment('OPENAI_API_KEY');
+    if (apiKey.isEmpty) {
       header('LLM step skipped');
       print(
-        'Set OPENAI_API_KEY to let the model call the MCP tools via '
-        'generateText:\n  export OPENAI_API_KEY=sk-...',
+        'Pass the key to let the model call the MCP tools via '
+        'generateText:\n  make run-mcp OPENAI_API_KEY=sk-...',
       );
     } else {
       header('generateText with MCP tools');

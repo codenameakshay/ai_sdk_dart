@@ -457,7 +457,9 @@ class _GoogleLanguageModel extends LanguageModelV4 {
             if (functionCall != null) {
               final toolCall = _parseGoogleFunctionCall(functionCall);
               var state = activeToolCalls[partIndex];
-              if (state == null || state.toolName != toolCall.toolName) {
+              if (state == null ||
+                  state.toolName != toolCall.toolName ||
+                  (toolCall.id != null && state.toolCallId != toolCall.id)) {
                 if (state != null) {
                   _emitGoogleToolCall(controller, state);
                 }

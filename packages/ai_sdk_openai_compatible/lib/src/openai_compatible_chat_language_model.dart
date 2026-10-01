@@ -213,7 +213,10 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
   Future<LanguageModelV4StreamResult> doStream(
     LanguageModelV4CallOptions options,
   ) async {
-    final cancellation = DioCancellationScope(options.abortSignal);
+    final cancellation = DioCancellationScope(
+      options.abortSignal,
+      alwaysCreateToken: true,
+    );
     late final Map<String, dynamic> requestBody;
     final Response<ResponseBody> response;
     try {

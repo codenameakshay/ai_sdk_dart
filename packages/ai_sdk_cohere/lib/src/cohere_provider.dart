@@ -314,7 +314,7 @@ class _CohereLanguageModel extends LanguageModelV4 {
   ) async {
     final cancellation = DioCancellationScope(options.abortSignal);
     final resolvedHeaders = await cancellation.run(headers);
-    final body = _buildBody(options);
+    final body = await cancellation.run(() => _buildBody(options));
 
     final Response<Map<String, dynamic>> response;
     try {
@@ -389,7 +389,8 @@ class _CohereLanguageModel extends LanguageModelV4 {
   ) async {
     final cancellation = DioCancellationScope(options.abortSignal);
     final resolvedHeaders = await cancellation.run(headers);
-    final body = _buildBody(options)..['stream'] = true;
+    final body = await cancellation.run(() => _buildBody(options))
+      ..['stream'] = true;
 
     final Response<ResponseBody> response;
     try {

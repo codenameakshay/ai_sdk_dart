@@ -88,38 +88,42 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
     final po = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
-    var (thinking, cacheControl, effort, cleanedPo) = _extractAnthropicOptions(
-      po,
+    var (thinking, cacheControl, effort, cleanedPo) = await cancellation.run(
+      () => _extractAnthropicOptions(po),
     );
     if (effort == null) {
-      final mapped = _anthropicReasoning(
-        options.reasoning,
-        modelId: modelId,
-        maxOutputTokens: options.maxOutputTokens,
+      final mapped = await cancellation.run(
+        () => _anthropicReasoning(
+          options.reasoning,
+          modelId: modelId,
+          maxOutputTokens: options.maxOutputTokens,
+        ),
       );
       if (mapped != null) {
         thinking ??= mapped.thinking;
         effort = mapped.effort;
       }
     }
-    final requestBody = {
-      'model': modelId,
-      'max_tokens': options.maxOutputTokens ?? 1024,
-      'system': options.prompt.system,
-      'messages': _toAnthropicMessages(options.prompt),
-      if (options.temperature != null) 'temperature': options.temperature,
-      if (options.topP != null) 'top_p': options.topP,
-      if (options.stopSequences.isNotEmpty)
-        'stop_sequences': options.stopSequences,
-      if (options.tools.isNotEmpty)
-        'tools': options.tools.map(_toAnthropicTool).toList(),
-      if (options.toolChoice != null)
-        'tool_choice': _toAnthropicToolChoice(options.toolChoice!),
-      'thinking': ?thinking,
-      'cache_control': ?cacheControl,
-      ..._anthropicOutputConfig(options.responseFormat, effort: effort),
-      ...?cleanedPo,
-    };
+    final requestBody = await cancellation.run(
+      () => {
+        'model': modelId,
+        'max_tokens': options.maxOutputTokens ?? 1024,
+        'system': options.prompt.system,
+        'messages': _toAnthropicMessages(options.prompt),
+        if (options.temperature != null) 'temperature': options.temperature,
+        if (options.topP != null) 'top_p': options.topP,
+        if (options.stopSequences.isNotEmpty)
+          'stop_sequences': options.stopSequences,
+        if (options.tools.isNotEmpty)
+          'tools': options.tools.map(_toAnthropicTool).toList(),
+        if (options.toolChoice != null)
+          'tool_choice': _toAnthropicToolChoice(options.toolChoice!),
+        'thinking': ?thinking,
+        'cache_control': ?cacheControl,
+        ..._anthropicOutputConfig(options.responseFormat, effort: effort),
+        ...?cleanedPo,
+      },
+    );
     final Response<Map<String, dynamic>> response;
     try {
       response = await client.post<Map<String, dynamic>>(
@@ -249,39 +253,43 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
     final po = options.providerOptions != null
         ? options.providerOptions![provider]
         : null;
-    var (thinking, cacheControl, effort, cleanedPo) = _extractAnthropicOptions(
-      po,
+    var (thinking, cacheControl, effort, cleanedPo) = await cancellation.run(
+      () => _extractAnthropicOptions(po),
     );
     if (effort == null) {
-      final mapped = _anthropicReasoning(
-        options.reasoning,
-        modelId: modelId,
-        maxOutputTokens: options.maxOutputTokens,
+      final mapped = await cancellation.run(
+        () => _anthropicReasoning(
+          options.reasoning,
+          modelId: modelId,
+          maxOutputTokens: options.maxOutputTokens,
+        ),
       );
       if (mapped != null) {
         thinking ??= mapped.thinking;
         effort = mapped.effort;
       }
     }
-    final requestBody = {
-      'model': modelId,
-      'max_tokens': options.maxOutputTokens ?? 1024,
-      'system': options.prompt.system,
-      'messages': _toAnthropicMessages(options.prompt),
-      'stream': true,
-      if (options.temperature != null) 'temperature': options.temperature,
-      if (options.topP != null) 'top_p': options.topP,
-      if (options.stopSequences.isNotEmpty)
-        'stop_sequences': options.stopSequences,
-      if (options.tools.isNotEmpty)
-        'tools': options.tools.map(_toAnthropicTool).toList(),
-      if (options.toolChoice != null)
-        'tool_choice': _toAnthropicToolChoice(options.toolChoice!),
-      'thinking': ?thinking,
-      'cache_control': ?cacheControl,
-      ..._anthropicOutputConfig(options.responseFormat, effort: effort),
-      ...?cleanedPo,
-    };
+    final requestBody = await cancellation.run(
+      () => {
+        'model': modelId,
+        'max_tokens': options.maxOutputTokens ?? 1024,
+        'system': options.prompt.system,
+        'messages': _toAnthropicMessages(options.prompt),
+        'stream': true,
+        if (options.temperature != null) 'temperature': options.temperature,
+        if (options.topP != null) 'top_p': options.topP,
+        if (options.stopSequences.isNotEmpty)
+          'stop_sequences': options.stopSequences,
+        if (options.tools.isNotEmpty)
+          'tools': options.tools.map(_toAnthropicTool).toList(),
+        if (options.toolChoice != null)
+          'tool_choice': _toAnthropicToolChoice(options.toolChoice!),
+        'thinking': ?thinking,
+        'cache_control': ?cacheControl,
+        ..._anthropicOutputConfig(options.responseFormat, effort: effort),
+        ...?cleanedPo,
+      },
+    );
     final Response<ResponseBody> response;
     try {
       response = await client.post<ResponseBody>(

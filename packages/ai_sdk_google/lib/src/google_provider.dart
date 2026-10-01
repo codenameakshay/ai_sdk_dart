@@ -89,35 +89,37 @@ class _GoogleLanguageModel extends LanguageModelV4 {
     );
     final modelPath = _modelPath(modelId);
     final providerOptions = _googleProviderOptions(options.providerOptions);
-    final requestBody = {
-      'contents': _toGoogleContents(options.prompt.messages),
-      if (options.prompt.system != null)
-        'systemInstruction': {
-          'parts': [
-            {'text': options.prompt.system},
-          ],
+    final requestBody = await cancellation.run(
+      () => {
+        'contents': _toGoogleContents(options.prompt.messages),
+        if (options.prompt.system != null)
+          'systemInstruction': {
+            'parts': [
+              {'text': options.prompt.system},
+            ],
+          },
+        'generationConfig': {
+          if (options.maxOutputTokens != null)
+            'maxOutputTokens': options.maxOutputTokens,
+          if (options.temperature != null) 'temperature': options.temperature,
+          if (options.topP != null) 'topP': options.topP,
+          if (options.topK != null) 'topK': options.topK,
+          if (options.stopSequences.isNotEmpty)
+            'stopSequences': options.stopSequences,
+          if (options.responseFormat
+              case final LanguageModelV4JsonResponseFormat format) ...{
+            'responseMimeType': 'application/json',
+            'responseJsonSchema': ?format.schema,
+          },
+          'thinkingConfig': ?_googleThinkingConfig(modelId, options),
         },
-      'generationConfig': {
-        if (options.maxOutputTokens != null)
-          'maxOutputTokens': options.maxOutputTokens,
-        if (options.temperature != null) 'temperature': options.temperature,
-        if (options.topP != null) 'topP': options.topP,
-        if (options.topK != null) 'topK': options.topK,
-        if (options.stopSequences.isNotEmpty)
-          'stopSequences': options.stopSequences,
-        if (options.responseFormat
-            case final LanguageModelV4JsonResponseFormat format) ...{
-          'responseMimeType': 'application/json',
-          'responseJsonSchema': ?format.schema,
+        if (options.tools.isNotEmpty) ...{
+          'tools': _buildGoogleTools(options.tools),
         },
-        'thinkingConfig': ?_googleThinkingConfig(modelId, options),
+        ..._googleToolChoicePayload(options.toolChoice),
+        ...?providerOptions,
       },
-      if (options.tools.isNotEmpty) ...{
-        'tools': _buildGoogleTools(options.tools),
-      },
-      ..._googleToolChoicePayload(options.toolChoice),
-      ...?providerOptions,
-    };
+    );
 
     final Response<Map<String, dynamic>> response;
     try {
@@ -300,35 +302,37 @@ class _GoogleLanguageModel extends LanguageModelV4 {
     );
     final modelPath = _modelPath(modelId);
     final providerOptions = _googleProviderOptions(options.providerOptions);
-    final requestBody = {
-      'contents': _toGoogleContents(options.prompt.messages),
-      if (options.prompt.system != null)
-        'systemInstruction': {
-          'parts': [
-            {'text': options.prompt.system},
-          ],
+    final requestBody = await cancellation.run(
+      () => {
+        'contents': _toGoogleContents(options.prompt.messages),
+        if (options.prompt.system != null)
+          'systemInstruction': {
+            'parts': [
+              {'text': options.prompt.system},
+            ],
+          },
+        'generationConfig': {
+          if (options.maxOutputTokens != null)
+            'maxOutputTokens': options.maxOutputTokens,
+          if (options.temperature != null) 'temperature': options.temperature,
+          if (options.topP != null) 'topP': options.topP,
+          if (options.topK != null) 'topK': options.topK,
+          if (options.stopSequences.isNotEmpty)
+            'stopSequences': options.stopSequences,
+          if (options.responseFormat
+              case final LanguageModelV4JsonResponseFormat format) ...{
+            'responseMimeType': 'application/json',
+            'responseJsonSchema': ?format.schema,
+          },
+          'thinkingConfig': ?_googleThinkingConfig(modelId, options),
         },
-      'generationConfig': {
-        if (options.maxOutputTokens != null)
-          'maxOutputTokens': options.maxOutputTokens,
-        if (options.temperature != null) 'temperature': options.temperature,
-        if (options.topP != null) 'topP': options.topP,
-        if (options.topK != null) 'topK': options.topK,
-        if (options.stopSequences.isNotEmpty)
-          'stopSequences': options.stopSequences,
-        if (options.responseFormat
-            case final LanguageModelV4JsonResponseFormat format) ...{
-          'responseMimeType': 'application/json',
-          'responseJsonSchema': ?format.schema,
+        if (options.tools.isNotEmpty) ...{
+          'tools': _buildGoogleTools(options.tools),
         },
-        'thinkingConfig': ?_googleThinkingConfig(modelId, options),
+        ..._googleToolChoicePayload(options.toolChoice),
+        ...?providerOptions,
       },
-      if (options.tools.isNotEmpty) ...{
-        'tools': _buildGoogleTools(options.tools),
-      },
-      ..._googleToolChoicePayload(options.toolChoice),
-      ...?providerOptions,
-    };
+    );
     final Response<ResponseBody> response;
     try {
       response = await client.post<ResponseBody>(

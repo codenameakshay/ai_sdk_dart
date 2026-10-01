@@ -721,6 +721,12 @@ class StreamableHttpClientTransport implements MCPTransport {
         lifetime.checkActive();
         if (refreshed != null && refreshed.isNotEmpty) {
           response = await dispatch(refreshed);
+        } else {
+          throw _transportError(
+            method: request.method,
+            uri: request.url,
+            statusCode: response.statusCode,
+          );
         }
       }
       return response;
@@ -753,6 +759,7 @@ class StreamableHttpClientTransport implements MCPTransport {
       );
     } catch (error) {
       lifetime.finish();
+      if (error is MCPTransportException) rethrow;
       throw _transportError(
         method: request.method,
         uri: request.url,

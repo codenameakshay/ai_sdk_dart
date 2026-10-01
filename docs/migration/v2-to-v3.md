@@ -205,12 +205,12 @@ qualification.
 
 ## Aggregate results and final-step reasoning
 
-`usage`, `content`, `toolCalls`, `toolResults`, `sources`, `files`, warnings,
-and reasoning aggregate successful steps in chronological order. `text`,
-structured `output`, and `finalStep` describe the last successful step. Read
-`finalStep.reasoning` when the application needs reasoning from only the final
-step; read `result.reasoning` when it needs the aggregate. A failed or
-interrupted operation does not invent a final step.
+`usage`, `content`, `toolCalls`, `toolResults`, `sources`, `files`, and warnings
+aggregate successful steps in chronological order. `text`, structured `output`,
+`reasoning`, `reasoningText`, and `finalStep` describe the last successful step.
+Read `result.steps.expand((step) => step.reasoning)` for reasoning from every
+step. With `streamText`, await `result.steps` before expanding its reasoning.
+A failed or interrupted operation does not invent a final step.
 
 The migration example in
 [`v3_contracts.dart`](../../packages/ai_sdk_dart/example/migration/v3_contracts.dart)

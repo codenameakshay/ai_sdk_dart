@@ -15,6 +15,8 @@ class EmbeddingsPage extends StatefulWidget {
 }
 
 class _EmbeddingsPageState extends State<EmbeddingsPage> {
+  late final _openAi = OpenAIProvider(apiKey: openAiApiKey);
+  late final _google = GoogleGenerativeAIProvider(apiKey: googleApiKey);
   final _text1Controller = TextEditingController(text: 'A cat sits on a mat.');
   final _text2Controller = TextEditingController(
     text: 'A kitten rests on a rug.',
@@ -64,12 +66,8 @@ class _EmbeddingsPageState extends State<EmbeddingsPage> {
       // batch finishes first.
       final result = await embedMany<String>(
         model: useOpenAi
-            ? OpenAIProvider(
-                apiKey: openAiApiKey,
-              ).embedding('text-embedding-3-small')
-            : GoogleGenerativeAIProvider(
-                apiKey: googleApiKey,
-              ).embedding('text-embedding-004'),
+            ? _openAi.embedding('text-embedding-3-small')
+            : _google.embedding('text-embedding-004'),
         values: values,
         maxEmbeddingsPerCall: _maxEmbeddingsPerCall,
         maxParallelCalls: _maxParallelCalls,
@@ -91,7 +89,7 @@ class _EmbeddingsPageState extends State<EmbeddingsPage> {
   Future<void> _compare() async {
     final text1 = _text1Controller.text.trim();
     final text2 = _text2Controller.text.trim();
-    if (text1.isEmpty || text2.isEmpty) return;
+    if (text1.isEmpty || text2.isEmpty || _loading) return;
 
     final useOpenAi = _provider == 'openai';
     if (useOpenAi && openAiApiKey.isEmpty) {
@@ -112,15 +110,11 @@ class _EmbeddingsPageState extends State<EmbeddingsPage> {
     try {
       if (useOpenAi) {
         final e1 = await embed(
-          model: OpenAIProvider(
-            apiKey: openAiApiKey,
-          ).embedding('text-embedding-3-small'),
+          model: _openAi.embedding('text-embedding-3-small'),
           value: text1,
         );
         final e2 = await embed(
-          model: OpenAIProvider(
-            apiKey: openAiApiKey,
-          ).embedding('text-embedding-3-small'),
+          model: _openAi.embedding('text-embedding-3-small'),
           value: text2,
         );
         if (!mounted) return;
@@ -130,15 +124,11 @@ class _EmbeddingsPageState extends State<EmbeddingsPage> {
         });
       } else {
         final e1 = await embed(
-          model: GoogleGenerativeAIProvider(
-            apiKey: googleApiKey,
-          ).embedding('text-embedding-004'),
+          model: _google.embedding('text-embedding-004'),
           value: text1,
         );
         final e2 = await embed(
-          model: GoogleGenerativeAIProvider(
-            apiKey: googleApiKey,
-          ).embedding('text-embedding-004'),
+          model: _google.embedding('text-embedding-004'),
           value: text2,
         );
         if (!mounted) return;
@@ -158,6 +148,8 @@ class _EmbeddingsPageState extends State<EmbeddingsPage> {
 
   @override
   void dispose() {
+    _openAi.dispose();
+    _google.dispose();
     _text1Controller.dispose();
     _text2Controller.dispose();
     _batchController.dispose();
@@ -189,7 +181,9 @@ class _EmbeddingsPageState extends State<EmbeddingsPage> {
                 ButtonSegment(value: 'google', label: Text('Google')),
               ],
               selected: {_provider},
-              onSelectionChanged: (s) => setState(() => _provider = s.first),
+              onSelectionChanged: _loading || _batchLoading
+                  ? null
+                  : (s) => setState(() => _provider = s.first),
             ),
             const SizedBox(height: 16),
             TextField(

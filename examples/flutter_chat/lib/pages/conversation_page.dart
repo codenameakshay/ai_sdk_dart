@@ -175,6 +175,7 @@ class _RemoteConversationPageState extends State<RemoteConversationPage> {
 
 class _ApprovalModel extends LanguageModelV4 {
   int _calls = 0;
+  int _executionsBeforeCall = 0;
   int executions = 0;
 
   @override
@@ -195,19 +196,26 @@ class _ApprovalModel extends LanguageModelV4 {
   Future<LanguageModelV4StreamResult> doStream(
     LanguageModelV4CallOptions options,
   ) async {
-    _calls++;
+    final lastMessage = options.prompt.messages.last;
+    final continuing = lastMessage.role == LanguageModelV4Role.tool;
+    if (!continuing) {
+      _calls++;
+      _executionsBeforeCall = executions;
+    }
+    final callId = 'local-call-$_calls';
     String? continuation;
-    if (_calls > 1) {
-      final result = options.prompt.messages
-          .expand((message) => message.content)
+    if (continuing) {
+      final result = lastMessage.content
           .whereType<LanguageModelV4ToolResultPart>()
           .single;
       if (result.isError) {
-        if (executions != 0) throw StateError('Denied tool executed');
+        if (executions != _executionsBeforeCall) {
+          throw StateError('Denied tool executed');
+        }
         continuation = 'Tool denied; no local action ran.';
       } else {
         final output = result.output;
-        if (executions != 1 ||
+        if (executions != _executionsBeforeCall + 1 ||
             output is! ToolResultOutputText ||
             output.text != 'deleted /tmp/example') {
           throw StateError('Expected one execution and its actual tool result');
@@ -215,22 +223,19 @@ class _ApprovalModel extends LanguageModelV4 {
         continuation = 'Tool result: ${output.text}';
       }
     }
-    final parts = _calls == 1
+    final parts = !continuing
         ? <LanguageModelV4StreamPart>[
-            const StreamPartToolInputStart(
-              id: 'local-call-1',
-              toolName: _localTool,
-            ),
-            const StreamPartToolInputDelta(
-              id: 'local-call-1',
+            StreamPartToolInputStart(id: callId, toolName: _localTool),
+            StreamPartToolInputDelta(
+              id: callId,
               delta: '{"path":"/tmp/example"}',
             ),
-            const StreamPartToolInputEnd(id: 'local-call-1'),
-            const StreamPartToolCall(
+            StreamPartToolInputEnd(id: callId),
+            StreamPartToolCall(
               toolCall: LanguageModelV4ToolCallPart(
-                toolCallId: 'local-call-1',
+                toolCallId: callId,
                 toolName: _localTool,
-                input: {'path': '/tmp/example'},
+                input: const {'path': '/tmp/example'},
               ),
             ),
           ]

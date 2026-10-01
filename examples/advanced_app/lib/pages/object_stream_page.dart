@@ -1,6 +1,7 @@
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_json_schema/ai_sdk_json_schema.dart';
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
+import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:flutter/material.dart';
 
 import '../config.dart';
@@ -18,13 +19,16 @@ import '../config.dart';
 /// runs schema validation before the decoder — an invalid final document
 /// throws rather than silently repairing into a "successful" object.
 class ObjectStreamPage extends StatefulWidget {
-  const ObjectStreamPage({super.key});
+  const ObjectStreamPage({super.key, this.testModel});
+
+  final LanguageModelV4? testModel;
 
   @override
   State<ObjectStreamPage> createState() => _ObjectStreamPageState();
 }
 
 class _ObjectStreamPageState extends State<ObjectStreamPage> {
+  late final _openAi = OpenAIProvider(apiKey: openAiApiKey);
   final _countryController = TextEditingController(text: 'Japan');
 
   static final _schema = validatedJsonSchema<Map<String, dynamic>>(
@@ -64,6 +68,7 @@ class _ObjectStreamPageState extends State<ObjectStreamPage> {
   @override
   void dispose() {
     _cancellation?.cancel();
+    _openAi.dispose();
     _countryController.dispose();
     super.dispose();
   }
@@ -84,7 +89,7 @@ class _ObjectStreamPageState extends State<ObjectStreamPage> {
     _cancellation = cancellation;
     try {
       final result = await streamObject(
-        model: OpenAIProvider(apiKey: openAiApiKey)('gpt-4.1-mini'),
+        model: widget.testModel ?? _openAi('gpt-4.1-mini'),
         schema: _schema,
         instructions: 'Generate a JSON country profile.',
         prompt: 'Generate a country profile for $country.',
@@ -93,7 +98,7 @@ class _ObjectStreamPageState extends State<ObjectStreamPage> {
       final partialSub = result.partialObjectStream.listen((snapshot) {
         if (!mounted || cancellation.isCancelled) return;
         setState(() => _partial = snapshot);
-      });
+      }, onError: (Object _) {});
       final patchSub = result.patchStream.listen((patch) {
         if (!mounted || cancellation.isCancelled) return;
         setState(() {
@@ -101,7 +106,7 @@ class _ObjectStreamPageState extends State<ObjectStreamPage> {
             ..clear()
             ..addAll(patch);
         });
-      });
+      }, onError: (Object _) {});
       try {
         // validatedJsonSchema runs schema validation before the decoder, so
         // an incomplete/invalid final document throws here rather than

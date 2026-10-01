@@ -30,6 +30,9 @@ class ResponsesPage extends StatefulWidget {
 }
 
 class _ResponsesPageState extends State<ResponsesPage> {
+  late final _openAi = OpenAIProvider(apiKey: openAiApiKey);
+  late final _anthropic = AnthropicProvider(apiKey: anthropicApiKey);
+  late final _google = GoogleGenerativeAIProvider(apiKey: googleApiKey);
   final _promptController = TextEditingController(
     text: 'What is notable about the number 41?',
   );
@@ -45,15 +48,9 @@ class _ResponsesPageState extends State<ResponsesPage> {
   LanguageModelV4 _modelFor(_Provider provider) {
     if (widget.testModel != null) return widget.testModel!;
     return switch (provider) {
-      _Provider.openai => OpenAIProvider(
-        apiKey: openAiApiKey,
-      ).responses('gpt-4.1-mini'),
-      _Provider.anthropic => AnthropicProvider(apiKey: anthropicApiKey)(
-        'claude-sonnet-4-20250514',
-      ),
-      _Provider.google => GoogleGenerativeAIProvider(apiKey: googleApiKey)(
-        'gemini-2.0-flash',
-      ),
+      _Provider.openai => _openAi.responses('gpt-6-luna'),
+      _Provider.anthropic => _anthropic('claude-fable-5-1'),
+      _Provider.google => _google('gemini-3.8-flash'),
     };
   }
 
@@ -131,6 +128,9 @@ class _ResponsesPageState extends State<ResponsesPage> {
   @override
   void dispose() {
     _cancellation?.cancel();
+    _openAi.dispose();
+    _anthropic.dispose();
+    _google.dispose();
     _promptController.dispose();
     super.dispose();
   }

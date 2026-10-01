@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:ai_sdk_conversation/ai_sdk_conversation.dart';
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
@@ -148,6 +149,71 @@ void main() {
       TextDirection.rtl,
     );
   });
+
+  for (final decisions in [
+    [true, false, true],
+    [false, true, false],
+  ]) {
+    testWidgets('local conversation handles successive $decisions approvals', (
+      tester,
+    ) async {
+      await tester.pumpWidget(const MaterialApp(home: LocalConversationPage()));
+      await tester.pumpAndSettle();
+      final conversation = tester
+          .widget<AiChatScaffold>(find.byType(AiChatScaffold))
+          .conversationController!;
+      final callIds = <String>{};
+
+      for (final approved in decisions) {
+        await tester.runAsync(
+          () => conversation.send('Please delete the example file.'),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.byType(ToolApprovalCard),
+          findsOneWidget,
+          reason: 'Approval for turn ${callIds.length + 1}',
+        );
+        final card = tester.widget<ToolApprovalCard>(
+          find.byType(ToolApprovalCard),
+        );
+        final request = card.request;
+        expect(callIds.add(request.toolCall.toolCallId), isTrue);
+        expect(request.toolCall.toolName, 'deleteFile');
+        expect(request.toolCall.input, {'path': '/tmp/example'});
+        expect(request.argumentsFingerprint, '{"path":"/tmp/example"}');
+        expect(request.policyRevision, 'default');
+
+        final respond = approved ? card.onApprove : card.onDeny;
+        respond(null);
+        respond(null);
+        for (var i = 0; i < 100; i++) {
+          await tester.pump(const Duration(milliseconds: 20));
+          final message = conversation.conversation.messages.last;
+          if (message.status == ConversationMessageStatus.complete &&
+              message.parts.whereType<TextPart>().isNotEmpty) {
+            break;
+          }
+          await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+        }
+        expect(
+          conversation.conversation.messages.last.status,
+          ConversationMessageStatus.complete,
+        );
+        final parts = conversation.conversation.messages.last.parts;
+        expect(
+          parts.whereType<TextPart>().map((part) => part.text).join(),
+          approved
+              ? 'Tool result: deleted /tmp/example'
+              : 'Tool denied; no local action ran.',
+        );
+        await tester.pumpAndSettle();
+      }
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
+  }
 }
 
 class _HoldingTextModel extends LanguageModelV4 {

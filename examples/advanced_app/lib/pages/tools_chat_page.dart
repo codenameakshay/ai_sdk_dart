@@ -65,12 +65,13 @@ ToolApprovalPolicy? _approvalPolicyFor(String toolName, Object input) =>
     toolName == 'deleteFile' ? ToolApprovalPolicy.always : null;
 
 class _ToolsChatPageState extends State<ToolsChatPage> {
+  late final _openAi = OpenAIProvider(apiKey: openAiApiKey);
   // extractReasoningMiddleware turns `<think>…</think>` spans into reasoning
   // parts, so the model's chain-of-thought shows up in the ReasoningView.
   late final LanguageModelV4 _model =
       widget.testModel ??
       wrapLanguageModel(
-        model: OpenAIProvider(apiKey: openAiApiKey)('gpt-4.1-mini'),
+        model: _openAi('gpt-4.1-mini'),
         middleware: [extractReasoningMiddleware(tagName: 'think')],
       );
 
@@ -197,6 +198,7 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
   @override
   void dispose() {
     _cancellation?.cancel();
+    _openAi.dispose();
     if (_ownsScrollController) _scrollController.dispose();
     super.dispose();
   }
@@ -290,6 +292,11 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
     required bool approved,
     String? reason,
   }) {
+    if (!mounted ||
+        !_pendingApprovals.contains(request) ||
+        _approvalResponses.containsKey(request.approvalId)) {
+      return;
+    }
     _approvalResponses[request.approvalId] =
         LanguageModelV4ToolApprovalResponse(
           approvalId: request.approvalId,
@@ -384,7 +391,7 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
         }
         _bump();
       case StreamTextErrorEvent(:final error):
-        _onError(error);
+        throw error;
       default:
         break;
     }

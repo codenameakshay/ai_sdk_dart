@@ -10,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:advanced_app/main.dart';
 import 'package:advanced_app/pages/conversation_page.dart';
+import 'package:advanced_app/pages/object_stream_page.dart';
 import 'package:advanced_app/pages/responses_page.dart';
 import 'package:advanced_app/pages/tools_chat_page.dart';
 import 'package:advanced_app/pages/widget_gallery_page.dart';
@@ -432,6 +433,49 @@ void main() {
   });
 
   testWidgets(
+    'conversation page restores an empty snapshot without invoking the model',
+    (tester) async {
+      final model = QueuedLanguageModel([
+        [mockText('Unused response.')],
+      ]);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ConversationPage(testAgent: ToolLoopAgent(model: model)),
+        ),
+      );
+      final savedId = tester
+          .widget<AiChatScaffold>(find.byType(AiChatScaffold))
+          .conversationController!
+          .conversation
+          .id;
+      await tester.tap(find.byTooltip('Save snapshot'));
+      await tester.pump();
+      await tester.tap(find.byTooltip('New conversation'));
+      await tester.pump();
+      expect(
+        tester
+            .widget<AiChatScaffold>(find.byType(AiChatScaffold))
+            .conversationController!
+            .conversation
+            .id,
+        isNot(savedId),
+      );
+      await tester.runAsync(() async {
+        await tester.tap(find.byTooltip('Restore snapshot'));
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        await tester.pump();
+      });
+      final restored = tester
+          .widget<AiChatScaffold>(find.byType(AiChatScaffold))
+          .conversationController!
+          .conversation;
+      expect(restored.id, savedId);
+      expect(restored.messages, isEmpty);
+      expect(model.calls, isEmpty);
+    },
+  );
+
+  testWidgets(
     'tools chat keeps history replayable after an approved tool turn',
     (tester) async {
       final model = QueuedLanguageModel([
@@ -556,6 +600,118 @@ void main() {
     expect(find.text('Early.'), findsNothing);
   });
 
+  testWidgets('tools chat ends a failed stream before accepting another turn', (
+    tester,
+  ) async {
+    final controller = StreamController<StreamTextEvent>();
+    final runner = _QueuedToolsRunner([
+      _completedStreamResult(
+        events: const [],
+        stream: controller.stream,
+        finalText: '',
+      ),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(home: ToolsChatPage(streamRunner: runner.call)),
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('chat-composer-field')),
+      'First request',
+    );
+    await tester.runAsync(() async {
+      await tester.tap(find.byKey(const ValueKey('chat-composer-send')));
+      await tester.pump();
+      controller.add(StreamTextErrorEvent(error: StateError('Request failed')));
+      controller.add(
+        const StreamTextTextDeltaEvent(id: 'late', delta: 'Late success'),
+      );
+      unawaited(controller.close());
+      for (var i = 0; i < 50; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        await tester.pump();
+        if (find.textContaining('Request failed').evaluate().isNotEmpty) break;
+      }
+    });
+    expect(find.textContaining('Request failed'), findsOneWidget);
+    expect(find.text('Late success'), findsNothing);
+    expect(
+      tester.widget<ChatComposer>(find.byType(ChatComposer)).isLoading,
+      isFalse,
+    );
+  });
+
+  for (final approved in [true, false]) {
+    testWidgets(
+      'tools chat resumes once after ${approved ? 'approval' : 'denial'}',
+      (tester) async {
+        final model = QueuedLanguageModel([
+          [
+            mockToolCall(
+              toolName: 'deleteFile',
+              input: {'path': 'q3.pdf'},
+              toolCallId: 'delete-1',
+            ),
+          ],
+          [mockText('Decision processed.')],
+        ]);
+        await tester.pumpWidget(
+          MaterialApp(home: ToolsChatPage(testModel: model)),
+        );
+        await tester.enterText(
+          find.byKey(const ValueKey('chat-composer-field')),
+          'Delete q3.pdf',
+        );
+        await tester.runAsync(() async {
+          await tester.tap(find.byKey(const ValueKey('chat-composer-send')));
+          for (var i = 0; i < 50; i++) {
+            await Future<void>.delayed(const Duration(milliseconds: 20));
+            await tester.pump();
+            if (find.byType(ToolApprovalCard).evaluate().isNotEmpty) break;
+          }
+          final card = tester.widget<ToolApprovalCard>(
+            find.byType(ToolApprovalCard),
+          );
+          if (approved) {
+            card.onApprove(null);
+            card.onDeny(null);
+          } else {
+            card.onDeny(null);
+            card.onApprove(null);
+          }
+          for (var i = 0; i < 50; i++) {
+            await Future<void>.delayed(const Duration(milliseconds: 20));
+            await tester.pump();
+            if (find.text('Decision processed.').evaluate().isNotEmpty) break;
+          }
+        });
+        expect(find.text('Decision processed.'), findsOneWidget);
+        expect(model.calls, hasLength(2));
+        final results = [
+          for (final message in model.calls.last.prompt.messages)
+            for (final part in message.content)
+              if (part is LanguageModelV4ToolResultPart) part,
+        ];
+        expect(results, hasLength(1));
+        expect(results.single.toolCallId, 'delete-1');
+        expect(results.single.isError, !approved);
+        expect(
+          results.single.output,
+          approved
+              ? isA<ToolResultOutputText>().having(
+                  (output) => output.text,
+                  'text',
+                  'Deleted /workspace/q3.pdf',
+                )
+              : isA<ToolResultOutputText>().having(
+                  (output) => output.text,
+                  'error',
+                  'Tool execution denied.',
+                ),
+        );
+      },
+    );
+  }
+
   testWidgets('responses page renders reasoning and hosted-tool sources', (
     tester,
   ) async {
@@ -590,6 +746,111 @@ void main() {
     expect(find.textContaining('Flutter 3.44 is current.'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'object stream reports an invalid final object without uncaught stream errors',
+    (tester) async {
+      final model = QueuedLanguageModel([
+        [mockText('{"country":"Japan"}')],
+      ]);
+      await tester.pumpWidget(
+        MaterialApp(home: ObjectStreamPage(testModel: model)),
+      );
+      await tester.runAsync(() async {
+        await tester.tap(find.text('Generate'));
+        for (var i = 0; i < 50; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+          await tester.pump();
+          if (find
+              .textContaining('Schema validation failed')
+              .evaluate()
+              .isNotEmpty) {
+            break;
+          }
+        }
+      });
+      expect(find.textContaining('Schema validation failed'), findsOneWidget);
+      expect(find.text('Country Profile (validated)'), findsNothing);
+      expect(
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Generate'))
+            .onPressed,
+        isNotNull,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  for (final removePage in [false, true]) {
+    testWidgets(
+      'object stream ignores late data after ${removePage ? 'page removal' : 'stop'}',
+      (tester) async {
+        final model = _ControlledStreamModel();
+        await tester.pumpWidget(
+          MaterialApp(home: ObjectStreamPage(testModel: model)),
+        );
+        await tester.runAsync(() async {
+          await tester.tap(find.text('Generate'));
+          for (var i = 0; i < 50 && model.streamCalls.isEmpty; i++) {
+            await Future<void>.delayed(const Duration(milliseconds: 20));
+            await tester.pump();
+          }
+          model.controller.add(const StreamPartTextStart(id: 't1'));
+          model.controller.add(
+            const StreamPartTextDelta(id: 't1', delta: '{"country":"Japan",'),
+          );
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+          await tester.pump();
+          expect(find.text('Japan'), findsNWidgets(2));
+          if (removePage) {
+            await tester.pumpWidget(const SizedBox());
+          } else {
+            await tester.tap(find.text('Stop'));
+            await tester.pump();
+          }
+          model.controller.add(
+            const StreamPartTextDelta(
+              id: 't1',
+              delta: '"capital":"Late capital"}',
+            ),
+          );
+          model.controller.add(const StreamPartTextEnd(id: 't1'));
+          model.controller.add(
+            const StreamPartFinish(
+              finishReason: LanguageModelV4FinishReason.stop,
+            ),
+          );
+          unawaited(model.controller.close());
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+          await tester.pump();
+        });
+        expect(find.text('Late capital'), findsNothing);
+        if (!removePage) {
+          expect(
+            tester
+                .widget<FilledButton>(
+                  find.widgetWithText(FilledButton, 'Generate'),
+                )
+                .onPressed,
+            isNotNull,
+          );
+        }
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+}
+
+class _ControlledStreamModel extends MockLanguageModelV4 {
+  final controller = StreamController<LanguageModelV4StreamPart>();
+
+  @override
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
+  ) async {
+    streamCalls.add(options);
+    return LanguageModelV4StreamResult(stream: controller.stream);
+  }
 }
 
 Future<void> _selectDrawerItem(WidgetTester tester, String label) async {

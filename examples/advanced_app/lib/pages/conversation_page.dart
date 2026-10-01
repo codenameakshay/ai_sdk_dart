@@ -50,6 +50,7 @@ class ConversationPage extends StatefulWidget {
 }
 
 class _ConversationPageState extends State<ConversationPage> {
+  late final _openAi = OpenAIProvider(apiKey: openAiApiKey);
   static final _deleteFileSchema = Schema<Map<String, dynamic>>(
     jsonSchema: const {
       'type': 'object',
@@ -103,7 +104,7 @@ class _ConversationPageState extends State<ConversationPage> {
   ToolLoopAgent _buildAgent() =>
       widget.testAgent ??
       ToolLoopAgent(
-        model: OpenAIProvider(apiKey: openAiApiKey)('gpt-4.1-mini'),
+        model: _openAi('gpt-4.1-mini'),
         instructions:
             'You are a helpful assistant with access to file tools. Use '
             'getWeather for weather questions and deleteFile when asked to '
@@ -175,6 +176,7 @@ class _ConversationPageState extends State<ConversationPage> {
   @override
   void dispose() {
     unawaited(_controller.dispose());
+    _openAi.dispose();
     super.dispose();
   }
 

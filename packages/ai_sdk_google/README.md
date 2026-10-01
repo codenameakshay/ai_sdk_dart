@@ -55,7 +55,7 @@ The core `reasoning:` parameter (`LanguageModelV4Reasoning`, from
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
 final result = await generateText(
-  model: google('gemini-2.0-flash'),
+  model: google('gemini-2.5-pro'),
   reasoning: LanguageModelV4Reasoning.high,
   prompt: 'Solve step by step: if 3x + 5 = 20, what is x?',
 );

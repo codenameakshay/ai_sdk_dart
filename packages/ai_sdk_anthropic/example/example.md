@@ -81,7 +81,7 @@ The core `reasoning:` parameter (`LanguageModelV4Reasoning`, from
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
 final result = await generateText(
-  model: anthropic('claude-sonnet-4-5'),
+  model: anthropic('claude-fable-5-1'),
   reasoning: LanguageModelV4Reasoning.high,
   prompt: 'Solve step by step: if 3x + 5 = 20, what is x?',
 );
@@ -96,6 +96,7 @@ For Anthropic-specific control over the thinking budget, use
 final result = await generateText(
   model: anthropic('claude-sonnet-4-5'),
   prompt: 'Solve step by step: if 3x + 5 = 20, what is x?',
+  maxOutputTokens: 16000,
   providerOptions: {
     'anthropic': AnthropicThinkingOptions(budgetTokens: 10000).toMap(),
   },
@@ -110,9 +111,10 @@ effort together:
 final result = await generateText(
   model: anthropic('claude-sonnet-4-5'),
   prompt: 'Solve step by step: if 3x + 5 = 20, what is x?',
+  maxOutputTokens: 16000,
   providerOptions: {
     'anthropic': AnthropicLanguageModelOptions(
-      thinking: AnthropicThinkingOptions(budgetTokens: 10000, adaptive: true),
+      thinking: AnthropicThinkingOptions(budgetTokens: 10000),
       cacheControl: AnthropicCacheControlOptions(ttl: '5m'),
     ).toMap(),
   },
@@ -130,16 +132,21 @@ in a follow-up turn. Don't read or reconstruct the signature yourself — carry
 it:
 
 ```dart
+const question = ModelMessage(
+  role: ModelMessageRole.user,
+  content: 'Solve step by step: if 3x + 5 = 20, what is x?',
+);
 final first = await generateText(
-  model: anthropic('claude-sonnet-4-5'),
+  model: anthropic('claude-fable-5-1'),
   reasoning: LanguageModelV4Reasoning.high,
-  prompt: 'Solve step by step: if 3x + 5 = 20, what is x?',
+  messages: [question],
 );
 
 final second = await generateText(
-  model: anthropic('claude-sonnet-4-5'),
+  model: anthropic('claude-fable-5-1'),
   reasoning: LanguageModelV4Reasoning.high,
   messages: [
+    question,
     ...first.responseMessages.map(ModelMessage.fromProvider),
     const ModelMessage(role: ModelMessageRole.user, content: 'Now check your work.'),
   ],
@@ -149,10 +156,10 @@ print(second.text);
 
 ---
 
-## Extended thinking (reasoning)
+## Tagged reasoning middleware
 
-Claude's native `thinking` content blocks are surfaced as `ReasoningPart` via
-`extractReasoningMiddleware`:
+`extractReasoningMiddleware` extracts `<think>` tags from text. It does not
+enable Claude's native thinking API, which the adapter handles directly:
 
 ```dart
 final model = wrapLanguageModel(

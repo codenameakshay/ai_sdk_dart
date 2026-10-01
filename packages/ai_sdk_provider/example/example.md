@@ -129,7 +129,14 @@ Future<LanguageModelV4GenerateResult> doGenerate(
           // Cancel the in-flight HTTP call here.
         });
   try {
-    final text = await _callMyApi(options);
+    final prompt = options.prompt.messages
+        .where((m) => m.role == LanguageModelV4Role.user)
+        .lastOrNull
+        ?.content
+        .whereType<LanguageModelV4TextPart>()
+        .map((p) => p.text)
+        .join() ?? '';
+    final text = await _callMyApi(prompt);
     return LanguageModelV4GenerateResult(
       content: [LanguageModelV4TextPart(text: text)],
       finishReason: LanguageModelV4FinishReason.stop,

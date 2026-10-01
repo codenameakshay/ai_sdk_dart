@@ -82,7 +82,7 @@ to Gemini's `thinkingConfig`/`thinkingBudget`:
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
 final result = await generateText(
-  model: google('gemini-2.0-flash'),
+  model: google('gemini-2.5-pro'),
   reasoning: LanguageModelV4Reasoning.high,
   prompt: 'Solve step by step: if 3x + 5 = 20, what is x?',
 );
@@ -98,16 +98,21 @@ yourself — carry `result.responseMessages` through unchanged as history and it
 round-trips automatically:
 
 ```dart
+const question = ModelMessage(
+  role: ModelMessageRole.user,
+  content: 'Solve step by step: if 3x + 5 = 20, what is x?',
+);
 final first = await generateText(
-  model: google('gemini-2.0-flash'),
+  model: google('gemini-2.5-pro'),
   reasoning: LanguageModelV4Reasoning.high,
-  prompt: 'Solve step by step: if 3x + 5 = 20, what is x?',
+  messages: [question],
 );
 
 final second = await generateText(
-  model: google('gemini-2.0-flash'),
+  model: google('gemini-2.5-pro'),
   reasoning: LanguageModelV4Reasoning.high,
   messages: [
+    question,
     ...first.responseMessages.map(ModelMessage.fromProvider),
     const ModelMessage(role: ModelMessageRole.user, content: 'Now check your work.'),
   ],
@@ -188,19 +193,21 @@ print('similarity: ${cosineSimilarity(a.embedding, b.embedding)}');
 
 ```dart
 import 'dart:io';
+import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
 final imageBytes = await File('photo.jpg').readAsBytes();
 
 final result = await generateText(
   model: google('gemini-2.0-flash'),
   messages: [
-    ModelMessage.user(
-      content: [
-        MessageContentImage.fromBytes(
-          data: imageBytes,
-          mimeType: 'image/jpeg',
+    ModelMessage.parts(
+      role: ModelMessageRole.user,
+      parts: [
+        LanguageModelV4ImagePart(
+          image: DataContentBytes(imageBytes),
+          mediaType: 'image/jpeg',
         ),
-        const MessageContentText('What is in this image?'),
+        const LanguageModelV4TextPart(text: 'What is in this image?'),
       ],
     ),
   ],

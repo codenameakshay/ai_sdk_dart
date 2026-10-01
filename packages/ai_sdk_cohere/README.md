@@ -67,8 +67,8 @@ final result = await rerank(
     'Rome is the capital of Italy.',
   ],
 );
-for (final item in result.rerankedDocuments) {
-  print('${item.score}: ${item.document}');
+for (final item in result.documents) {
+  print('${item.relevanceScore}: ${item.document}');
 }
 ```
 

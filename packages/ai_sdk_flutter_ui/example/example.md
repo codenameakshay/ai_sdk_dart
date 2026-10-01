@@ -164,7 +164,7 @@ class _CompletionPageState extends State<CompletionPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               ElevatedButton(
-                onPressed: _completion.isStreaming
+                onPressed: _completion.isLoading
                     ? null
                     : () => _completion.complete('Write a haiku about Dart.'),
                 child: const Text('Generate haiku'),
@@ -240,7 +240,7 @@ class _ObjectStreamPageState extends State<ObjectStreamPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               ElevatedButton(
-                onPressed: _controller.isStreaming
+                onPressed: _controller.isLoading
                     ? null
                     : () => _controller.submit('Describe Japan as a JSON object.'),
                 child: const Text('Describe Japan'),

@@ -18,7 +18,7 @@ Demonstrates:
 | Instructions | `instructions` — the canonical top-level instruction |
 | Canonical stream | `result.stream` — the exhaustive typed event stream |
 | Lifecycle callbacks | `onStart`, `onStepStart`, `onToolExecutionStart`, `onToolExecutionEnd`, `onStepEnd`, `onEnd` |
-| Aggregate vs. final step | `result.usage`/`result.text` (aggregate) vs. `result.finalStep` |
+| Aggregate vs. final step | `result.usage` (aggregate) vs. `result.text`/`result.finalStep` (last step) |
 | History reuse | `responseMessages` + `ModelMessage.fromProvider` |
 | Context + approval | `toolWithContext` + `approvalPolicy` |
 | Bounded concurrency | `maxToolConcurrency` |
@@ -64,6 +64,8 @@ cd examples/flutter_chat && fvm flutter run --dart-define=OPENAI_API_KEY=sk-...
 | Multi-turn streaming chat | `ChatController` |
 | Single-turn completion with presets | `CompletionController` |
 | Live structured JSON stream | `ObjectStreamController` |
+| In-memory local tool approvals | `ConversationController` + `LocalConversationBackend` |
+| Trusted-backend conversation stream | `ConversationController` + `RemoteConversationBackend` |
 
 ---
 
@@ -83,10 +85,13 @@ cd examples/advanced_app && fvm flutter run \
 |---------|----------|
 | Provider switcher (OpenAI / Anthropic / Google) | All |
 | Tools chat (weather + calculator) | OpenAI |
-| Image generation (DALL-E 3) | OpenAI |
+| Image generation (gpt-image-1) | OpenAI |
 | Multimodal (image + text input) | OpenAI |
 | Embeddings + cosine similarity | OpenAI / Google |
 | Text-to-speech | OpenAI |
 | Speech-to-text | OpenAI |
 | Completion | OpenAI |
 | Object stream | OpenAI |
+| In-memory snapshot restore with approvals | OpenAI |
+| Responses API with hosted web search | OpenAI |
+| Shared reasoning controls | OpenAI / Anthropic / Google |

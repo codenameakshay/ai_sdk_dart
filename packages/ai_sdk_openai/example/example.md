@@ -173,7 +173,7 @@ final result = await generateImage(
   model: openai.image('dall-e-3'),
   prompt: 'A futuristic city skyline at sunset, digital art.',
 );
-print(result.images.first.url);
+print('${result.image.bytes.length} bytes of ${result.image.mediaType}');
 ```
 
 ---
@@ -201,7 +201,7 @@ final audioBytes = await File('recording.mp3').readAsBytes();
 final result = await transcribe(
   model: openai.transcription('whisper-1'),
   audio: audioBytes,
-  mimeType: 'audio/mpeg',
+  audioMediaType: 'audio/mpeg',
 );
 print(result.text);
 ```

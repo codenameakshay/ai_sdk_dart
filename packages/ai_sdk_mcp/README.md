@@ -87,8 +87,10 @@ await updates.cancel();
 
 HTTP authorization is host-owned. Pass `MCPAuthConfiguration` with token and
 refresh callbacks; the transport sends bearer credentials on every request
-and retries a rejected 401 once after a refresh. It does not store tokens or
-open browser login flows. Use `validateAuthorizationIssuer` for RFC 9207
+and retries a rejected 401 once after a refresh only when
+`retryAfterUnauthorized: true` is set. Leave it `false` for calls that are not
+safe to replay. It does not store tokens or open browser login flows. Use
+`validateAuthorizationIssuer` for RFC 9207
 issuer binding and `validateRedirectUri` before handing a callback URI to a
 host browser integration.
 

@@ -26,7 +26,7 @@ fvm dart run lib/main.dart 5      # run only demo 5
 | 8 | `streamObject` | immutable partial snapshots, `patchStream`, awaiting the validated `object` |
 | 9 | `embedMany` | `maxEmbeddingsPerCall` + `maxParallelCalls`, input order preserved |
 | 10 | OpenAI Responses API | `openai.responses(...)` + hosted `OpenAIWebSearchTool`, printing `result.sources` |
-| 11 | Reasoning | `reasoning: LanguageModelV4Reasoning.medium`, aggregate `result.reasoning` vs `finalStep.reasoning` |
+| 11 | Reasoning | `reasoning: LanguageModelV4Reasoning.medium`, final-step `result.reasoning` |
 | 12 | Body inclusion | default omits request/response bodies; `BodyInclusionPolicy.all()` opts in |
 | 13 | Conversation persistence | `Conversation` built from an exchange, round-tripped via `ConversationCodec.encode`/`decode` (`ai_sdk_conversation`) |
 | 14 | Middleware | `defaultSettingsMiddleware`, `extractReasoningMiddleware` |
@@ -34,7 +34,8 @@ fvm dart run lib/main.dart 5      # run only demo 5
 
 Requires `OPENAI_API_KEY`. Demos that need it print a skip line and return
 instead of crashing when it is absent — `fvm dart run lib/main.dart` with no
-key exits cleanly after printing 15 skip lines. Prefer the repo target, which
+key runs demo 7's local schema comparison, then exits cleanly after printing
+15 skip lines for the provider requests. Prefer the repo target, which
 forwards the key to the provider factory correctly:
 
 ```sh

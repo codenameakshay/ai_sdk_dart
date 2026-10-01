@@ -20,6 +20,7 @@ const server = http.createServer(async (request, response) => {
     response.writeHead(404, corsHeaders).end();
     return;
   }
+  request.setEncoding('utf8');
   let body = '';
   for await (const chunk of request) body += chunk;
   let messages;

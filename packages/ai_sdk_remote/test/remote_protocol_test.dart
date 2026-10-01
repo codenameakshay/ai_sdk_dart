@@ -1343,6 +1343,209 @@ void main() {
     );
   });
 
+  test('two steps in one message may reuse a text part id', () async {
+    final client = MockClient(
+      (request) async => _response(
+        'data: {"type":"start","messageId":"m1"}\n\n'
+        'data: {"type":"start-step"}\n\n'
+        'data: {"type":"text-start","id":"0"}\n\n'
+        'data: {"type":"text-delta","id":"0","delta":"one"}\n\n'
+        'data: {"type":"text-end","id":"0"}\n\n'
+        'data: {"type":"finish-step"}\n\n'
+        'data: {"type":"start-step"}\n\n'
+        'data: {"type":"text-start","id":"0"}\n\n'
+        'data: {"type":"text-delta","id":"0","delta":"two"}\n\n'
+        'data: {"type":"text-end","id":"0"}\n\n'
+        'data: {"type":"finish-step"}\n\n'
+        'data: {"type":"finish"}\n\n'
+        'data: [DONE]\n\n',
+      ),
+    );
+    final transport = RemoteConversationTransport(
+      endpoint: Uri.parse('https://backend.test/chat'),
+      client: client,
+    );
+    addTearDown(transport.dispose);
+    addTearDown(client.close);
+
+    final snapshots = await transport
+        .send(Conversation(id: 'c1', messages: const []))
+        .toList();
+
+    final parts = snapshots.last.messages.single.parts.whereType<TextPart>();
+    expect(parts.map((part) => part.text), ['one', 'two']);
+    expect(parts.map((part) => part.id).toSet(), hasLength(2));
+  });
+
+  test('sequential sends may reuse wire and synthesized part ids', () async {
+    var turn = 0;
+    final client = MockClient((request) async {
+      turn++;
+      return _response(
+        'data: {"type":"start","messageId":"m$turn"}\n\n'
+        'data: {"type":"file","url":"https://files.test/a.png",'
+        '"mediaType":"image/png"}\n\n'
+        'data: {"type":"text-start","id":"0"}\n\n'
+        'data: {"type":"text-delta","id":"0","delta":"turn $turn"}\n\n'
+        'data: {"type":"text-end","id":"0"}\n\n'
+        'data: {"type":"finish"}\n\n'
+        'data: [DONE]\n\n',
+      );
+    });
+    final transport = RemoteConversationTransport(
+      endpoint: Uri.parse('https://backend.test/chat'),
+      client: client,
+    );
+    addTearDown(transport.dispose);
+    addTearDown(client.close);
+
+    final first =
+        (await transport
+                .send(Conversation(id: 'c1', messages: const []))
+                .toList())
+            .last;
+    final second = (await transport.send(first).toList()).last;
+
+    expect(second.messages.map((message) => message.id), ['m1', 'm2']);
+    final ids = [
+      for (final message in second.messages) ...message.parts.map((p) => p.id),
+    ];
+    expect(ids.toSet(), hasLength(4));
+  });
+
+  test('history omits messages that have no sendable parts', () async {
+    late Map<String, dynamic> body;
+    final client = MockClient((request) async {
+      body = jsonDecode(request.body) as Map<String, dynamic>;
+      return _response(
+        'data: {"type":"start"}\n\n'
+        'data: {"type":"finish"}\n\n'
+        'data: [DONE]\n\n',
+      );
+    });
+    final transport = RemoteConversationTransport(
+      endpoint: Uri.parse('https://backend.test/chat'),
+      client: client,
+    );
+    addTearDown(transport.dispose);
+    addTearDown(client.close);
+
+    await transport
+        .send(
+          Conversation(
+            id: 'c1',
+            messages: [
+              ConversationMessage(
+                id: 'u1',
+                role: ConversationRole.user,
+                parts: [TextPart(id: 'u1-text', text: 'hi')],
+              ),
+              ConversationMessage(
+                id: 'a0',
+                role: ConversationRole.assistant,
+                parts: [
+                  ToolCallPart(
+                    id: 'c0',
+                    callId: 'call-1',
+                    name: 'search',
+                    arguments: const {},
+                  ),
+                ],
+              ),
+              ConversationMessage(
+                id: 'a1',
+                role: ConversationRole.assistant,
+                status: ConversationMessageStatus.failed,
+                parts: const [],
+              ),
+              ConversationMessage(
+                id: 't1',
+                role: ConversationRole.tool,
+                parts: [
+                  ToolResultPart(id: 'r1', callId: 'call-1', output: 'ok'),
+                ],
+              ),
+            ],
+          ),
+        )
+        .toList();
+
+    final messages = body['messages'] as List;
+    expect(messages.map((message) => (message as Map)['id']), ['u1', 'a0']);
+  });
+
+  test('tool input error keeps unparsable raw input', () async {
+    final client = MockClient(
+      (request) async => _response(
+        'data: {"type":"start"}\n\n'
+        'data: {"type":"tool-input-error","toolCallId":"call-1",'
+        '"toolName":"search","input":"{bad json","errorText":"invalid"}\n\n'
+        'data: {"type":"finish"}\n\n'
+        'data: [DONE]\n\n',
+      ),
+    );
+    final transport = RemoteConversationTransport(
+      endpoint: Uri.parse('https://backend.test/chat'),
+      client: client,
+    );
+    addTearDown(transport.dispose);
+    addTearDown(client.close);
+
+    final snapshots = await transport
+        .send(Conversation(id: 'c1', messages: const []))
+        .toList();
+
+    final message = snapshots.last.messages.single;
+    expect(message.status, ConversationMessageStatus.complete);
+    final call = message.parts.whereType<ToolCallPart>().single;
+    expect(call.arguments, isEmpty);
+    expect(call.extra['rawInput'], '{bad json');
+    final result = message.parts.whereType<ToolResultPart>().single;
+    expect(result.isError, isTrue);
+    expect(result.output, 'invalid');
+  });
+
+  test('history omits a tool call whose input never completed', () async {
+    var requests = 0;
+    late Map<String, dynamic> body;
+    final client = MockClient((request) async {
+      requests++;
+      body = jsonDecode(request.body) as Map<String, dynamic>;
+      return _response(
+        requests == 1
+            ? 'data: {"type":"start","messageId":"a1"}\n\n'
+                  'data: {"type":"tool-input-start","toolCallId":"call-1",'
+                  '"toolName":"search"}\n\n'
+                  'data: {"type":"tool-input-delta","toolCallId":"call-1",'
+                  '"inputTextDelta":"{\\"q\\":"}\n\n'
+                  'data: {"type":"abort"}\n\n'
+                  'data: [DONE]\n\n'
+            : 'data: {"type":"start","messageId":"a2"}\n\n'
+                  'data: {"type":"finish"}\n\n'
+                  'data: [DONE]\n\n',
+      );
+    });
+    final transport = RemoteConversationTransport(
+      endpoint: Uri.parse('https://backend.test/chat'),
+      client: client,
+    );
+    addTearDown(transport.dispose);
+    addTearDown(client.close);
+
+    final interrupted =
+        (await transport
+                .send(Conversation(id: 'c1', messages: const []))
+                .toList())
+            .last;
+    expect(
+      interrupted.messages.single.status,
+      ConversationMessageStatus.interrupted,
+    );
+    await transport.send(interrupted).toList();
+
+    expect(body['messages'], isEmpty);
+  });
+
   test('exposes cancellation and protocol exception descriptions', () async {
     final token = RemoteCancellationToken();
     expect(token.isCancelled, isFalse);

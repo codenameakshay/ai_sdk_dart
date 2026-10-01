@@ -171,6 +171,28 @@ void main() {
     transport.dispose();
   });
 
+  test('dispose ends an active stream that has a live token', () async {
+    final server = await _RawSocketServer.start(sendSseHeaders: true);
+    addTearDown(server.close);
+    final token = RemoteCancellationToken();
+    final transport = RemoteConversationTransport(endpoint: server.endpoint);
+    final firstSnapshot = Completer<Conversation>();
+    final done = transport
+        .send(
+          Conversation(id: 'c1', messages: const []),
+          cancellation: token,
+        )
+        .listen((snapshot) {
+          if (!firstSnapshot.isCompleted) firstSnapshot.complete(snapshot);
+        })
+        .asFuture<void>();
+    await firstSnapshot.future;
+    transport.dispose();
+    await done;
+    await server.peerClosed.future;
+    await token.dispose();
+  });
+
   test(
     'pausing downstream pauses and resuming downstream resumes the source',
     () async {

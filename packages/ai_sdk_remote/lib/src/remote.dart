@@ -203,7 +203,7 @@ class RemoteConversationTransport {
           yield reducer.apply(frame);
         }
       } on http.RequestAbortedException {
-        if (cancellation?.isCancelled ?? false || _closed) return;
+        if ((cancellation?.isCancelled ?? false) || _closed) return;
         rethrow;
       } on FormatException catch (error) {
         throw RemoteProtocolException('Malformed SSE or JSON frame: $error');
@@ -217,7 +217,7 @@ class RemoteConversationTransport {
         throw const RemoteProtocolException('Truncated UI message stream');
       }
     } on http.RequestAbortedException {
-      if (cancellation?.isCancelled ?? false || _closed) {
+      if ((cancellation?.isCancelled ?? false) || _closed) {
         throw const RemoteCancelledException();
       }
       rethrow;
@@ -258,7 +258,7 @@ List<Map<String, dynamic>> _toUiMessages(Conversation conversation) {
       if (part is ApprovalPart) approvals[part.callId] = part;
     }
   }
-  return conversation.messages.map((message) {
+  final messages = conversation.messages.map((message) {
     final parts = <Map<String, dynamic>>[];
     for (final part in message.parts) {
       switch (part) {
@@ -372,6 +372,8 @@ List<Map<String, dynamic>> _toUiMessages(Conversation conversation) {
             if (part.providerMetadata.isNotEmpty)
               'providerMetadata': part.providerMetadata,
           });
+        case ToolCallPart() when part.extra['inputPending'] == true:
+          continue;
         case ToolCallPart():
           final result = toolResults[part.callId];
           final approval = approvals[part.callId];
@@ -444,6 +446,10 @@ List<Map<String, dynamic>> _toUiMessages(Conversation conversation) {
       if (message.metadata.isNotEmpty) 'metadata': message.metadata,
     };
   }).toList();
+  return [
+    for (final message in messages)
+      if ((message['parts'] as List).isNotEmpty) message,
+  ];
 }
 
 const _doneFrame = <String, dynamic>{'__done__': true};
@@ -642,9 +648,10 @@ class _ConversationReducer {
   }
 
   void _textStart(Map<String, dynamic> e, {required bool reasoning}) {
-    final id = _string(e, 'id');
-    if (_partIndexes.containsKey(id)) return;
-    _partIndexes[id] = _parts.length;
+    final wireId = _string(e, 'id');
+    if (_partIndexes.containsKey(wireId)) return;
+    final id = _uniqueId(wireId);
+    _partIndexes[wireId] = _parts.length;
     _parts.add(
       reasoning
           ? ReasoningPart(
@@ -670,7 +677,7 @@ class _ConversationReducer {
     final old = _parts[index];
     if (reasoning && old is ReasoningPart) {
       _parts[index] = ReasoningPart(
-        id: id,
+        id: old.id,
         text: old.text + delta,
         providerOptions: _mergeProviderMetadata(
           old.providerOptions,
@@ -679,7 +686,7 @@ class _ConversationReducer {
       );
     } else if (!reasoning && old is TextPart) {
       _parts[index] = TextPart(
-        id: id,
+        id: old.id,
         text: old.text + delta,
         providerOptions: _mergeProviderMetadata(
           old.providerOptions,
@@ -710,7 +717,7 @@ class _ConversationReducer {
       );
     } else if (!reasoning && old is TextPart) {
       _parts[index] = TextPart(
-        id: id,
+        id: old.id,
         text: old.text,
         providerOptions: _mergeProviderMetadata(
           old.providerOptions,
@@ -736,7 +743,10 @@ class _ConversationReducer {
         arguments: {},
         providerExecuted: e['providerExecuted'] == true,
         providerOptions: _optionalMap(e, 'providerMetadata'),
-        extra: {if (e['dynamic'] == true) 'dynamic': true},
+        extra: {
+          if (e['dynamic'] == true) 'dynamic': true,
+          'inputPending': true,
+        },
       ),
     );
   }
@@ -750,7 +760,9 @@ class _ConversationReducer {
   void _toolAvailable(Map<String, dynamic> e, bool error) {
     final callId = _string(e, 'toolCallId');
     final name = _string(e, 'toolName');
-    final args = _map(e['input'], 'input');
+    final rawInput = e['input'];
+    final keepRaw = error && rawInput is! Map;
+    final args = keepRaw ? <String, dynamic>{} : _map(rawInput, 'input');
     final index = _toolIndexes[callId];
     final previous = index == null ? null : _parts[index];
     final previousCall = previous is ToolCallPart ? previous : null;
@@ -768,7 +780,10 @@ class _ConversationReducer {
         previousCall?.providerOptions ?? const {},
         _optionalMap(e, 'providerMetadata'),
       ),
-      extra: {if (dynamicTool) 'dynamic': true},
+      extra: {
+        if (dynamicTool) 'dynamic': true,
+        if (keepRaw) 'rawInput': rawInput,
+      },
     );
     if (index == null) {
       _toolIndexes[callId] = _parts.length;
@@ -906,7 +921,7 @@ class _ConversationReducer {
     final typedData = _fileData(e['data']);
     final data = typedData ?? (url == null ? null : _fileDataFromUrl(url));
     final uri = data == null && url != null ? url : null;
-    final id = 'file-${_parts.length}';
+    final id = _uniqueId('file-${_parts.length}');
     if (reasoning) {
       _addPart(
         ReasoningFilePart(
@@ -937,8 +952,28 @@ class _ConversationReducer {
     if (type.startsWith('data-') && e['transient'] == true) return;
     final n = (_unknownCounts[type] ?? 0) + 1;
     _unknownCounts[type] = n;
-    final raw = {...e, 'id': e['id'] is String ? e['id'] : 'remote-$type-$n'};
+    final raw = {
+      ...e,
+      'id': e['id'] is String ? e['id'] : _uniqueId('remote-$type-$n'),
+    };
     _addPart(UnknownPart(id: raw['id'] as String, type: type, raw: raw));
+  }
+
+  String _uniqueId(String base) {
+    final used = <String>{
+      _assistantId ?? 'remote-1',
+      for (final message in _messages)
+        if (message.id != _assistantId) ...[
+          message.id,
+          ...message.parts.map((part) => part.id),
+        ],
+      ..._parts.map((part) => part.id),
+    };
+    var id = base;
+    for (var n = 2; used.contains(id); n++) {
+      id = '$base#$n';
+    }
+    return id;
   }
 
   void _addPart(ConversationPart part) {

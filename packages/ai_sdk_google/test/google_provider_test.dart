@@ -1251,6 +1251,92 @@ void main() {
       },
     );
 
+    test('usage counts thinking tokens as reasoning output', () async {
+      final server = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.set('content-type', 'text/event-stream');
+        request.response.write(
+          'data: {"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":2,"thoughtsTokenCount":7,"totalTokenCount":14},"candidates":[{"content":{"parts":[{"text":"Hi"}]},"finishReason":"STOP"}]}\n\n',
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = GoogleGenerativeAIProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).call('gemini-2.5-pro');
+
+      final streamResult = await model.doStream(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
+            messages: [
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
+              ),
+            ],
+          ),
+        ),
+      );
+
+      final finish = (await streamResult.stream.toList())
+          .whereType<StreamPartFinish>()
+          .single;
+      expect(finish.usage.outputTokens.total, 9);
+      expect(finish.usage.outputTokens.text, 2);
+      expect(finish.usage.outputTokens.reasoning, 7);
+
+      final generateServer = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'candidates': [
+              {
+                'finishReason': 'STOP',
+                'content': {
+                  'parts': [
+                    {'text': 'Hi'},
+                  ],
+                },
+              },
+            ],
+            'usageMetadata': {
+              'promptTokenCount': 5,
+              'candidatesTokenCount': 2,
+              'thoughtsTokenCount': 7,
+              'totalTokenCount': 14,
+            },
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(generateServer.close);
+
+      final result =
+          await GoogleGenerativeAIProvider(
+                apiKey: 'test',
+                baseUrl: generateServer.baseUrl,
+              )
+              .call('gemini-2.5-pro')
+              .doGenerate(
+                LanguageModelV4CallOptions(
+                  prompt: LanguageModelV4Prompt(
+                    messages: [
+                      LanguageModelV4Message(
+                        role: LanguageModelV4Role.user,
+                        content: [LanguageModelV4TextPart(text: 'hi')],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+      expect(result.usage.outputTokens.total, 9);
+      expect(result.usage.outputTokens.text, 2);
+      expect(result.usage.outputTokens.reasoning, 7);
+    });
+
     test('stream finish includes usage and metadata', () async {
       final server = await _startServer((request) async {
         request.response.statusCode = 200;

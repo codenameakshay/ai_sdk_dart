@@ -1011,6 +1011,8 @@ void _emitGoogleToolCall(
 LanguageModelV4Usage _googleUsageFrom(Map<String, dynamic> usage) {
   final inputTokens = intOrNull(usage['promptTokenCount']);
   final cacheRead = intOrNull(usage['cachedContentTokenCount']);
+  final candidates = intOrNull(usage['candidatesTokenCount']);
+  final thoughts = intOrNull(usage['thoughtsTokenCount']);
   return LanguageModelV4Usage(
     inputTokens: LanguageModelV4InputTokenUsage(
       total: inputTokens,
@@ -1020,7 +1022,11 @@ LanguageModelV4Usage _googleUsageFrom(Map<String, dynamic> usage) {
       cacheRead: cacheRead,
     ),
     outputTokens: LanguageModelV4OutputTokenUsage(
-      total: intOrNull(usage['candidatesTokenCount']),
+      total: candidates == null && thoughts == null
+          ? null
+          : (candidates ?? 0) + (thoughts ?? 0),
+      text: candidates,
+      reasoning: thoughts,
     ),
     raw: usage,
   );

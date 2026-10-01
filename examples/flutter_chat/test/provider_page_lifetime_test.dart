@@ -97,6 +97,7 @@ class _Request extends Fake implements HttpClientRequest {
   void abort([Object? exception, StackTrace? stackTrace]) {
     aborted = true;
     if (!_response.isCompleted) {
+      _response.future.ignore();
       _response.completeError(const SocketException('closed'));
     }
   }

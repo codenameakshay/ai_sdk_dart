@@ -124,7 +124,7 @@ Future<void> main() async => runZonedGuarded(() async {
     prompt: 'repro',
   );
   print('streamObject returned');
-  objectResult.rawStream.listen((_) {}, onError: (_, __) {});
+  objectResult.rawStream.listen((_) {}, onError: (_, _) {});
   try {
     await objectResult.object.timeout(const Duration(milliseconds: 100));
     print('streamObject object: completed');

@@ -67,7 +67,7 @@ ifdef GOOGLE_API_KEY
 endif
 
 .PHONY: all get run run-web run-advanced run-advanced-web run-basic run-mcp \
-        test analyze format format-check dry-run publish help \
+        test test-examples analyze format format-check dry-run publish help \
         coverage coverage-check benchmark catalog-check test-mcp-reference
 
 all: help
@@ -113,28 +113,26 @@ run-mcp:
 
 # ── Quality ───────────────────────────────────────────────────────────────────
 
-## Run tests across all packages
+## Run tests across all packages and examples
 test:
-	$(DART) test tool/makefile_test.dart
-	$(DART) test tool/provider_capability_catalog_test.dart
-	$(DART) test tool/canaries/
+	$(DART) test tool/
+	$(DART) test $(foreach p,$(DART_PKGS),packages/$(p)/test/)
+	$(FLUTTER) test $(foreach p,$(FLUTTER_PKGS),packages/$(p)/)
 	$(DART) --enable-asserts run $(DART_APP)/test/client_lifetime_test.dart
-	$(foreach p,$(DART_PKGS),$(DART) test packages/$(p)/test/ &&) true
-	$(foreach p,$(FLUTTER_PKGS),$(FLUTTER) test packages/$(p)/test/ &&) true
-	$(FLUTTER) test $(FLUTTER_APP)/test/
-	$(FLUTTER) test $(ADVANCED_APP)/test/
+	$(FLUTTER) test $(FLUTTER_APP)/test/ $(ADVANCED_APP)/test/
 	$(FLUTTER) test --dart-define=OPENAI_API_KEY=fixture --dart-define=ANTHROPIC_API_KEY=fixture --dart-define=GOOGLE_API_KEY=fixture $(ADVANCED_APP)/test/provider_lifecycle_test.dart $(ADVANCED_APP)/test/media_page_lifetime_test.dart $(ADVANCED_APP)/test/media_picker_lifetime_test.dart
 	$(DART) test $(DART_EXAMPLES)/test/
 
-## Run dart analyze across all packages
+## Run the example tests only (CI pairs this with coverage-check)
+test-examples:
+	$(DART) --enable-asserts run $(DART_APP)/test/client_lifetime_test.dart
+	$(FLUTTER) test $(FLUTTER_APP)/test/ $(ADVANCED_APP)/test/
+	$(FLUTTER) test --dart-define=OPENAI_API_KEY=fixture --dart-define=ANTHROPIC_API_KEY=fixture --dart-define=GOOGLE_API_KEY=fixture $(ADVANCED_APP)/test/provider_lifecycle_test.dart $(ADVANCED_APP)/test/media_page_lifetime_test.dart $(ADVANCED_APP)/test/media_picker_lifetime_test.dart
+	$(DART) test $(DART_EXAMPLES)/test/
+
+## Run one analyzer over the whole workspace (packages, examples, tool)
 analyze:
-	$(DART) analyze tool/makefile_test.dart tool/provider_capability_catalog.dart tool/provider_capability_catalog_test.dart tool/canaries/
-	$(DART) analyze $(DART_APP)/
-	$(foreach p,$(DART_PKGS),$(DART) analyze packages/$(p)/ &&) true
-	$(foreach p,$(FLUTTER_PKGS),$(FLUTTER) analyze packages/$(p)/ &&) true
-	$(FLUTTER) analyze $(FLUTTER_APP)/
-	$(FLUTTER) analyze $(ADVANCED_APP)/
-	$(DART) analyze $(DART_EXAMPLES)/
+	$(DART) analyze --fatal-infos
 
 ## Run the structured-stream benchmark and print JSON results
 benchmark:
@@ -151,12 +149,10 @@ test-mcp-reference:
 
 ## Run tests with coverage across all packages and print a summary
 coverage:
-	$(DART) pub global activate coverage >/dev/null
 	DART="$(DART)" FLUTTER="$(FLUTTER)" tool/coverage.sh
 
 ## Run coverage and fail if total line coverage is below the 99% gate
 coverage-check:
-	$(DART) pub global activate coverage >/dev/null
 	DART="$(DART)" FLUTTER="$(FLUTTER)" tool/coverage.sh 99
 
 ## Format all Dart source files
@@ -193,6 +189,7 @@ help:
 	@echo "  make run-basic         Run Dart CLI example"
 	@echo "  make run-mcp           Run the MCP CLI demo (works without a key)"
 	@echo "  make test              Run all package tests"
+	@echo "  make test-examples     Run the example app tests only"
 	@echo "  make analyze           Run dart analyze across all packages"
 	@echo "  make format            Format all Dart source files"
 	@echo "  make format-check      Verify Dart formatting without writing changes"

@@ -23,8 +23,8 @@ Standard dev commands are documented in the `Makefile` and `README.md`. The CI w
 | Task | CI-style command | Makefile command |
 |------|-----------------|-----------------|
 | Install deps | `fvm flutter pub get` | `make get` |
-| Lint/analyze | `make analyze DART=dart FLUTTER=flutter` | `make analyze` |
-| Run all tests | `make test DART=dart FLUTTER=flutter` | `make test` |
+| Lint/analyze | `make analyze DART=dart` | `make analyze` |
+| Run all tests | `make coverage-check DART=dart FLUTTER=flutter` then `make test-examples FLUTTER=flutter` | `make test` |
 | Format | `make format-check DART=dart` | `make format` |
 
 ### Running tests
@@ -42,11 +42,14 @@ twice and retains screenshots and launch diagnostics.
 
 ### Gotchas
 
-- `make test` / `make analyze` enumerate every package and example path. They
-  use fake/mock models and JSON fixtures, so no API keys are needed.
+- `make test` runs every package and example test, and `make analyze` runs one
+  analyzer over the whole workspace. They use fake/mock models and JSON
+  fixtures, so no API keys are needed.
+- CI runs each package test once: `make coverage-check` is both the test run
+  and the 99% coverage gate, and `make test-examples` covers the example apps.
 - API keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`) are needed
   for live example requests and explicitly enabled provider canaries.
-- CI installs and starts the pinned remote fixture before tests and coverage,
-  and enables the pinned MCP reference test. See `make test-mcp-reference` and
+- CI installs and starts the pinned remote fixture before the coverage run, and
+  enables the pinned MCP reference test. See `make test-mcp-reference` and
   `docs/provider-canaries.md` for the separate qualification commands.
 - To build and serve the Flutter web app: `cd examples/flutter_chat && fvm flutter build web` then serve `build/web/` with any HTTP server.

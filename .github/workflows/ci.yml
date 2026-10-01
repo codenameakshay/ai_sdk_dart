@@ -1,31 +1,45 @@
 name: CI
 
+# One job. The whole suite takes about a minute, so a second job would spend
+# more time on Flutter setup than it saves. A newer push to a pull request
+# cancels the older run. A change that touches only docs does not start a run.
+
 on:
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   push:
     branches: [main]
-  pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 jobs:
   analyze-test-coverage:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     env:
-      FLUTTER_VERSION: 3.44.3
       AI_SDK_REMOTE_REFERENCE_URL: http://127.0.0.1:8081/chat
       AI_SDK_MCP_REFERENCE: '1'
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
-      - name: Verify pinned Flutter version
-        run: |
-          test "$(python3 -c 'import json; print(json.load(open(".fvmrc"))["flutter"])')" = "$FLUTTER_VERSION"
-
-      - name: Set up Flutter ${{ env.FLUTTER_VERSION }} (includes Dart)
+      # .fvmrc is the only place the Flutter version is pinned.
+      - name: Set up Flutter (includes Dart)
         uses: subosito/flutter-action@v2
         with:
-          channel: stable
-          flutter-version: ${{ env.FLUTTER_VERSION }}
+          flutter-version-file: .fvmrc
+          cache: true
 
       - name: Install dependencies
         run: flutter pub get
@@ -34,7 +48,7 @@ jobs:
         run: make format-check DART=dart
 
       - name: Analyze
-        run: make analyze DART=dart FLUTTER=flutter
+        run: make analyze DART=dart
 
       - name: Set up Node for pinned protocol fixtures
         uses: actions/setup-node@v4
@@ -59,15 +73,19 @@ jobs:
           cat "$RUNNER_TEMP/remote-reference.log"
           exit 1
 
-      - name: Test
-        run: make test DART=dart FLUTTER=flutter
+      # Runs every package test once. The same run feeds the ratchet gate that
+      # prevents coverage regressions across the published packages.
+      - name: Test packages with coverage (gate)
+        run: make coverage-check DART=dart FLUTTER=flutter
+
+      - name: Test tooling
+        run: dart test tool/
 
       - name: Check provider catalog
         run: make catalog-check DART=dart
 
-      # Ratchet gate: prevents coverage regressions across the published packages.
-      - name: Test with coverage (gate)
-        run: make coverage-check DART=dart FLUTTER=flutter
+      - name: Test examples
+        run: make test-examples DART=dart FLUTTER=flutter
 
       - name: Stop remote protocol fixture
         if: always()

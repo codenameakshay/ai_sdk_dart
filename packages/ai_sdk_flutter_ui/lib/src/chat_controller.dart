@@ -191,6 +191,7 @@ class ChatController extends StreamingControllerBase {
     required ToolLoopAgent agent,
     required String text,
   }) async {
+    if (isDisposed) return;
     _lastAgent = agent;
     _discardApprovalState();
     append(ModelMessage(role: ModelMessageRole.user, content: text));
@@ -199,6 +200,7 @@ class ChatController extends StreamingControllerBase {
 
   /// Add a [message] to the list without triggering generation.
   void append(ModelMessage message) {
+    if (isDisposed) return;
     _messages.add(message);
     notifyListenersSafely(immediate: true, content: true);
   }
@@ -209,6 +211,7 @@ class ChatController extends StreamingControllerBase {
   /// fresh response. Requires a prior call to [sendMessage].
   /// Alias: [regenerate].
   Future<void> reload({ToolLoopAgent? agent}) async {
+    if (isDisposed) return;
     final effectiveAgent = agent ?? _lastAgent;
     if (effectiveAgent == null) return;
     _discardApprovalState();
@@ -230,6 +233,7 @@ class ChatController extends StreamingControllerBase {
   ///
   /// Mirrors the JS `useChat` `clearError()` method.
   void clearError() {
+    if (isDisposed) return;
     if (_status == ChatStatus.error) {
       _error = null;
       _status = ChatStatus.ready;
@@ -249,6 +253,7 @@ class ChatController extends StreamingControllerBase {
     required bool approved,
     String? reason,
   }) {
+    if (isDisposed) return;
     final request = _pendingApprovalRequests
         .cast<LanguageModelV4ToolApprovalRequestPart?>()
         .firstWhere(
@@ -520,6 +525,7 @@ class ChatController extends StreamingControllerBase {
 
   /// Cancel the active stream.
   Future<void> stop() async {
+    if (isDisposed) return;
     await _cancelActiveRequest(commitPartial: true);
     _discardApprovalState();
     _status = ChatStatus.ready;
@@ -528,6 +534,7 @@ class ChatController extends StreamingControllerBase {
 
   /// Remove all messages and reset to initial state.
   void clear() {
+    if (isDisposed) return;
     _cancelActiveRequestSync();
     _messages
       ..clear()

@@ -92,7 +92,15 @@ class ConversationController {
   Conversation get conversation => _conversation;
   Stream<void> get changes => _listeners.stream;
 
-  Future<void> send(String text) => backend.send(text);
+  void _checkNotDisposed() {
+    if (_disposed) throw StateError('Conversation controller is disposed');
+  }
+
+  Future<void> send(String text) {
+    _checkNotDisposed();
+    return backend.send(text);
+  }
+
   ConversationRetryInfo get retryInfo => backend is ConversationRetryBackend
       ? (backend as ConversationRetryBackend).retryInfo
       : const ConversationRetryInfo(
@@ -100,6 +108,7 @@ class ConversationController {
           reason: 'This conversation backend does not support retry.',
         );
   Future<void> retryLastTurn() {
+    _checkNotDisposed();
     final retry = backend;
     if (retry is ConversationRetryBackend) {
       return (retry as ConversationRetryBackend).retryLastTurn();
@@ -111,18 +120,28 @@ class ConversationController {
     );
   }
 
-  Future<void> interrupt() => backend.interrupt();
-  Future<void> restore(Map<String, dynamic> encoded) =>
-      backend.restore(encoded);
+  Future<void> interrupt() {
+    _checkNotDisposed();
+    return backend.interrupt();
+  }
+
+  Future<void> restore(Map<String, dynamic> encoded) {
+    _checkNotDisposed();
+    return backend.restore(encoded);
+  }
+
   Future<void> respondToApproval({
     required String approvalId,
     required bool approved,
     String? reason,
-  }) => backend.respondToApproval(
-    approvalId: approvalId,
-    approved: approved,
-    reason: reason,
-  );
+  }) {
+    _checkNotDisposed();
+    return backend.respondToApproval(
+      approvalId: approvalId,
+      approved: approved,
+      reason: reason,
+    );
+  }
 
   Future<void> dispose() async {
     if (_disposed) return;
@@ -207,6 +226,7 @@ class ConversationChatController extends ChatController {
 
   /// Sends text through the conversation backend without a model agent.
   Future<void> sendText(String text) async {
+    if (isDisposed) return;
     final generation = ++_operationGeneration;
     _sending = true;
     _awaitingBackendSnapshot = true;
@@ -231,6 +251,7 @@ class ConversationChatController extends ChatController {
 
   @override
   Future<void> stop() async {
+    if (isDisposed) return;
     ++_operationGeneration;
     _sending = false;
     _awaitingBackendSnapshot = false;
@@ -244,6 +265,7 @@ class ConversationChatController extends ChatController {
     required bool approved,
     String? reason,
   }) {
+    if (isDisposed) return;
     final generation = _operationGeneration;
     unawaited(
       conversationController
@@ -263,6 +285,7 @@ class ConversationChatController extends ChatController {
 
   @override
   void clearError() {
+    if (isDisposed) return;
     if (_conversationError == null) return;
     _conversationError = null;
     _failureDismissed = true;
@@ -271,6 +294,7 @@ class ConversationChatController extends ChatController {
 
   @override
   Future<void> reload({ToolLoopAgent? agent}) async {
+    if (isDisposed) return;
     final generation = ++_operationGeneration;
     _sending = true;
     _awaitingBackendSnapshot = true;

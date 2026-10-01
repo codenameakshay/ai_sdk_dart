@@ -82,6 +82,7 @@ class CompletionController extends StreamingControllerBase {
 
   /// Submit [prompt] and stream the completion.
   Future<void> complete(String prompt) async {
+    if (isDisposed) return;
     _cancelActiveRequestSync();
     final requestId = ++nextRequestId;
     final abortSignal = CancellationToken();
@@ -172,6 +173,7 @@ class CompletionController extends StreamingControllerBase {
   }
 
   Future<void> stop() async {
+    if (isDisposed) return;
     await _cancelActiveRequest();
     _isLoading = false;
     _isStreaming = false;
@@ -179,6 +181,7 @@ class CompletionController extends StreamingControllerBase {
   }
 
   void clear() {
+    if (isDisposed) return;
     _cancelActiveRequestSync();
     _completion = '';
     _error = null;

@@ -63,6 +63,23 @@ Before: request history + generated turns returned as response history
 After:  request history stays with caller; response history = generated turns
 ```
 
+## Text and agent timeouts
+
+`generateText`, `streamText`, and `ToolLoopAgent` now require
+`TimeoutConfiguration` for their `timeout` parameter. To retain a total
+deadline, wrap the duration in `total`:
+
+```dart
+final result = await generateText(
+  model: model,
+  prompt: 'Hello',
+  timeout: const TimeoutConfiguration(total: Duration(seconds: 30)),
+);
+```
+
+Object, embedding, image, speech, transcription, and reranking functions still
+accept `Duration` in `timeout` for a total deadline.
+
 ## MCP replay
 
 A lost reply to `tools/call` is ambiguous: the server may already have performed the action. The SDK no longer automatically retries that call. Handle `MCPAmbiguousToolCompletionException` by checking the remote outcome or asking the application's workflow to reconcile it. Set `retryOnTransportFailure` only for a call whose replay is safe.

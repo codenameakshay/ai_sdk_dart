@@ -60,7 +60,10 @@ implementation-by-implementation audit.
 - **Cancellation and deadlines** — a shared `CancellationToken`
   (`abortSignal`) reaches every adapter and closes real transport work.
   `TimeoutConfiguration` distinguishes total/step/first-chunk/chunk/tool
-  deadlines; `timeout` remains the total-duration shorthand.
+  deadlines for `generateText`, `streamText`, and `ToolLoopAgent`. Set
+  `timeout: const TimeoutConfiguration(total: Duration(seconds: 30))`
+  for a total deadline. Object, embedding, media, and reranking functions
+  accept `Duration`.
 - **`BodyInclusionPolicy`** — request/response bodies and raw provider
   chunks are omitted by default; opt in per call when an integration needs
   to retain them.
@@ -166,7 +169,7 @@ above.
 - `streamText` — real-time token streaming with typed event taxonomy
 - `smoothStream` transform — configurable chunk-size smoothing; `delayInMs` option adds per-chunk delay for UX pacing
 - Multi-step agentic loops with `maxSteps`, `prepareStep`, and `stopConditions`
-- `timeout` parameter on all core functions — apply `Duration` deadlines to any model call
+- `timeout` accepts `TimeoutConfiguration` for text generation, streaming, and agents; object, embedding, media, and reranking functions accept a total `Duration` deadline
 - Canonical callbacks: `onStart`, `onStepStart`, `onToolExecutionStart`, `onToolExecutionEnd`, `onStepEnd`, `onEnd` (plus `onChunk`, `onError`, `onAbort`); deprecated `onFinish`/`onStepFinish` remain fallbacks
 
 ### 🧩 Structured Output

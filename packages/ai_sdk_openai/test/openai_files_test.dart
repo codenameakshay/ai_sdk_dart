@@ -411,6 +411,32 @@ void main() {
     },
   );
 
+  test('a paused download consumer pauses the source body', () async {
+    final source = StreamController<Uint8List>();
+    final dio = Dio()
+      ..httpClientAdapter = FakeHttpAdapter(
+        (_) async => ResponseBody(source.stream, 200, headers: const {}),
+      );
+    addTearDown(() => dio.close(force: true));
+    final files = OpenAIFiles(
+      client: dio,
+      headers: () async => const {},
+      baseUrl: 'https://api.openai.test/v1',
+    );
+    final body = await files.download(
+      const DataContentProviderReference(namespace: 'openai', id: 'file-1'),
+    );
+    final subscription = body.listen((_) {});
+    addTearDown(subscription.cancel);
+    await Future<void>.delayed(Duration.zero);
+    subscription.pause();
+    await Future<void>.delayed(Duration.zero);
+    expect(source.isPaused, isTrue);
+    subscription.resume();
+    await Future<void>.delayed(Duration.zero);
+    expect(source.isPaused, isFalse);
+  });
+
   test('cancelling an unlistened download closes the peer', () async {
     final server = await _StreamingServer.start();
     addTearDown(server.close);

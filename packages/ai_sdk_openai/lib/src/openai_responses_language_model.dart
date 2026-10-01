@@ -114,7 +114,10 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
     }
     try {
       final content = <LanguageModelV4ContentPart>[];
-      final approvalRequestCallIds = _approvalRequestCallIds(options.prompt);
+      final approvalRequestCallIds = _approvalRequestCallIds(
+        options.prompt,
+        provider,
+      );
       for (final raw in (data['output'] as List? ?? const [])) {
         if (raw is! Map) continue;
         final item = raw.cast<String, dynamic>();
@@ -139,7 +142,9 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
               .map((e) => e is Map ? e['text']?.toString() : null)
               .whereType<String>()
               .join();
-          if (summary.isNotEmpty || item['encrypted_content'] != null) {
+          if (summary.isNotEmpty ||
+              item['encrypted_content'] != null ||
+              (item['id'] is String && (item['id'] as String).isNotEmpty)) {
             content.add(
               LanguageModelV4ReasoningPart(
                 text: summary,
@@ -164,6 +169,7 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
           content.addAll(
             _hostedItemContent(
               item,
+              provider,
               toolCallId: approvalId == null
                   ? null
                   : approvalRequestCallIds[approvalId],
@@ -173,7 +179,7 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
           final approvalId =
               item['approval_request_id']?.toString() ??
               _requiredString(item, 'id', 'mcp_approval_request');
-          content.addAll(_hostedItemContent(item));
+          content.addAll(_hostedItemContent(item, provider));
           approvalRequestCallIds[approvalId] = _requiredString(
             item,
             'id',
@@ -189,7 +195,13 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
         content: content,
         finishReason: _finish(
           status,
-          (data['incomplete_details'] as Map?)?['reason']?.toString(),
+          incompleteReason: (data['incomplete_details'] as Map?)?['reason']
+              ?.toString(),
+          clientToolCall: content.any(
+            (part) =>
+                part is LanguageModelV4ToolCallPart && !part.providerExecuted ||
+                part is LanguageModelV4ToolApprovalRequestPart,
+          ),
         ),
         warnings: _warnings(options),
         rawFinishReason: status,
@@ -268,7 +280,11 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
     final reasoningIds = <String>{};
     final reasoningRaw = <String, Map<String, dynamic>>{};
     final emittedHostedItems = <String>{};
-    final approvalRequestCallIds = _approvalRequestCallIds(options.prompt);
+    var sawClientToolCall = false;
+    final approvalRequestCallIds = _approvalRequestCallIds(
+      options.prompt,
+      provider,
+    );
     unawaited(() async {
       try {
         controller.add(StreamPartStreamStart(warnings: _warnings(options)));
@@ -426,11 +442,17 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
                 final approvalId = item['approval_request_id']?.toString();
                 final hostedParts = _hostedItemContent(
                   item,
+                  provider,
                   toolCallId: approvalId == null
                       ? null
                       : approvalRequestCallIds[approvalId],
                 );
                 for (final part in hostedParts) {
+                  if (part is LanguageModelV4ToolCallPart &&
+                          !part.providerExecuted ||
+                      part is LanguageModelV4ToolApprovalRequestPart) {
+                    sawClientToolCall = true;
+                  }
                   switch (part) {
                     case final LanguageModelV4ToolCallPart call:
                       controller.add(StreamPartToolCall(toolCall: call));
@@ -578,8 +600,11 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
               StreamPartFinish(
                 finishReason: _finish(
                   status,
-                  (responseMap?['incomplete_details'] as Map?)?['reason']
-                      ?.toString(),
+                  incompleteReason:
+                      (responseMap?['incomplete_details'] as Map?)?['reason']
+                          ?.toString(),
+                  clientToolCall:
+                      emittedFunctionCalls.isNotEmpty || sawClientToolCall,
                 ),
                 rawFinishReason: status,
                 usage: usage,
@@ -648,6 +673,13 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
   List<Map<String, dynamic>> _input(LanguageModelV4Prompt prompt) {
     final out = <Map<String, dynamic>>[];
     final emittedRawItemIds = <String>{};
+    final functionCallIds = <String>{
+      for (final message in prompt.messages)
+        for (final part in message.content)
+          if (part case LanguageModelV4ToolCallPart call)
+            if (call.providerOptions?[provider]?['raw'] is! Map)
+              call.toolCallId,
+    };
     void addRawItem(Map raw) {
       final item = raw.cast<String, dynamic>();
       final id = item['id'];
@@ -696,7 +728,9 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
             addRawItem(raw);
             continue;
           }
-          if (_toolResultInput(result) case final wire?) out.add(wire);
+          if (_toolResultInput(result, functionCallIds) case final wire?) {
+            out.add(wire);
+          }
         } else if (part case LanguageModelV4ToolApprovalResponse approval) {
           flushContent();
           out.add({
@@ -713,7 +747,12 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
             addRawItem(extension!['raw'] as Map);
             continue;
           }
-          content.add({'type': 'input_text', 'text': text});
+          content.add({
+            'type': message.role == LanguageModelV4Role.assistant
+                ? 'output_text'
+                : 'input_text',
+            'text': text,
+          });
         } else if (part case LanguageModelV4OpaquePart(
           :final provider,
           :final raw,
@@ -765,8 +804,15 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
     return out;
   }
 
-  Map<String, dynamic>? _toolResultInput(LanguageModelV4ToolResultPart result) {
-    if (result.toolName == 'computer') {
+  Map<String, dynamic>? _toolResultInput(
+    LanguageModelV4ToolResultPart result,
+    Set<String> functionCallIds,
+  ) {
+    final isTextResult =
+        result.output is ToolResultOutputText ||
+        result.output is ToolResultOutputErrorText;
+    if (result.toolName == 'computer' &&
+        !(isTextResult && functionCallIds.contains(result.toolCallId))) {
       final output = _computerCallOutput(result.output);
       return {
         'type': 'computer_call_output',
@@ -1067,10 +1113,14 @@ LanguageModelV4Usage _usage(Object? raw) {
 }
 
 LanguageModelV4FinishReason _finish(
-  String? status, [
+  String? status, {
   String? incompleteReason,
-]) => switch (status) {
-  'completed' => LanguageModelV4FinishReason.stop,
+  bool clientToolCall = false,
+}) => switch (status) {
+  'completed' =>
+    clientToolCall
+        ? LanguageModelV4FinishReason.toolCalls
+        : LanguageModelV4FinishReason.stop,
   'incomplete' =>
     incompleteReason == 'content_filter'
         ? LanguageModelV4FinishReason.contentFilter
@@ -1187,7 +1237,10 @@ bool _isHostedResponseItem(String? type) => switch (type) {
   _ => false,
 };
 
-Map<String, String> _approvalRequestCallIds(LanguageModelV4Prompt prompt) {
+Map<String, String> _approvalRequestCallIds(
+  LanguageModelV4Prompt prompt,
+  String provider,
+) {
   final mapping = <String, String>{};
   for (final message in prompt.messages) {
     if (message.role != LanguageModelV4Role.assistant) continue;
@@ -1196,7 +1249,7 @@ Map<String, String> _approvalRequestCallIds(LanguageModelV4Prompt prompt) {
         mapping[request.approvalId] = request.toolCall.toolCallId;
       }
       if (part case LanguageModelV4ToolCallPart call) {
-        final namespaced = call.providerOptions?['openai'];
+        final namespaced = call.providerOptions?[provider];
         if (namespaced is Map && namespaced['approval_request_id'] is String) {
           mapping[namespaced['approval_request_id'] as String] =
               call.toolCallId;
@@ -1213,7 +1266,8 @@ Map<String, String> _approvalRequestCallIds(LanguageModelV4Prompt prompt) {
 }
 
 List<LanguageModelV4ContentPart> _hostedItemContent(
-  Map<String, dynamic> item, {
+  Map<String, dynamic> item,
+  String provider, {
   String? toolCallId,
 }) {
   final type = item['type']?.toString();
@@ -1241,7 +1295,7 @@ List<LanguageModelV4ContentPart> _hostedItemContent(
   final effectiveToolCallId = toolCallId ?? id;
   final providerOptions = <String, dynamic>{
     'item_id': itemId,
-    'openai': <String, dynamic>{
+    provider: <String, dynamic>{
       'item_id': itemId,
       if (!isClientComputerCall) 'provider_executed': true,
       if (item['approval_request_id'] != null)
@@ -1328,7 +1382,7 @@ List<LanguageModelV4ContentPart> _hostedItemContent(
     _ => <String, dynamic>{},
   };
   final resultOptions = <String, dynamic>{
-    'openai': <String, dynamic>{
+    provider: <String, dynamic>{
       'item_id': id,
       'provider_executed': true,
       'raw': raw,

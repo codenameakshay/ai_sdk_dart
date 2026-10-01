@@ -338,6 +338,8 @@ Stream<List<int>> _downloadStream(
       cancelOnError: false,
     );
   };
+  output.onPause = () => subscription.pause();
+  output.onResume = () => subscription.resume();
   output.onCancel = () async {
     // Do not let a transport's cancellation failure replace a source error.
     try {

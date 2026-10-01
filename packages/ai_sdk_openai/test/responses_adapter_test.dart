@@ -634,7 +634,7 @@ void main() {
     );
     expect(
       parts.whereType<StreamPartFinish>().single.finishReason,
-      LanguageModelV4FinishReason.stop,
+      LanguageModelV4FinishReason.toolCalls,
     );
   });
 
@@ -1526,7 +1526,7 @@ void main() {
         {
           'role': 'assistant',
           'content': [
-            {'type': 'input_text', 'text': 'According to the file,'},
+            {'type': 'output_text', 'text': 'According to the file,'},
           ],
         },
       );
@@ -1626,7 +1626,7 @@ void main() {
         {
           'role': 'assistant',
           'content': [
-            {'type': 'input_text', 'text': 'According to the file,'},
+            {'type': 'output_text', 'text': 'According to the file,'},
           ],
         },
       );

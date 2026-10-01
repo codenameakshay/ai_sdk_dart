@@ -200,7 +200,7 @@ void main() {
       expect(parts.whereType<StreamPartReasoningEnd>(), hasLength(1));
       expect(
         parts.whereType<StreamPartFinish>().single.finishReason,
-        LanguageModelV4FinishReason.stop,
+        LanguageModelV4FinishReason.toolCalls,
       );
     },
   );

@@ -38,9 +38,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      OPENAI_API_KEY: ${{ ((github.event_name == 'schedule' && vars.OPENAI_CANARY_MODEL != '') || (github.event_name == 'workflow_dispatch' && inputs.openai_model != '')) && secrets.OPENAI_API_KEY || '' }}
-      ANTHROPIC_API_KEY: ${{ ((github.event_name == 'schedule' && vars.ANTHROPIC_CANARY_MODEL != '') || (github.event_name == 'workflow_dispatch' && inputs.anthropic_model != '')) && secrets.ANTHROPIC_API_KEY || '' }}
-      GOOGLE_API_KEY: ${{ ((github.event_name == 'schedule' && vars.GOOGLE_CANARY_MODEL != '') || (github.event_name == 'workflow_dispatch' && inputs.google_model != '')) && secrets.GOOGLE_API_KEY || '' }}
       OPENAI_CANARY_MODEL: ${{ github.event_name == 'schedule' && vars.OPENAI_CANARY_MODEL || inputs.openai_model }}
       ANTHROPIC_CANARY_MODEL: ${{ github.event_name == 'schedule' && vars.ANTHROPIC_CANARY_MODEL || inputs.anthropic_model }}
       GOOGLE_CANARY_MODEL: ${{ github.event_name == 'schedule' && vars.GOOGLE_CANARY_MODEL || inputs.google_model }}
@@ -65,4 +62,8 @@ jobs:
         run: dart analyze tool/canaries
 
       - name: Run opt-in provider canaries
+        env:
+          OPENAI_API_KEY: ${{ ((github.event_name == 'schedule' && vars.OPENAI_CANARY_MODEL != '') || (github.event_name == 'workflow_dispatch' && inputs.openai_model != '')) && secrets.OPENAI_API_KEY || '' }}
+          ANTHROPIC_API_KEY: ${{ ((github.event_name == 'schedule' && vars.ANTHROPIC_CANARY_MODEL != '') || (github.event_name == 'workflow_dispatch' && inputs.anthropic_model != '')) && secrets.ANTHROPIC_API_KEY || '' }}
+          GOOGLE_API_KEY: ${{ ((github.event_name == 'schedule' && vars.GOOGLE_CANARY_MODEL != '') || (github.event_name == 'workflow_dispatch' && inputs.google_model != '')) && secrets.GOOGLE_API_KEY || '' }}
         run: dart run tool/canaries/provider_canaries.dart --live

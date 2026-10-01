@@ -387,7 +387,10 @@ class _CohereLanguageModel extends LanguageModelV4 {
   Future<LanguageModelV4StreamResult> doStream(
     LanguageModelV4CallOptions options,
   ) async {
-    final cancellation = DioCancellationScope(options.abortSignal);
+    final cancellation = DioCancellationScope(
+      options.abortSignal,
+      alwaysCreateToken: true,
+    );
     final resolvedHeaders = await cancellation.run(headers);
     final body = await cancellation.run(() => _buildBody(options))
       ..['stream'] = true;

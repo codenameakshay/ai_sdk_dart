@@ -279,7 +279,10 @@ class _OllamaLanguageModel extends LanguageModelV4 {
     // Override stream to true for streaming mode.
     final body = _buildBody(options);
     body['stream'] = true;
-    final cancellation = DioCancellationScope(options.abortSignal);
+    final cancellation = DioCancellationScope(
+      options.abortSignal,
+      alwaysCreateToken: true,
+    );
     if (options.abortSignal?.isCancelled == true) {
       await cancellation.dispose();
       throw const AiOperationCancelledError();

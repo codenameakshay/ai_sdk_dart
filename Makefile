@@ -115,8 +115,10 @@ run-mcp:
 
 ## Run tests across all packages
 test:
+	$(DART) test tool/makefile_test.dart
 	$(DART) test tool/provider_capability_catalog_test.dart
-	$(DART) test tool/canaries/provider_canaries_test.dart
+	$(DART) test tool/canaries/
+	$(DART) --enable-asserts run $(DART_APP)/test/client_lifetime_test.dart
 	$(foreach p,$(DART_PKGS),$(DART) test packages/$(p)/test/ &&) true
 	$(foreach p,$(FLUTTER_PKGS),$(FLUTTER) test packages/$(p)/test/ &&) true
 	$(FLUTTER) test $(FLUTTER_APP)/test/
@@ -125,7 +127,7 @@ test:
 
 ## Run dart analyze across all packages
 analyze:
-	$(DART) analyze tool/provider_capability_catalog.dart tool/provider_capability_catalog_test.dart tool/canaries/
+	$(DART) analyze tool/makefile_test.dart tool/provider_capability_catalog.dart tool/provider_capability_catalog_test.dart tool/canaries/
 	$(DART) analyze $(DART_APP)/
 	$(foreach p,$(DART_PKGS),$(DART) analyze packages/$(p)/ &&) true
 	$(foreach p,$(FLUTTER_PKGS),$(FLUTTER) analyze packages/$(p)/ &&) true

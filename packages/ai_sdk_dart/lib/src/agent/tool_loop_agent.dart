@@ -293,6 +293,8 @@ class ToolLoopAgent {
             policyRevision: request.policyRevision ?? effectiveRevision,
             generationContext: generationContext ?? this.generationContext,
             requireExactApprovalBinding: true,
+            onToolCallStart: onToolExecutionStart,
+            onToolCallFinish: onToolExecutionEnd,
           ),
         );
         if (execution.approvalRequest != null) {

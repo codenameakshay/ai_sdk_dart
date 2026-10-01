@@ -544,6 +544,8 @@ void main() {
           for (final part in message.content)
             if (part is LanguageModelV4ToolResultPart) part.toolCallId,
       };
+      expect(callIds, {'call-delete-1'});
+      expect(resultIds, {'call-delete-1'});
       expect(resultIds.containsAll(callIds), isTrue);
 
       final assistantText = [
@@ -959,7 +961,16 @@ StreamTextResult<Object?> _completedStreamResult({
       const GenerateTextRequest(system: null, messages: []),
     ),
     response: Future<GenerateTextResponse>.value(
-      const GenerateTextResponse(messages: [], body: null, metadata: null),
+      GenerateTextResponse(
+        messages: [
+          LanguageModelV4Message(
+            role: LanguageModelV4Role.assistant,
+            content: content,
+          ),
+        ],
+        body: null,
+        metadata: null,
+      ),
     ),
     providerMetadata: Future<ProviderMetadata?>.value(null),
     finish: Future<StreamPartFinish?>.value(

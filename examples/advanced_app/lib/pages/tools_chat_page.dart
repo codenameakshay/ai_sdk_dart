@@ -97,7 +97,6 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
   final List<ModelMessage> _history = [];
   final List<_Item> _items = [];
   final List<LanguageModelV4SourcePart> _pendingSources = [];
-  final StringBuffer _turnText = StringBuffer();
   final Map<String, LanguageModelV4ToolApprovalResponse> _approvalResponses =
       {};
 
@@ -212,7 +211,6 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
       _streaming = true;
       _currentAssistant = null;
       _currentReasoning = null;
-      _turnText.clear();
     });
     _scheduleScrollToBottom();
     await _runTurn(() {
@@ -280,6 +278,15 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
         });
         return;
       }
+      final request = await result.request;
+      final response = await result.response;
+      if (!mounted || turn != _turn) return;
+      _history
+        ..clear()
+        ..addAll([
+          for (final message in [...request.messages, ...response.messages])
+            ModelMessage.fromProvider(message),
+        ]);
       _finishTurn();
     } catch (err) {
       if (turn != _turn) return;
@@ -344,7 +351,6 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
         _currentAssistant = null;
         _currentReasoning = null;
       case StreamTextTextDeltaEvent(:final delta):
-        _turnText.write(delta);
         final item = _currentAssistant ??= _push(
           _TextItem(ModelMessageRole.assistant, ''),
         );
@@ -410,12 +416,6 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
 
   void _finishTurn() {
     _cancellation = null;
-    final text = _turnText.toString();
-    if (text.isNotEmpty) {
-      _history.add(
-        ModelMessage(role: ModelMessageRole.assistant, content: text),
-      );
-    }
     if (!mounted) return;
     setState(() {
       if (_currentAssistant != null && _pendingSources.isNotEmpty) {
@@ -452,7 +452,6 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
       _history.clear();
       _items.clear();
       _pendingSources.clear();
-      _turnText.clear();
       _currentAssistant = null;
       _currentReasoning = null;
       _streaming = false;

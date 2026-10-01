@@ -48,6 +48,35 @@ void main() {
     },
   );
 
+  test('a second turn keeps the reply to the first', () async {
+    final transport = RemoteConversationTransport(
+      endpoint: Uri.parse('http://127.0.0.1:${server.port}/chat'),
+    );
+    addTearDown(transport.dispose);
+    ConversationMessage user(String id) => ConversationMessage(
+      id: id,
+      role: ConversationRole.user,
+      parts: [TextPart(id: '$id-part', text: 'Say hello.')],
+    );
+    final first = await transport
+        .send(Conversation(id: 'example-chat', messages: [user('user-1')]))
+        .last;
+    final second = await transport
+        .send(
+          Conversation(
+            id: 'example-chat',
+            messages: [...first.messages, user('user-2')],
+          ),
+        )
+        .last;
+    expect(second.messages.map((message) => message.role), [
+      ConversationRole.user,
+      ConversationRole.assistant,
+      ConversationRole.user,
+      ConversationRole.assistant,
+    ]);
+  });
+
   test('rejects malformed bodies with an explicit JSON error', () async {
     final client = HttpClient();
     addTearDown(client.close);

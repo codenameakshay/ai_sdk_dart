@@ -59,20 +59,23 @@ Future<void> _handleRequest(HttpRequest request) async {
     return;
   }
 
+  // A response that reuses a message id continues that message, so each
+  // response needs its own id.
+  final turn = ((decoded as Map)['messages'] as List).length;
   request.response
     ..statusCode = HttpStatus.ok
     ..headers.contentType = ContentType('text', 'event-stream')
     ..headers.set('cache-control', 'no-cache')
     ..headers.set('x-vercel-ai-ui-message-stream', 'v1');
   for (final event in [
-    {'type': 'start', 'messageId': 'example-assistant'},
-    {'type': 'text-start', 'id': 'example-text'},
+    {'type': 'start', 'messageId': 'example-assistant-$turn'},
+    {'type': 'text-start', 'id': 'example-text-$turn'},
     {
       'type': 'text-delta',
-      'id': 'example-text',
+      'id': 'example-text-$turn',
       'delta': 'Hello from the trusted backend.',
     },
-    {'type': 'text-end', 'id': 'example-text'},
+    {'type': 'text-end', 'id': 'example-text-$turn'},
     {'type': 'finish'},
   ]) {
     request.response.write('data: ${jsonEncode(event)}\n\n');

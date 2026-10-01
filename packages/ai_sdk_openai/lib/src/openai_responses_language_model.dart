@@ -584,6 +584,7 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
               ),
             );
             terminal = true;
+            break;
           } else if (type == 'error') {
             controller.add(
               StreamPartError(error: _responseFailure(response, event)),
@@ -595,6 +596,7 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
               ),
             );
             terminal = true;
+            break;
           }
         }
         if (!terminal) {

@@ -9,6 +9,36 @@ import 'package:dio/dio.dart';
 import 'package:test/test.dart';
 
 void main() {
+  for (final type in ['response.completed', 'response.failed', 'error']) {
+    test('terminal $type closes a response that stays open', () async {
+      final source = StreamController<Uint8List>();
+      final cancelled = Completer<void>();
+      source.onCancel = () => cancelled.complete();
+      final dio = Dio()
+        ..httpClientAdapter = _StreamAdapter(
+          () => ResponseBody(source.stream, HttpStatus.ok),
+        );
+      addTearDown(() => dio.close(force: true));
+      final model = OpenAIResponsesLanguageModel(
+        modelId: 'gpt-5',
+        client: dio,
+        headers: () async => const {},
+        baseUrl: 'http://responses.test',
+      );
+      final result = await model.doStream(_options());
+      final parts = result.stream.toList();
+      source.add(
+        Uint8List.fromList(
+          utf8.encode('data: ${jsonEncode({'type': type})}\n\n'),
+        ),
+      );
+      final completed = await parts.timeout(const Duration(seconds: 1));
+      expect(completed.whereType<StreamPartFinish>(), hasLength(1));
+      expect(completed.last, isA<StreamPartFinish>());
+      await cancelled.future.timeout(const Duration(seconds: 1));
+    });
+  }
+
   for (final streaming in [false, true]) {
     test('pre-cancelled Responses skips auth (stream=$streaming)', () async {
       var authCalls = 0;

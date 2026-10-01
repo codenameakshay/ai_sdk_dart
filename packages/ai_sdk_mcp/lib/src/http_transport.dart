@@ -864,6 +864,19 @@ class StreamableHttpClientTransport implements MCPTransport {
         final message = decoded.cast<String, dynamic>();
         if (request.method == 'subscriptions/listen' &&
             message['method'] == 'notifications/subscriptions/acknowledged') {
+          final params = message['params'];
+          final meta = params is Map ? params['_meta'] : null;
+          if (message['jsonrpc'] != '2.0' ||
+              meta is! Map ||
+              meta['io.modelcontextprotocol/subscriptionId'] != request.id) {
+            if (!completer.isCompleted) {
+              completer.completeError(
+                const MCPException('Invalid subscription acknowledgement ID'),
+              );
+            }
+            unawaited(subscription.cancel());
+            return;
+          }
           if (!completer.isCompleted) {
             _subscriptionStreams[request.id] = subscription;
             completer.complete(
@@ -889,11 +902,8 @@ class StreamableHttpClientTransport implements MCPTransport {
               completer.completeError(error, stackTrace);
             }
           }
-          if (request.method == 'subscriptions/listen') {
-            _subscriptionStreams[request.id] = subscription;
-          } else {
-            unawaited(subscription.cancel());
-          }
+          _subscriptionStreams.remove(request.id);
+          unawaited(subscription.cancel());
           return;
         }
         _dispatchMessage(message);

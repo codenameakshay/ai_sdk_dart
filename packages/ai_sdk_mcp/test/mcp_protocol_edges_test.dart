@@ -574,7 +574,9 @@ void main() {
               'data: ${jsonEncode({
                 'jsonrpc': '2.0',
                 'method': 'notifications/subscriptions/acknowledged',
-                'params': {'requestId': body['id']},
+                'params': {
+                  '_meta': {'io.modelcontextprotocol/subscriptionId': body['id']},
+                },
               })}\n\n',
             ),
           );
@@ -630,7 +632,9 @@ void main() {
                 'data: ${jsonEncode({
                   'jsonrpc': '2.0',
                   'method': 'notifications/subscriptions/acknowledged',
-                  'params': {'requestId': body['id']},
+                  'params': {
+                    '_meta': {'io.modelcontextprotocol/subscriptionId': body['id']},
+                  },
                 })}\n\n',
               ),
             );

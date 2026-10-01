@@ -61,7 +61,9 @@ void main() {
           'data: ${jsonEncode({
             'jsonrpc': '2.0',
             'method': 'notifications/subscriptions/acknowledged',
-            'params': {'requestId': requestId},
+            'params': {
+              '_meta': {'io.modelcontextprotocol/subscriptionId': requestId},
+            },
           })}\n\n',
         ),
       );

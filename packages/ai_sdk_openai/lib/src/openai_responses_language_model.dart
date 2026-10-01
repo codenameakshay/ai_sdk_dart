@@ -673,12 +673,16 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
   List<Map<String, dynamic>> _input(LanguageModelV4Prompt prompt) {
     final out = <Map<String, dynamic>>[];
     final emittedRawItemIds = <String>{};
+    bool isFunctionToolCall(LanguageModelV4ToolCallPart call) {
+      final raw = call.providerOptions?[provider]?['raw'];
+      return raw is! Map || raw['type'] == 'function_call';
+    }
+
     final functionCallIds = <String>{
       for (final message in prompt.messages)
         for (final part in message.content)
           if (part case LanguageModelV4ToolCallPart call)
-            if (call.providerOptions?[provider]?['raw'] is! Map)
-              call.toolCallId,
+            if (isFunctionToolCall(call)) call.toolCallId,
     };
     void addRawItem(Map raw) {
       final item = raw.cast<String, dynamic>();
@@ -808,11 +812,8 @@ class OpenAIResponsesLanguageModel extends LanguageModelV4 {
     LanguageModelV4ToolResultPart result,
     Set<String> functionCallIds,
   ) {
-    final isTextResult =
-        result.output is ToolResultOutputText ||
-        result.output is ToolResultOutputErrorText;
     if (result.toolName == 'computer' &&
-        !(isTextResult && functionCallIds.contains(result.toolCallId))) {
+        !functionCallIds.contains(result.toolCallId)) {
       final output = _computerCallOutput(result.output);
       return {
         'type': 'computer_call_output',

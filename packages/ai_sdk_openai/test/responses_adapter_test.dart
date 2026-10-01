@@ -152,6 +152,17 @@ void main() {
                   'pendingSafetyChecks': [],
                   'status': 'completed',
                 },
+                providerOptions: {
+                  'openai': {
+                    'raw': {
+                      'type': 'computer_call',
+                      'id': 'item-computer',
+                      'call_id': 'call-computer',
+                      'status': 'completed',
+                      'action': {'type': 'screenshot'},
+                    },
+                  },
+                },
               ),
               const LanguageModelV4ToolResultPart(
                 toolCallId: 'call-computer',

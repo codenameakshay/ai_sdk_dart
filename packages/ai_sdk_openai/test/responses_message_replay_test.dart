@@ -195,6 +195,137 @@ void main() {
     },
   );
 
+  test('a computer-named function can return JSON', () async {
+    final requests = <Map<String, dynamic>>[];
+    final model = _model((request) {
+      requests.add(Map<String, dynamic>.from(request.data as Map));
+      return {'id': 'resp', 'status': 'completed', 'output': []};
+    });
+    await model.doGenerate(
+      LanguageModelV4CallOptions(
+        prompt: LanguageModelV4Prompt(
+          messages: [
+            LanguageModelV4Message(
+              role: LanguageModelV4Role.assistant,
+              content: [
+                LanguageModelV4ToolCallPart(
+                  toolCallId: 'call_1',
+                  toolName: 'computer',
+                  input: {'q': 1},
+                  providerOptions: const {'item_id': 'fc_1'},
+                ),
+                LanguageModelV4ToolResultPart(
+                  toolCallId: 'call_1',
+                  toolName: 'computer',
+                  output: const ToolResultOutputJson({'ok': true}),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+    expect(requests.single['input'], [
+      {
+        'type': 'function_call',
+        'id': 'fc_1',
+        'call_id': 'call_1',
+        'name': 'computer',
+        'arguments': '{"q":1}',
+      },
+      {
+        'type': 'function_call_output',
+        'call_id': 'call_1',
+        'output': '{"ok":true}',
+      },
+    ]);
+  });
+
+  test(
+    'raw function_call provenance disambiguates computer result outputs',
+    () async {
+      final cases =
+          <({LanguageModelV4ToolResultOutput output, Object expected})>[
+            (output: const ToolResultOutputText('ok'), expected: 'ok'),
+            (
+              output: const ToolResultOutputErrorText('failed'),
+              expected: 'failed',
+            ),
+            (
+              output: const ToolResultOutputJson({'ok': true}),
+              expected: '{"ok":true}',
+            ),
+            (
+              output: const ToolResultOutputErrorJson({'error': true}),
+              expected: '{"error":true}',
+            ),
+            (
+              output: ToolResultOutputContent([
+                LanguageModelV4TextPart(text: 'ok'),
+              ]),
+              expected: [
+                {'type': 'input_text', 'text': 'ok'},
+              ],
+            ),
+          ];
+      for (final testCase in cases) {
+        final requests = <Map<String, dynamic>>[];
+        final model = _model((request) {
+          requests.add(Map<String, dynamic>.from(request.data as Map));
+          return {'id': 'resp', 'status': 'completed', 'output': []};
+        });
+        await model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.assistant,
+                  content: [
+                    LanguageModelV4ToolCallPart(
+                      toolCallId: 'call_1',
+                      toolName: 'computer',
+                      input: const {},
+                      providerOptions: {
+                        'openai': {
+                          'raw': {
+                            'type': 'function_call',
+                            'id': 'fc_1',
+                            'call_id': 'call_1',
+                            'name': 'computer',
+                            'arguments': '{}',
+                          },
+                        },
+                      },
+                    ),
+                    LanguageModelV4ToolResultPart(
+                      toolCallId: 'call_1',
+                      toolName: 'computer',
+                      output: testCase.output,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+        expect(requests.single['input'], [
+          {
+            'type': 'function_call',
+            'id': 'fc_1',
+            'call_id': 'call_1',
+            'name': 'computer',
+            'arguments': '{}',
+          },
+          {
+            'type': 'function_call_output',
+            'call_id': 'call_1',
+            'output': testCase.expected,
+          },
+        ]);
+      }
+    },
+  );
+
   test('azure responses replay hosted and computer items from raw', () async {
     final requests = <Map<String, dynamic>>[];
     final model = _model((request) {

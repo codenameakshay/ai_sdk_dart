@@ -4,11 +4,16 @@ import 'dart:io';
 
 import 'package:advanced_app/config.dart';
 import 'package:advanced_app/pages/conversation_page.dart';
+import 'package:advanced_app/pages/completion_page.dart';
 import 'package:advanced_app/pages/embeddings_page.dart';
 import 'package:advanced_app/pages/object_stream_page.dart';
+import 'package:advanced_app/pages/image_gen_page.dart';
+import 'package:advanced_app/pages/provider_chat_page.dart';
+import 'package:advanced_app/pages/tts_page.dart';
 import 'package:advanced_app/pages/responses_page.dart';
 import 'package:advanced_app/pages/tools_chat_page.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -18,10 +23,44 @@ void main() {
     'embeddings': const EmbeddingsPage(),
     'object stream': const ObjectStreamPage(),
     'responses': const ResponsesPage(),
+    'provider chat': const ProviderChatPage(),
+    'completion': const CompletionPage(),
+    'image generation': const ImageGenPage(),
+    'text to speech': const TtsPage(),
   }.entries) {
     testWidgets(
       '${page.key} closes its provider connection when removed',
       (tester) async {
+        if (page.key == 'text to speech') {
+          final channels = <String>{
+            'xyz.luan/audioplayers.global',
+            'xyz.luan/audioplayers.global/events',
+            'xyz.luan/audioplayers',
+          };
+          final messenger = tester.binding.defaultBinaryMessenger;
+          Future<void> mock(String name) async {
+            messenger.setMockMethodCallHandler(MethodChannel(name), (
+              call,
+            ) async {
+              if (call.method == 'create') {
+                final events =
+                    'xyz.luan/audioplayers/events/${call.arguments['playerId']}';
+                channels.add(events);
+                await mock(events);
+              }
+              return null;
+            });
+          }
+
+          for (final name in channels.toList()) {
+            await mock(name);
+          }
+          addTearDown(() {
+            for (final name in channels) {
+              messenger.setMockMethodCallHandler(MethodChannel(name), null);
+            }
+          });
+        }
         await _withHttpClient(tester, page.value, (client) async {
           final send = find.byKey(const ValueKey('chat-composer-send'));
           if (send.evaluate().isNotEmpty) {
@@ -31,10 +70,15 @@ void main() {
             );
             await tester.tap(send);
           } else {
+            if (page.key == 'completion' || page.key == 'image generation') {
+              await tester.enterText(find.byType(TextField).first, 'Hello');
+            }
             await tester.tap(
               find.text(switch (page.key) {
                 'embeddings' => 'Compare',
-                'object stream' => 'Generate',
+                'object stream' || 'image generation' => 'Generate',
+                'completion' => 'Generate',
+                'text to speech' => 'Speak',
                 _ => 'Ask',
               }),
             );
@@ -43,11 +87,20 @@ void main() {
           expect(client.requests, hasLength(1));
           await tester.pumpWidget(const SizedBox());
           expect(client.closed, isTrue);
+          await Future<void>.delayed(Duration.zero);
+          await tester.pump();
+          expect(tester.takeException(), isNull);
         });
       },
       skip:
           openAiApiKey.isEmpty &&
-          (page.key == 'embeddings' || page.key == 'responses'),
+          {
+            'embeddings',
+            'responses',
+            'completion',
+            'image generation',
+            'text to speech',
+          }.contains(page.key),
     );
   }
 

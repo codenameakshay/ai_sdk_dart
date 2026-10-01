@@ -15,6 +15,8 @@ class ImageGenPage extends StatefulWidget {
 }
 
 class _ImageGenPageState extends State<ImageGenPage> {
+  late final _openAi = OpenAIProvider(apiKey: openAiApiKey);
+  CancellationToken? _cancellation;
   final _promptController = TextEditingController();
   bool _loading = false;
   Uint8List? _imageBytes;
@@ -22,6 +24,7 @@ class _ImageGenPageState extends State<ImageGenPage> {
   String? _emptyMessage;
 
   Future<void> _generate() async {
+    if (_loading) return;
     if (openAiApiKey.isEmpty) {
       setState(() {
         _error = 'Set OPENAI_API_KEY to use image generation.';
@@ -39,11 +42,15 @@ class _ImageGenPageState extends State<ImageGenPage> {
       _imageBytes = null;
     });
 
+    final cancellation = CancellationToken();
+    _cancellation = cancellation;
     try {
       final result = await generateImage(
-        model: OpenAIProvider(apiKey: openAiApiKey).image('gpt-image-1'),
+        model: _openAi.image('gpt-image-1'),
         prompt: prompt,
+        abortSignal: cancellation,
       );
+      if (!mounted || cancellation.isCancelled) return;
       setState(() {
         if (result.images.isEmpty) {
           // Avoid touching result.image (images.first), which throws on an
@@ -58,15 +65,20 @@ class _ImageGenPageState extends State<ImageGenPage> {
         _loading = false;
       });
     } catch (e) {
+      if (!mounted || cancellation.isCancelled) return;
       setState(() {
         _error = 'Image generation failed: $e';
         _loading = false;
       });
+    } finally {
+      if (identical(_cancellation, cancellation)) _cancellation = null;
     }
   }
 
   @override
   void dispose() {
+    _cancellation?.cancel();
+    _openAi.dispose();
     _promptController.dispose();
     super.dispose();
   }

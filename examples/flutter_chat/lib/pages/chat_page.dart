@@ -19,6 +19,7 @@ class ChatPage extends StatefulWidget {
 }
 
 class _ChatPageState extends State<ChatPage> {
+  final _provider = OpenAIProvider(apiKey: openAiApiKey);
   late final ToolLoopAgent _agent;
   late final ChatController _chat;
 
@@ -26,7 +27,7 @@ class _ChatPageState extends State<ChatPage> {
   void initState() {
     super.initState();
     _agent = ToolLoopAgent(
-      model: OpenAIProvider(apiKey: openAiApiKey)('gpt-4.1-mini'),
+      model: _provider('gpt-4.1-mini'),
       instructions: 'You are a helpful assistant. Be concise.',
       maxSteps: 5,
     );
@@ -36,6 +37,7 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void dispose() {
     _chat.dispose();
+    _provider.dispose();
     super.dispose();
   }
 

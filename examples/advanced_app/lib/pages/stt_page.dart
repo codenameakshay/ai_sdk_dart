@@ -18,6 +18,8 @@ class SttPage extends StatefulWidget {
 
 class _SttPageState extends State<SttPage> {
   final _recorder = AudioRecorder();
+  final _provider = OpenAIProvider(apiKey: openAiApiKey);
+  CancellationToken? _abortSignal;
   bool _recording = false;
   bool _loading = false;
   String? _transcription;
@@ -40,21 +42,26 @@ class _SttPageState extends State<SttPage> {
 
       try {
         final bytes = await _readFile(path);
+        if (!mounted) return;
+        final abortSignal = _abortSignal = CancellationToken();
         final result = await transcribe(
-          model: OpenAIProvider(
-            apiKey: openAiApiKey,
-          ).transcription('whisper-1'),
+          model: _provider.transcription('whisper-1'),
           audio: bytes,
+          abortSignal: abortSignal,
         );
+        if (!mounted) return;
         setState(() {
           _transcription = result.text;
           _loading = false;
         });
       } catch (e) {
+        if (!mounted) return;
         setState(() {
           _error = e.toString();
           _loading = false;
         });
+      } finally {
+        _abortSignal = null;
       }
     } else {
       if (await _recorder.hasPermission()) {
@@ -79,6 +86,8 @@ class _SttPageState extends State<SttPage> {
 
   @override
   void dispose() {
+    _abortSignal?.cancel();
+    _provider.dispose();
     _recorder.dispose();
     super.dispose();
   }

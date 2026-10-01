@@ -14,6 +14,8 @@ class TtsPage extends StatefulWidget {
 }
 
 class _TtsPageState extends State<TtsPage> {
+  late final _openAi = OpenAIProvider(apiKey: openAiApiKey);
+  CancellationToken? _cancellation;
   final _textController = TextEditingController(
     text: 'Hello! This is a sample of text-to-speech from the AI SDK.',
   );
@@ -22,6 +24,7 @@ class _TtsPageState extends State<TtsPage> {
   final _player = AudioPlayer();
 
   Future<void> _speak() async {
+    if (_loading) return;
     if (openAiApiKey.isEmpty) {
       setState(() => _error = 'Set OPENAI_API_KEY to use TTS.');
       return;
@@ -35,21 +38,29 @@ class _TtsPageState extends State<TtsPage> {
       _error = null;
     });
 
+    final cancellation = CancellationToken();
+    _cancellation = cancellation;
     try {
       final result = await generateSpeech(
-        model: OpenAIProvider(apiKey: openAiApiKey).speech('tts-1'),
+        model: _openAi.speech('tts-1'),
         text: text,
         voice: 'alloy',
+        abortSignal: cancellation,
       );
-
+      if (!mounted || cancellation.isCancelled) return;
       await _player.stop();
+      if (!mounted || cancellation.isCancelled) return;
       await _player.play(BytesSource(result.audio, mimeType: result.mediaType));
+      if (!mounted || cancellation.isCancelled) return;
       setState(() => _loading = false);
     } catch (e) {
+      if (!mounted || cancellation.isCancelled) return;
       setState(() {
         _error = e.toString();
         _loading = false;
       });
+    } finally {
+      if (identical(_cancellation, cancellation)) _cancellation = null;
     }
   }
 
@@ -59,6 +70,8 @@ class _TtsPageState extends State<TtsPage> {
 
   @override
   void dispose() {
+    _cancellation?.cancel();
+    _openAi.dispose();
     _textController.dispose();
     _player.dispose();
     super.dispose();

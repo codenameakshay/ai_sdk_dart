@@ -2413,4 +2413,62 @@ void main() {
       await backend.dispose();
     },
   );
+
+  test('a new send invalidates an earlier local approval', () async {
+    var executions = 0;
+    final model = _ApprovalSequenceModel([
+      [
+        mockToolCall(
+          toolName: 'delete',
+          input: const {},
+          toolCallId: 'old-call',
+        ),
+      ],
+      [mockText('new answer')],
+      [mockText('unexpected replay')],
+    ]);
+    final backend = LocalConversationBackend(
+      agent: ToolLoopAgent(
+        model: model,
+        tools: {'delete': _countedApprovalTool(() => executions++)},
+      ),
+      initial: _empty(),
+    );
+    addTearDown(backend.dispose);
+    await backend.send('delete it');
+    final approval = backend.conversation.messages.last.parts
+        .whereType<ApprovalPart>()
+        .single;
+    await backend.send('do something else');
+    await backend.respondToApproval(
+      approvalId: approval.approvalId!,
+      approved: true,
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(executions, 0);
+    expect(model.streamCalls, 2);
+    expect(
+      backend.conversation.messages.last.parts
+          .whereType<TextPart>()
+          .single
+          .text,
+      'new answer',
+    );
+    final restored = LocalConversationBackend(
+      agent: ToolLoopAgent(
+        model: model,
+        tools: {'delete': _countedApprovalTool(() => executions++)},
+      ),
+      initial: _empty(),
+    );
+    addTearDown(restored.dispose);
+    await restored.restore(ConversationCodec.encode(backend.conversation));
+    await restored.respondToApproval(
+      approvalId: approval.approvalId!,
+      approved: true,
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(executions, 0);
+    expect(model.streamCalls, 2);
+  });
 }

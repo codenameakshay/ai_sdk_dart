@@ -517,6 +517,11 @@ class LocalConversationBackend
     if (_disposed) throw StateError('Conversation backend is disposed');
     await interrupt();
     final epoch = ++_epoch;
+    _pendingReplay = null;
+    _restoredBindingInvalid = false;
+    _pendingApprovalRequests.clear();
+    _pendingApprovalResponses.clear();
+    _resumeInFlight = null;
     final userId = _freshId(_conversation, 'message');
     final user = ConversationMessage(
       id: userId,

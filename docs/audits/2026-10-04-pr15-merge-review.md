@@ -222,9 +222,13 @@ are closed; the verification record below describes the separate execution gates
 
 ## Verification record
 
-- At code head `742ecbd`, pinned Flutter 3.44.3 / Dart 3.12.2 dependency
-  resolution, whole-workspace analysis, and formatting passed (455 files,
-  zero changes). The complete stable-tree coverage run is pending.
+- At tested head `f14d776` (production code unchanged from `742ecbd`), pinned
+  Flutter 3.44.3 / Dart 3.12.2 dependency resolution, whole-workspace analysis,
+  and formatting passed (455 files, zero changes).
+- `AI_SDK_REMOTE_REFERENCE_URL=http://127.0.0.1:8081/chat AI_SDK_MCP_REFERENCE=1 make coverage-check`
+  passed all 1,917 Dart and 304 Flutter package tests. Total line coverage is
+  **99.01% (14,373/14,516)**, meeting the unchanged 99% gate. Both pinned
+  JavaScript protocol references were enabled.
 - `make test-examples` passed: 41 ordinary Flutter cases, 21 fixture-enabled
   provider/media cases, 5 Dart remote examples, and 6 CLI assertions. The
   ordinary Flutter invocation skips 15 cases that need provider defines;
@@ -236,9 +240,9 @@ are closed; the verification record below describes the separate execution gates
   passed both launches, with 9 screenshots per launch. The parent inspected the
   pending-approval and restored-approved screenshots. This is scripted-model
   simulator evidence at `b6d1c96`, not live provider evidence.
-- The baseline Flutter chat release web build and Wasm compilation dry run
-  passed; the final-code rebuild is pending.
-- All five baseline Chromium browser flows passed: local approve/deny, remote text, and
+- The final-code Flutter chat release web build and Wasm compilation dry run
+  passed.
+- All five final-code Chromium browser flows passed: local approve/deny, remote text, and
   remote approve/deny. They verified disabled input during approval, restored
   editing afterward, one assistant row, and zero page/console errors. The parent
   inspected desktop approval and narrow-viewport denial screenshots.
@@ -246,10 +250,16 @@ are closed; the verification record below describes the separate execution gates
 - `make benchmark` passed its parse/allocation assertions for 12 cases and 360
   measured samples. Shared-host timing is not a latency improvement claim.
 - The initial full coverage run overlapped newly added regressions after source
-  compilation; it was stopped and excluded as a stable-tree gate. Final coverage
-  must run after implementation is frozen.
-- A package publication dry-run stopped on the dirty-worktree warning while a
-  worker was adding a regression. It must be rerun on the committed tree.
+  compilation; it was stopped and excluded as a stable-tree gate. The first
+  stable-tree run passed all 1,916 Dart and 301 Flutter tests, but its 98.93%
+  coverage failed the unchanged 99% gate. Follow-up tests cover provider aliases,
+  Gemini high reasoning levels, stream invocation failure, approval-resume
+  failure after one tool execution, and repeated pure-text retry failure.
+  The final stable-tree rerun passed as recorded above; no coverage exclusions
+  or thresholds were changed.
+- `make dry-run` passed on the clean committed tree: all 17 publishable
+  packages reported zero warnings. The unpublished realtime preview is
+  intentionally excluded by the repository target. No package was published.
 
 | Pending approval before restart | Restored and approved on the second launch |
 | --- | --- |

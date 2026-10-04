@@ -1,9 +1,9 @@
 {
-  "capturedAt": "2026-10-04T10:06:23.536Z",
+  "capturedAt": "2026-10-04T11:04:57.938Z",
   "browser": "154.0.8037.0",
   "passed": true,
   "hashes": {
-    "examples/flutter_chat/build/web/main.dart.js": "e6014b59df86ffd4e2ef47291742e4dd2441b46fb8a8546ba2b2c924072acb19",
+    "examples/flutter_chat/build/web/main.dart.js": "bbb97507418fbe252445cd6fae01fbc5ce5cceefbd7e7ab6c3e6aa2988482d66",
     "examples/flutter_chat/lib/pages/conversation_page.dart": "dc18530ee7ba04d22e6ae6e3802cfdd46a778b340853b02c84470cf6b90c2d03",
     "examples/remote_backend/js/server.mjs": "16f55fc2f36791e1f07cec92c614f0f857eae7fdcf179488fd15ed9ef9336579",
     "examples/remote_backend/js/package-lock.json": "b739df309f9945cd221582dae72f51f35b43b99a7d0cca20a85b989fc953328c",
@@ -11,9 +11,9 @@
     "packages/ai_sdk_flutter_ui/lib/src/widgets/chat_message_bubble.dart": "972d8424d3cb4bd76a5d08f0473087dc4eaa7f91f2570d2e6e529f212d6c0e19",
     "packages/ai_sdk_flutter_ui/lib/src/widgets/assistant_message_view.dart": "4d3373273dd084319f07fbf8c56faec59fcdd8c0668f45a99ebefe6b0f90949a",
     "packages/ai_sdk_flutter_ui/lib/src/widgets/ai_chat_scaffold.dart": "373bfc29aeb46bac95bcc17245d0ab36b66b4aa9fb5d53e2eb14c2a6a0a3308f",
-    "packages/ai_sdk_flutter_ui/lib/src/conversation_controller.dart": "c1721a9b04a2def4c90708199451ef1950032865f6ac64e27d2ed49f00be79d9",
-    "packages/ai_sdk_conversation/lib/src/conversation.dart": "74f5249f7dc5055d57f08fbd168c12cac6833c552aa151c0a287616d0962f3f0",
-    "packages/ai_sdk_remote/lib/src/remote.dart": "8c93437a00e332af05495ba4408a543b591a8132388921488ca80c6358671cd9"
+    "packages/ai_sdk_flutter_ui/lib/src/conversation_controller.dart": "99448b28307979dd1de8d8013e5742e2cb98fcbb8d714b88be3d43a30b75276e",
+    "packages/ai_sdk_conversation/lib/src/conversation.dart": "85b176b1f6cadf260c09b3180a8c04057efa8d0bcb00f8252213373994c8fb21",
+    "packages/ai_sdk_remote/lib/src/remote.dart": "1dd05e73debedbb1480da238f583b7ea60389b4d573d19f4436bc1e98d28bbf2"
   },
   "results": [
     {
@@ -36,7 +36,7 @@
       "width": 390,
       "height": 844,
       "pending": "- button \"Back\"\n- heading \"Local conversation\" [level=2]\n- button \"التبديل إلى العربية\"\n- group:\n  - text: User message Run the example\n  - group \"Assistant message\":\n    - 'group \"Tool call: deleteFile\"':\n      - 'group \"deleteFile { \\\"path\\\": \\\"/tmp/example\\\" }\"'\n- group \"Tool approval required for deleteFile\":\n  - 'group \"Approve tool call? deleteFile { \\\"path\\\": \\\"/tmp/example\\\" }\"':\n    - button \"Deny\"\n    - button \"Approve\"\n- text: Approve the tool call to continue.\n- textbox \"Message…\" [disabled]\n- button \"Send message\" [disabled]\n- text: Send message",
-      "final": "- button \"Back\"\n- heading \"Local conversation\" [level=2]\n- button \"التبديل إلى العربية\"\n- group:\n  - text: User message Run the example\n  - group \"Assistant message\":\n    - 'group \"Tool call: deleteFile\"':\n      - 'group \"deleteFile { \\\"path\\\": \\\"/tmp/example\\\" }\"'\n    - text: Tool denied; no local action ran.\n- textbox \"Message…\"\n- button \"Send message\"",
+      "final": "- text: Assistant is responding…\n- button \"Back\"\n- heading \"Local conversation\" [level=2]\n- button \"التبديل إلى العربية\"\n- group:\n  - text: User message Run the example\n  - group \"Assistant message\":\n    - 'group \"Tool call: deleteFile\"':\n      - 'group \"deleteFile { \\\"path\\\": \\\"/tmp/example\\\" }\"'\n    - text: Tool denied; no local action ran.\n- textbox \"Message…\"\n- button \"Send message\"",
       "errors": [],
       "screenshot": "conversation-Deny.png"
     },

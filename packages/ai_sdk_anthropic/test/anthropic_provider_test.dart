@@ -378,6 +378,93 @@ void main() {
     }
   });
 
+  test('classifies unversioned model aliases for reasoning', () async {
+    final captured = <Map<String, dynamic>>[];
+    final server = await _startServer((request) async {
+      captured.add(
+        (jsonDecode(await utf8.decoder.bind(request).join()) as Map)
+            .cast<String, dynamic>(),
+      );
+      request.response.statusCode = 200;
+      if (request.headers.value('accept')?.contains('text/event-stream') ??
+          false) {
+        request.response.headers.set('content-type', 'text/event-stream');
+        request.response.write(
+          'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n',
+        );
+      } else {
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({'content': []}));
+      }
+      await request.response.close();
+    });
+    addTearDown(server.close);
+
+    final provider = AnthropicProvider(apiKey: 'test', baseUrl: server.baseUrl);
+    for (final modelId in [
+      'custom-provider-alias',
+      'claude-3-custom-alias',
+      'claude-2-custom-alias',
+      'claude-instant-custom-alias',
+    ]) {
+      await provider
+          .call(modelId)
+          .doGenerate(
+            LanguageModelV4CallOptions(
+              prompt: userPrompt('reason'),
+              reasoning: LanguageModelV4Reasoning.high,
+            ),
+          );
+      final stream = await provider
+          .call(modelId)
+          .doStream(
+            LanguageModelV4CallOptions(
+              prompt: userPrompt('reason'),
+              reasoning: LanguageModelV4Reasoning.high,
+            ),
+          );
+      await stream.stream.drain<void>();
+    }
+
+    for (final request in captured.take(8)) {
+      expect(request['thinking'], {'type': 'enabled', 'budget_tokens': 2458});
+      expect(request.containsKey('output_config'), isFalse);
+    }
+
+    await provider
+        .call('claude-future-alias')
+        .doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: userPrompt('reason'),
+            reasoning: LanguageModelV4Reasoning.high,
+          ),
+        );
+    final futureAliasStream = await provider
+        .call('claude-future-alias')
+        .doStream(
+          LanguageModelV4CallOptions(
+            prompt: userPrompt('reason'),
+            reasoning: LanguageModelV4Reasoning.high,
+          ),
+        );
+    await futureAliasStream.stream.drain<void>();
+    await provider
+        .call('claude-future-alias')
+        .doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: userPrompt('reason'),
+            reasoning: LanguageModelV4Reasoning.none,
+          ),
+        );
+
+    for (final request in captured.skip(8).take(2)) {
+      expect(request['thinking'], {'type': 'adaptive'});
+      expect((request['output_config'] as Map)['effort'], 'high');
+    }
+    expect(captured.last.containsKey('thinking'), isFalse);
+    expect((captured.last['output_config'] as Map)['effort'], 'low');
+  });
+
   group('AnthropicProvider', () {
     test('rejects null and malformed 2xx chat responses', () async {
       final nullServer = await _startServer((request) async {

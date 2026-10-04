@@ -87,6 +87,27 @@ class _ApprovalSequenceModel extends LanguageModelV4 {
   }
 }
 
+class _FailAfterFirstStreamModel extends _ApprovalSequenceModel {
+  _FailAfterFirstStreamModel()
+    : super([
+        [
+          const LanguageModelV4ToolCallPart(
+            toolCallId: 'approval-call',
+            toolName: 'delete',
+            input: {'path': '/tmp/a'},
+          ),
+        ],
+      ]);
+
+  @override
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
+  ) {
+    if (streamCalls > 0) throw StateError('resume provider failed');
+    return super.doStream(options);
+  }
+}
+
 Tool<Map<String, dynamic>, String> _countedApprovalTool(
   void Function() onExecute,
 ) => Tool<Map<String, dynamic>, String>(
@@ -527,6 +548,47 @@ void main() {
       final opaque = parts.whereType<LanguageModelV4OpaquePart>().single;
       expect(opaque.provider, 'vendor-x');
       expect(opaque.raw, ['opaque', 3]);
+      await backend.dispose();
+    },
+  );
+
+  test(
+    'approval resume failure settles the assistant turn as failed',
+    () async {
+      final model = _FailAfterFirstStreamModel();
+      var executions = 0;
+      final backend = LocalConversationBackend(
+        agent: ToolLoopAgent(
+          model: model,
+          tools: {'delete': _countedApprovalTool(() => executions++)},
+        ),
+        initial: _empty(),
+      );
+
+      await backend.send('delete the file');
+      await pumpUntil(
+        () =>
+            backend.conversation.messages.last.status ==
+            ConversationMessageStatus.pendingApproval,
+      );
+      final approval = backend.conversation.messages.last.parts
+          .whereType<ApprovalPart>()
+          .single;
+      await backend.respondToApproval(
+        approvalId: approval.approvalId!,
+        approved: true,
+      );
+      await pumpUntil(
+        () =>
+            backend.conversation.messages.last.status ==
+            ConversationMessageStatus.failed,
+      );
+
+      expect(executions, 1);
+      expect(
+        backend.conversation.messages.last.status,
+        ConversationMessageStatus.failed,
+      );
       await backend.dispose();
     },
   );
@@ -2386,6 +2448,52 @@ void main() {
     );
     await backend.dispose();
   });
+
+  test(
+    'stream invocation failure settles a failed assistant snapshot',
+    () async {
+      final backend = LocalConversationBackend(
+        agent: ThrowingStreamAgent(StateError('stream invocation failed')),
+        initial: _empty(),
+      );
+      await backend.send('fail before opening the stream');
+      expect(backend.conversation.messages, hasLength(2));
+      expect(
+        backend.conversation.messages.last.status,
+        ConversationMessageStatus.failed,
+      );
+      await backend.dispose();
+    },
+  );
+
+  test(
+    'failed pure-text retry settles back to the same failed assistant',
+    () async {
+      final backend = LocalConversationBackend(
+        agent: ThrowingStreamAgent(
+          StateError('retry stream invocation failed'),
+        ),
+        initial: _empty(),
+      );
+      await backend.send('retry safely');
+      final failedAssistantId = backend.conversation.messages.last.id;
+      expect(
+        backend.conversation.messages.last.status,
+        ConversationMessageStatus.failed,
+      );
+
+      await backend.retryLastTurn();
+
+      expect(backend.conversation.messages, hasLength(2));
+      expect(backend.conversation.messages.first.role, ConversationRole.user);
+      expect(backend.conversation.messages.last.id, failedAssistantId);
+      expect(
+        backend.conversation.messages.last.status,
+        ConversationMessageStatus.failed,
+      );
+      await backend.dispose();
+    },
+  );
 
   test('renews a changed approval policy and persists the renewal', () async {
     final model = _ApprovalSequenceModel([

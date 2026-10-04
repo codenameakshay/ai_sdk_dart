@@ -300,6 +300,8 @@ void main() {
         ('gemini-3.1-pro-preview', LanguageModelV4Reasoning.minimal, 'low'),
         ('gemini-3.1-pro-preview', LanguageModelV4Reasoning.low, 'low'),
         ('gemini-3.1-pro-preview', LanguageModelV4Reasoning.medium, 'medium'),
+        ('gemini-3.1-pro-preview', LanguageModelV4Reasoning.high, 'high'),
+        ('gemini-3.1-pro-preview', LanguageModelV4Reasoning.xhigh, 'high'),
         (
           'gemini-3.1-flash-lite-image',
           LanguageModelV4Reasoning.none,

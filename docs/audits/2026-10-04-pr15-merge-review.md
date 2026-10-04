@@ -236,10 +236,18 @@ are closed; the verification record below describes the separate execution gates
 - Repository tooling: 22 tests passed. Catalog: 16 records across 9 providers.
 - Pinned JavaScript remote fixture: all 3 tests passed on local Node 24.21.0;
   hosted CI uses Node 22.
-- Baseline iOS run [37193586224](https://github.com/codenameakshay/ai_sdk_dart/actions/runs/37193586224)
+- Hosted [CI](https://github.com/codenameakshay/ai_sdk_dart/actions/runs/37197917799)
+  and all three [compatibility lanes](https://github.com/codenameakshay/ai_sdk_dart/actions/runs/37197917780)
+  passed at `8e1361b`: minimum Flutter 3.41.3 / Dart 3.11.1, pinned
+  Flutter 3.44.3 / Dart 3.12.2, and latest stable. Hosted coverage independently
+  reported the same 99.01% result.
+- Final-code iOS run [37197917882](https://github.com/codenameakshay/ai_sdk_dart/actions/runs/37197917882)
   passed both launches, with 9 screenshots per launch. The parent inspected the
-  pending-approval and restored-approved screenshots. This is scripted-model
-  simulator evidence at `b6d1c96`, not live provider evidence.
+  pending-approval and restored-approved screenshots and verified both launch
+  logs. This is scripted-model simulator evidence at `8e1361b`, not live provider
+  evidence. [Native evidence](assets/pr15-merge-ios.json) records toolchains,
+  screenshot hashes, and the tested commit. The evidence-only follow-up changes
+  documentation and assets; final-head checks remain visible on [PR #15](https://github.com/codenameakshay/ai_sdk_dart/pull/15/checks).
 - The final-code Flutter chat release web build and Wasm compilation dry run
   passed.
 - All five final-code Chromium browser flows passed: local approve/deny, remote text, and

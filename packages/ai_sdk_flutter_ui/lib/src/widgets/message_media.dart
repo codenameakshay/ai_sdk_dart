@@ -10,13 +10,13 @@ import 'ui_strings.dart';
 /// explicitly chosen to trust.
 typedef RemoteImageProviderBuilder = ImageProvider Function(Uri url);
 
-/// Renders an image content part ([LanguageModelV4ImagePart]) from any of the
-/// three `DataContent` carriers — raw bytes, base64, or a URL — using core
-/// Flutter image widgets (no extra dependency). The image fades in once decoded
-/// (suppressed under reduced motion).
-///
-/// Decode/network failures fall back to a broken-image placeholder rather than
-/// throwing, so a malformed part never breaks the surrounding message.
+/// Renders raw-byte, base64, and URL-backed image content using core Flutter
+/// image widgets (no extra dependency). Provider-owned references have no
+/// built-in resolver and render the broken-image placeholder. Synchronous
+/// provider-resolution errors and decode/network failures also fall back to
+/// that placeholder rather than throwing, so malformed content never breaks
+/// the surrounding message. The image fades in once decoded (suppressed under
+/// reduced motion).
 ///
 /// ```dart
 /// MessageImage(image: imagePart, width: 220)
@@ -75,6 +75,15 @@ class MessageImage extends StatelessWidget {
     final semanticLabel = mediaType == null || mediaType.isEmpty
         ? strings.attachedImage
         : '${strings.attachedImage}, $mediaType';
+    final ImageProvider provider;
+    try {
+      provider = imageProviderFor(
+        data,
+        remoteImageProviderBuilder: remoteImageProviderBuilder,
+      );
+    } on Object {
+      return _failedImage(strings, width, height, borderRadius);
+    }
     return Semantics(
       image: true,
       label: semanticLabel,
@@ -82,10 +91,7 @@ class MessageImage extends StatelessWidget {
         child: ClipRRect(
           borderRadius: borderRadius,
           child: Image(
-            image: imageProviderFor(
-              data,
-              remoteImageProviderBuilder: remoteImageProviderBuilder,
-            ),
+            image: provider,
             width: width,
             height: height,
             fit: fit,
@@ -111,6 +117,22 @@ class MessageImage extends StatelessWidget {
     );
   }
 }
+
+Widget _failedImage(
+  AiSdkUiStrings strings,
+  double? width,
+  double? height,
+  BorderRadius borderRadius,
+) => Semantics(
+  image: true,
+  label: strings.imageFailedToLoad,
+  child: ExcludeSemantics(
+    child: ClipRRect(
+      borderRadius: borderRadius,
+      child: _ImageError(width: width, height: height),
+    ),
+  ),
+);
 
 /// Maps trusted [LanguageModelV4DataContent] to a core [ImageProvider].
 ///

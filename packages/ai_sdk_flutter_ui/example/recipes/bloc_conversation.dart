@@ -84,22 +84,18 @@ class ConversationCubit extends Cubit<Conversation> {
   }
 
   @override
-  // The actual super call is awaited in _finishClose so concurrent close()
-  // callers share one cleanup future.
-  // ignore: must_call_super
-  Future<void> close() async {
+  Future<void> close() {
     final inFlight = _closeFuture;
     if (inFlight != null) return inFlight;
     _closing = true;
     _epoch++;
-    final closing = _finishClose();
+
+    final closing = Future<void>.microtask(() async {
+      unawaited(_cancelSubscription(_subscription));
+      await _disposeOwned(backend);
+      await super.close();
+    });
     _closeFuture = closing;
     return closing;
-  }
-
-  Future<void> _finishClose() async {
-    unawaited(_cancelSubscription(_subscription));
-    await _disposeOwned(backend);
-    await super.close();
   }
 }

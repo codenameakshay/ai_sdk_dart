@@ -61,6 +61,27 @@ void main() {
       expect(image.image, isA<MemoryImage>());
     });
 
+    for (final (description, data) in <(String, LanguageModelV4DataContent)>[
+      (
+        'provider references',
+        const DataContentProviderReference(namespace: 'mock', id: 'image-1'),
+      ),
+      ('malformed base64', const DataContentBase64('%%%')),
+    ]) {
+      testWidgets('$description show an accessible placeholder', (
+        tester,
+      ) async {
+        await tester.pumpWidget(
+          _wrap(MessageImage(image: LanguageModelV4ImagePart(image: data))),
+        );
+
+        expect(find.byType(Image), findsNothing);
+        expect(find.byIcon(Icons.broken_image_outlined), findsOneWidget);
+        expect(find.bySemanticsLabel('Image failed to load'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      });
+    }
+
     testWidgets('blocks url data unless the host opts in', (tester) async {
       await tester.pumpWidget(
         _wrap(

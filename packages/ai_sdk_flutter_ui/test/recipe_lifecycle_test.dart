@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:ai_sdk_conversation/ai_sdk_conversation.dart';
+import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -94,6 +95,50 @@ void main() {
   );
 
   test(
+    'Bloc close caches its future before disposing a reentrant backend',
+    () async {
+      late ConversationCubit cubit;
+      Future<void>? reentrantClose;
+      final finishDispose = Completer<void>();
+      final previousObserver = Bloc.observer;
+      final observer = _CloseCountingBlocObserver();
+      Bloc.observer = observer;
+      addTearDown(() => Bloc.observer = previousObserver);
+      final backend = _ReentrantCloseBackend(
+        onDispose: () {
+          reentrantClose = cubit.close();
+          return finishDispose.future;
+        },
+      );
+      cubit = ConversationCubit(backend, disposeBackend: true);
+
+      final firstClose = cubit.close();
+      final secondClose = cubit.close();
+      var firstFinished = false;
+      var secondFinished = false;
+      var reentrantFinished = false;
+      unawaited(firstClose.then((_) => firstFinished = true));
+      unawaited(secondClose.then((_) => secondFinished = true));
+      await Future<void>.delayed(Duration.zero);
+      reentrantClose!.then((_) => reentrantFinished = true);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(firstFinished, isFalse);
+      expect(secondFinished, isFalse);
+      expect(reentrantFinished, isFalse);
+      expect(observer.closeCount, 0);
+      expect(backend.disposeCount, 1);
+
+      finishDispose.complete();
+      await Future.wait([firstClose, secondClose, reentrantClose!]);
+
+      expect(observer.closeCount, 1);
+      expect(cubit.isClosed, isTrue);
+      await backend.changesController.close();
+    },
+  );
+
+  test(
     'Bloc keeps caller-owned backends alive during replacement and close',
     () async {
       final first = _backend('first');
@@ -153,4 +198,38 @@ void main() {
       expect(cubit.state.id, 'third-update');
     },
   );
+}
+
+class _ReentrantCloseBackend implements ConversationBackend {
+  _ReentrantCloseBackend({required this.onDispose});
+
+  final FutureOr<void> Function() onDispose;
+  final changesController = StreamController<Conversation>.broadcast();
+  var disposeCount = 0;
+
+  @override
+  Conversation get conversation =>
+      Conversation(id: 'reentrant', messages: const []);
+
+  @override
+  Stream<Conversation> get changes => changesController.stream;
+
+  @override
+  Future<void> dispose() async {
+    disposeCount++;
+    await onDispose();
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _CloseCountingBlocObserver extends BlocObserver {
+  int closeCount = 0;
+
+  @override
+  void onClose(BlocBase<dynamic> bloc) {
+    closeCount++;
+    super.onClose(bloc);
+  }
 }

@@ -650,6 +650,64 @@ class LocalConversationBackend
     }
   }
 
+  void _mergeResponseToolResults(
+    Iterable<LanguageModelV4Message> messages,
+    int insertionIndex,
+  ) {
+    final existingCallIds = _liveParts
+        .whereType<ToolResultPart>()
+        .map((part) => part.callId)
+        .toSet();
+    var nextInsertionIndex = insertionIndex;
+    for (final message in messages) {
+      if (message.role != LanguageModelV4Role.tool) continue;
+      for (final result
+          in message.content.whereType<LanguageModelV4ToolResultPart>()) {
+        if (!existingCallIds.add(result.toolCallId)) continue;
+        final denied = result.output;
+        final rejectedApproval = _liveParts
+            .whereType<ApprovalPart>()
+            .where(
+              (part) =>
+                  part.callId == result.toolCallId &&
+                  part.status == ApprovalStatus.rejected,
+            )
+            .firstOrNull;
+        final denialReason = switch (denied) {
+          ToolResultOutputExecutionDenied(:final reason) => reason,
+          ToolResultOutputErrorText(:final text)
+              when rejectedApproval != null =>
+            text,
+          ToolResultOutputText(:final text) when rejectedApproval != null =>
+            text,
+          _ when rejectedApproval != null => 'Tool execution denied.',
+          _ => null,
+        };
+        _liveParts.insert(
+          nextInsertionIndex,
+          ToolResultPart(
+            id: _freshLivePartId('result'),
+            callId: result.toolCallId,
+            toolName: result.toolName,
+            output: _toolOutput(result.output),
+            isError: result.isError,
+            outputKind: _toolOutputKind(result.output),
+            preliminary: result.preliminary,
+            isDynamic: result.isDynamic,
+            providerOptions: result.providerOptions ?? const {},
+            executionDeniedReason: denialReason,
+            executionDeniedApprovalId:
+                (denied is ToolResultOutputExecutionDenied
+                    ? denied.approvalId
+                    : null) ??
+                rejectedApproval?.approvalId,
+          ),
+        );
+        nextInsertionIndex++;
+      }
+    }
+  }
+
   String _freshLivePartId(String prefix) {
     final used = <String>{
       for (final message in _conversation.messages) ...[
@@ -1002,8 +1060,13 @@ class LocalConversationBackend
       for (final part in message.parts.whereType<ToolCallPart>())
         part.callId: part,
     };
+    final completedCallIds = {
+      for (final result in message.parts.whereType<ToolResultPart>())
+        if (!result.preliminary) result.callId,
+    };
     final requests = <LanguageModelV4ToolApprovalRequestPart>[];
     for (final approval in approvals) {
+      if (completedCallIds.contains(approval.callId)) continue;
       final call = calls[approval.callId];
       if (call == null) continue;
       final request = LanguageModelV4ToolApprovalRequestPart(
@@ -1087,6 +1150,7 @@ class LocalConversationBackend
 
   Future<void> _resumeApproval(ToolApprovalReplay replay) async {
     final epoch = _epoch;
+    final responseHistoryInsertionIndex = _liveParts.length;
     final cancellation = CancellationToken();
     _resumeCancellation = cancellation;
     try {
@@ -1118,6 +1182,12 @@ class LocalConversationBackend
       final resumedSteps = await result.steps;
       if (_disposed || epoch != _epoch) return;
       _mergeStepToolCalls(resumedSteps);
+      final responseHistory = await result.response;
+      if (_disposed || epoch != _epoch) return;
+      _mergeResponseToolResults(
+        responseHistory.messages,
+        responseHistoryInsertionIndex,
+      );
       final approvals = [
         for (final step in resumedSteps) ...step.toolApprovalRequests,
       ];
@@ -1135,12 +1205,6 @@ class LocalConversationBackend
           )
           .toList();
       if (freshApprovals.isNotEmpty) {
-        _pendingReplay = ToolApprovalReplay(
-          messages: [
-            for (final step in resumedSteps) ..._replayMessagesForStep(step),
-          ],
-          requests: freshApprovals,
-        );
         _pendingApprovalRequests
           ..clear()
           ..addEntries(
@@ -1168,6 +1232,17 @@ class LocalConversationBackend
               status: ApprovalStatus.pending,
             ),
         ]);
+        _pendingReplay = ToolApprovalReplay(
+          messages: _modelMessagesForSnapshot(
+            ConversationMessage(
+              id: _liveMessageId!,
+              role: ConversationRole.assistant,
+              status: ConversationMessageStatus.pendingApproval,
+              parts: List.of(_liveParts),
+            ),
+          ),
+          requests: freshApprovals,
+        );
         _publishLive(ConversationMessageStatus.pendingApproval);
         return;
       }

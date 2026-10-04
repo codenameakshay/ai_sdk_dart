@@ -1,5 +1,15 @@
 ## 3.0.0
 
+- Added conversation controllers and local/remote backends, persisted conversation snapshots,
+  and capability-aware safe retry for completed turns.
+- Preserved tool results and assistant history across chained approval resumes; invalidated stale
+  approvals on a new send.
+- Added RTL-aware text rendering and localized accessible labels.
+
+---
+
+## 2.0.0
+
 - Hardened controller cancellation/disposal and coalesced streaming updates to
   frame boundaries.
 - URL-backed model images are blocked by default to prevent untrusted automatic

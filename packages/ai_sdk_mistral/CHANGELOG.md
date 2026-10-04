@@ -1,5 +1,14 @@
 ## 3.0.0
 
+- Inherits the shared adapter's trailing-usage handling, schema-free JSON mode,
+  and active-stream cancellation behavior while retaining Mistral request-field
+  mapping.
+
+
+---
+
+## 2.0.0
+
 - Migrated Mistral chat models to the shared V4 language-model contract,
   including unified tools, response formats, lifecycle metadata, and nested
   usage.

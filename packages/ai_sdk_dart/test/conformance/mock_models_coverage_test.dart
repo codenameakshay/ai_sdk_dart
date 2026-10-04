@@ -33,6 +33,34 @@ void main() {
       expect(parts.whereType<StreamPartTextDelta>(), hasLength(1));
     });
 
+    test(
+      'doStream preserves reasoning signature and provider options',
+      () async {
+        final model = MockLanguageModelV4(
+          response: const [
+            LanguageModelV4ReasoningPart(
+              text: 'thinking',
+              signature: 'signed',
+              providerOptions: {
+                'fixture': {'opaque': 'preserved'},
+              },
+            ),
+          ],
+        );
+        final result = await model.doStream(
+          const LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(messages: []),
+          ),
+        );
+        final parts = await result.stream.toList();
+        final end = parts.whereType<StreamPartReasoningEnd>().single;
+        expect(end.signature, 'signed');
+        expect(end.providerMetadata, {
+          'fixture': {'opaque': 'preserved'},
+        });
+      },
+    );
+
     test('doStream fans out tool-call start/delta/end parts', () async {
       final model = MockLanguageModelV4(
         response: [

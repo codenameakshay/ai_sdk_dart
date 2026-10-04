@@ -61,6 +61,68 @@ void main() {
       },
     );
   }
+
+  test('reports EOF before message-end as truncation', () async {
+    final client = Dio()
+      ..httpClientAdapter = _StreamAdapter(
+        Stream.value(
+          Uint8List.fromList(
+            utf8.encode(
+              '{"type":"content-delta","delta":{"message":{"content":{"text":"partial"}}}}\n',
+            ),
+          ),
+        ),
+      );
+    addTearDown(() => client.close(force: true));
+    final result = await CohereProvider(client: client)
+        .call('command-r-plus')
+        .doStream(
+          const LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(messages: []),
+          ),
+        );
+    final parts = await result.stream.toList();
+    expect(parts.whereType<StreamPartError>(), hasLength(1));
+    expect(parts.whereType<StreamPartFinish>(), isEmpty);
+  });
+
+  test('empty response body reports truncation after one start', () async {
+    final client = Dio()
+      ..httpClientAdapter = _StreamAdapter(const Stream.empty());
+    addTearDown(() => client.close(force: true));
+    final result = await CohereProvider(client: client)
+        .call('command-r-plus')
+        .doStream(
+          const LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(messages: []),
+          ),
+        );
+    final parts = await result.stream.toList();
+    expect(parts.whereType<StreamPartStreamStart>(), hasLength(1));
+    expect(parts.whereType<StreamPartError>(), hasLength(1));
+    expect(parts.whereType<StreamPartFinish>(), isEmpty);
+  });
+
+  test('message-end without content remains a valid empty finish', () async {
+    final client = Dio()
+      ..httpClientAdapter = _StreamAdapter(
+        Stream.value(
+          Uint8List.fromList(utf8.encode('{"type":"message-end","delta":{}}')),
+        ),
+      );
+    addTearDown(() => client.close(force: true));
+    final result = await CohereProvider(client: client)
+        .call('command-r-plus')
+        .doStream(
+          const LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(messages: []),
+          ),
+        );
+    final parts = await result.stream.toList();
+    expect(parts.whereType<StreamPartStreamStart>(), hasLength(1));
+    expect(parts.whereType<StreamPartError>(), isEmpty);
+    expect(parts.whereType<StreamPartFinish>(), hasLength(1));
+  });
 }
 
 class _StreamAdapter implements HttpClientAdapter {

@@ -14,6 +14,48 @@ import '../../ai_sdk_provider/test/support/test_server.dart';
 import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
+  test('rejects non-text tool result content instead of dropping it', () async {
+    var dispatched = false;
+    final server = await _startServer((request) async {
+      dispatched = true;
+      request.response.statusCode = 200;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({'done': true, 'message': {}}));
+      await request.response.close();
+    });
+    addTearDown(server.close);
+
+    final model = OllamaProvider(baseUrl: server.baseUrl).call('llava');
+    await expectLater(
+      model.doGenerate(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
+            messages: [
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.tool,
+                content: [
+                  LanguageModelV4ToolResultPart(
+                    toolCallId: 'call_1',
+                    toolName: 'lookup',
+                    output: ToolResultOutputContent([
+                      LanguageModelV4TextPart(text: 'caption'),
+                      LanguageModelV4ImagePart(
+                        image: DataContentBase64('aW1hZ2U='),
+                        mediaType: 'image/png',
+                      ),
+                    ]),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+      throwsUnsupportedError,
+    );
+    expect(dispatched, isFalse);
+  });
+
   test('default provider exposes embedding capabilities', () {
     final model = ollama.embedding('nomic-embed-text');
     expect(model.provider, 'ollama');

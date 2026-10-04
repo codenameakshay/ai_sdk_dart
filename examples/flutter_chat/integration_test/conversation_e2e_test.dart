@@ -105,7 +105,22 @@ void main() {
     await _waitForFinishedTurn(tester);
 
     expect(find.text('Hello from the pinned AI SDK backend.'), findsOneWidget);
-    await _waitFor(tester, find.bySemanticsLabel(RegExp('Assistant message')));
+    await _send(tester, 'Say hello again.');
+    await _waitForCount(
+      tester,
+      find.text('Hello from the pinned AI SDK backend.'),
+      2,
+    );
+    await _waitForFinishedTurn(tester);
+    expect(
+      find.text('Hello from the pinned AI SDK backend.'),
+      findsNWidgets(2),
+    );
+    await _waitForCount(
+      tester,
+      find.bySemanticsLabel(RegExp('Assistant message')),
+      2,
+    );
     expect(
       tester
           .widget<TextField>(find.byKey(const ValueKey('chat-composer-field')))
@@ -161,6 +176,23 @@ void main() {
       isNotNull,
     );
     await binding.takeScreenshot('conversation-remote-approved');
+
+    await _send(tester, 'Please request a fresh approval for this new turn.');
+    await _waitFor(tester, find.byKey(const ValueKey('tool-approval-approve')));
+    expect(
+      find.text('The scripted tool call was approved and resumed.'),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('tool-approval-deny')));
+    await _waitFor(
+      tester,
+      find.text('The scripted tool call was denied and resumed safely.'),
+    );
+    await _waitForFinishedTurn(tester);
+    expect(
+      find.text('The scripted tool call was denied and resumed safely.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('remote conversation denial resumes safely', (tester) async {
@@ -217,7 +249,7 @@ void main() {
     await _send(tester, 'Trigger an app error.');
     await _waitFor(tester, find.byKey(const ValueKey('chat-error-dismiss')));
     expect(find.text('Bad state: fixture backend failure'), findsOneWidget);
-    expect(find.text('Retry'), findsOneWidget);
+    expect(find.text('Retry'), findsNothing);
     await binding.takeScreenshot('conversation-error');
 
     await tester.tap(find.byKey(const ValueKey('chat-error-dismiss')));
@@ -457,6 +489,20 @@ Future<void> _waitForSingle(
     await tester.pump(const Duration(milliseconds: 50));
   }
   expect(finder, findsOneWidget);
+}
+
+Future<void> _waitForCount(
+  WidgetTester tester,
+  Finder finder,
+  int count, {
+  Duration timeout = const Duration(seconds: 15),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (finder.evaluate().length != count &&
+      DateTime.now().isBefore(deadline)) {
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+  expect(finder, findsNWidgets(count));
 }
 
 Future<void> _waitForFinishedTurn(WidgetTester tester) async {

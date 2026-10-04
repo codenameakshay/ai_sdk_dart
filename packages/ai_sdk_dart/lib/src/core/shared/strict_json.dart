@@ -10,7 +10,7 @@ Map<String, dynamic> parseCompleteJsonObject(String text) {
   return _decodeObject(trimmed);
 }
 
-Object parseCompleteJsonValue(String text) {
+Object? parseCompleteJsonValue(String text) {
   final trimmed = text.trim();
   final fenced = RegExp(
     r'^```(?:json)?\s*([\s\S]*?)\s*```$',

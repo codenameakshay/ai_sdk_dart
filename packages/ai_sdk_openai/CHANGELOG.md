@@ -1,5 +1,14 @@
 ## 3.0.0
 
+- Added the OpenAI Responses API language model with streaming, reasoning, hosted tools, and validated function/tool continuation history.
+- Added Files and Batches clients with request lifecycle handling and runnable examples.
+- Added multipart media serialization, cancellation/error coverage, and terminal handling for Responses streams.
+
+
+---
+
+## 2.0.0
+
 - Migrated chat language models to the V4 provider contract and added
   provider-neutral reasoning controls, structured response formats, nested
   usage, and in-flight request cancellation through the shared base.

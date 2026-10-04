@@ -2,3 +2,4 @@
 
 - Add optional local Draft 7 and 2020-12 runtime validation for AI SDK Dart.
 - Reject remote references, unsupported dialects, and out-of-bounds JSON trees.
+- Enforce `maxNodes` before traversing additional siblings so broad inputs cannot exceed the configured work bound.

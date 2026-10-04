@@ -93,6 +93,12 @@ void validateToolChoiceForCalls({
     );
   }
   if (toolChoice is ToolChoiceSpecific) {
+    if (calls.isEmpty) {
+      throw AiApiCallError(
+        'Step $stepNumber produced no tool call while toolChoice requires '
+        '"${toolChoice.toolName}".',
+      );
+    }
     for (final call in calls) {
       if (call.toolName != toolChoice.toolName) {
         throw AiApiCallError(

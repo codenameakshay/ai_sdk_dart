@@ -251,9 +251,8 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
   final runFuture = Future<void>(() async {
     final overallStopwatch = Stopwatch()..start();
     final steps = <GenerateTextStep>[];
-    final overallTextBuffer = StringBuffer();
-    final partialJsonTracker = PartialJsonTracker();
-    final partialArrayTracker = outputSpec is ArrayOutput
+    var partialJsonTracker = PartialJsonTracker();
+    var partialArrayTracker = outputSpec is ArrayOutput
         ? PartialJsonArrayTracker()
         : null;
     final partialArrayValues = <dynamic>[];
@@ -293,6 +292,15 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
         maxSteps: maxSteps,
       );
       for (var stepNumber = 0; stepNumber < totalSteps; stepNumber++) {
+        if (stepNumber > 0) {
+          partialJsonTracker = PartialJsonTracker();
+          lastPartialFingerprint = null;
+          if (partialArrayTracker != null) {
+            partialArrayTracker = PartialJsonArrayTracker();
+            partialArrayValues.clear();
+            lastArraySnapshotLength = -1;
+          }
+        }
         final responseMessageStart = responseMessages.length;
         throwIfCancelled(scope.signal);
         fullController.add(StreamTextStartStepEvent(stepNumber: stepNumber));
@@ -560,7 +568,6 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                       StringBuffer.new,
                     );
                     textBuffer.write(transformedDelta);
-                    overallTextBuffer.write(transformedDelta);
                     textController.add(transformedDelta);
                     fullController.add(
                       StreamTextTextDeltaEvent(
@@ -606,7 +613,9 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                       final cadence = partialJsonTracker.append(
                         transformedDelta,
                       );
-                      final fullText = overallTextBuffer.toString();
+                      final fullText = stepTextById.values
+                          .map((buffer) => buffer.toString())
+                          .join();
 
                       if (cadence.shouldAttemptValue) {
                         final partial = tryParsePartialOutput(

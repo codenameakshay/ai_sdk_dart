@@ -121,12 +121,15 @@ bool _withinLimits(Object? value, int maxDepth, int maxNodes) {
     if (++count > maxNodes || depth > maxDepth) return false;
     switch (current) {
       case Map():
-        if (current.keys.any((key) => key is! String)) return false;
-        for (final child in current.values) {
-          pending.add((child, depth + 1));
+        for (final entry in current.entries) {
+          if (entry.key is! String || count + pending.length >= maxNodes) {
+            return false;
+          }
+          pending.add((entry.value, depth + 1));
         }
       case List():
         for (final child in current) {
+          if (count + pending.length >= maxNodes) return false;
           pending.add((child, depth + 1));
         }
       case num():
@@ -136,7 +139,6 @@ bool _withinLimits(Object? value, int maxDepth, int maxNodes) {
       default:
         return false;
     }
-    if (pending.length + count > maxNodes) return false;
   }
   return true;
 }

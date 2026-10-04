@@ -528,8 +528,8 @@ void main() {
       },
     );
 
-    test('toolChoice specific exposes only the named tool', () async {
-      final model = FakeCapturingStreamModel('hi');
+    test('toolChoice specific requires and exposes the named tool', () async {
+      final model = _SpecificCapturingToolModel();
       final result = await streamText(
         model: model,
         prompt: 'go',
@@ -1065,6 +1065,34 @@ class _StreamSingleToolModel extends LanguageModelV4 {
           ),
         ),
         StreamPartFinish(finishReason: LanguageModelV4FinishReason.toolCalls),
+      ]),
+    );
+  }
+}
+
+class _SpecificCapturingToolModel extends FakeCapturingStreamModel {
+  _SpecificCapturingToolModel() : super('unused');
+
+  @override
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
+  ) async {
+    lastOptions = options;
+    return LanguageModelV4StreamResult(
+      stream: Stream.fromIterable([
+        const StreamPartToolInputStart(id: 'specific', toolName: 'echo'),
+        const StreamPartToolInputDelta(id: 'specific', delta: '{}'),
+        const StreamPartToolInputEnd(id: 'specific'),
+        const StreamPartToolCall(
+          toolCall: LanguageModelV4ToolCallPart(
+            toolCallId: 'specific',
+            toolName: 'echo',
+            input: {},
+          ),
+        ),
+        const StreamPartFinish(
+          finishReason: LanguageModelV4FinishReason.toolCalls,
+        ),
       ]),
     );
   }

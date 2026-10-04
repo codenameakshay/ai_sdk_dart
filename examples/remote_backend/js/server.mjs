@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { randomUUID } from 'node:crypto';
 import {
   createUIMessageStream,
   createUIMessageStreamResponse,
@@ -22,7 +23,12 @@ const server = http.createServer(async (request, response) => {
   }
   request.setEncoding('utf8');
   let body = '';
-  for await (const chunk of request) body += chunk;
+  try {
+    for await (const chunk of request) body += chunk;
+  } catch (error) {
+    if (request.aborted && error?.code === 'ECONNRESET') return;
+    throw error;
+  }
   let messages;
   try {
     messages = JSON.parse(body).messages;
@@ -32,63 +38,69 @@ const server = http.createServer(async (request, response) => {
     response.end(`invalid UI messages: ${error.message}`);
     return;
   }
-  const toolPart = messages
-    .flatMap(message => message.parts)
-    .find(part => part.type.startsWith('tool-'));
+  const lastMessage = messages.at(-1);
+  const lastAssistantTool = lastMessage?.role === 'assistant'
+    ? lastMessage.parts.find(part => part.type.startsWith('tool-'))
+    : undefined;
+  const approval = lastAssistantTool?.approval;
+  const continuingApproval =
+    lastAssistantTool?.state === 'approval-responded' && approval != null &&
+    typeof approval.approved === 'boolean';
+  const toolPart = continuingApproval ? lastAssistantTool : undefined;
   const hasTool = toolPart != null;
-  const requestsApproval = messages.some(message =>
-    message.role === 'user' && message.parts.some(part =>
+  const requestsApproval = lastMessage?.role === 'user' && lastMessage.parts.some(part =>
       part.type === 'text' && part.text.toLowerCase().includes('approval'),
-    ),
   );
-  const approval = toolPart?.approval;
   const hasDecision =
     approval != null && typeof approval.approved === 'boolean';
+  const assistantId = continuingApproval ? lastMessage.id : randomUUID();
+  const toolCallId = continuingApproval ? toolPart.toolCallId : randomUUID();
+  const approvalId = continuingApproval ? approval.id : randomUUID();
   const stream = createUIMessageStream({
     execute({ writer }) {
-      writer.write({ type: 'start', messageId: 'js-example-assistant' });
+      writer.write({ type: 'start', messageId: assistantId });
       if ((hasTool || requestsApproval) && !hasDecision) {
         writer.write({
           type: 'tool-input-available',
-          toolCallId: 'js-call-1',
+          toolCallId,
           toolName: 'delete',
           input: { path: '/tmp/reference' },
         });
         writer.write({
           type: 'tool-approval-request',
-          approvalId: 'js-approval-1',
-          toolCallId: 'js-call-1',
+          approvalId,
+          toolCallId,
           reason: 'Reference server approval',
         });
       } else if (hasTool && hasDecision) {
         writer.write({
           type: 'tool-input-available',
-          toolCallId: 'js-call-1',
+          toolCallId,
           toolName: 'delete',
           input: { path: '/tmp/reference' },
         });
         writer.write({
           type: 'tool-approval-request',
-          approvalId: approval.id,
-          toolCallId: 'js-call-1',
+          approvalId,
+          toolCallId,
           reason: 'Reference server approval',
         });
         writer.write({
           type: 'tool-approval-response',
-          approvalId: approval.id,
+          approvalId,
           approved: approval.approved,
           ...(approval.reason ? { reason: approval.reason } : {}),
         });
         if (approval.approved) {
           writer.write({
             type: 'tool-output-available',
-            toolCallId: 'js-call-1',
+            toolCallId,
             output: { ok: true, path: '/tmp/reference' },
           });
         } else {
           writer.write({
             type: 'tool-output-denied',
-            toolCallId: 'js-call-1',
+            toolCallId,
           });
         }
         writer.write({ type: 'text-start', id: 'js-example-text' });
@@ -121,6 +133,7 @@ const server = http.createServer(async (request, response) => {
   response.end();
 });
 
-server.listen(8081, '127.0.0.1', () => {
-  console.log('Listening on http://127.0.0.1:8081/chat');
+const port = Number(process.env.PORT ?? 8081);
+server.listen(port, '127.0.0.1', () => {
+  console.log(`Listening on http://127.0.0.1:${port}/chat`);
 });

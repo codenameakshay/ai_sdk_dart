@@ -276,10 +276,15 @@ class _GoogleLanguageModel extends LanguageModelV4 {
 
       final usage = (data['usageMetadata'] as Map?)?.cast<String, dynamic>();
       final warnings = _readGoogleWarnings(data);
+      final candidateFinishReason = first['finishReason']?.toString();
+      final promptBlockReason = _googlePromptBlockReason(data);
+      final rawFinishReason = candidateFinishReason ?? promptBlockReason;
       return LanguageModelV4GenerateResult(
         content: content,
-        finishReason: _mapGoogleFinishReason(first['finishReason']?.toString()),
-        rawFinishReason: first['finishReason']?.toString(),
+        finishReason: candidateFinishReason != null
+            ? _mapGoogleFinishReason(candidateFinishReason)
+            : _mapGooglePromptBlockReason(promptBlockReason),
+        rawFinishReason: rawFinishReason,
         usage: usage == null ? null : _googleUsageFrom(usage),
         warnings: warnings,
         request: LanguageModelV4RequestMetadata(body: requestBody),
@@ -378,6 +383,7 @@ class _GoogleLanguageModel extends LanguageModelV4 {
     var textStarted = false;
     ProviderMetadata? textProviderOptions;
     var streamStarted = false;
+    var sawTerminalEvent = false;
     final activeToolCalls = <int, _GoogleStreamFunctionCallState>{};
     final activeReasoning = <int, _GoogleStreamReasoningState>{};
     LanguageModelV4Usage? streamUsage;
@@ -410,7 +416,40 @@ class _GoogleLanguageModel extends LanguageModelV4 {
             streamUsage = _googleUsageFrom(usage);
           }
           final candidates = (json['candidates'] as List?) ?? const [];
-          if (candidates.isEmpty) continue;
+          if (candidates.isEmpty) {
+            final blocked = _googlePromptBlockReason(json);
+            if (blocked != null) {
+              sawTerminalEvent = true;
+              controller.add(
+                StreamPartResponseMetadata(
+                  metadata: LanguageModelV4ResponseMetadata(
+                    modelId: modelId,
+                    timestamp: responseTimestamp,
+                    headers: responseHeaders,
+                    body: lastChunk,
+                  ),
+                ),
+              );
+              controller.add(
+                StreamPartFinish(
+                  finishReason: _mapGooglePromptBlockReason(blocked),
+                  rawFinishReason: blocked,
+                  usage: streamUsage ?? const LanguageModelV4Usage(),
+                  providerMetadata: {
+                    provider: {
+                      'model': modelId,
+                      'timestamp': DateTime.now().toUtc().toIso8601String(),
+                      if (warnings.isNotEmpty)
+                        'warnings': warnings
+                            .map((warning) => warning.type)
+                            .toList(growable: false),
+                    },
+                  },
+                ),
+              );
+            }
+            continue;
+          }
           final first = (candidates.first as Map).cast<String, dynamic>();
           final content =
               (first['content'] as Map?)?.cast<String, dynamic>() ??
@@ -558,6 +597,7 @@ class _GoogleLanguageModel extends LanguageModelV4 {
 
           final finishReason = first['finishReason']?.toString();
           if (finishReason != null) {
+            sawTerminalEvent = true;
             if (textStarted) {
               controller.add(
                 StreamPartTextEnd(
@@ -603,12 +643,30 @@ class _GoogleLanguageModel extends LanguageModelV4 {
             );
           }
         }
-      } catch (error) {
-        if (!streamStarted) {
-          streamStarted = true;
-          controller.add(const StreamPartStreamStart());
+        if (!sawTerminalEvent && !cancellation.isCancelled) {
+          if (!streamStarted) {
+            streamStarted = true;
+            controller.add(const StreamPartStreamStart());
+          }
+          controller.add(
+            StreamPartError(
+              error: AiApiCallError(
+                'Google stream ended before finishReason.',
+                statusCode: response.statusCode,
+                url: response.requestOptions.uri.toString(),
+                responseHeaders: responseHeaders,
+              ),
+            ),
+          );
         }
-        controller.add(StreamPartError(error: error));
+      } catch (error) {
+        if (!cancellation.isCancelled && !controller.isClosed) {
+          if (!streamStarted) {
+            streamStarted = true;
+            controller.add(const StreamPartStreamStart());
+          }
+          controller.add(StreamPartError(error: error));
+        }
       } finally {
         if (!streamStarted) {
           controller.add(const StreamPartStreamStart());
@@ -938,11 +996,33 @@ LanguageModelV4FinishReason _mapGoogleFinishReason(String? reason) {
   return switch (reason) {
     'STOP' => LanguageModelV4FinishReason.stop,
     'MAX_TOKENS' => LanguageModelV4FinishReason.length,
-    'SAFETY' => LanguageModelV4FinishReason.contentFilter,
-    'RECITATION' => LanguageModelV4FinishReason.contentFilter,
+    'SAFETY' || 'RECITATION' => LanguageModelV4FinishReason.contentFilter,
     'OTHER' => LanguageModelV4FinishReason.other,
     null => LanguageModelV4FinishReason.unknown,
     _ => LanguageModelV4FinishReason.other,
+  };
+}
+
+String? _googlePromptBlockReason(Map<String, dynamic> data) {
+  final feedback = (data['promptFeedback'] as Map?)?.cast<String, dynamic>();
+  final reason = feedback?['blockReason']?.toString();
+  if (reason == null ||
+      reason.isEmpty ||
+      reason == 'BLOCK_REASON_UNSPECIFIED') {
+    return null;
+  }
+  return reason;
+}
+
+LanguageModelV4FinishReason _mapGooglePromptBlockReason(String? reason) {
+  return switch (reason) {
+    'SAFETY' ||
+    'BLOCKLIST' ||
+    'PROHIBITED_CONTENT' ||
+    'IMAGE_SAFETY' ||
+    'RECITATION' => LanguageModelV4FinishReason.contentFilter,
+    'OTHER' => LanguageModelV4FinishReason.other,
+    _ => LanguageModelV4FinishReason.unknown,
   };
 }
 

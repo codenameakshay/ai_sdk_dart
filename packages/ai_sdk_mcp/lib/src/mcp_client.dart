@@ -42,6 +42,18 @@ class _MCPModernProtocolException extends MCPException {
   const _MCPModernProtocolException(super.message);
 }
 
+const _definiteToolRejectionStatusCodes = {
+  400,
+  401,
+  403,
+  404,
+  405,
+  406,
+  413,
+  415,
+  422,
+};
+
 // ---------------------------------------------------------------------------
 // Data types
 // ---------------------------------------------------------------------------
@@ -711,6 +723,25 @@ class MCPClient {
         }
       } catch (error, stackTrace) {
         if (error is MCPSessionExpiredException) rethrow;
+        final statusCode = error is MCPTransportException
+            ? error.statusCode
+            : null;
+        if (request.method == 'tools/call' && statusCode != null) {
+          if (_definiteToolRejectionStatusCodes.contains(statusCode)) {
+            Error.throwWithStackTrace(error, stackTrace);
+          }
+          if (statusCode == 408) {
+            // The server may have dispatched the call before its timeout.
+            Error.throwWithStackTrace(
+              MCPAmbiguousToolCompletionException(
+                toolName: request.params?['name']?.toString() ?? '',
+                requestId: request.id,
+                cause: error,
+              ),
+              stackTrace,
+            );
+          }
+        }
         // A malformed modern result was received successfully, so the
         // operation is not transport-ambiguous. Preserve its protocol error
         // instead of converting it into a tool replay warning.

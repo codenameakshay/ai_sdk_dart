@@ -1022,52 +1022,72 @@ void main() {
     expect(message.parts.whereType<TextPart>().single.text, 'retried');
   });
 
-  test('pinned server resumes an approved tool continuation', () async {
-    final endpoint = _pinnedEndpoint();
-    if (endpoint == null) {
-      markTestSkipped('Set AI_SDK_REMOTE_REFERENCE_URL for the pinned server');
-      return;
-    }
-    final transport = RemoteConversationTransport(
-      endpoint: Uri.parse(endpoint),
-    );
-    addTearDown(transport.dispose);
+  test(
+    'pinned server gives completed approved history a fresh assistant turn',
+    () async {
+      final endpoint = _pinnedEndpoint();
+      if (endpoint == null) {
+        markTestSkipped(
+          'Set AI_SDK_REMOTE_REFERENCE_URL for the pinned server',
+        );
+        return;
+      }
+      final transport = RemoteConversationTransport(
+        endpoint: Uri.parse(endpoint),
+      );
+      addTearDown(transport.dispose);
 
-    final snapshots = await transport.send(_approvedToolHistory()).toList();
-    final message = snapshots.last.messages
-        .where((item) => item.id == 'js-example-assistant')
-        .single;
-    expect(message.status, ConversationMessageStatus.complete);
-    expect(
-      (message.parts.whereType<TextPart>().single).text,
-      'The scripted tool call was approved and resumed.',
-    );
-    expect(message.parts.whereType<ToolResultPart>(), hasLength(1));
-  });
+      final snapshots = await transport.send(_approvedToolHistory()).toList();
+      final message = snapshots.last.messages
+          .where(
+            (item) =>
+                item.role == ConversationRole.assistant &&
+                item.id != 'assistant-history',
+          )
+          .single;
+      expect(message.id, isNot('assistant-history'));
+      expect(message.status, ConversationMessageStatus.complete);
+      expect(
+        message.parts.whereType<TextPart>().single.text,
+        'Hello from the pinned AI SDK backend.',
+      );
+      expect(message.parts.whereType<ToolResultPart>(), isEmpty);
+    },
+  );
 
-  test('pinned server accepts a denied tool history', () async {
-    final endpoint = _pinnedEndpoint();
-    if (endpoint == null) {
-      markTestSkipped('Set AI_SDK_REMOTE_REFERENCE_URL for the pinned server');
-      return;
-    }
-    final transport = RemoteConversationTransport(
-      endpoint: Uri.parse(endpoint),
-    );
-    addTearDown(transport.dispose);
+  test(
+    'pinned server gives completed denied history a fresh assistant turn',
+    () async {
+      final endpoint = _pinnedEndpoint();
+      if (endpoint == null) {
+        markTestSkipped(
+          'Set AI_SDK_REMOTE_REFERENCE_URL for the pinned server',
+        );
+        return;
+      }
+      final transport = RemoteConversationTransport(
+        endpoint: Uri.parse(endpoint),
+      );
+      addTearDown(transport.dispose);
 
-    final snapshots = await transport.send(_deniedToolHistory()).toList();
-    final message = snapshots.last.messages
-        .where((item) => item.id == 'js-example-assistant')
-        .single;
-    expect(message.status, ConversationMessageStatus.complete);
-    expect(
-      (message.parts.whereType<TextPart>().single).text,
-      'The scripted tool call was denied and resumed safely.',
-    );
-  });
+      final snapshots = await transport.send(_deniedToolHistory()).toList();
+      final message = snapshots.last.messages
+          .where(
+            (item) =>
+                item.role == ConversationRole.assistant &&
+                item.id != 'assistant-history',
+          )
+          .single;
+      expect(message.id, isNot('assistant-history'));
+      expect(message.status, ConversationMessageStatus.complete);
+      expect(
+        message.parts.whereType<TextPart>().single.text,
+        'Hello from the pinned AI SDK backend.',
+      );
+    },
+  );
 
-  test('pinned server accepts a text tool error history', () async {
+  test('pinned server does not resume completed tool-error history', () async {
     final endpoint = _pinnedEndpoint();
     if (endpoint == null) {
       markTestSkipped('Set AI_SDK_REMOTE_REFERENCE_URL for the pinned server');
@@ -1080,11 +1100,19 @@ void main() {
 
     final snapshots = await transport.send(_errorTextToolHistory()).toList();
     final message = snapshots.last.messages
-        .where((item) => item.id == 'js-example-assistant')
+        .where(
+          (item) =>
+              item.role == ConversationRole.assistant &&
+              item.id != 'assistant-history',
+        )
         .single;
-    expect(message.status, ConversationMessageStatus.pendingApproval);
-    expect(message.parts.whereType<ToolCallPart>(), hasLength(1));
-    expect(message.parts.whereType<ApprovalPart>(), hasLength(1));
+    expect(message.id, isNot('assistant-history'));
+    expect(message.status, ConversationMessageStatus.complete);
+    expect(
+      message.parts.whereType<TextPart>().single.text,
+      'Hello from the pinned AI SDK backend.',
+    );
+    expect(message.parts.whereType<ToolCallPart>(), isEmpty);
   });
 
   test('serializes text tool errors in outgoing history', () async {

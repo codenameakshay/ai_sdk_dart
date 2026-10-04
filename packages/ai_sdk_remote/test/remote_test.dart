@@ -288,9 +288,16 @@ void main() {
               )
               .toList();
       final message = snapshots.last.messages
-          .where((item) => item.id == 'js-example-assistant')
+          .where((item) => item.role == ConversationRole.assistant)
           .single;
-      expect(message.id, 'js-example-assistant');
+      expect(message.id, isNotEmpty);
+      expect(message.id, isNot('user-1'));
+      expect(
+        snapshots.every(
+          (snapshot) => snapshot.messages.any((item) => item.id == message.id),
+        ),
+        isTrue,
+      );
       expect(message.status, ConversationMessageStatus.complete);
       expect(
         (message.parts.single as TextPart).text,
@@ -332,18 +339,44 @@ void main() {
                         ),
                       ],
                     ),
+                    ConversationMessage(
+                      id: 'user-current',
+                      role: ConversationRole.user,
+                      parts: [
+                        TextPart(
+                          id: 'user-current-text',
+                          text: 'I need an approval before proceeding.',
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               )
               .toList();
       final message = snapshots.last.messages
-          .where((item) => item.id == 'js-example-assistant')
+          .where(
+            (item) =>
+                item.role == ConversationRole.assistant &&
+                item.id != 'assistant-history',
+          )
           .single;
+      expect(message.id, isNot('assistant-history'));
       expect(message.status, ConversationMessageStatus.pendingApproval);
-      expect(message.parts.whereType<ToolCallPart>(), hasLength(1));
+      final call = message.parts.whereType<ToolCallPart>().single;
+      expect(call.callId, isNot('call-1'));
+      expect(
+        snapshots.every(
+          (snapshot) => snapshot.messages.any((item) => item.id == message.id),
+        ),
+        isTrue,
+      );
       expect(
         message.parts.whereType<ApprovalPart>().single.status,
         ApprovalStatus.pending,
+      );
+      expect(
+        message.parts.whereType<ApprovalPart>().single.approvalId,
+        isNot('approval-part'),
       );
     },
   );

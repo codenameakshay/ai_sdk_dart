@@ -64,7 +64,19 @@ void main() {
   });
 
   test('rejects missing, wrong, and duplicate tool execution', () async {
-    await _expectFailure(_healthyModel(toolCalls: const []), 'tool call count');
+    await expectLater(
+      runProviderCanary(
+        _configuration(),
+        modelOverride: _healthyModel(toolCalls: const []),
+      ),
+      throwsA(
+        isA<AiApiCallError>().having(
+          (error) => error.message,
+          'message',
+          'Step 0 produced no tool call while toolChoice requires "lookup".',
+        ),
+      ),
+    );
     await _expectFailure(
       _healthyModel(toolCalls: [_toolCall(toolName: 'other')]),
       'called "other"',

@@ -60,6 +60,9 @@ jobs:
           npm ci --ignore-scripts --prefix examples/remote_backend/js
           npm ci --ignore-scripts --prefix examples/mcp_reference/js
 
+      - name: Test remote backend fixture
+        run: npm test --prefix examples/remote_backend/js
+
       - name: Start remote protocol fixture
         run: |
           node examples/remote_backend/js/server.mjs > "$RUNNER_TEMP/remote-reference.log" 2>&1 &

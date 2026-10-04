@@ -800,7 +800,7 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
       output: outputSpec,
       text: text,
       usage: lastResponse?.usage,
-      response: lastResponse?.response,
+      response: filterResponseMetadata(lastResponse?.response, bodyInclusion),
     );
     scope.checkDeadline();
     final totalUsage = sumUsage(steps.map((step) => step.usage));

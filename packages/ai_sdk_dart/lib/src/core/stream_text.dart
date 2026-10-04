@@ -1046,7 +1046,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
         output: outputSpec,
         text: finalText,
         usage: lastFinishPart?.usage,
-        response: lastResponseMetadata,
+        response: filterResponseMetadata(lastResponseMetadata, bodyInclusion),
       );
       scope.checkDeadline();
       final totalUsage = sumUsage(steps.map((step) => step.usage));

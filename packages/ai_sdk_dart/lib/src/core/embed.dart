@@ -40,17 +40,19 @@ Future<EmbedResult<VALUE>> embed<VALUE>({
   final result = await runOperation(
     abortSignal: abortSignal,
     timeout: timeout,
-    operation: (signal) => model.doEmbed(
-      EmbeddingModelV2CallOptions(
-        values: [value],
-        headers: headers,
-        providerOptions: providerOptions,
-        abortSignal: signal,
-      ),
-    ),
+    operation: (signal) async {
+      final response = await model.doEmbed(
+        EmbeddingModelV2CallOptions(
+          values: [value],
+          headers: headers,
+          providerOptions: providerOptions,
+          abortSignal: signal,
+        ),
+      );
+      validateEmbeddings(response, [value]);
+      return response;
+    },
   );
-
-  validateEmbeddings(result, [value]);
 
   final first = result.embeddings.first;
   return EmbedResult<VALUE>(

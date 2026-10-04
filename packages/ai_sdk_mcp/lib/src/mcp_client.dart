@@ -1301,13 +1301,13 @@ class MCPClient {
     _closedSignal.complete();
     await _notificationSub?.cancel();
     for (final subscription in _resourceSubscriptions.values.toList()) {
-      await subscription.close();
+      unawaited(subscription.close().catchError((Object _) {}));
     }
     _resourceSubscriptions.clear();
     _resourceRefreshStates.clear();
     _activeProgress.clear();
     _progressTotals.clear();
-    await _progress.close();
+    unawaited(_progress.close().catchError((Object _) {}));
     await transport.close();
   }
 }

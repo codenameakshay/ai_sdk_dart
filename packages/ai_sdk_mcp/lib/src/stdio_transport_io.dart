@@ -210,7 +210,9 @@ class StdioMCPTransport implements MCPTransport {
   }) async {
     _terminateImmediately(error, killProcess: killProcess);
     await _cancelSubscriptions();
-    if (!_notifications.isClosed) await _notifications.close();
+    if (!_notifications.isClosed) {
+      unawaited(_notifications.close().catchError((Object _) {}));
+    }
   }
 
   void _terminateImmediately(MCPException error, {bool killProcess = false}) {

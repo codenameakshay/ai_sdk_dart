@@ -26,7 +26,9 @@ dependencies:
 - reuses `Mcp-Session-Id` and `MCP-Protocol-Version` on later `POST` / `GET` /
   `DELETE` requests when the server negotiates a session
 - reconnects the optional `GET` listener with `Last-Event-ID` after an
-  unexpected disconnect
+  unexpected disconnect, using exponential delays from
+  `listenerReconnectDelay` up to 30 seconds while the listener is failing
+  (a configured initial delay above 30 seconds is preserved)
 - sends a best-effort `notifications/cancelled` notification when a request
   times out
 

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import 'json_rpc.dart';
+import 'listener_reconnect_backoff.dart';
 
 typedef MCPAccessTokenProvider = Future<String?> Function();
 
@@ -476,7 +477,9 @@ class StreamableHttpClientTransport implements MCPTransport {
 
   StreamSubscription<_SseEvent>? _listenerSubscription;
   final _modernSubscriptions = <int, _ModernSubscriptionLifetime>{};
-  Timer? _listenerReconnectTimer;
+  late final _listenerReconnectBackoff = ListenerReconnectBackoff(
+    listenerReconnectDelay,
+  );
   bool _listenerConnecting = false;
   int _listenerEpoch = 0;
   bool _listenerStarted = false;
@@ -1422,6 +1425,7 @@ class StreamableHttpClientTransport implements MCPTransport {
     if (decoded is! Map) {
       return;
     }
+    _listenerReconnectBackoff.reset();
     _dispatchMessage(decoded.cast<String, dynamic>());
   }
 
@@ -1430,11 +1434,10 @@ class StreamableHttpClientTransport implements MCPTransport {
         !_listenerStarted ||
         _listenerUnsupported ||
         _sessionExpired ||
-        _listenerReconnectTimer != null) {
+        _listenerReconnectBackoff.isScheduled) {
       return;
     }
-    _listenerReconnectTimer = Timer(listenerReconnectDelay, () {
-      _listenerReconnectTimer = null;
+    _listenerReconnectBackoff.schedule(() {
       unawaited(_ensureListenerRunning());
     });
   }
@@ -1442,8 +1445,7 @@ class StreamableHttpClientTransport implements MCPTransport {
   Future<void> _stopListener() async {
     _listenerEpoch++;
     _listenerConnecting = false;
-    _listenerReconnectTimer?.cancel();
-    _listenerReconnectTimer = null;
+    _listenerReconnectBackoff.cancel();
     final subscription = _listenerSubscription;
     _listenerSubscription = null;
     for (final lifetime in _activeRequests.toList()) {
@@ -1513,7 +1515,7 @@ class StreamableHttpClientTransport implements MCPTransport {
     _lastEventId = null;
     _sessionExpired = false;
     if (!_notifications.isClosed) {
-      await _notifications.close();
+      unawaited(_notifications.close().catchError((Object _) {}));
     }
     if (_ownsClient) {
       _client.close();

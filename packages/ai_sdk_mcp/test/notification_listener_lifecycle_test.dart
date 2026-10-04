@@ -7,6 +7,24 @@ import 'package:test/test.dart';
 
 void main() {
   test(
+    'transport close does not wait for a paused notification listener',
+    () async {
+      final transport = StreamableHttpClientTransport(
+        url: Uri.https('mcp.test', '/'),
+      );
+      final completed = Completer<void>();
+      final subscription = transport.notifications.listen(
+        (_) {},
+        onDone: completed.complete,
+      )..pause();
+
+      await transport.close().timeout(const Duration(seconds: 1));
+      expect(completed.isCompleted, isFalse);
+      await subscription.cancel();
+    },
+  );
+
+  test(
     'delayed old listener cancellation preserves the replacement listener',
     () async {
       final cancelling = Completer<void>();

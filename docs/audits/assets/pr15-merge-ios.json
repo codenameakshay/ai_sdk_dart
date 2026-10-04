@@ -1,0 +1,45 @@
+{
+  "runUrl": "https://github.com/codenameakshay/ai_sdk_dart/actions/runs/37197917882",
+  "testedHead": "8e1361b889fbf2694d1fa9904f3aa06b063e5b12",
+  "conclusion": "success",
+  "flutter": "3.44.3",
+  "dart": "3.12.2",
+  "xcode": "15.4",
+  "launches": [
+    {
+      "name": "run-1",
+      "passed": true,
+      "screenshots": {
+        "conversation-error.png": "5223fd66779966408f316f8f7ca3ec8d513a9ad1f1f054c62c374b6edbca226a",
+        "conversation-local-approval.png": "231e82aad42de88e3146c7224890d8e66a7c8c71f74b2cec802986e6130798fd",
+        "conversation-local-approved.png": "6b154921fe4bd333be30dc3248b4487f49b83e23e59556619e2294b0422d5190",
+        "conversation-local-denied.png": "c4969fcc024e770b87794895dbf8b1759f9976c2e7a0361b015ec3bc86a06c50",
+        "conversation-local-retry.png": "d5a24a04db3b1fdcbbb1ca1a0140680f470e9a414f7b9f9f0206606d8566ab62",
+        "conversation-persisted-write.png": "c69e4e36c92d2add80950855bff6fa9733a353e98c1a724c4ed2e3892b014a9f",
+        "conversation-remote-approved.png": "6f690ef8f3eb23b3dc15bf3163781d9919f0a895ac9fa4f4ad859ecdb86341ae",
+        "conversation-remote-denied.png": "560e681485b9a35d32bc98fa11a84c7ead1fe6f19a603d30e267e5c83d38370e",
+        "conversation-remote-text.png": "c8e9a3b0e8a786c9c2226869fa3b619e886c2382e4624be508b5f8302bcff14f"
+      }
+    },
+    {
+      "name": "run-2",
+      "passed": true,
+      "screenshots": {
+        "conversation-error.png": "04f46d96dd11741869ecb7192f0ebd00d66d5db06e24bd0f1869280f2e80d4d4",
+        "conversation-local-approval.png": "9e4062f05e628e8efd021b069bc11257fa4817d81a54bd1dffdc52d68fdb0059",
+        "conversation-local-approved.png": "18c291b531611259ed8b53210e7f0c2359b2ec4de69c222950c51b2bbb7512c9",
+        "conversation-local-denied.png": "83cbd7db01217d9123b711236f92a4d912b8c495cc4e34c2654b849b6ff04766",
+        "conversation-local-retry.png": "abe83bec381abee3f2bdaed1acbd2d6d7c689728e601d9045b53a766a5665669",
+        "conversation-persisted-restore.png": "df685a4ce81435ab4310f45db32a301f07a9a92bf70827b4ea481e6d9e90f886",
+        "conversation-remote-approved.png": "4dcf6d7b462148b099dfc0a9f70e43310a71b2b4aa0ed41f6a04992b5423e1fc",
+        "conversation-remote-denied.png": "0f886df30f73a0c9b0dc5c33e6dbded365d721c41f8c3cdf5bebd29a02179733",
+        "conversation-remote-text.png": "3ef951b44f4b8cf4110e7718dd80f92d8e47e69c0d013b673653f7b0c3bf61a9"
+      }
+    }
+  ],
+  "selectedScreenshots": {
+    "run-1/conversation-persisted-write.png": "pr15-merge-approval-pending.png",
+    "run-2/conversation-persisted-restore.png": "pr15-merge-approval-restored.png"
+  },
+  "limitations": "Scripted-model iOS Simulator checks. No live provider, physical device, Android, audio, or profile performance qualification."
+}

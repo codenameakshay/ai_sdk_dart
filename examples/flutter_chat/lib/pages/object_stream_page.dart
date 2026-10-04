@@ -19,6 +19,7 @@ class ObjectStreamPage extends StatefulWidget {
 }
 
 class _ObjectStreamPageState extends State<ObjectStreamPage> {
+  OpenAIProvider? _ownedProvider;
   ObjectStreamController<Map<String, dynamic>>? _ownedObjectController;
   late final ObjectStreamController<Map<String, dynamic>> _objectController;
   final _countryController = TextEditingController(text: 'Japan');
@@ -56,7 +57,9 @@ class _ObjectStreamPageState extends State<ObjectStreamPage> {
     _objectController =
         widget.controller ??
         (_ownedObjectController = ObjectStreamController<Map<String, dynamic>>(
-          model: OpenAIProvider(apiKey: openAiApiKey)('gpt-4.1-mini'),
+          model: (_ownedProvider = OpenAIProvider(apiKey: openAiApiKey))(
+            'gpt-4.1-mini',
+          ),
           schema: _schema,
           onError: (err) => _showSnackBar('Error: $err'),
         ));
@@ -65,6 +68,7 @@ class _ObjectStreamPageState extends State<ObjectStreamPage> {
   @override
   void dispose() {
     _ownedObjectController?.dispose();
+    _ownedProvider?.dispose();
     _countryController.dispose();
     super.dispose();
   }

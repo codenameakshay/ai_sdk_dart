@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_google/ai_sdk_google.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:dio/dio.dart';
@@ -65,6 +66,104 @@ void main() {
         throwsA(isA<AiApiCallError>()),
       );
     });
+
+    test('rejects empty and inconsistent embedding vectors', () async {
+      for (final vectors in [
+        [
+          [1.0, 2.0],
+          <double>[],
+        ],
+        [
+          [1.0, 2.0],
+          [3.0],
+        ],
+      ]) {
+        final server = await _startServer((request) async {
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'embeddings': vectors
+                  .map((values) => {'values': values})
+                  .toList(),
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        await expectLater(
+          GoogleGenerativeAIProvider(apiKey: 'test', baseUrl: server.baseUrl)
+              .embedding('text-embedding-004')
+              .doEmbed(
+                const EmbeddingModelV2CallOptions(values: ['first', 'second']),
+              ),
+          throwsA(
+            isA<AiApiCallError>()
+                .having((error) => error.statusCode, 'statusCode', 200)
+                .having(
+                  (error) => error.url,
+                  'url',
+                  contains('batchEmbedContents'),
+                ),
+          ),
+        );
+      }
+    });
+
+    test('rejects numeric overflow in an embedding vector', () async {
+      final server = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write('{"embeddings":[{"values":[1e999]}]}');
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      await expectLater(
+        GoogleGenerativeAIProvider(apiKey: 'test', baseUrl: server.baseUrl)
+            .embedding('text-embedding-004')
+            .doEmbed(const EmbeddingModelV2CallOptions(values: ['first'])),
+        throwsA(isA<AiApiCallError>()),
+      );
+    });
+
+    test(
+      'types empty embedding responses and preserves credential failures',
+      () async {
+        final emptyServer = await _startServer((request) async {
+          request.response.statusCode = 200;
+          await request.response.close();
+        });
+        addTearDown(emptyServer.close);
+        await expectLater(
+          GoogleGenerativeAIProvider(
+                apiKey: 'test',
+                baseUrl: emptyServer.baseUrl,
+              )
+              .embedding('text-embedding-004')
+              .doEmbed(const EmbeddingModelV2CallOptions(values: ['hi'])),
+          throwsA(isA<AiApiCallError>()),
+        );
+
+        final provider = GoogleGenerativeAIProvider(
+          credentialProvider: () async => throw StateError('credential failed'),
+        );
+        await expectLater(
+          provider
+              .call('gemini-2.0-flash')
+              .doStream(LanguageModelV4CallOptions(prompt: userPrompt('hi'))),
+          throwsStateError,
+        );
+        await expectLater(
+          provider
+              .embedding('text-embedding-004')
+              .doEmbed(const EmbeddingModelV2CallOptions(values: ['hi'])),
+          throwsStateError,
+        );
+        provider.dispose();
+      },
+    );
 
     test('rejects malformed nested 2xx chat response fields', () async {
       final cases = <Map<String, dynamic>>[
@@ -1213,6 +1312,92 @@ void main() {
       },
     );
 
+    test('usage counts thinking tokens as reasoning output', () async {
+      final server = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.set('content-type', 'text/event-stream');
+        request.response.write(
+          'data: {"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":2,"thoughtsTokenCount":7,"totalTokenCount":14},"candidates":[{"content":{"parts":[{"text":"Hi"}]},"finishReason":"STOP"}]}\n\n',
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final model = GoogleGenerativeAIProvider(
+        apiKey: 'test',
+        baseUrl: server.baseUrl,
+      ).call('gemini-2.5-pro');
+
+      final streamResult = await model.doStream(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
+            messages: [
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'hi')],
+              ),
+            ],
+          ),
+        ),
+      );
+
+      final finish = (await streamResult.stream.toList())
+          .whereType<StreamPartFinish>()
+          .single;
+      expect(finish.usage.outputTokens.total, 9);
+      expect(finish.usage.outputTokens.text, 2);
+      expect(finish.usage.outputTokens.reasoning, 7);
+
+      final generateServer = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'candidates': [
+              {
+                'finishReason': 'STOP',
+                'content': {
+                  'parts': [
+                    {'text': 'Hi'},
+                  ],
+                },
+              },
+            ],
+            'usageMetadata': {
+              'promptTokenCount': 5,
+              'candidatesTokenCount': 2,
+              'thoughtsTokenCount': 7,
+              'totalTokenCount': 14,
+            },
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(generateServer.close);
+
+      final result =
+          await GoogleGenerativeAIProvider(
+                apiKey: 'test',
+                baseUrl: generateServer.baseUrl,
+              )
+              .call('gemini-2.5-pro')
+              .doGenerate(
+                LanguageModelV4CallOptions(
+                  prompt: LanguageModelV4Prompt(
+                    messages: [
+                      LanguageModelV4Message(
+                        role: LanguageModelV4Role.user,
+                        content: [LanguageModelV4TextPart(text: 'hi')],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+      expect(result.usage.outputTokens.total, 9);
+      expect(result.usage.outputTokens.text, 2);
+      expect(result.usage.outputTokens.reasoning, 7);
+    });
+
     test('stream finish includes usage and metadata', () async {
       final server = await _startServer((request) async {
         request.response.statusCode = 200;
@@ -1529,6 +1714,7 @@ void main() {
       final fnCall =
           ((contents.single['parts'] as List).single as Map)['functionCall'];
       expect(fnCall, {
+        'id': 'call_1',
         'name': 'weather',
         'args': {'city': 'Paris'},
       });
@@ -1564,8 +1750,8 @@ void main() {
         baseUrl: server.baseUrl,
       ).call('gemini-2.0-flash');
 
-      // A reasoning part is not serialized into any wire part, so the
-      // empty-parts fallback joins any text parts in the message.
+      // Reasoning is preserved as Gemini's native thought part for
+      // continuation requests.
       await model.doGenerate(
         LanguageModelV4CallOptions(
           prompt: LanguageModelV4Prompt(
@@ -1581,7 +1767,10 @@ void main() {
 
       final contents = (captured['contents'] as List)
           .cast<Map<String, dynamic>>();
-      expect((contents.single['parts'] as List).single, {'text': ''});
+      expect((contents.single['parts'] as List).single, {
+        'text': 'thinking...',
+        'thought': true,
+      });
     });
 
     test('serializes content tool result output with media parts', () async {
@@ -1638,12 +1827,6 @@ void main() {
                         mediaType: 'application/pdf',
                         filename: 'doc.pdf',
                       ),
-                      // Unsupported inside tool-result content -> 'unsupported'.
-                      LanguageModelV4ToolCallPart(
-                        toolCallId: 'x',
-                        toolName: 'y',
-                        input: const {},
-                      ),
                     ]),
                   ),
                 ],
@@ -1668,7 +1851,7 @@ void main() {
       expect(outParts[2]['mediaType'], 'application/pdf');
       expect(outParts[2]['filename'], 'doc.pdf');
       expect((outParts[2]['inlineData'] as Map)['data'], imageB64);
-      expect(outParts[3], {'type': 'unsupported'});
+      expect(outParts, hasLength(3));
     });
 
     test('doStream serializes system, config, tools, and tool choice', () async {
@@ -2042,6 +2225,33 @@ void main() {
       );
     });
 
+    test('doStream reports EOF before finishReason as truncation', () async {
+      final server = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.set('content-type', 'text/event-stream');
+        request.response.write(
+          'data: {"candidates":[{"content":{"parts":[{"text":"partial"}]}}]}\n\n',
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final stream =
+          await GoogleGenerativeAIProvider(
+                apiKey: 'test',
+                baseUrl: server.baseUrl,
+              )
+              .call('gemini-2.0-flash')
+              .doStream(
+                LanguageModelV4CallOptions(
+                  prompt: LanguageModelV4Prompt(messages: []),
+                ),
+              );
+      final parts = await stream.stream.toList();
+      expect(parts.whereType<StreamPartError>(), hasLength(1));
+      expect(parts.whereType<StreamPartFinish>(), isEmpty);
+    });
+
     test(
       'doStream emits StreamPartError when reading the body fails',
       () async {
@@ -2363,6 +2573,289 @@ void main() {
         final functionResponse = (parts.single['functionResponse'] as Map?)
             ?.cast<String, dynamic>();
         expect(functionResponse?['name'], 'weather');
+      },
+    );
+
+    test(
+      'preserves Gemini thought signatures and native response schema',
+      () async {
+        late Map<String, dynamic> captured;
+        final server = await _startServer((request) async {
+          captured =
+              (jsonDecode(await utf8.decoder.bind(request).join()) as Map)
+                  .cast<String, dynamic>();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(jsonEncode({'candidates': []}));
+          await request.response.close();
+        });
+        addTearDown(server.close);
+        final model = GoogleGenerativeAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('gemini-2.5-pro');
+        await model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.assistant,
+                  content: [
+                    LanguageModelV4ToolCallPart(
+                      toolCallId: 'call-1',
+                      toolName: 'lookup',
+                      input: const {'q': 'x'},
+                      providerOptions: const {
+                        'google': {'thoughtSignature': 'sig-1'},
+                      },
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            responseFormat: const LanguageModelV4JsonResponseFormat(
+              name: 'answer',
+              schema: {'type': 'object'},
+            ),
+          ),
+        );
+        final parts =
+            ((captured['contents'] as List).first as Map)['parts'] as List;
+        expect((parts.first as Map)['thoughtSignature'], 'sig-1');
+        expect(
+          captured['generationConfig']['responseMimeType'],
+          'application/json',
+        );
+        expect(
+          captured['generationConfig']['responseJsonSchema']['type'],
+          'object',
+        );
+      },
+    );
+
+    test(
+      'streams a signed assistant continuation with tool response',
+      () async {
+        late Map<String, dynamic> captured;
+        final server = await _startServer((request) async {
+          captured =
+              (jsonDecode(await utf8.decoder.bind(request).join()) as Map)
+                  .cast<String, dynamic>();
+          request.response.statusCode = 200;
+          request.response.headers.set('content-type', 'text/event-stream');
+          request.response.write(
+            'data: {"candidates":[{"content":{"parts":[{"text":"done"}]}}]}\n\n'
+            'data: {"candidates":[{"finishReason":"STOP"}]}\n\n',
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+        final model = GoogleGenerativeAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('gemini-2.0-flash');
+        final result = await model.doStream(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.assistant,
+                  content: const [
+                    LanguageModelV4ToolCallPart(
+                      toolCallId: 'call-1',
+                      toolName: 'lookup',
+                      input: {'q': 'x'},
+                      providerOptions: {
+                        'google': {'thoughtSignature': 'sig-1'},
+                      },
+                    ),
+                  ],
+                ),
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.tool,
+                  content: [
+                    LanguageModelV4ToolResultPart(
+                      toolCallId: 'call-1',
+                      toolName: 'lookup',
+                      output: ToolResultOutputText('ok'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+        await result.stream.toList();
+        final contents = (captured['contents'] as List).cast<Map>();
+        final assistantParts = (contents.first['parts'] as List).cast<Map>();
+        expect(assistantParts.single['thoughtSignature'], 'sig-1');
+        final toolParts = (contents[1]['parts'] as List).cast<Map>();
+        expect((toolParts.single['functionResponse'] as Map)['name'], 'lookup');
+      },
+    );
+
+    test('maps portable reasoning to Gemini thinking configuration', () async {
+      late Map<String, dynamic> captured;
+      final server = await _startServer((request) async {
+        captured = (jsonDecode(await utf8.decoder.bind(request).join()) as Map)
+            .cast<String, dynamic>();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({'candidates': []}));
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      await GoogleGenerativeAIProvider(apiKey: 'test', baseUrl: server.baseUrl)
+          .call('gemini-2.5-pro')
+          .doGenerate(
+            LanguageModelV4CallOptions(
+              prompt: userPrompt('reason'),
+              reasoning: LanguageModelV4Reasoning.high,
+            ),
+          );
+
+      expect(captured['generationConfig']['thinkingConfig'], {
+        'thinkingBudget': 32768,
+      });
+    });
+
+    test('places explicit thinkingConfig in generationConfig only', () async {
+      late Map<String, dynamic> captured;
+      final server = await _startServer((request) async {
+        captured = (jsonDecode(await utf8.decoder.bind(request).join()) as Map)
+            .cast<String, dynamic>();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({'candidates': []}));
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      await GoogleGenerativeAIProvider(apiKey: 'test', baseUrl: server.baseUrl)
+          .call('gemini-2.5-pro')
+          .doGenerate(
+            LanguageModelV4CallOptions(
+              prompt: userPrompt('reason'),
+              providerOptions: {
+                'google': {
+                  'thinkingConfig': {'thinkingBudget': 1234},
+                  'cachedContent': 'cachedContents/123',
+                },
+              },
+            ),
+          );
+
+      expect(captured['generationConfig']['thinkingConfig'], {
+        'thinkingBudget': 1234,
+      });
+      expect(captured['thinkingConfig'], isNull);
+      expect(captured['cachedContent'], 'cachedContents/123');
+    });
+
+    test(
+      'preserves signed tool calls and IDs through a real generateText loop',
+      () async {
+        final requests = <Map<String, dynamic>>[];
+        var requestCount = 0;
+        final server = await _startServer((request) async {
+          requests.add(
+            (jsonDecode(await utf8.decoder.bind(request).join()) as Map)
+                .cast<String, dynamic>(),
+          );
+          requestCount++;
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode(
+              requestCount == 1
+                  ? {
+                      'candidates': [
+                        {
+                          'finishReason': 'STOP',
+                          'content': {
+                            'parts': [
+                              {
+                                'functionCall': {
+                                  'id': 'call-g-1',
+                                  'name': 'lookup',
+                                  'args': {'q': 'x'},
+                                },
+                                'thoughtSignature': 'sig-g-1',
+                              },
+                              {
+                                'functionCall': {
+                                  'id': 'call-g-2',
+                                  'name': 'lookup',
+                                  'args': {'q': 'y'},
+                                },
+                                'thoughtSignature': 'sig-g-2',
+                              },
+                            ],
+                          },
+                        },
+                      ],
+                    }
+                  : {
+                      'candidates': [
+                        {
+                          'finishReason': 'STOP',
+                          'content': {
+                            'parts': [
+                              {'text': 'done'},
+                            ],
+                          },
+                        },
+                      ],
+                    },
+            ),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = GoogleGenerativeAIProvider(
+          apiKey: 'test',
+          baseUrl: server.baseUrl,
+        ).call('gemini-2.5-pro');
+        final result = await generateText(
+          model: model,
+          prompt: 'lookup',
+          maxSteps: 2,
+          tools: {
+            'lookup': tool<Map<String, dynamic>, String>(
+              inputSchema: jsonSchema(const {'type': 'object'}),
+              execute: (_, _) async => 'ok',
+            ),
+          },
+        );
+
+        expect(result.text, 'done');
+        expect(requests, hasLength(2));
+        final contents = (requests[1]['contents'] as List).cast<Map>();
+        final assistant = contents.firstWhere((m) => m['role'] == 'model');
+        final assistantParts = (assistant['parts'] as List).cast<Map>();
+        expect(assistantParts.map((p) => p['thoughtSignature']), [
+          'sig-g-1',
+          'sig-g-2',
+        ]);
+        expect(assistantParts.map((p) => (p['functionCall'] as Map)['id']), [
+          'call-g-1',
+          'call-g-2',
+        ]);
+        final toolBody = contents.firstWhere(
+          (m) => (m['parts'] as List).any(
+            (part) => (part as Map).containsKey('functionResponse'),
+          ),
+        );
+        final responses = (toolBody['parts'] as List)
+            .cast<Map>()
+            .map((part) => part['functionResponse'] as Map)
+            .toList();
+        expect(responses.map((response) => response['id']), [
+          'call-g-1',
+          'call-g-2',
+        ]);
       },
     );
   });

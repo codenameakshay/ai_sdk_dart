@@ -75,6 +75,7 @@ void main() {
             model: model,
             values: ['a', 'b'],
             maxParallelCalls: 1,
+            maxEmbeddingsPerCall: 1,
           );
           expect(result.usage, isNotNull);
           expect(result.usage!.tokens, isNull);
@@ -90,6 +91,7 @@ void main() {
           model: model,
           values: ['a', 'b'],
           maxParallelCalls: 1,
+          maxEmbeddingsPerCall: 1,
         );
         expect(result.usage, isNotNull);
         expect(result.usage!.tokens, 0);
@@ -107,6 +109,7 @@ void main() {
             model: model,
             values: ['a', 'b', 'c'],
             maxParallelCalls: 1,
+            maxEmbeddingsPerCall: 1,
           );
           expect(result.usage, isNotNull);
           expect(result.usage!.tokens, 4);
@@ -123,22 +126,24 @@ void main() {
         expect(model.callCount, 1);
       });
 
-      test('maxParallelCalls=1 sends each value separately', () async {
+      test('batch size 1 sends each value separately', () async {
         final model = _CountingEmbeddingModel([0.1, 0.2]);
         await embedMany(
           model: model,
           values: ['a', 'b', 'c'],
           maxParallelCalls: 1,
+          maxEmbeddingsPerCall: 1,
         );
         expect(model.callCount, 3);
       });
 
-      test('maxParallelCalls=2 with 4 values makes 2 calls', () async {
+      test('batch size 2 with 4 values makes 2 calls', () async {
         final model = _CountingEmbeddingModel([0.1, 0.2]);
         await embedMany(
           model: model,
           values: ['a', 'b', 'c', 'd'],
           maxParallelCalls: 2,
+          maxEmbeddingsPerCall: 2,
         );
         expect(model.callCount, 2);
       });
@@ -156,6 +161,7 @@ void main() {
           model: model,
           values: input,
           maxParallelCalls: 2,
+          maxEmbeddingsPerCall: 2,
         );
         final values = result.embeddings.map((e) => e.value).toList();
         expect(values, input);
@@ -201,6 +207,12 @@ void main() {
 
 class _EmptyEmbeddingModel implements EmbeddingModelV2<String> {
   @override
+  int? get maxEmbeddingsPerCall => null;
+
+  @override
+  bool get supportsParallelCalls => true;
+
+  @override
   String get provider => 'fake';
 
   @override
@@ -216,6 +228,12 @@ class _EmptyEmbeddingModel implements EmbeddingModelV2<String> {
 }
 
 class _CapturingEmbeddingModel implements EmbeddingModelV2<String> {
+  @override
+  int? get maxEmbeddingsPerCall => null;
+
+  @override
+  bool get supportsParallelCalls => true;
+
   EmbeddingModelV2CallOptions<String>? lastOptions;
 
   @override
@@ -245,6 +263,12 @@ class _CapturingEmbeddingModel implements EmbeddingModelV2<String> {
 
 /// A fake embedding model that counts how many times doEmbed is called.
 class _CountingEmbeddingModel implements EmbeddingModelV2<String> {
+  @override
+  int? get maxEmbeddingsPerCall => null;
+
+  @override
+  bool get supportsParallelCalls => true;
+
   _CountingEmbeddingModel(this.embedding);
 
   final List<double> embedding;
@@ -273,6 +297,12 @@ class _CountingEmbeddingModel implements EmbeddingModelV2<String> {
 }
 
 class _UsageEmbeddingModel implements EmbeddingModelV2<String> {
+  @override
+  int? get maxEmbeddingsPerCall => null;
+
+  @override
+  bool get supportsParallelCalls => true;
+
   _UsageEmbeddingModel(this.usages);
 
   final List<EmbeddingModelV2Usage> usages;

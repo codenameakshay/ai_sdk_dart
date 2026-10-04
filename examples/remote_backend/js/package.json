@@ -1,0 +1,11 @@
+{
+  "name": "ai-sdk-remote-reference-server",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "ai": "7.0.111"
+  },
+  "scripts": {
+    "test": "node --test server.test.mjs"
+  }
+}

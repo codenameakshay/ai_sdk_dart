@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:ai_sdk_conversation/ai_sdk_conversation.dart';
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_dart/test.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
@@ -164,6 +165,20 @@ class ThrowingStreamAgent extends ToolLoopAgent {
     List<LanguageModelV4ToolApprovalResponse> toolApprovalResponses = const [],
     CancellationToken? abortSignal,
     TimeoutConfiguration? timeout,
+    ToolApprovalPolicy? approvalPolicy,
+    ToolApprovalPolicySelector? approvalPolicyFor,
+    String? approvalPolicyRevision,
+    Object? generationContext,
+    bool allowSystemInMessages = false,
+    GenerateTextExperimentalOnStart? onStart,
+    GenerateTextExperimentalOnStepStart? onStepStart,
+    GenerateTextExperimentalOnToolCallStart? onToolExecutionStart,
+    GenerateTextExperimentalOnToolCallFinish? onToolExecutionEnd,
+    StreamTextOnEnd? onEnd,
+    StreamTextOnStepEnd? onStepEnd,
+    GenerateTextPrepareStep? prepareStep,
+    StreamTextOnChunk? onChunk,
+    BodyInclusionPolicy bodyInclusion = const BodyInclusionPolicy.none(),
   }) async {
     throw error;
   }
@@ -219,8 +234,8 @@ class RecordedStreamInvocation {
 
   StreamTextResult<Object?> buildResult() {
     return StreamTextResult<Object?>(
-      stream: const Stream.empty(),
-      fullStream: _fullController.stream,
+      stream: _fullController.stream,
+      providerStream: const Stream.empty(),
       textStream: _textController.stream,
       partialOutputStream: const Stream.empty(),
       elementStream: const Stream.empty(),
@@ -230,7 +245,9 @@ class RecordedStreamInvocation {
       reasoning: Future.value(const []),
       reasoningText: _reasoningTextCompleter.future,
       files: Future.value(const []),
+      reasoningFiles: Future.value(const []),
       sources: _sourcesCompleter.future,
+      documentSources: Future.value(const []),
       toolCalls: _toolCallsCompleter.future,
       toolResults: _toolResultsCompleter.future,
       finishReason: Future.value(LanguageModelV4FinishReason.stop),
@@ -252,6 +269,18 @@ class RecordedStreamInvocation {
           rawFinishReason: 'stop',
         ),
       ),
+      finalStep: Future.value(
+        const GenerateTextStep(
+          stepNumber: 0,
+          content: [],
+          toolCalls: [],
+          toolResults: [],
+          toolApprovalRequests: [],
+          response: LanguageModelV4GenerateResult(),
+          text: '',
+          finishReason: LanguageModelV4FinishReason.stop,
+        ),
+      ),
     );
   }
 
@@ -265,6 +294,47 @@ class RecordedStreamInvocation {
 
   void emitError(Object error) {
     _fullController.add(StreamTextErrorEvent(error: error));
+  }
+
+  void emitToolResult(
+    LanguageModelV4ToolResultPart toolResult, {
+    bool preliminary = false,
+  }) {
+    _fullController.add(
+      StreamTextToolResultEvent(
+        toolResult: toolResult,
+        preliminary: preliminary,
+      ),
+    );
+  }
+
+  void emitToolInputEnd({
+    required String toolCallId,
+    required String toolName,
+    required Object input,
+  }) {
+    _fullController.add(
+      StreamTextToolInputEndEvent(
+        toolCallId: toolCallId,
+        toolName: toolName,
+        input: input,
+        inputBuffer: jsonEncode(input),
+      ),
+    );
+  }
+
+  void emitToolError({
+    required String toolCallId,
+    required String toolName,
+    required Object error,
+  }) {
+    _fullController.add(
+      StreamTextToolErrorEvent(
+        toolCallId: toolCallId,
+        toolName: toolName,
+        error: error,
+      ),
+    );
   }
 
   void emitFullStreamFailure(Object error) {
@@ -288,6 +358,7 @@ class RecordedStreamInvocation {
     List<LanguageModelV4SourcePart> sources = const [],
     List<LanguageModelV4ToolCallPart> toolCalls = const [],
     List<LanguageModelV4ToolResultPart> toolResults = const [],
+    bool closeTextStream = true,
   }) async {
     if (!_textCompleter.isCompleted) _textCompleter.complete(finalText);
     if (!_outputCompleter.isCompleted) _outputCompleter.complete(finalText);
@@ -310,7 +381,11 @@ class RecordedStreamInvocation {
       _toolResultsCompleter.complete(toolResults);
     }
     await _fullController.close();
-    await _textController.close();
+    if (closeTextStream) {
+      await _textController.close();
+    } else {
+      unawaited(_textController.close());
+    }
   }
 }
 
@@ -326,6 +401,20 @@ class RecordingStreamAgent extends ToolLoopAgent {
     List<LanguageModelV4ToolApprovalResponse> toolApprovalResponses = const [],
     CancellationToken? abortSignal,
     TimeoutConfiguration? timeout,
+    ToolApprovalPolicy? approvalPolicy,
+    ToolApprovalPolicySelector? approvalPolicyFor,
+    String? approvalPolicyRevision,
+    Object? generationContext,
+    bool allowSystemInMessages = false,
+    GenerateTextExperimentalOnStart? onStart,
+    GenerateTextExperimentalOnStepStart? onStepStart,
+    GenerateTextExperimentalOnToolCallStart? onToolExecutionStart,
+    GenerateTextExperimentalOnToolCallFinish? onToolExecutionEnd,
+    StreamTextOnEnd? onEnd,
+    StreamTextOnStepEnd? onStepEnd,
+    GenerateTextPrepareStep? prepareStep,
+    StreamTextOnChunk? onChunk,
+    BodyInclusionPolicy bodyInclusion = const BodyInclusionPolicy.none(),
   }) async {
     final invocation = RecordedStreamInvocation(
       abortSignal: abortSignal,
@@ -344,6 +433,19 @@ class RecordingStreamAgent extends ToolLoopAgent {
     List<LanguageModelV4ToolApprovalResponse> toolApprovalResponses = const [],
     CancellationToken? abortSignal,
     TimeoutConfiguration? timeout,
+    ToolApprovalPolicy? approvalPolicy,
+    ToolApprovalPolicySelector? approvalPolicyFor,
+    String? approvalPolicyRevision,
+    Object? generationContext,
+    bool allowSystemInMessages = false,
+    GenerateTextExperimentalOnStart? onStart,
+    GenerateTextExperimentalOnStepStart? onStepStart,
+    GenerateTextExperimentalOnToolCallStart? onToolExecutionStart,
+    GenerateTextExperimentalOnToolCallFinish? onToolExecutionEnd,
+    StreamTextOnEnd? onEnd,
+    StreamTextOnStepEnd? onStepEnd,
+    GenerateTextPrepareStep? prepareStep,
+    BodyInclusionPolicy bodyInclusion = const BodyInclusionPolicy.none(),
   }) async {
     final invocation = RecordedStreamInvocation(
       abortSignal: abortSignal,
@@ -490,6 +592,8 @@ ToolLoopAgent approvalAgent({
   String toolName = 'deleteFile',
   String finalText = 'final answer',
   String toolCallId = 'c1',
+  bool repeatCallAfterApproval = true,
+  bool continuationOnly = false,
 }) {
   final call = mockToolCall(
     toolName: toolName,
@@ -498,8 +602,8 @@ ToolLoopAgent approvalAgent({
   );
   return ToolLoopAgent(
     model: QueuedStreamModel([
-      [call],
-      [call],
+      if (!continuationOnly) [call],
+      if (repeatCallAfterApproval) [call],
       [mockText(finalText)],
     ]),
     tools: {toolName: approvalTool('done')},
@@ -528,5 +632,70 @@ class FakeFrameNotificationScheduler implements FrameNotificationScheduler {
     for (final callback in callbacks) {
       callback();
     }
+  }
+}
+
+/// A minimal, configurable [ConversationBackend] fake shared across
+/// lifecycle and widget tests: a change stream, dispose/cancel tracking, and
+/// helpers to push a full snapshot or a fresh conversation by id.
+class FakeConversationBackend implements ConversationBackend {
+  factory FakeConversationBackend({
+    Conversation? initial,
+    bool broadcast = true,
+    Future<void>? onCancelDelay,
+  }) {
+    late final FakeConversationBackend backend;
+    FutureOr<void> onCancel() {
+      backend.cancelCount++;
+      return onCancelDelay;
+    }
+
+    final controller = broadcast
+        ? StreamController<Conversation>.broadcast(onCancel: onCancel)
+        : StreamController<Conversation>(onCancel: onCancel);
+    return backend = FakeConversationBackend._(
+      initial ?? Conversation(id: 'chat-1', messages: const []),
+      controller,
+    );
+  }
+
+  FakeConversationBackend._(this._conversation, this.streamController);
+
+  Conversation _conversation;
+  final StreamController<Conversation> streamController;
+  int cancelCount = 0;
+  int disposeCount = 0;
+  final disposeSignal = Completer<void>();
+
+  @override
+  Conversation get conversation => _conversation;
+  @override
+  Stream<Conversation> get changes => streamController.stream;
+
+  /// Publishes a fresh, empty conversation with the given [id].
+  void emit(String id) => publish(Conversation(id: id, messages: const []));
+
+  /// Publishes an arbitrary snapshot.
+  void publish(Conversation value) {
+    _conversation = value;
+    streamController.add(value);
+  }
+
+  @override
+  Future<void> send(String text) async {}
+  @override
+  Future<void> interrupt() async {}
+  @override
+  Future<void> restore(Map<String, dynamic> encoded) async {}
+  @override
+  Future<void> respondToApproval({
+    required String approvalId,
+    required bool approved,
+    String? reason,
+  }) async {}
+  @override
+  Future<void> dispose() async {
+    disposeCount++;
+    if (!disposeSignal.isCompleted) disposeSignal.complete();
   }
 }

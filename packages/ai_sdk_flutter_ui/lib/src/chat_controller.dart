@@ -164,9 +164,9 @@ class ChatController extends StreamingControllerBase {
     activeRequestId = null;
     _activeAbortSignal?.cancel();
     _activeAbortSignal = null;
-    await _activeSubscription?.cancel();
+    final subscription = _activeSubscription;
+    final errorSubscription = _errorSubscription;
     _activeSubscription = null;
-    await _errorSubscription?.cancel();
     _errorSubscription = null;
     if (commitPartial && _streamBuffer.isNotEmpty) {
       _messages.add(
@@ -178,6 +178,8 @@ class ChatController extends StreamingControllerBase {
     }
     _streamBuffer.clear();
     _streamingReasoning = '';
+    await subscription?.cancel();
+    await errorSubscription?.cancel();
   }
 
   void _discardApprovalState() {
@@ -191,6 +193,7 @@ class ChatController extends StreamingControllerBase {
     required ToolLoopAgent agent,
     required String text,
   }) async {
+    if (isDisposed) return;
     _lastAgent = agent;
     _discardApprovalState();
     append(ModelMessage(role: ModelMessageRole.user, content: text));
@@ -199,6 +202,7 @@ class ChatController extends StreamingControllerBase {
 
   /// Add a [message] to the list without triggering generation.
   void append(ModelMessage message) {
+    if (isDisposed) return;
     _messages.add(message);
     notifyListenersSafely(immediate: true, content: true);
   }
@@ -209,6 +213,7 @@ class ChatController extends StreamingControllerBase {
   /// fresh response. Requires a prior call to [sendMessage].
   /// Alias: [regenerate].
   Future<void> reload({ToolLoopAgent? agent}) async {
+    if (isDisposed) return;
     final effectiveAgent = agent ?? _lastAgent;
     if (effectiveAgent == null) return;
     _discardApprovalState();
@@ -230,6 +235,7 @@ class ChatController extends StreamingControllerBase {
   ///
   /// Mirrors the JS `useChat` `clearError()` method.
   void clearError() {
+    if (isDisposed) return;
     if (_status == ChatStatus.error) {
       _error = null;
       _status = ChatStatus.ready;
@@ -249,10 +255,21 @@ class ChatController extends StreamingControllerBase {
     required bool approved,
     String? reason,
   }) {
+    if (isDisposed) return;
+    final request = _pendingApprovalRequests
+        .cast<LanguageModelV4ToolApprovalRequestPart?>()
+        .firstWhere(
+          (value) => value?.approvalId == approvalId,
+          orElse: () => null,
+        );
     _pendingApprovals[approvalId] = LanguageModelV4ToolApprovalResponse(
       approvalId: approvalId,
       approved: approved,
       reason: reason,
+      toolCallId: request?.toolCall.toolCallId,
+      toolName: request?.toolCall.toolName,
+      argumentsFingerprint: request?.argumentsFingerprint,
+      policyRevision: request?.policyRevision,
     );
     _pendingApprovalRequests = _pendingApprovalRequests
         .where((request) => request.approvalId != approvalId)
@@ -321,15 +338,15 @@ class ChatController extends StreamingControllerBase {
       notifyListenersSafely(immediate: true, status: true);
 
       // The result's `text`/`output` futures reject on a streaming error; we
-      // surface errors via [fullStream] instead, so swallow those completions
+      // surface errors via [stream] instead, so swallow those completions
       // to keep them from becoming unhandled async errors.
       streamResult.text.then((_) {}, onError: (_) {});
       streamResult.output.then((_) {}, onError: (_) {});
 
       // Streaming errors surface on the full event stream (not the text
-      // stream), so watch both: text for content, fullStream for errors and
+      // stream), so watch both: text for content, stream for errors and
       // live reasoning deltas.
-      _errorSubscription = streamResult.fullStream.listen((event) {
+      _errorSubscription = streamResult.stream.listen((event) {
         if (!isCurrentRequest(requestId)) return;
         if (event is StreamTextErrorEvent) {
           _handleError(event.error, requestId);
@@ -366,8 +383,32 @@ class ChatController extends StreamingControllerBase {
   /// metadata, then either surface pending approval requests or commit the
   /// assistant message.
   Iterable<ModelMessage> _replayMessagesForStep(GenerateTextStep step) sync* {
+    if (step.responseMessages.isNotEmpty) {
+      for (final responseMessage in step.responseMessages) {
+        final content = responseMessage.content
+            .where((part) => part is! LanguageModelV4ToolApprovalRequestPart)
+            .toList(growable: false);
+        if (content.isNotEmpty) {
+          yield ModelMessage.fromProvider(
+            LanguageModelV4Message(
+              role: responseMessage.role,
+              content: content,
+            ),
+          );
+        }
+      }
+      return;
+    }
+    final locallyExecutedResultIds = {
+      for (final result in step.toolResults) result.toolCallId,
+    };
     final assistantParts = step.content
-        .where((part) => part is! LanguageModelV4ToolApprovalRequestPart)
+        .where(
+          (part) =>
+              part is! LanguageModelV4ToolApprovalRequestPart &&
+              (part is! LanguageModelV4ToolResultPart ||
+                  !locallyExecutedResultIds.contains(part.toolCallId)),
+        )
         .toList(growable: false);
     if (assistantParts.isNotEmpty) {
       yield ModelMessage.parts(
@@ -510,7 +551,10 @@ class ChatController extends StreamingControllerBase {
 
   /// Cancel the active stream.
   Future<void> stop() async {
+    if (isDisposed) return;
+    final generation = nextRequestId;
     await _cancelActiveRequest(commitPartial: true);
+    if (isDisposed || generation != nextRequestId) return;
     _discardApprovalState();
     _status = ChatStatus.ready;
     notifyListenersSafely(immediate: true, status: true, content: true);
@@ -518,6 +562,7 @@ class ChatController extends StreamingControllerBase {
 
   /// Remove all messages and reset to initial state.
   void clear() {
+    if (isDisposed) return;
     _cancelActiveRequestSync();
     _messages
       ..clear()

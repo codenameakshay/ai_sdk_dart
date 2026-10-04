@@ -1,3 +1,4 @@
+import '../shared/abort_signal.dart';
 import '../language_model/language_model_v4_data_content.dart';
 import '../shared/json_value.dart';
 
@@ -21,6 +22,7 @@ class ImageModelV3CallOptions {
     this.seed,
     this.headers,
     this.providerOptions,
+    this.abortSignal,
   });
 
   final String? prompt;
@@ -31,4 +33,5 @@ class ImageModelV3CallOptions {
   final int? seed;
   final Map<String, String>? headers;
   final ProviderOptions? providerOptions;
+  final AbortSignal? abortSignal;
 }

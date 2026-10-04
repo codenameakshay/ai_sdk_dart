@@ -1,3 +1,17 @@
+## 3.0.0
+
+- Added v3 instruction precedence, canonical lifecycle callbacks, per-step result semantics,
+  generated-only response history, and typed body inclusion.
+- Separated embedding request batch limits from concurrency and added result validation for
+  cardinality, indexes, dimensions, and finite values.
+- Clarified structured streaming previews and final-output validation; operation failures now
+  settle exposed result surfaces consistently.
+- Fixed cancellation settlement, validation before approval side effects, typed tool choice,
+  per-step array previews, typed array results, nullable JSON, and inclusion of newly
+  executed approval results in response history.
+
+---
+
 ## 2.0.0
 
 - Migrated generation, streaming, middleware, mocks, and tools to the V4

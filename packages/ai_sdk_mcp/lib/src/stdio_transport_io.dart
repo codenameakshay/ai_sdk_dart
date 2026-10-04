@@ -5,8 +5,9 @@ import 'dart:io';
 import 'json_rpc.dart';
 
 class _PendingRequest {
-  _PendingRequest() : completer = Completer<JsonRpcResponse>();
+  _PendingRequest(this.method) : completer = Completer<JsonRpcResponse>();
 
+  final String method;
   final Completer<JsonRpcResponse> completer;
 }
 
@@ -107,6 +108,27 @@ class StdioMCPTransport implements MCPTransport {
       _buffer.clear();
       if (json is Map<String, dynamic>) {
         final id = json['id'];
+        final params = json['params'];
+        final meta = params is Map ? params['_meta'] : null;
+        final subscriptionId = meta is Map
+            ? meta['io.modelcontextprotocol/subscriptionId']
+            : null;
+        if (json['jsonrpc'] == '2.0' &&
+            json['method'] == 'notifications/subscriptions/acknowledged' &&
+            subscriptionId is int &&
+            _pending[subscriptionId]?.method == 'subscriptions/listen') {
+          _pending
+              .remove(subscriptionId)!
+              .completer
+              .complete(
+                JsonRpcResponse(
+                  id: subscriptionId,
+                  result: const {'resultType': 'complete'},
+                ),
+              );
+          if (!_notifications.isClosed) _notifications.add(json);
+          return;
+        }
         if (id is int && _pending.containsKey(id)) {
           final pending = _pending.remove(id)!;
           if (!pending.completer.isCompleted) {
@@ -188,7 +210,9 @@ class StdioMCPTransport implements MCPTransport {
   }) async {
     _terminateImmediately(error, killProcess: killProcess);
     await _cancelSubscriptions();
-    if (!_notifications.isClosed) await _notifications.close();
+    if (!_notifications.isClosed) {
+      unawaited(_notifications.close().catchError((Object _) {}));
+    }
   }
 
   void _terminateImmediately(MCPException error, {bool killProcess = false}) {
@@ -219,7 +243,7 @@ class StdioMCPTransport implements MCPTransport {
   Future<JsonRpcResponse> send(JsonRpcRequest request) async {
     await _ensureStarted();
     _throwIfClosedOrExited();
-    final pending = _PendingRequest();
+    final pending = _PendingRequest(request.method);
     _pending[request.id] = pending;
     unawaited(pending.completer.future.then((_) {}, onError: (_) {}));
     final line = '${jsonEncode(request.toJson())}\n';

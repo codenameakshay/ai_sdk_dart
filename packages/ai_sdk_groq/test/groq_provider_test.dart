@@ -11,6 +11,11 @@ import '../../ai_sdk_provider/test/support/test_server.dart';
 import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
+  test('default provider exposes its model metadata', () {
+    expect(groq('llama-3.1-8b-instant').provider, 'groq');
+    expect(groq('llama-3.1-8b-instant').modelId, 'llama-3.1-8b-instant');
+  });
+
   group('GroqProvider', () {
     test('creates language model with correct provider/spec/modelId', () {
       final provider = GroqProvider(apiKey: 'test-key');

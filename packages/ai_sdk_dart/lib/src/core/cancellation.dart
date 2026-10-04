@@ -17,32 +17,49 @@ Future<T> raceWithCancellation<T>(
     return operation;
   }
   if (abortSignal.isCancelled) {
+    // The caller may have created an operation that rejects after it cancels
+    // the signal. Observe that late rejection even though cancellation wins.
+    operation.ignore();
     return Future<T>.error(const AiOperationCancelledError());
   }
 
   final completer = Completer<T>();
   var settled = false;
+  StreamSubscription<void>? cancellationSubscription;
+
+  void detach() {
+    final subscription = cancellationSubscription;
+    cancellationSubscription = null;
+    if (subscription != null) Future<void>.sync(subscription.cancel).ignore();
+  }
 
   void completeError(Object error, StackTrace stackTrace) {
     if (settled) return;
     settled = true;
+    detach();
     completer.completeError(error, stackTrace);
   }
 
   operation.then((value) {
     if (settled) return;
     settled = true;
+    detach();
     completer.complete(value);
   }, onError: completeError);
 
-  abortSignal.onCancelled.then((_) {
+  void cancel() {
     if (settled) return;
     settled = true;
+    detach();
     completer.completeError(
       const AiOperationCancelledError(),
       StackTrace.current,
     );
-  });
+  }
+
+  cancellationSubscription = abortSignal.cancellationEvents.listen(
+    (_) => cancel(),
+  );
 
   return completer.future;
 }

@@ -173,6 +173,16 @@ class _ScriptedTransport implements MCPTransport {
   }
 }
 
+class _ThrowingCloseTransport extends _ScriptedTransport {
+  _ThrowingCloseTransport(super.handler);
+
+  @override
+  Future<void> close() async {
+    await super.close();
+    throw const MCPException('DELETE failed');
+  }
+}
+
 /// A transport that does NOT override [notifications], so the abstract default
 /// (`json_rpc.dart`) getter is exercised.
 class _DefaultNotificationsTransport extends MCPTransport {
@@ -1670,6 +1680,39 @@ void main() {
       },
     );
 
+    test(
+      'reconnects with the factory transport when closing the old one throws',
+      () async {
+        final first = _ThrowingCloseTransport((req) {
+          if (req.method == 'initialize') return _initResult(req);
+          if (req.method == 'notifications/initialized') return _ok(req, {});
+          throw const MCPException('server down');
+        });
+        var built = 0;
+        final client = MCPClient(
+          transport: first,
+          reconnectPolicy: const MCPReconnectPolicy(
+            maxAttempts: 2,
+            initialDelayMs: 1,
+            maxDelayMs: 2,
+          ),
+          transportFactory: () {
+            built++;
+            return _ScriptedTransport((req) {
+              if (req.method == 'initialize') return _initResult(req);
+              if (req.method == 'tools/list') return _ok(req, {'tools': []});
+              return _ok(req, {});
+            });
+          },
+        );
+        addTearDown(client.close);
+
+        expect(await client.tools(), isEmpty);
+        expect(built, 1);
+        expect(first.closeCount, 1);
+      },
+    );
+
     test('exhausts attempts and rethrows when every attempt fails', () async {
       _ScriptedTransport makeFailing() => _ScriptedTransport((req) {
         if (req.method == 'initialize') return _initResult(req);
@@ -1690,6 +1733,49 @@ void main() {
 
       await expectLater(client.tools(), throwsA(isA<MCPException>()));
     });
+
+    test(
+      'reconnect succeeds even when the recovery reinitialize itself fails once',
+      () async {
+        var reinitializeAttempts = 0;
+        final first = _ScriptedTransport((req) {
+          switch (req.method) {
+            case 'initialize':
+              return _initResult(req);
+            case 'notifications/initialized':
+              return _ok(req, {});
+            case 'tools/list':
+              throw const MCPException('transport down');
+            default:
+              return _ok(req, {});
+          }
+        });
+
+        final reconnected = _ScriptedTransport((req) {
+          if (req.method == 'initialize') {
+            reinitializeAttempts++;
+            throw const MCPException('reinitialize failed');
+          }
+          if (req.method == 'tools/list') return _ok(req, {'tools': []});
+          return _ok(req, {});
+        });
+
+        final client = MCPClient(
+          transport: first,
+          reconnectPolicy: const MCPReconnectPolicy(
+            maxAttempts: 1,
+            initialDelayMs: 1,
+            maxDelayMs: 2,
+          ),
+          transportFactory: () => reconnected,
+        );
+        addTearDown(client.close);
+
+        final tools = await client.tools();
+        expect(tools, isEmpty);
+        expect(reinitializeAttempts, 1);
+      },
+    );
 
     test(
       'resource refresh queues a trailing replay when a second update lands mid-read',

@@ -1,9 +1,10 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+
 import 'cancellation.dart';
 import 'timeout_helpers.dart';
-import '../errors/ai_errors.dart';
 import '../tools/tool.dart';
 
 const Duration _retryBaseDelay = Duration(milliseconds: 100);
@@ -57,6 +58,7 @@ Future<T> withRetry<T>({
   required Duration? totalTimeout,
   required Duration? stepTimeout,
   CancellationToken? abortSignal,
+  void Function()? onRetry,
   required Future<T> Function(Duration? attemptTimeout) fn,
 }) async {
   final stopwatch = Stopwatch()..start();
@@ -136,6 +138,7 @@ Future<T> withRetry<T>({
       } else if (abortSignal?.isCancelled ?? false) {
         rethrow;
       }
+      onRetry?.call();
       retryCount++;
     }
   }
@@ -155,10 +158,35 @@ Future<bool> _sleepWithCancellation({
   }
   if (abortSignal.isCancelled) return true;
 
-  return Future.any<bool>([
-    _retryHooks.sleep(duration).then((_) => false),
-    abortSignal.onCancelled.then((_) => true),
-  ]);
+  final completer = Completer<bool>();
+  var settled = false;
+  AbortSignalObservation? observation;
+
+  Future<void> complete(bool cancelled) async {
+    if (settled) return;
+    settled = true;
+    await observation?.dispose();
+    completer.complete(cancelled);
+  }
+
+  observation = AbortSignalObservation.attach(abortSignal, () {
+    complete(true);
+  });
+  if (settled) {
+    unawaited(observation.dispose());
+    return completer.future;
+  }
+
+  Future.sync(() => _retryHooks.sleep(duration)).then(
+    (_) => complete(false),
+    onError: (Object error, StackTrace stackTrace) async {
+      if (settled) return;
+      settled = true;
+      await observation?.dispose();
+      completer.completeError(error, stackTrace);
+    },
+  );
+  return completer.future;
 }
 
 bool _shouldRetry(

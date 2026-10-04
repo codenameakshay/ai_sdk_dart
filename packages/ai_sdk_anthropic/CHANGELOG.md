@@ -1,3 +1,13 @@
+## 3.0.0
+
+- Honor disabled Anthropic tool choice while retaining extended-thinking request controls.
+- Stream API errors now become typed failures and stop parsing; premature EOF is reported as
+  truncation.
+- Keep generated thinking budgets below `max_tokens`, size defaults for explicit budgets, and
+  preserve explicit maxima above the budget.
+
+---
+
 ## 2.0.0
 
 - Migrated language generation and streaming to V4 lifecycle, metadata,

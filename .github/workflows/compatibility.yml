@@ -1,0 +1,65 @@
+name: Toolchain compatibility
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compatibility-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  matrix:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: minimum Flutter 3.41.3 / Dart 3.11.1
+            flutter: 3.41.3
+            dart: 3.11.1
+          - name: pinned Flutter 3.44.3 / Dart 3.12.2
+            flutter: 3.44.3
+            dart: 3.12.2
+          - name: latest stable Flutter
+            flutter: ''
+            dart: ''
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter ${{ matrix.flutter }}
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ matrix.flutter }}
+          cache: true
+
+      - name: Verify toolchain
+        env:
+          EXPECTED_DART: ${{ matrix.dart }}
+        run: |
+          flutter --version
+          dart --version
+          if [ -n "$EXPECTED_DART" ] && ! dart --version 2>&1 | grep -F "$EXPECTED_DART"; then
+            echo "The selected Flutter lane did not provide Dart $EXPECTED_DART."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Verify formatting
+        if: matrix.flutter == '3.44.3'
+        run: make format-check DART=dart
+
+      - name: Analyze workspace
+        run: make analyze DART=dart FLUTTER=flutter
+
+      - name: Test workspace
+        run: make test DART=dart FLUTTER=flutter

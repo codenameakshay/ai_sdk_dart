@@ -1,0 +1,116 @@
+{
+  "capturedAt": "2026-09-23T14:17:21.065429+00:00",
+  "command": "make coverage-check",
+  "exitCode": 2,
+  "complete": false,
+  "reason": "Flutter test failure stopped script before aggregate summary; source edits overlapped this checkpoint. Rerun on stable tree.",
+  "packages": [
+    {
+      "package": "ai_sdk_telemetry",
+      "percentage": 90.54,
+      "hit": 201,
+      "total": 222
+    },
+    {
+      "package": "ai_sdk_realtime",
+      "percentage": 78.83,
+      "hit": 499,
+      "total": 633
+    },
+    {
+      "package": "ai_sdk_remote",
+      "percentage": 72.21,
+      "hit": 369,
+      "total": 511
+    },
+    {
+      "package": "ai_sdk_conversation",
+      "percentage": 85.77,
+      "hit": 458,
+      "total": 534
+    },
+    {
+      "package": "ai_sdk_json_schema",
+      "percentage": 98.11,
+      "hit": 52,
+      "total": 53
+    },
+    {
+      "package": "ai_sdk_dart",
+      "percentage": 96.16,
+      "hit": 2931,
+      "total": 3048
+    },
+    {
+      "package": "ai_sdk_provider",
+      "percentage": 91.37,
+      "hit": 254,
+      "total": 278
+    },
+    {
+      "package": "ai_sdk_openai",
+      "percentage": 86.71,
+      "hit": 1207,
+      "total": 1392
+    },
+    {
+      "package": "ai_sdk_openai_compatible",
+      "percentage": 95.05,
+      "hit": 442,
+      "total": 465
+    },
+    {
+      "package": "ai_sdk_anthropic",
+      "percentage": 95.93,
+      "hit": 542,
+      "total": 565
+    },
+    {
+      "package": "ai_sdk_google",
+      "percentage": 90.02,
+      "hit": 568,
+      "total": 631
+    },
+    {
+      "package": "ai_sdk_azure",
+      "percentage": 82.35,
+      "hit": 56,
+      "total": 68
+    },
+    {
+      "package": "ai_sdk_cohere",
+      "percentage": 93.62,
+      "hit": 367,
+      "total": 392
+    },
+    {
+      "package": "ai_sdk_groq",
+      "percentage": 94.44,
+      "hit": 17,
+      "total": 18
+    },
+    {
+      "package": "ai_sdk_mistral",
+      "percentage": 91.07,
+      "hit": 51,
+      "total": 56
+    },
+    {
+      "package": "ai_sdk_ollama",
+      "percentage": 95.26,
+      "hit": 261,
+      "total": 274
+    },
+    {
+      "package": "ai_sdk_mcp",
+      "percentage": 95.63,
+      "hit": 1226,
+      "total": 1282
+    }
+  ],
+  "dartSubtotal": {
+    "hit": 9501,
+    "total": 10422
+  },
+  "thresholdPercent": 99
+}

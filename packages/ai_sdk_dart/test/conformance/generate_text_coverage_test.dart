@@ -24,6 +24,7 @@ void main() {
           ModelMessage(role: ModelMessageRole.assistant, content: 'a'),
           ModelMessage(role: ModelMessageRole.tool, content: 't'),
         ],
+        allowSystemInMessages: true,
       );
       final roles = capturing.capturedOptions.single.prompt.messages
           .map((m) => m.role.name)
@@ -466,6 +467,10 @@ void main() {
           LanguageModelV4ToolApprovalResponse(
             approvalId: 'approval_c1',
             approved: true,
+            toolCallId: 'c1',
+            toolName: 'danger',
+            argumentsFingerprint: '{}',
+            policyRevision: 'default',
           ),
         ],
       );
@@ -501,6 +506,10 @@ void main() {
             approvalId: 'approval_c1',
             approved: false,
             reason: 'denied!',
+            toolCallId: 'c1',
+            toolName: 'danger',
+            argumentsFingerprint: '{}',
+            policyRevision: 'default',
           ),
         ],
       );

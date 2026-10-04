@@ -28,7 +28,7 @@ void main() {
     });
 
     test('stream emits only the completed object', () async {
-      final model = textDeltaStream('{}\n{"a":1}\n{"a":1,"b":2}'.split(''));
+      final model = textDeltaStream('{"a":1,"b":2}'.split(''));
       final result = await streamObject(
         model: model,
         schema: schema,
@@ -41,7 +41,7 @@ void main() {
       expect(await completedFuture, [
         {'a': 1, 'b': 2},
       ]);
-      expect((await partialFuture).length, greaterThan(1));
+      expect((await partialFuture).length, greaterThanOrEqualTo(1));
     });
 
     test('stream replays the completed object to a late listener', () async {
@@ -107,9 +107,28 @@ void main() {
         result.object,
         throwsA(isA<AiNoObjectGeneratedError>()),
       );
-      await result.partialObjectStream.toList();
+      await expectLater(
+        result.partialObjectStream.toList(),
+        throwsA(isA<AiNoObjectGeneratedError>()),
+      );
       await expectation;
     });
+
+    test(
+      'incomplete final JSON does not salvage the last partial snapshot',
+      () async {
+        final model = textDeltaStream('{"a":1'.split(''));
+        final result = await streamObject<Map<String, dynamic>>(
+          model: model,
+          schema: schema,
+          prompt: 'json',
+        );
+        await expectLater(
+          result.object,
+          throwsA(isA<AiNoObjectGeneratedError>()),
+        );
+      },
+    );
 
     test('stream error is forwarded to object and patch streams', () async {
       final model = FakeStreamModel([
@@ -205,6 +224,7 @@ void main() {
           ModelMessage(role: ModelMessageRole.assistant, content: 'a'),
           ModelMessage(role: ModelMessageRole.tool, content: 't'),
         ],
+        allowSystemInMessages: true,
       );
       final roles = model.lastOptions!.prompt.messages
           .map((m) => m.role.name)

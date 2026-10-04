@@ -121,17 +121,52 @@ EmbeddingModelV2GenerateResult<String> parseOpenAiEmbeddings(
   Map<String, dynamic> data,
   List<String> values,
 ) {
-  final dataList = (data['data'] as List?) ?? [];
-  final embeddings = dataList.take(values.length).indexed.map((entry) {
-    final item = entry.$2 as Map<String, dynamic>;
-    final vector = (item['embedding'] as List)
-        .map((value) => (value as num).toDouble())
-        .toList();
-    return EmbeddingModelV2Embedding<String>(
-      value: values[entry.$1],
-      embedding: vector,
-    );
-  }).toList();
-
-  return EmbeddingModelV2GenerateResult<String>(embeddings: embeddings);
+  final rows = data['data'];
+  if (rows is! List || rows.length != values.length) {
+    throw const FormatException('Expected one embedding row for each input.');
+  }
+  final ordered = List<List<double>?>.filled(values.length, null);
+  final indexed = rows.any((row) => row is Map && row.containsKey('index'));
+  int? dimensions;
+  for (var position = 0; position < rows.length; position++) {
+    final row = rows[position];
+    if (row is! Map) {
+      throw const FormatException('An embedding row is not an object.');
+    }
+    final index = indexed ? row['index'] : position;
+    if (index is! int ||
+        index < 0 ||
+        index >= values.length ||
+        ordered[index] != null) {
+      throw const FormatException(
+        'Embedding indices must be unique and cover every input.',
+      );
+    }
+    final raw = row['embedding'];
+    if (raw is! List ||
+        raw.isEmpty ||
+        raw.any((value) => value is! num || !value.isFinite)) {
+      throw const FormatException(
+        'Embedding vectors must contain finite numbers.',
+      );
+    }
+    dimensions ??= raw.length;
+    if (raw.length != dimensions) {
+      throw const FormatException('Embedding dimensions differ between rows.');
+    }
+    ordered[index] = raw.map((value) => (value as num).toDouble()).toList();
+  }
+  final rawUsage = data['usage'];
+  if (rawUsage != null && rawUsage is! Map) {
+    throw const FormatException('Embedding usage is not an object.');
+  }
+  return EmbeddingModelV2GenerateResult<String>(
+    embeddings: [
+      for (var i = 0; i < values.length; i++)
+        EmbeddingModelV2Embedding(value: values[i], embedding: ordered[i]!),
+    ],
+    usage: rawUsage == null
+        ? null
+        : EmbeddingModelV2Usage(tokens: intOrNull(rawUsage['total_tokens'])),
+  );
 }

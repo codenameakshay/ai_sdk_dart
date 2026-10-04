@@ -16,6 +16,41 @@ void main() {
       expect(find.byKey(const ValueKey('streaming-cursor')), findsNothing);
     });
 
+    testWidgets('streamed text keeps its own direction', (tester) async {
+      Widget view({required bool isStreaming}) => MaterialApp(
+        home: Directionality(
+          textDirection: TextDirection.rtl,
+          child: Scaffold(
+            body: StreamingTextView(
+              text: 'Delete the file.',
+              isStreaming: isStreaming,
+            ),
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(view(isStreaming: false));
+      expect(
+        tester
+            .widget<SelectableText>(find.byType(SelectableText))
+            .textDirection,
+        TextDirection.ltr,
+      );
+
+      await tester.pumpWidget(view(isStreaming: true));
+      expect(
+        tester
+            .widget<RichText>(
+              find.descendant(
+                of: find.byType(StreamingTextView),
+                matching: find.byType(RichText),
+              ),
+            )
+            .textDirection,
+        TextDirection.ltr,
+      );
+    });
+
     testWidgets('shows a blinking cursor while streaming', (tester) async {
       await tester.pumpWidget(
         _wrap(const StreamingTextView(text: 'typing', isStreaming: true)),

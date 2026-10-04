@@ -12,6 +12,12 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 /// expect(result.embedding, [0.1, 0.2, 0.3]);
 /// ```
 class MockEmbeddingModelV2<VALUE> implements EmbeddingModelV2<VALUE> {
+  @override
+  int? get maxEmbeddingsPerCall => null;
+
+  @override
+  bool get supportsParallelCalls => true;
+
   MockEmbeddingModelV2({
     required this.embedding,
     this.usage,

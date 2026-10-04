@@ -1,3 +1,11 @@
+## 3.0.0
+
+- Preserved signed answer text across replay, kept distinct streamed function-call identities, and counted thinking tokens in output usage.
+- Candidate-less prompt safety blocks now finish as content-filter results; truncated streams report an error.
+
+
+---
+
 ## 2.0.0
 
 - Migrated Gemini generation and streaming to V4 lifecycle, response formats,

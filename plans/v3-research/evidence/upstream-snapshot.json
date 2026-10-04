@@ -1,0 +1,52 @@
+[
+  {
+    "url": "https://registry.npmjs.org/ai",
+    "retrieved_utc": "2026-09-23T05:43:15.095863+00:00",
+    "versions": {
+      "latest": {
+        "version": "7.0.111",
+        "published": "2026-09-22T18:11:20.964Z"
+      },
+      "ai-v6": {
+        "version": "6.0.288",
+        "published": "2026-09-22T17:22:55.886Z"
+      }
+    }
+  },
+  {
+    "url": "https://registry.npmjs.org/@ai-sdk/provider",
+    "retrieved_utc": "2026-09-23T05:43:15.147123+00:00",
+    "versions": {
+      "latest": {
+        "version": "4.0.17",
+        "published": "2026-09-16T21:39:18.465Z"
+      },
+      "ai-v6": {
+        "version": "3.0.16",
+        "published": "2026-09-09T18:14:17.991Z"
+      }
+    }
+  },
+  {
+    "url": "https://github.com/vercel/ai/releases/tag/ai%407.0.111",
+    "source_commit": "e9c1d2f54da6bd01a16bb8a5fdfcb4b62f34e7d0"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/vercel/ai/e9c1d2f54da6bd01a16bb8a5fdfcb4b62f34e7d0/content/docs/08-migration-guides/23-migration-guide-7-0.mdx",
+    "sha256": "ad1867d54bb87814592b596cbbece0e9df3d7d68ca2e1598c6dc3297a8492b01",
+    "bytes": 65026,
+    "retrieved_date": "2026-09-23"
+  },
+  {
+    "url": "https://modelcontextprotocol.io/specification/2026-07-28/changelog.md",
+    "sha256": "203d3c9974e1a0e22308a4f0ae55e6ff7f1ad4150de64411b8c8e03003589aae",
+    "bytes": 11892,
+    "retrieved_date": "2026-09-23"
+  },
+  {
+    "url": "https://developers.openai.com/api/docs/guides/migrate-to-responses.md",
+    "sha256": "9550a98f822a87262c563894f7d7627eab486d86643d0c21803ba34efe351d7a",
+    "bytes": 62931,
+    "retrieved_date": "2026-09-23"
+  }
+]

@@ -110,7 +110,21 @@ class MockLanguageModelV4 extends LanguageModelV4 {
         parts.add(
           StreamPartReasoningDelta(id: 'mock-reasoning', delta: part.text),
         );
-        parts.add(const StreamPartReasoningEnd(id: 'mock-reasoning'));
+        final providerMetadata = <String, Map<String, dynamic>>{};
+        part.providerOptions?.forEach((provider, options) {
+          if (options is Map) {
+            providerMetadata[provider] = options.cast<String, dynamic>();
+          }
+        });
+        parts.add(
+          StreamPartReasoningEnd(
+            id: 'mock-reasoning',
+            signature: part.signature,
+            providerMetadata: providerMetadata.isEmpty
+                ? null
+                : providerMetadata,
+          ),
+        );
       } else if (part is LanguageModelV4ToolCallPart) {
         parts.add(
           StreamPartToolInputStart(

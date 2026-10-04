@@ -14,6 +14,55 @@ import '../../ai_sdk_provider/test/support/test_server.dart';
 import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
+  test('rejects non-text tool result content instead of dropping it', () async {
+    var dispatched = false;
+    final server = await _startServer((request) async {
+      dispatched = true;
+      request.response.statusCode = 200;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({'done': true, 'message': {}}));
+      await request.response.close();
+    });
+    addTearDown(server.close);
+
+    final model = OllamaProvider(baseUrl: server.baseUrl).call('llava');
+    await expectLater(
+      model.doGenerate(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
+            messages: [
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.tool,
+                content: [
+                  LanguageModelV4ToolResultPart(
+                    toolCallId: 'call_1',
+                    toolName: 'lookup',
+                    output: ToolResultOutputContent([
+                      LanguageModelV4TextPart(text: 'caption'),
+                      LanguageModelV4ImagePart(
+                        image: DataContentBase64('aW1hZ2U='),
+                        mediaType: 'image/png',
+                      ),
+                    ]),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+      throwsUnsupportedError,
+    );
+    expect(dispatched, isFalse);
+  });
+
+  test('default provider exposes embedding capabilities', () {
+    final model = ollama.embedding('nomic-embed-text');
+    expect(model.provider, 'ollama');
+    expect(model.maxEmbeddingsPerCall, isNull);
+    expect(model.supportsParallelCalls, isTrue);
+  });
+
   group('OllamaProvider', () {
     test('creates language model with correct provider/spec/modelId', () {
       final provider = OllamaProvider();
@@ -146,6 +195,85 @@ void main() {
 
       await expectLater(future, throwsA(isA<AiOperationCancelledError>()));
       expect(adapter.fetchCount, 1);
+    });
+
+    test('doStream skips dispatch when already cancelled', () async {
+      final adapter = CancellationHttpClientAdapter();
+      final client = _cancellationClient(adapter, 'http://localhost/api');
+      addTearDown(() => client.close(force: true));
+      final signal = TestAbortSignal()..cancel();
+      await expectLater(
+        OllamaProvider(baseUrl: 'http://localhost/api', client: client)
+            .call('llama3')
+            .doStream(
+              LanguageModelV4CallOptions(
+                prompt: userPrompt('hi'),
+                abortSignal: signal,
+              ),
+            ),
+        throwsA(isA<AiOperationCancelledError>()),
+      );
+      expect(adapter.fetchCount, 0);
+    });
+
+    test(
+      'non-Dio failures propagate from generate, stream, and embedding',
+      () async {
+        final client = Dio()..httpClientAdapter = _ThrowingHttpClientAdapter();
+        addTearDown(() => client.close(force: true));
+        final provider = OllamaProvider(
+          baseUrl: 'http://127.0.0.1:1',
+          client: client,
+        );
+        final wrappedBoom = throwsA(
+          isA<AiApiCallError>().having(
+            (error) => error.cause,
+            'cause',
+            isA<DioException>().having(
+              (error) => error.error,
+              'error',
+              isA<StateError>().having(
+                (error) => error.message,
+                'message',
+                'boom',
+              ),
+            ),
+          ),
+        );
+
+        await expectLater(
+          provider(
+            'llama',
+          ).doGenerate(LanguageModelV4CallOptions(prompt: userPrompt('hi'))),
+          wrappedBoom,
+        );
+        await expectLater(
+          provider(
+            'llama',
+          ).doStream(LanguageModelV4CallOptions(prompt: userPrompt('hi'))),
+          wrappedBoom,
+        );
+        await expectLater(
+          provider
+              .embedding('nomic-embed-text')
+              .doEmbed(
+                const EmbeddingModelV2CallOptions<String>(values: ['hi']),
+              ),
+          wrappedBoom,
+        );
+      },
+    );
+
+    test('doStream rejects a null response body', () async {
+      final client = Dio()..interceptors.add(_NullStreamBodyInterceptor());
+      addTearDown(() => client.close(force: true));
+
+      await expectLater(
+        OllamaProvider(baseUrl: 'http://127.0.0.1:1', client: client)
+            .call('llama')
+            .doStream(LanguageModelV4CallOptions(prompt: userPrompt('hi'))),
+        throwsA(isA<AiApiCallError>()),
+      );
     });
 
     test(
@@ -554,6 +682,16 @@ void main() {
           LanguageModelV4CallOptions(
             prompt: LanguageModelV4Prompt(
               messages: [
+                const LanguageModelV4Message(
+                  role: LanguageModelV4Role.assistant,
+                  content: [
+                    LanguageModelV4ToolCallPart(
+                      toolCallId: 'call_1',
+                      toolName: 'weather',
+                      input: {'city': 'Paris'},
+                    ),
+                  ],
+                ),
                 LanguageModelV4Message(
                   role: LanguageModelV4Role.tool,
                   content: [
@@ -563,6 +701,24 @@ void main() {
                       output: ToolResultOutputContent([
                         LanguageModelV4TextPart(text: 'sunny'),
                       ]),
+                    ),
+                    LanguageModelV4ToolResultPart(
+                      toolCallId: 'call_2',
+                      toolName: 'structured',
+                      output: ToolResultOutputJson({'temperature': 21}),
+                    ),
+                    LanguageModelV4ToolResultPart(
+                      toolCallId: 'call_3',
+                      toolName: 'failed',
+                      output: ToolResultOutputErrorJson({'message': 'nope'}),
+                    ),
+                    LanguageModelV4ToolResultPart(
+                      toolCallId: 'call_4',
+                      toolName: 'denied',
+                      output: ToolResultOutputExecutionDenied(
+                        'requires approval',
+                        'approval-4',
+                      ),
                     ),
                   ],
                 ),
@@ -589,10 +745,24 @@ void main() {
         final messages = (captured['messages'] as List)
             .cast<Map<String, dynamic>>();
         // ToolResultOutputContent flattened to its text parts.
-        expect(messages[0]['role'], 'tool');
-        expect(messages[0]['content'], 'sunny');
+        final assistant = messages.firstWhere(
+          (message) => message['role'] == 'assistant',
+        );
+        expect(assistant['tool_calls'], isA<List>());
+        final toolMessages = messages
+            .where((message) => message['role'] == 'tool')
+            .toList();
+        expect(toolMessages.map((message) => message['content']), [
+          'sunny',
+          '{"temperature":21}',
+          '{"message":"nope"}',
+          'requires approval',
+        ]);
         // Base64 image part + image file part both land in `images`.
-        final images = (messages[1]['images'] as List).cast<String>();
+        final user = messages.firstWhere(
+          (message) => message['role'] == 'user',
+        );
+        final images = (user['images'] as List).cast<String>();
         expect(images, [rawB64, rawB64]);
       },
     );
@@ -640,6 +810,33 @@ void main() {
       expect(messages.single['content'], 'see this');
       // No images field because the URL image is not embeddable.
       expect(messages.single.containsKey('images'), isFalse);
+    });
+
+    test('rejects provider file references before dispatch', () async {
+      final model = OllamaProvider().call('llava');
+      await expectLater(
+        model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                const LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [
+                    LanguageModelV4ImagePart(
+                      image: DataContentProviderReference(
+                        namespace: 'files',
+                        id: 'file-1',
+                      ),
+                      mediaType: 'image/png',
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        throwsUnsupportedError,
+      );
     });
 
     test(
@@ -728,6 +925,7 @@ void main() {
 
       final streamResult = await model.doStream(
         LanguageModelV4CallOptions(
+          includeRawChunks: true,
           prompt: LanguageModelV4Prompt(
             messages: [
               LanguageModelV4Message(
@@ -744,6 +942,7 @@ void main() {
         parts.whereType<StreamPartTextDelta>().map((p) => p.delta).join(),
         'thinking',
       );
+      expect(parts.whereType<StreamPartRaw>(), isNotEmpty);
       final start = parts.whereType<StreamPartToolInputStart>().single;
       expect(start.toolName, 'weather');
       final end = parts.whereType<StreamPartToolInputEnd>().single;
@@ -955,7 +1154,7 @@ void main() {
       expect(result.embeddings[1].embedding, [0.3, 0.4]);
     });
 
-    test('tolerates a response without an embeddings list', () async {
+    test('rejects a response without an embeddings list', () async {
       final server = await _startServer((request) async {
         await utf8.decoder.bind(request).join();
         request.response.statusCode = 200;
@@ -969,49 +1168,185 @@ void main() {
         baseUrl: server.baseUrl,
       ).embedding('nomic-embed-text');
 
-      final result = await model.doEmbed(
-        const EmbeddingModelV2CallOptions<String>(values: ['only']),
+      await expectLater(
+        model.doEmbed(
+          const EmbeddingModelV2CallOptions<String>(values: ['only']),
+        ),
+        throwsA(isA<AiApiCallError>()),
       );
-      expect(result.embeddings, isEmpty);
     });
 
-    test(
-      'normalizes numeric vectors and ignores response rows beyond the input',
-      () async {
+    test('normalizes numeric vectors', () async {
+      final server = await _startServer((request) async {
+        await utf8.decoder.bind(request).join();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'embeddings': [
+              [1, 2.5],
+              [-3, 4],
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final result = await OllamaProvider(baseUrl: server.baseUrl)
+          .embedding('nomic-embed-text')
+          .doEmbed(
+            const EmbeddingModelV2CallOptions<String>(values: ['a', 'b']),
+          );
+
+      expect(result.embeddings, hasLength(2));
+      expect(result.embeddings.map((embedding) => embedding.value), ['a', 'b']);
+      expect(result.embeddings.map((embedding) => embedding.embedding), [
+        [1.0, 2.5],
+        [-3.0, 4.0],
+      ]);
+    });
+
+    test('rejects empty and inconsistent embedding vectors', () async {
+      for (final vectors in [
+        [
+          [1.0, 2.0],
+          <double>[],
+        ],
+        [
+          [1.0, 2.0],
+          [3.0],
+        ],
+      ]) {
         final server = await _startServer((request) async {
           await utf8.decoder.bind(request).join();
           request.response.statusCode = 200;
           request.response.headers.contentType = ContentType.json;
-          request.response.write(
-            jsonEncode({
-              'embeddings': [
-                [1, 2.5],
-                [-3, 4],
-                [99],
-              ],
-            }),
-          );
+          request.response.write(jsonEncode({'embeddings': vectors}));
           await request.response.close();
         });
         addTearDown(server.close);
 
-        final result = await OllamaProvider(baseUrl: server.baseUrl)
+        await expectLater(
+          OllamaProvider(baseUrl: server.baseUrl)
+              .embedding('nomic-embed-text')
+              .doEmbed(
+                const EmbeddingModelV2CallOptions<String>(
+                  values: ['first', 'second'],
+                ),
+              ),
+          throwsA(
+            isA<AiApiCallError>()
+                .having((error) => error.statusCode, 'statusCode', 200)
+                .having((error) => error.url, 'url', contains('/api/embed')),
+          ),
+        );
+      }
+    });
+
+    test('rejects numeric overflow in an embedding vector', () async {
+      final server = await _startServer((request) async {
+        await utf8.decoder.bind(request).join();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write('{"embeddings":[[1e999]]}');
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      await expectLater(
+        OllamaProvider(baseUrl: server.baseUrl)
             .embedding('nomic-embed-text')
             .doEmbed(
-              const EmbeddingModelV2CallOptions<String>(values: ['a', 'b']),
-            );
+              const EmbeddingModelV2CallOptions<String>(values: ['first']),
+            ),
+        throwsA(isA<AiApiCallError>()),
+      );
+    });
 
-        expect(result.embeddings, hasLength(2));
-        expect(result.embeddings.map((embedding) => embedding.value), [
-          'a',
-          'b',
-        ]);
-        expect(result.embeddings.map((embedding) => embedding.embedding), [
-          [1.0, 2.5],
-          [-3.0, 4.0],
-        ]);
+    test(
+      'pre-cancelled embeddings skip dispatch and empty bodies are typed',
+      () async {
+        final adapter = CancellationHttpClientAdapter();
+        final client = _cancellationClient(adapter, 'http://localhost/api');
+        addTearDown(() => client.close(force: true));
+        final signal = TestAbortSignal()..cancel();
+        final model = OllamaProvider(
+          baseUrl: 'http://localhost/api',
+          client: client,
+        ).embedding('nomic-embed-text');
+        await expectLater(
+          model.doEmbed(
+            EmbeddingModelV2CallOptions<String>(
+              values: const ['hi'],
+              abortSignal: signal,
+            ),
+          ),
+          throwsA(isA<AiOperationCancelledError>()),
+        );
+        expect(adapter.fetchCount, 0);
+
+        final server = await _startServer((request) async {
+          await utf8.decoder.bind(request).join();
+          request.response.statusCode = 200;
+          await request.response.close();
+        });
+        addTearDown(server.close);
+        await expectLater(
+          OllamaProvider(baseUrl: server.baseUrl)
+              .embedding('nomic-embed-text')
+              .doEmbed(
+                const EmbeddingModelV2CallOptions<String>(values: ['hi']),
+              ),
+          throwsA(isA<AiApiCallError>()),
+        );
       },
     );
+  });
+
+  group('cancellation observer lifetime', () {
+    for (final operation in ['generate', 'stream', 'embed']) {
+      test(
+        '$operation releases observable cancellation after completion',
+        () async {
+          final signal = _ObserverSignal();
+          final dio = Dio()..httpClientAdapter = _ObserverAdapter();
+          addTearDown(() => dio.close(force: true));
+          addTearDown(signal.events.close);
+          final provider = OllamaProvider(client: dio);
+          for (var i = 0; i < 5; i++) {
+            final options = LanguageModelV4CallOptions(
+              prompt: const LanguageModelV4Prompt(messages: []),
+              abortSignal: signal,
+            );
+            switch (operation) {
+              case 'generate':
+                await provider('fixture').doGenerate(options);
+              case 'stream':
+                await (await provider(
+                  'fixture',
+                ).doStream(options)).stream.toList();
+              case 'embed':
+                await provider
+                    .embedding('fixture')
+                    .doEmbed(
+                      EmbeddingModelV2CallOptions(
+                        values: ['x'],
+                        abortSignal: signal,
+                      ),
+                    );
+            }
+            expect(
+              signal.futureReads,
+              0,
+              reason: 'Observable callers must use detachable subscriptions',
+            );
+            expect(signal.active, 0);
+            expect(signal.attached, greaterThan(0));
+          }
+        },
+      );
+    }
   });
 }
 
@@ -1030,3 +1365,84 @@ Dio _cancellationClient(HttpClientAdapter adapter, String baseUrl) {
 Future<TestServer> _startServer(
   Future<void> Function(HttpRequest request) handler,
 ) => TestServer.start(handler, pathSuffix: '/api');
+
+class _ThrowingHttpClientAdapter implements HttpClientAdapter {
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async => throw StateError('boom');
+
+  @override
+  void close({bool force = false}) {}
+}
+
+class _NullStreamBodyInterceptor extends Interceptor {
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    handler.resolve(
+      Response<dynamic>(requestOptions: options, statusCode: 200),
+    );
+  }
+}
+
+class _ObserverSignal implements ObservableAbortSignal {
+  final events = StreamController<void>.broadcast();
+  final _cancelled = Completer<void>();
+  int active = 0;
+  int attached = 0;
+  int futureReads = 0;
+  @override
+  bool get isCancelled => false;
+  @override
+  Future<void> get onCancelled {
+    futureReads++;
+    return _cancelled.future;
+  }
+
+  @override
+  Stream<void> get cancellationEvents => Stream.multi((controller) {
+    active++;
+    attached++;
+    final subscription = events.stream.listen(controller.addSync);
+    controller.onCancel = () async {
+      active--;
+      await subscription.cancel();
+    };
+  });
+}
+
+class _ObserverAdapter implements HttpClientAdapter {
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    final payload = options.path.endsWith('/embed')
+        ? {
+            'embeddings': [
+              [1.0, 2.0],
+            ],
+          }
+        : {
+            'message': {'role': 'assistant', 'content': 'ok'},
+            'done': true,
+            'done_reason': 'stop',
+          };
+    final streaming = (options.data as Map)['stream'] == true;
+    return ResponseBody.fromString(
+      '${jsonEncode(payload)}${streaming ? '\n' : ''}',
+      200,
+      headers: {
+        'content-type': [
+          streaming ? 'application/x-ndjson' : 'application/json',
+        ],
+      },
+    );
+  }
+
+  @override
+  void close({bool force = false}) {}
+}

@@ -20,6 +20,8 @@ class MultimodalPage extends StatefulWidget {
 
 class _MultimodalPageState extends State<MultimodalPage> {
   final _questionController = TextEditingController();
+  final _provider = OpenAIProvider(apiKey: openAiApiKey);
+  CancellationToken? _abortSignal;
   Uint8List? _imageBytes;
   String? _mediaType;
   bool _loading = false;
@@ -33,8 +35,9 @@ class _MultimodalPageState extends State<MultimodalPage> {
       maxWidth: 1024,
       imageQuality: 85,
     );
-    if (xfile == null) return;
+    if (!mounted || xfile == null) return;
     final bytes = await xfile.readAsBytes();
+    if (!mounted) return;
     setState(() {
       _imageBytes = bytes;
       _mediaType = 'image/jpeg';
@@ -50,8 +53,9 @@ class _MultimodalPageState extends State<MultimodalPage> {
       maxWidth: 1024,
       imageQuality: 85,
     );
-    if (xfile == null) return;
+    if (!mounted || xfile == null) return;
     final bytes = await xfile.readAsBytes();
+    if (!mounted) return;
     setState(() {
       _imageBytes = bytes;
       _mediaType = 'image/jpeg';
@@ -82,11 +86,13 @@ class _MultimodalPageState extends State<MultimodalPage> {
       _response = '';
     });
 
+    final abortSignal = _abortSignal = CancellationToken();
     try {
       // Multimodal input: one user message carrying an image part + a text
       // part. The reply is streamed token-by-token into a StreamingTextView.
       final result = await streamText(
-        model: OpenAIProvider(apiKey: openAiApiKey)('gpt-4.1-mini'),
+        model: _provider('gpt-4.1-mini'),
+        abortSignal: abortSignal,
         messages: [
           ModelMessage.parts(
             role: ModelMessageRole.user,
@@ -112,11 +118,15 @@ class _MultimodalPageState extends State<MultimodalPage> {
         _error = e.toString();
         _loading = false;
       });
+    } finally {
+      if (identical(_abortSignal, abortSignal)) _abortSignal = null;
     }
   }
 
   @override
   void dispose() {
+    _abortSignal?.cancel();
+    _provider.dispose();
     _questionController.dispose();
     super.dispose();
   }

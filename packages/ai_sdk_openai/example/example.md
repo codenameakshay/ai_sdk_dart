@@ -25,7 +25,60 @@ final result = await generateText(
   prompt: 'Say hello from AI SDK Dart!',
 );
 print(result.text);
-print('tokens used: ${result.usage?.totalTokens}');
+print('tokens used: ${result.usage}');
+```
+
+---
+
+## Responses API
+
+`openai.responses(modelId)` returns a `LanguageModelV4` backed by the OpenAI
+Responses API instead of Chat Completions. It works with `generateText` and
+`streamText` exactly like `openai(modelId)`:
+
+```dart
+final result = await generateText(
+  model: openai.responses('gpt-4.1-mini'),
+  prompt: 'Say hello from AI SDK Dart!',
+);
+print(result.text);
+```
+
+---
+
+## Hosted tools (Responses API)
+
+The Responses API exposes server-side tools as
+`LanguageModelV4ProviderDefinedTool` subclasses, passed via
+`providerDefinedTools:` (a `List`, separate from the `tools:` map) — they
+require `openai.responses(...)`, not `openai(...)`:
+
+```dart
+final result = await generateText(
+  model: openai.responses('gpt-4.1-mini'),
+  prompt: 'What happened in the news today?',
+  providerDefinedTools: [OpenAIWebSearchTool()],
+);
+print(result.text);
+```
+
+| Tool | Purpose |
+|------|---------|
+| `OpenAIWebSearchTool({userLocation, searchContextSize})` | Web search grounding |
+| `OpenAIFileSearchTool({required vectorStoreIds, maxNumResults})` | Search over uploaded vector stores |
+| `OpenAICodeInterpreterTool({container})` | Runs model-written code in an OpenAI container |
+| `OpenAIMcpTool({required serverLabel, required serverUrl, allowedTools, requireApproval, headers})` | Connects to a remote MCP server |
+
+```dart
+final result = await generateText(
+  model: openai.responses('gpt-4.1-mini'),
+  prompt: 'Search our docs and summarize the onboarding steps.',
+  providerDefinedTools: [
+    OpenAIFileSearchTool(vectorStoreIds: ['vs_123']),
+    OpenAICodeInterpreterTool(),
+    OpenAIMcpTool(serverLabel: 'docs', serverUrl: 'https://mcp.example.com'),
+  ],
+);
 ```
 
 ---
@@ -120,7 +173,7 @@ final result = await generateImage(
   model: openai.image('dall-e-3'),
   prompt: 'A futuristic city skyline at sunset, digital art.',
 );
-print(result.images.first.url);
+print('${result.image.bytes.length} bytes of ${result.image.mediaType}');
 ```
 
 ---
@@ -148,7 +201,7 @@ final audioBytes = await File('recording.mp3').readAsBytes();
 final result = await transcribe(
   model: openai.transcription('whisper-1'),
   audio: audioBytes,
-  mimeType: 'audio/mpeg',
+  audioMediaType: 'audio/mpeg',
 );
 print(result.text);
 ```
@@ -168,6 +221,13 @@ final result = await generateText(
   prompt: 'Hello from Azure OpenAI!',
 );
 ```
+
+---
+
+## File and batch lifecycle
+
+- **[files_lifecycle.dart](files_lifecycle.dart)** — uploads a file through `provider.files()`, downloads its content, and explicitly deletes it.
+- **[batch_lifecycle.dart](batch_lifecycle.dart)** — creates a Responses batch through `provider.batches()`, checks its status, and reads the result file once it reaches a terminal state.
 
 ---
 

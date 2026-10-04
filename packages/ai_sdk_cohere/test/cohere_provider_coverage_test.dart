@@ -10,6 +10,148 @@ import 'package:test/test.dart';
 import '../../ai_sdk_provider/test/support/test_server.dart';
 
 void main() {
+  test('default provider exposes all model families', () {
+    expect(cohere('command-r').provider, 'cohere');
+    expect(cohere.embedding('embed-v4.0').maxEmbeddingsPerCall, 96);
+    expect(cohere.embedding('embed-v4.0').supportsParallelCalls, isTrue);
+    expect(cohere.rerank('rerank-v3.5').specificationVersion, 'v1');
+  });
+
+  test('wraps malformed rerank responses as API errors', () async {
+    final server = await TestServer.start((request) async {
+      request.response.statusCode = 200;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(
+        jsonEncode({
+          'results': [
+            {'index': 4},
+          ],
+        }),
+      );
+      await request.response.close();
+    });
+    addTearDown(server.close);
+
+    await expectLater(
+      CohereProvider(apiKey: 'test', baseUrl: server.baseUrl)
+          .rerank('rerank-v3.5')
+          .doRerank(
+            const RerankModelV1CallOptions(
+              query: 'query',
+              documents: ['document'],
+            ),
+          ),
+      throwsA(isA<AiApiCallError>()),
+    );
+  });
+
+  test('rejects empty embedding and rerank response bodies', () async {
+    final server = await TestServer.start((request) async {
+      request.response.statusCode = 200;
+      await request.response.close();
+    });
+    addTearDown(server.close);
+    final provider = CohereProvider(apiKey: 'test', baseUrl: server.baseUrl);
+
+    await expectLater(
+      provider
+          .embedding('embed-v4.0')
+          .doEmbed(const EmbeddingModelV2CallOptions<String>(values: ['text'])),
+      throwsA(isA<AiApiCallError>()),
+    );
+    await expectLater(
+      provider
+          .rerank('rerank-v3.5')
+          .doRerank(
+            const RerankModelV1CallOptions(query: 'query', documents: ['doc']),
+          ),
+      throwsA(isA<AiApiCallError>()),
+    );
+  });
+
+  test('rejects unsupported prompt and tool-result media', () async {
+    final model = CohereProvider(apiKey: 'test').call('command-r');
+    for (final part in <LanguageModelV4ContentPart>[
+      const LanguageModelV4DocumentSourcePart(
+        id: 'doc',
+        mediaType: 'application/pdf',
+        title: 'doc',
+      ),
+      const LanguageModelV4ReasoningFilePart(
+        data: DataContentBase64('YQ=='),
+        mediaType: 'text/plain',
+      ),
+    ]) {
+      await expectLater(
+        model.doGenerate(
+          LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(
+              messages: [
+                LanguageModelV4Message(
+                  role: LanguageModelV4Role.user,
+                  content: [
+                    const LanguageModelV4ImagePart(
+                      image: DataContentBase64('YQ=='),
+                    ),
+                    part,
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        throwsUnsupportedError,
+      );
+    }
+
+    await expectLater(
+      model.doGenerate(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
+            messages: [
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.tool,
+                content: [
+                  const LanguageModelV4ToolResultPart(
+                    toolCallId: 'call',
+                    toolName: 'tool',
+                    output: ToolResultOutputContent([
+                      LanguageModelV4ImagePart(
+                        image: DataContentBase64('YQ=='),
+                      ),
+                    ]),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+      throwsUnsupportedError,
+    );
+  });
+
+  test('embedding and rerank rethrow credential-provider errors', () async {
+    final provider = CohereProvider(
+      credentialProvider: () async => throw StateError('credential failed'),
+    );
+    await expectLater(
+      provider
+          .embedding('embed-v4.0')
+          .doEmbed(const EmbeddingModelV2CallOptions<String>(values: ['x'])),
+      throwsStateError,
+    );
+    await expectLater(
+      provider
+          .rerank('rerank-v3.5')
+          .doRerank(
+            const RerankModelV1CallOptions(query: 'x', documents: ['x']),
+          ),
+      throwsStateError,
+    );
+    provider.dispose();
+  });
+
   group('Cohere embedding model', () {
     test('serializes /embed request and parses float embeddings', () async {
       late String capturedPath;
@@ -62,6 +204,67 @@ void main() {
       expect(result.embeddings[1].embedding, [0.4, 0.5, 0.6]);
     });
 
+    test('rejects empty and inconsistent embedding vectors', () async {
+      for (final vectors in [
+        [
+          [1.0, 2.0],
+          <double>[],
+        ],
+        [
+          [1.0, 2.0],
+          [3.0],
+        ],
+      ]) {
+        final server = await TestServer.start((request) async {
+          await utf8.decoder.bind(request).join();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'embeddings': {'float': vectors},
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        await expectLater(
+          CohereProvider(apiKey: 'test', baseUrl: server.baseUrl)
+              .embedding('embed-v4.0')
+              .doEmbed(
+                const EmbeddingModelV2CallOptions<String>(
+                  values: ['first', 'second'],
+                ),
+              ),
+          throwsA(
+            isA<AiApiCallError>()
+                .having((error) => error.statusCode, 'statusCode', 200)
+                .having((error) => error.url, 'url', endsWith('/embed')),
+          ),
+        );
+      }
+    });
+
+    test('rejects numeric overflow in an embedding vector', () async {
+      final server = await TestServer.start((request) async {
+        await utf8.decoder.bind(request).join();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write('{"embeddings":{"float":[[1e999]]}}');
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      await expectLater(
+        CohereProvider(apiKey: 'test', baseUrl: server.baseUrl)
+            .embedding('embed-v4.0')
+            .doEmbed(
+              const EmbeddingModelV2CallOptions<String>(values: ['first']),
+            ),
+        throwsA(isA<AiApiCallError>()),
+      );
+    });
+
     test(
       'forwards providerOptions and defaults input_type when omitted',
       () async {
@@ -103,7 +306,7 @@ void main() {
       },
     );
 
-    test('handles a missing embeddings field as an empty result', () async {
+    test('rejects a missing embeddings field', () async {
       final server = await TestServer.start((request) async {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
@@ -117,11 +320,12 @@ void main() {
         baseUrl: server.baseUrl,
       ).embedding('embed-english-v4.0');
 
-      final result = await model.doEmbed(
-        const EmbeddingModelV2CallOptions<String>(values: ['only']),
+      await expectLater(
+        model.doEmbed(
+          const EmbeddingModelV2CallOptions<String>(values: ['only']),
+        ),
+        throwsA(isA<AiApiCallError>()),
       );
-
-      expect(result.embeddings, isEmpty);
     });
   });
 
@@ -671,6 +875,7 @@ void main() {
 
       final streamResult = await model.doStream(
         LanguageModelV4CallOptions(
+          includeRawChunks: true,
           prompt: LanguageModelV4Prompt(
             messages: [
               LanguageModelV4Message(
@@ -684,6 +889,7 @@ void main() {
 
       final parts = await streamResult.stream.toList();
       final deltas = parts.whereType<StreamPartTextDelta>().toList();
+      expect(parts.whereType<StreamPartRaw>(), isNotEmpty);
       expect(deltas.map((d) => d.delta).join(), 'Hello world');
       expect(deltas.every((d) => d.id == 'text-0'), isTrue);
       expect(parts.whereType<StreamPartTextStart>().single.id, 'text-0');

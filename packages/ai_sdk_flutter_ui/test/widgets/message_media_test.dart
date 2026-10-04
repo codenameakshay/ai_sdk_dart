@@ -23,6 +23,15 @@ void main() {
       );
     });
 
+    test('provider-owned data requires a host image provider', () {
+      expect(
+        () => imageProviderFor(
+          const DataContentProviderReference(namespace: 'mock', id: 'image-1'),
+        ),
+        throwsUnsupportedError,
+      );
+    });
+
     testWidgets('renders byte data via a MemoryImage', (tester) async {
       final bytes = base64Decode(_pngBase64);
       await tester.pumpWidget(
@@ -51,6 +60,27 @@ void main() {
       final image = tester.widget<Image>(find.byType(Image));
       expect(image.image, isA<MemoryImage>());
     });
+
+    for (final (description, data) in <(String, LanguageModelV4DataContent)>[
+      (
+        'provider references',
+        const DataContentProviderReference(namespace: 'mock', id: 'image-1'),
+      ),
+      ('malformed base64', const DataContentBase64('%%%')),
+    ]) {
+      testWidgets('$description show an accessible placeholder', (
+        tester,
+      ) async {
+        await tester.pumpWidget(
+          _wrap(MessageImage(image: LanguageModelV4ImagePart(image: data))),
+        );
+
+        expect(find.byType(Image), findsNothing);
+        expect(find.byIcon(Icons.broken_image_outlined), findsOneWidget);
+        expect(find.bySemanticsLabel('Image failed to load'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      });
+    }
 
     testWidgets('blocks url data unless the host opts in', (tester) async {
       await tester.pumpWidget(
@@ -138,6 +168,55 @@ void main() {
       );
 
       expect(find.textContaining('application/pdf'), findsOneWidget);
+    });
+
+    testWidgets('chooses icons from the attachment media type', (tester) async {
+      for (final entry in {
+        'image/png': Icons.image_outlined,
+        'audio/mpeg': Icons.audiotrack_outlined,
+        'video/mp4': Icons.movie_outlined,
+        'application/pdf': Icons.picture_as_pdf_outlined,
+        'application/octet-stream': Icons.insert_drive_file_outlined,
+      }.entries) {
+        await tester.pumpWidget(
+          _wrap(
+            MessageAttachment(
+              file: LanguageModelV4FilePart(
+                data: DataContentUrl(Uri.parse('https://example.com/file')),
+                mediaType: entry.key,
+              ),
+            ),
+          ),
+        );
+        expect(find.byIcon(entry.value), findsOneWidget, reason: entry.key);
+      }
+    });
+
+    testWidgets('renders reasoning files with their media type', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      await tester.pumpWidget(
+        _wrap(
+          const MessageReasoningFileAttachment(
+            file: LanguageModelV4ReasoningFilePart(
+              data: DataContentBase64(''),
+              mediaType: 'application/pdf',
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('application/pdf'), findsOneWidget);
+      expect(find.bySemanticsLabel('Reasoning attachment'), findsOneWidget);
+      expect(
+        tester
+            .getSemantics(find.byType(MessageReasoningFileAttachment))
+            .getSemanticsData()
+            .value,
+        'application/pdf',
+      );
+      semantics.dispose();
     });
 
     testWidgets('fires onTap when tapped', (tester) async {

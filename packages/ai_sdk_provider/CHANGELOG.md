@@ -1,3 +1,13 @@
+## 3.0.0
+
+- Added canonical `AbortSignal` observation and shared Dio cancellation scopes for provider
+  request lifetimes.
+- Added embedding batch-size and parallel-call capability declarations for bounded `embedMany`
+  requests with stable result order.
+- Added lifecycle and cancellation conformance coverage for request setup, streaming, and disposal.
+
+---
+
 ## 2.0.0
 
 - **Breaking:** replaced the language-model V3 seam with `LanguageModelV4` and

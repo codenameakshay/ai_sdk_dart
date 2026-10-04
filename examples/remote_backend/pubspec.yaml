@@ -1,0 +1,13 @@
+name: remote_backend_example
+description: Minimal documentation companion for ai_sdk_remote.
+publish_to: none
+resolution: workspace
+environment:
+  sdk: ^3.11.1
+
+dependencies:
+  ai_sdk_conversation: ^3.0.0
+  ai_sdk_remote: ^3.0.0
+
+dev_dependencies:
+  test: ^1.25.0

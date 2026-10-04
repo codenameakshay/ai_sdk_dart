@@ -19,6 +19,7 @@ void main() {
         model: model,
         values: ['a', 'b', 'c'],
         maxParallelCalls: 2,
+        maxEmbeddingsPerCall: 2,
       );
       expect(result.usage, isNull);
     });
@@ -31,6 +32,7 @@ void main() {
         model: model,
         values: ['a', 'b', 'c', 'd', 'e'],
         maxParallelCalls: 2,
+        maxEmbeddingsPerCall: 2,
       );
       expect(result.embeddings, hasLength(5));
       // 3 provider calls (chunks of 2, 2, 1), each reporting 1 token.
@@ -200,6 +202,12 @@ void main() {
 
 /// An embedding model that reports a fixed token count per call (or none).
 class _UsageEmbeddingModel implements EmbeddingModelV2<String> {
+  @override
+  int? get maxEmbeddingsPerCall => null;
+
+  @override
+  bool get supportsParallelCalls => true;
+
   _UsageEmbeddingModel(this.embedding, {required this.tokensPerCall});
   final List<double> embedding;
   final int? tokensPerCall;

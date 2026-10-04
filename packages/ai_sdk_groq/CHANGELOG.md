@@ -1,3 +1,11 @@
+## 3.0.0
+
+- Inherits the shared adapter's trailing-usage handling, schema-free JSON mode,
+  and active-stream cancellation behavior.
+
+
+---
+
 ## 2.0.0
 
 - Migrated Groq chat models to the shared V4 language-model contract,

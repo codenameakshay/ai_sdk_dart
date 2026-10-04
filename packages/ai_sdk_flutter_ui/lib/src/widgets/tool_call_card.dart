@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/ai_motion.dart';
 import 'pretty_json.dart';
+import 'ui_strings.dart';
 
 /// Renders a tool call — the tool name plus its pretty-printed JSON arguments —
 /// and, when supplied, the matching tool result or error.
@@ -35,10 +36,11 @@ class ToolCallCard extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
     final result = this.result;
     final isError = result?.isError ?? false;
+    final strings = AiSdkUiStringsScope.of(context);
 
     return Semantics(
       container: true,
-      label: 'Tool call: ${call.toolName}',
+      label: strings.toolCall(call.toolName),
       child: Card(
         margin: const EdgeInsets.symmetric(vertical: 4),
         elevation: 0,
@@ -75,7 +77,7 @@ class ToolCallCard extends StatelessWidget {
               if (result != null) ...[
                 const SizedBox(height: 12),
                 Semantics(
-                  label: isError ? 'Tool error' : 'Tool result',
+                  label: isError ? strings.toolError : strings.toolResult,
                   child: Row(
                     children: [
                       TweenAnimationBuilder<double>(
@@ -95,7 +97,7 @@ class ToolCallCard extends StatelessWidget {
                       ),
                       const SizedBox(width: 6),
                       Text(
-                        isError ? 'Error' : 'Result',
+                        isError ? strings.error : strings.result,
                         style: textTheme.labelMedium?.copyWith(
                           color: isError
                               ? scheme.error

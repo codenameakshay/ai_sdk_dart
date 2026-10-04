@@ -83,35 +83,43 @@ class _GoogleLanguageModel extends LanguageModelV4 {
   Future<LanguageModelV4GenerateResult> doGenerate(
     LanguageModelV4CallOptions options,
   ) async {
-    final resolvedApiKey = await apiKey();
-    final cancelToken = _cancelTokenFor(options.abortSignal);
+    final cancellation = DioCancellationScope(options.abortSignal);
+    final resolvedApiKey = await cancellation.run(
+      () async => (await apiKey())!,
+    );
     final modelPath = _modelPath(modelId);
-    final providerOptions = options.providerOptions != null
-        ? options.providerOptions![provider]
-        : null;
-    final requestBody = {
-      'contents': _toGoogleContents(options.prompt.messages),
-      if (options.prompt.system != null)
-        'systemInstruction': {
-          'parts': [
-            {'text': options.prompt.system},
-          ],
+    final providerOptions = _googleProviderOptions(options.providerOptions);
+    final requestBody = await cancellation.run(
+      () => {
+        'contents': _toGoogleContents(options.prompt.messages),
+        if (options.prompt.system != null)
+          'systemInstruction': {
+            'parts': [
+              {'text': options.prompt.system},
+            ],
+          },
+        'generationConfig': {
+          if (options.maxOutputTokens != null)
+            'maxOutputTokens': options.maxOutputTokens,
+          if (options.temperature != null) 'temperature': options.temperature,
+          if (options.topP != null) 'topP': options.topP,
+          if (options.topK != null) 'topK': options.topK,
+          if (options.stopSequences.isNotEmpty)
+            'stopSequences': options.stopSequences,
+          if (options.responseFormat
+              case final LanguageModelV4JsonResponseFormat format) ...{
+            'responseMimeType': 'application/json',
+            'responseJsonSchema': ?format.schema,
+          },
+          'thinkingConfig': ?_googleThinkingConfig(modelId, options),
         },
-      'generationConfig': {
-        if (options.maxOutputTokens != null)
-          'maxOutputTokens': options.maxOutputTokens,
-        if (options.temperature != null) 'temperature': options.temperature,
-        if (options.topP != null) 'topP': options.topP,
-        if (options.topK != null) 'topK': options.topK,
-        if (options.stopSequences.isNotEmpty)
-          'stopSequences': options.stopSequences,
+        if (options.tools.isNotEmpty) ...{
+          'tools': _buildGoogleTools(options.tools),
+        },
+        ..._googleToolChoicePayload(options.toolChoice),
+        ...?providerOptions,
       },
-      if (options.tools.isNotEmpty) ...{
-        'tools': _buildGoogleTools(options.tools),
-      },
-      ..._googleToolChoicePayload(options.toolChoice),
-      ...?providerOptions,
-    };
+    );
 
     final Response<Map<String, dynamic>> response;
     try {
@@ -120,11 +128,13 @@ class _GoogleLanguageModel extends LanguageModelV4 {
         queryParameters: {'key': resolvedApiKey},
         data: requestBody,
         options: Options(headers: options.headers),
-        cancelToken: cancelToken,
+        cancelToken: cancellation.token,
       );
     } on DioException catch (e) {
+      await cancellation.dispose();
       throw await apiErrorFromDioException(e, provider: provider);
     }
+    await cancellation.dispose();
 
     final data = response.data;
     if (data == null) throw _invalidResponse(response);
@@ -172,7 +182,27 @@ class _GoogleLanguageModel extends LanguageModelV4 {
         if (partMap['text'] is String) {
           final text = partMap['text'].toString();
           if (text.isNotEmpty) {
-            content.add(LanguageModelV4TextPart(text: text));
+            if (partMap['thought'] == true) {
+              content.add(
+                LanguageModelV4ReasoningPart(
+                  text: text,
+                  providerOptions: {
+                    provider: {
+                      'thought': true,
+                      if (partMap['thoughtSignature'] != null)
+                        'thoughtSignature': partMap['thoughtSignature'],
+                    },
+                  },
+                ),
+              );
+            } else {
+              content.add(
+                LanguageModelV4TextPart(
+                  text: text,
+                  providerOptions: _googleThoughtOptions(partMap),
+                ),
+              );
+            }
           }
         }
         final functionCall = (partMap['functionCall'] as Map?)
@@ -181,9 +211,10 @@ class _GoogleLanguageModel extends LanguageModelV4 {
           final toolCall = _parseGoogleFunctionCall(functionCall);
           content.add(
             LanguageModelV4ToolCallPart(
-              toolCallId: prefixedId('tool'),
+              toolCallId: toolCall.id ?? prefixedId('tool'),
               toolName: toolCall.toolName,
               input: toolCall.input,
+              providerOptions: _googleThoughtOptions(partMap),
             ),
           );
         }
@@ -245,10 +276,15 @@ class _GoogleLanguageModel extends LanguageModelV4 {
 
       final usage = (data['usageMetadata'] as Map?)?.cast<String, dynamic>();
       final warnings = _readGoogleWarnings(data);
+      final candidateFinishReason = first['finishReason']?.toString();
+      final promptBlockReason = _googlePromptBlockReason(data);
+      final rawFinishReason = candidateFinishReason ?? promptBlockReason;
       return LanguageModelV4GenerateResult(
         content: content,
-        finishReason: _mapGoogleFinishReason(first['finishReason']?.toString()),
-        rawFinishReason: first['finishReason']?.toString(),
+        finishReason: candidateFinishReason != null
+            ? _mapGoogleFinishReason(candidateFinishReason)
+            : _mapGooglePromptBlockReason(promptBlockReason),
+        rawFinishReason: rawFinishReason,
         usage: usage == null ? null : _googleUsageFrom(usage),
         warnings: warnings,
         request: LanguageModelV4RequestMetadata(body: requestBody),
@@ -270,35 +306,46 @@ class _GoogleLanguageModel extends LanguageModelV4 {
   Future<LanguageModelV4StreamResult> doStream(
     LanguageModelV4CallOptions options,
   ) async {
-    final resolvedApiKey = await apiKey();
-    final cancelToken = _cancelTokenFor(options.abortSignal);
+    final cancellation = DioCancellationScope(
+      options.abortSignal,
+      alwaysCreateToken: true,
+    );
+    final resolvedApiKey = await cancellation.run(
+      () async => (await apiKey())!,
+    );
     final modelPath = _modelPath(modelId);
-    final providerOptions = options.providerOptions != null
-        ? options.providerOptions![provider]
-        : null;
-    final requestBody = {
-      'contents': _toGoogleContents(options.prompt.messages),
-      if (options.prompt.system != null)
-        'systemInstruction': {
-          'parts': [
-            {'text': options.prompt.system},
-          ],
+    final providerOptions = _googleProviderOptions(options.providerOptions);
+    final requestBody = await cancellation.run(
+      () => {
+        'contents': _toGoogleContents(options.prompt.messages),
+        if (options.prompt.system != null)
+          'systemInstruction': {
+            'parts': [
+              {'text': options.prompt.system},
+            ],
+          },
+        'generationConfig': {
+          if (options.maxOutputTokens != null)
+            'maxOutputTokens': options.maxOutputTokens,
+          if (options.temperature != null) 'temperature': options.temperature,
+          if (options.topP != null) 'topP': options.topP,
+          if (options.topK != null) 'topK': options.topK,
+          if (options.stopSequences.isNotEmpty)
+            'stopSequences': options.stopSequences,
+          if (options.responseFormat
+              case final LanguageModelV4JsonResponseFormat format) ...{
+            'responseMimeType': 'application/json',
+            'responseJsonSchema': ?format.schema,
+          },
+          'thinkingConfig': ?_googleThinkingConfig(modelId, options),
         },
-      'generationConfig': {
-        if (options.maxOutputTokens != null)
-          'maxOutputTokens': options.maxOutputTokens,
-        if (options.temperature != null) 'temperature': options.temperature,
-        if (options.topP != null) 'topP': options.topP,
-        if (options.topK != null) 'topK': options.topK,
-        if (options.stopSequences.isNotEmpty)
-          'stopSequences': options.stopSequences,
+        if (options.tools.isNotEmpty) ...{
+          'tools': _buildGoogleTools(options.tools),
+        },
+        ..._googleToolChoicePayload(options.toolChoice),
+        ...?providerOptions,
       },
-      if (options.tools.isNotEmpty) ...{
-        'tools': _buildGoogleTools(options.tools),
-      },
-      ..._googleToolChoicePayload(options.toolChoice),
-      ...?providerOptions,
-    };
+    );
     final Response<ResponseBody> response;
     try {
       response = await client.post<ResponseBody>(
@@ -309,9 +356,10 @@ class _GoogleLanguageModel extends LanguageModelV4 {
           responseType: ResponseType.stream,
           headers: options.headers,
         ),
-        cancelToken: cancelToken,
+        cancelToken: cancellation.token,
       );
     } on DioException catch (e) {
+      await cancellation.dispose();
       throw await apiErrorFromDioException(e, provider: provider);
     }
 
@@ -319,14 +367,25 @@ class _GoogleLanguageModel extends LanguageModelV4 {
     if (body == null) {
       // Defensive; Dio stream body is never null on a 200 streaming response.
       // coverage:ignore-start
+      await cancellation.dispose();
       throw StateError('Google stream response body is null.');
       // coverage:ignore-end
     }
 
     final controller = StreamController<LanguageModelV4StreamPart>();
+    controller.onCancel = () async {
+      final token = cancellation.token;
+      if (token != null && !token.isCancelled) {
+        token.cancel('stream subscription cancelled');
+      }
+      await cancellation.dispose();
+    };
     var textStarted = false;
+    ProviderMetadata? textProviderOptions;
     var streamStarted = false;
+    var sawTerminalEvent = false;
     final activeToolCalls = <int, _GoogleStreamFunctionCallState>{};
+    final activeReasoning = <int, _GoogleStreamReasoningState>{};
     LanguageModelV4Usage? streamUsage;
     final warnings = <LanguageModelV4Warning>[];
     Map<String, dynamic>? lastChunk;
@@ -357,7 +416,40 @@ class _GoogleLanguageModel extends LanguageModelV4 {
             streamUsage = _googleUsageFrom(usage);
           }
           final candidates = (json['candidates'] as List?) ?? const [];
-          if (candidates.isEmpty) continue;
+          if (candidates.isEmpty) {
+            final blocked = _googlePromptBlockReason(json);
+            if (blocked != null) {
+              sawTerminalEvent = true;
+              controller.add(
+                StreamPartResponseMetadata(
+                  metadata: LanguageModelV4ResponseMetadata(
+                    modelId: modelId,
+                    timestamp: responseTimestamp,
+                    headers: responseHeaders,
+                    body: lastChunk,
+                  ),
+                ),
+              );
+              controller.add(
+                StreamPartFinish(
+                  finishReason: _mapGooglePromptBlockReason(blocked),
+                  rawFinishReason: blocked,
+                  usage: streamUsage ?? const LanguageModelV4Usage(),
+                  providerMetadata: {
+                    provider: {
+                      'model': modelId,
+                      'timestamp': DateTime.now().toUtc().toIso8601String(),
+                      if (warnings.isNotEmpty)
+                        'warnings': warnings
+                            .map((warning) => warning.type)
+                            .toList(growable: false),
+                    },
+                  },
+                ),
+              );
+            }
+            continue;
+          }
           final first = (candidates.first as Map).cast<String, dynamic>();
           final content =
               (first['content'] as Map?)?.cast<String, dynamic>() ??
@@ -367,7 +459,34 @@ class _GoogleLanguageModel extends LanguageModelV4 {
             final part = parts[partIndex];
             final map = (part as Map).cast<String, dynamic>();
             final text = map['text']?.toString();
-            if (text != null && text.isNotEmpty) {
+            if (map['thought'] == true) {
+              final thoughtSignature = map['thoughtSignature'];
+              if ((text != null && text.isNotEmpty) ||
+                  thoughtSignature != null) {
+                final id = 'reasoning-$partIndex';
+                final state = activeReasoning.putIfAbsent(partIndex, () {
+                  controller.add(
+                    StreamPartReasoningStart(
+                      id: id,
+                      providerMetadata: {
+                        provider: {'thought': true},
+                      },
+                    ),
+                  );
+                  return _GoogleStreamReasoningState(id);
+                });
+                if (thoughtSignature != null) {
+                  state.thoughtSignature = thoughtSignature;
+                }
+                if (text != null && text.isNotEmpty) {
+                  controller.add(StreamPartReasoningDelta(id: id, delta: text));
+                }
+              }
+            } else if (text != null) {
+              textProviderOptions =
+                  _googleThoughtOptions(map) ?? textProviderOptions;
+            }
+            if (text != null && text.isNotEmpty && map['thought'] != true) {
               if (!textStarted) {
                 textStarted = true;
                 controller.add(const StreamPartTextStart(id: 'text-0'));
@@ -380,14 +499,17 @@ class _GoogleLanguageModel extends LanguageModelV4 {
             if (functionCall != null) {
               final toolCall = _parseGoogleFunctionCall(functionCall);
               var state = activeToolCalls[partIndex];
-              if (state == null || state.toolName != toolCall.toolName) {
+              if (state == null ||
+                  state.toolName != toolCall.toolName ||
+                  (toolCall.id != null && state.toolCallId != toolCall.id)) {
                 if (state != null) {
                   _emitGoogleToolCall(controller, state);
                 }
                 state = _GoogleStreamFunctionCallState(
-                  toolCallId: prefixedId('tool'),
+                  toolCallId: toolCall.id ?? prefixedId('tool'),
                   toolName: toolCall.toolName,
                   input: toolCall.input,
+                  providerOptions: _googleThoughtOptions(map),
                 );
                 activeToolCalls[partIndex] = state;
                 controller.add(
@@ -396,6 +518,10 @@ class _GoogleLanguageModel extends LanguageModelV4 {
                     toolName: state.toolName,
                   ),
                 );
+              }
+              final providerOptions = _googleThoughtOptions(map);
+              if (providerOptions != null) {
+                state.providerOptions = providerOptions;
               }
 
               final argsDelta = _googleFunctionArgsDelta(
@@ -478,13 +604,28 @@ class _GoogleLanguageModel extends LanguageModelV4 {
 
           final finishReason = first['finishReason']?.toString();
           if (finishReason != null) {
+            sawTerminalEvent = true;
             if (textStarted) {
-              controller.add(const StreamPartTextEnd(id: 'text-0'));
+              controller.add(
+                StreamPartTextEnd(
+                  id: 'text-0',
+                  providerMetadata: textProviderOptions,
+                ),
+              );
             }
             for (final state in activeToolCalls.values.toList()) {
               _emitGoogleToolCall(controller, state);
             }
             activeToolCalls.clear();
+            for (final state in activeReasoning.values) {
+              controller.add(
+                StreamPartReasoningEnd(
+                  id: state.id,
+                  providerMetadata: state.providerMetadata,
+                ),
+              );
+            }
+            activeReasoning.clear();
             controller.add(
               StreamPartResponseMetadata(
                 metadata: LanguageModelV4ResponseMetadata(
@@ -514,17 +655,36 @@ class _GoogleLanguageModel extends LanguageModelV4 {
             );
           }
         }
-      } catch (error) {
-        if (!streamStarted) {
-          streamStarted = true;
-          controller.add(const StreamPartStreamStart());
+        if (!sawTerminalEvent && !cancellation.isCancelled) {
+          if (!streamStarted) {
+            streamStarted = true;
+            controller.add(const StreamPartStreamStart());
+          }
+          controller.add(
+            StreamPartError(
+              error: AiApiCallError(
+                'Google stream ended before finishReason.',
+                statusCode: response.statusCode,
+                url: response.requestOptions.uri.toString(),
+                responseHeaders: responseHeaders,
+              ),
+            ),
+          );
         }
-        controller.add(StreamPartError(error: error));
+      } catch (error) {
+        if (!cancellation.isCancelled && !controller.isClosed) {
+          if (!streamStarted) {
+            streamStarted = true;
+            controller.add(const StreamPartStreamStart());
+          }
+          controller.add(StreamPartError(error: error));
+        }
       } finally {
         if (!streamStarted) {
           controller.add(const StreamPartStreamStart());
         }
         await controller.close();
+        await cancellation.dispose();
       }
     }());
 
@@ -543,6 +703,12 @@ class _GoogleLanguageModel extends LanguageModelV4 {
 }
 
 class _GoogleEmbeddingModel implements EmbeddingModelV2<String> {
+  @override
+  int? get maxEmbeddingsPerCall => null;
+
+  @override
+  bool get supportsParallelCalls => true;
+
   _GoogleEmbeddingModel({
     required this.modelId,
     required this.client,
@@ -564,7 +730,10 @@ class _GoogleEmbeddingModel implements EmbeddingModelV2<String> {
   Future<EmbeddingModelV2GenerateResult<String>> doEmbed(
     EmbeddingModelV2CallOptions<String> options,
   ) async {
-    final resolvedApiKey = await apiKey();
+    final cancellation = DioCancellationScope(options.abortSignal);
+    final resolvedApiKey = await cancellation.run(
+      () async => (await apiKey())!,
+    );
     final modelPath = _modelPath(modelId);
     final providerOptions = options.providerOptions != null
         ? options.providerOptions![provider]
@@ -591,25 +760,37 @@ class _GoogleEmbeddingModel implements EmbeddingModelV2<String> {
         queryParameters: {'key': resolvedApiKey},
         data: embedRequest,
         options: Options(headers: options.headers),
+        cancelToken: cancellation.token,
       );
     } on DioException catch (e) {
+      await cancellation.dispose();
       throw await apiErrorFromDioException(e, provider: provider);
     }
+    await cancellation.dispose();
 
     final data = response.data;
     if (data == null) throw _invalidResponse(response);
     try {
       final rawEmbeddings = data['embeddings'];
-      if (rawEmbeddings is List) {
-        for (final row in rawEmbeddings.take(options.values.length)) {
-          if (row is! Map) throw StateError('embedding is not an object');
-          final values = row['values'];
-          if (values is! List || values.any((value) => value is! num)) {
-            throw StateError('embedding values are not numeric');
-          }
+      if (rawEmbeddings is! List ||
+          rawEmbeddings.length != options.values.length) {
+        throw const FormatException(
+          'Expected one embedding row for each input.',
+        );
+      }
+      int? dimensions;
+      for (final row in rawEmbeddings) {
+        if (row is! Map) throw StateError('embedding is not an object');
+        final values = row['values'];
+        if (values is! List ||
+            values.isEmpty ||
+            values.any((value) => value is! num || !value.isFinite)) {
+          throw StateError('embedding values must be non-empty finite numbers');
         }
-      } else if (rawEmbeddings != null) {
-        throw StateError('embeddings are not a list');
+        dimensions ??= values.length;
+        if (values.length != dimensions) {
+          throw StateError('embedding dimensions differ between rows');
+        }
       }
     } on Object catch (error) {
       throw _invalidResponse(response, error);
@@ -617,7 +798,7 @@ class _GoogleEmbeddingModel implements EmbeddingModelV2<String> {
     final embeddings = (data['embeddings'] as List?) ?? const [];
 
     final out = <EmbeddingModelV2Embedding<String>>[];
-    for (var i = 0; i < embeddings.length && i < options.values.length; i++) {
+    for (var i = 0; i < embeddings.length; i++) {
       final row = (embeddings[i] as Map).cast<String, dynamic>();
       final values = ((row['values'] as List?) ?? const [])
           .map((e) => (e as num).toDouble())
@@ -650,6 +831,104 @@ AiApiCallError _invalidResponse<T>(Response<T> response, [Object? cause]) =>
 String _modelPath(String modelId) {
   if (modelId.startsWith('models/')) return modelId;
   return 'models/$modelId';
+}
+
+Map<String, dynamic>? _googleThinkingConfig(
+  String modelId,
+  LanguageModelV4CallOptions options,
+) {
+  final model = options.providerOptions?['google'];
+  final configured = model is Map ? (model as Map)['thinkingConfig'] : null;
+  if (configured is Map) {
+    return configured.cast<String, dynamic>();
+  }
+  final reasoning = options.reasoning;
+  if (reasoning == LanguageModelV4Reasoning.providerDefault) return null;
+  return _thinkingConfigForModel(
+    modelId,
+    reasoning,
+    maxOutputTokens: options.maxOutputTokens,
+  );
+}
+
+Map<String, dynamic>? _googleProviderOptions(ProviderOptions? options) {
+  final providerOptions = options?["google"];
+  if (providerOptions == null) return null;
+  final cleaned = Map<String, dynamic>.from(providerOptions)
+    ..remove('thinkingConfig');
+  return cleaned.isEmpty ? null : cleaned;
+}
+
+Map<String, dynamic>? _thinkingConfigForModel(
+  String modelId,
+  LanguageModelV4Reasoning reasoning, {
+  required int? maxOutputTokens,
+}) {
+  final lower = modelId.toLowerCase();
+  final gemini3 = lower.contains('gemini-3');
+  if (gemini3) {
+    if (lower.contains('gemini-3-pro')) {
+      final level = switch (reasoning) {
+        LanguageModelV4Reasoning.none ||
+        LanguageModelV4Reasoning.minimal ||
+        LanguageModelV4Reasoning.low ||
+        LanguageModelV4Reasoning.medium => 'low',
+        LanguageModelV4Reasoning.high ||
+        LanguageModelV4Reasoning.xhigh => 'high',
+        LanguageModelV4Reasoning.providerDefault => null,
+      };
+      return level == null ? null : {'thinkingLevel': level};
+    }
+    if (lower.contains('gemini-3.1-pro')) {
+      final level = switch (reasoning) {
+        LanguageModelV4Reasoning.none ||
+        LanguageModelV4Reasoning.minimal ||
+        LanguageModelV4Reasoning.low => 'low',
+        LanguageModelV4Reasoning.medium => 'medium',
+        LanguageModelV4Reasoning.high ||
+        LanguageModelV4Reasoning.xhigh => 'high',
+        LanguageModelV4Reasoning.providerDefault => null,
+      };
+      return level == null ? null : {'thinkingLevel': level};
+    }
+    if (lower.contains('gemini-3.1-flash-lite-image')) {
+      final level = switch (reasoning) {
+        LanguageModelV4Reasoning.none ||
+        LanguageModelV4Reasoning.minimal ||
+        LanguageModelV4Reasoning.low ||
+        LanguageModelV4Reasoning.medium => 'minimal',
+        LanguageModelV4Reasoning.high ||
+        LanguageModelV4Reasoning.xhigh => 'high',
+        LanguageModelV4Reasoning.providerDefault => null,
+      };
+      return level == null ? null : {'thinkingLevel': level};
+    }
+    final minimum = lower.contains('flash') ? 'low' : 'minimal';
+    final level = switch (reasoning) {
+      LanguageModelV4Reasoning.none => minimum,
+      LanguageModelV4Reasoning.minimal => minimum,
+      LanguageModelV4Reasoning.low => 'low',
+      LanguageModelV4Reasoning.medium => 'medium',
+      LanguageModelV4Reasoning.high || LanguageModelV4Reasoning.xhigh => 'high',
+      LanguageModelV4Reasoning.providerDefault => null,
+    };
+    return level == null ? null : {'thinkingLevel': level};
+  }
+  if (reasoning == LanguageModelV4Reasoning.none) {
+    return {'thinkingBudget': 0};
+  }
+  final maximum = lower.contains('2.5-pro') ? 32768 : 24576;
+  final output = maxOutputTokens ?? 65536;
+  final fraction = switch (reasoning) {
+    LanguageModelV4Reasoning.minimal => 0.02,
+    LanguageModelV4Reasoning.low => 0.10,
+    LanguageModelV4Reasoning.medium => 0.30,
+    LanguageModelV4Reasoning.high => 0.60,
+    LanguageModelV4Reasoning.xhigh => 0.90,
+    LanguageModelV4Reasoning.providerDefault ||
+    LanguageModelV4Reasoning.none => 0,
+  };
+  return {'thinkingBudget': (output * fraction).round().clamp(0, maximum)};
 }
 
 List<Map<String, dynamic>> _buildGoogleTools(List<LanguageModelV4Tool> tools) {
@@ -702,7 +981,12 @@ List<Map<String, dynamic>> _toGoogleContents(
     final parts = <Map<String, dynamic>>[];
     for (final part in message.content) {
       if (part is LanguageModelV4TextPart) {
-        parts.add({'text': part.text});
+        final thought = part.providerOptions?['google'];
+        parts.add({
+          'text': part.text,
+          if (thought is Map && thought['thoughtSignature'] != null)
+            'thoughtSignature': thought['thoughtSignature'],
+        });
       } else if (part is LanguageModelV4ImagePart) {
         final imagePart = _toGoogleInlinePart(part.image, part.mediaType);
         if (imagePart != null) {
@@ -713,16 +997,36 @@ List<Map<String, dynamic>> _toGoogleContents(
         if (filePart != null) {
           parts.add(filePart);
         }
+      } else if (part is LanguageModelV4ReasoningFilePart ||
+          part is LanguageModelV4DocumentSourcePart) {
+        throw UnsupportedError(
+          'Google cannot serialize ${part.runtimeType} in a prompt.',
+        );
       } else if (part is LanguageModelV4ToolCallPart) {
+        final thought = part.providerOptions?['google'];
         parts.add({
-          'functionCall': {'name': part.toolName, 'args': part.input},
+          'functionCall': {
+            if (part.toolCallId.isNotEmpty) 'id': part.toolCallId,
+            'name': part.toolName,
+            'args': part.input,
+          },
+          if (thought is Map && thought['thoughtSignature'] != null)
+            'thoughtSignature': thought['thoughtSignature'],
+        });
+      } else if (part is LanguageModelV4ReasoningPart) {
+        final thought = part.providerOptions?['google'];
+        parts.add({
+          'text': part.text,
+          'thought': true,
+          if (thought is Map && thought['thoughtSignature'] != null)
+            'thoughtSignature': thought['thoughtSignature'],
         });
       } else if (part is LanguageModelV4ToolResultPart) {
         parts.add({
           'functionResponse': {
+            if (part.toolCallId.isNotEmpty) 'id': part.toolCallId,
             'name': part.toolName,
             'response': {
-              'toolCallId': part.toolCallId,
               'isError': part.isError,
               'output': _toGoogleToolResultOutput(part.output),
             },
@@ -747,11 +1051,33 @@ LanguageModelV4FinishReason _mapGoogleFinishReason(String? reason) {
   return switch (reason) {
     'STOP' => LanguageModelV4FinishReason.stop,
     'MAX_TOKENS' => LanguageModelV4FinishReason.length,
-    'SAFETY' => LanguageModelV4FinishReason.contentFilter,
-    'RECITATION' => LanguageModelV4FinishReason.contentFilter,
+    'SAFETY' || 'RECITATION' => LanguageModelV4FinishReason.contentFilter,
     'OTHER' => LanguageModelV4FinishReason.other,
     null => LanguageModelV4FinishReason.unknown,
     _ => LanguageModelV4FinishReason.other,
+  };
+}
+
+String? _googlePromptBlockReason(Map<String, dynamic> data) {
+  final feedback = (data['promptFeedback'] as Map?)?.cast<String, dynamic>();
+  final reason = feedback?['blockReason']?.toString();
+  if (reason == null ||
+      reason.isEmpty ||
+      reason == 'BLOCK_REASON_UNSPECIFIED') {
+    return null;
+  }
+  return reason;
+}
+
+LanguageModelV4FinishReason _mapGooglePromptBlockReason(String? reason) {
+  return switch (reason) {
+    'SAFETY' ||
+    'BLOCKLIST' ||
+    'PROHIBITED_CONTENT' ||
+    'IMAGE_SAFETY' ||
+    'RECITATION' => LanguageModelV4FinishReason.contentFilter,
+    'OTHER' => LanguageModelV4FinishReason.other,
+    _ => LanguageModelV4FinishReason.unknown,
   };
 }
 
@@ -772,6 +1098,7 @@ _GoogleFunctionCall _parseGoogleFunctionCall(
       ? rawArgs.cast<String, dynamic>()
       : (rawArgs ?? const {});
   return _GoogleFunctionCall(
+    id: functionCall['id']?.toString(),
     toolName: functionCall['name']?.toString() ?? 'unknown_tool',
     input: input,
     argsText: _googleFunctionArgsText(rawArgs, input),
@@ -807,6 +1134,7 @@ void _emitGoogleToolCall(
         toolCallId: state.toolCallId,
         toolName: state.toolName,
         input: state.input,
+        providerOptions: state.providerOptions,
       ),
     ),
   );
@@ -818,6 +1146,8 @@ void _emitGoogleToolCall(
 LanguageModelV4Usage _googleUsageFrom(Map<String, dynamic> usage) {
   final inputTokens = intOrNull(usage['promptTokenCount']);
   final cacheRead = intOrNull(usage['cachedContentTokenCount']);
+  final candidates = intOrNull(usage['candidatesTokenCount']);
+  final thoughts = intOrNull(usage['thoughtsTokenCount']);
   return LanguageModelV4Usage(
     inputTokens: LanguageModelV4InputTokenUsage(
       total: inputTokens,
@@ -827,7 +1157,11 @@ LanguageModelV4Usage _googleUsageFrom(Map<String, dynamic> usage) {
       cacheRead: cacheRead,
     ),
     outputTokens: LanguageModelV4OutputTokenUsage(
-      total: intOrNull(usage['candidatesTokenCount']),
+      total: candidates == null && thoughts == null
+          ? null
+          : (candidates ?? 0) + (thoughts ?? 0),
+      text: candidates,
+      reasoning: thoughts,
     ),
     raw: usage,
   );
@@ -835,11 +1169,13 @@ LanguageModelV4Usage _googleUsageFrom(Map<String, dynamic> usage) {
 
 class _GoogleFunctionCall {
   const _GoogleFunctionCall({
+    this.id,
     required this.toolName,
     required this.input,
     required this.argsText,
   });
 
+  final String? id;
   final String toolName;
   final Object input;
   final String argsText;
@@ -850,12 +1186,28 @@ class _GoogleStreamFunctionCallState {
     required this.toolCallId,
     required this.toolName,
     required this.input,
+    this.providerOptions,
   });
 
   final String toolCallId;
   final String toolName;
   Object input;
+  Map<String, dynamic>? providerOptions;
   String argsText = '';
+}
+
+class _GoogleStreamReasoningState {
+  _GoogleStreamReasoningState(this.id);
+
+  final String id;
+  Object? thoughtSignature;
+
+  ProviderMetadata get providerMetadata => {
+    'google': {
+      'thought': true,
+      if (thoughtSignature != null) 'thoughtSignature': thoughtSignature,
+    },
+  };
 }
 
 Map<String, dynamic>? _toGoogleInlinePart(
@@ -884,6 +1236,20 @@ Map<String, dynamic>? _toGoogleInlinePart(
 Object _toGoogleToolResultOutput(LanguageModelV4ToolResultOutput output) {
   return switch (output) {
     ToolResultOutputText(:final text) => {'type': 'text', 'text': text},
+    ToolResultOutputErrorText(:final text) => {
+      'type': 'error-text',
+      'text': text,
+    },
+    ToolResultOutputJson(:final value) => {'type': 'json', 'value': value},
+    ToolResultOutputErrorJson(:final value) => {
+      'type': 'error-json',
+      'value': value,
+    },
+    ToolResultOutputExecutionDenied(:final reason, :final approvalId) => {
+      'type': 'execution-denied',
+      'reason': reason,
+      'approvalId': ?approvalId,
+    },
     ToolResultOutputContent(:final parts) => {
       'type': 'content',
       'parts': parts.map(_toGoogleToolResultPart).toList(),
@@ -896,20 +1262,29 @@ Map<String, dynamic> _toGoogleToolResultPart(LanguageModelV4ContentPart part) {
     return {'type': 'text', 'text': part.text};
   }
   if (part is LanguageModelV4ImagePart) {
-    return {
-      'type': 'image',
-      ...?_toGoogleInlinePart(part.image, part.mediaType),
-    };
+    final inline = _toGoogleInlinePart(part.image, part.mediaType);
+    if (inline == null) {
+      throw UnsupportedError(
+        'Google cannot serialize this tool image content.',
+      );
+    }
+    return {'type': 'image', ...inline};
   }
   if (part is LanguageModelV4FilePart) {
+    final inline = _toGoogleInlinePart(part.data, part.mediaType);
+    if (inline == null) {
+      throw UnsupportedError('Google cannot serialize this tool file content.');
+    }
     return {
       'type': 'file',
       'mediaType': part.mediaType,
       if (part.filename != null) 'filename': part.filename,
-      ...?_toGoogleInlinePart(part.data, part.mediaType),
+      ...inline,
     };
   }
-  return {'type': 'unsupported'};
+  throw UnsupportedError(
+    'Google cannot serialize ${part.runtimeType} tool result content.',
+  );
 }
 
 List<LanguageModelV4Warning> _readGoogleWarnings(Map<String, dynamic> payload) {
@@ -987,23 +1362,10 @@ Map<String, dynamic> _googleToolChoicePayload(
 /// Maps a [DioException] from a non-2xx response to a typed [AiApiCallError]
 /// carrying the provider's message/status/code. Drains a streamed error body
 /// (`ResponseType.stream`) when present so the message is recoverable.
-CancelToken? _cancelTokenFor(LanguageModelV4AbortSignal? abortSignal) {
-  if (abortSignal == null) {
-    return null;
-  }
-
-  final cancelToken = CancelToken();
-  if (abortSignal.isCancelled) {
-    cancelToken.cancel('abortSignal');
-    return cancelToken;
-  }
-
-  unawaited(
-    abortSignal.onCancelled.then((_) {
-      if (!cancelToken.isCancelled) {
-        cancelToken.cancel('abortSignal');
-      }
-    }),
-  );
-  return cancelToken;
+ProviderMetadata? _googleThoughtOptions(Map<String, dynamic> functionCall) {
+  final signature = functionCall['thoughtSignature'];
+  if (signature == null) return null;
+  return {
+    'google': {'thoughtSignature': signature},
+  };
 }

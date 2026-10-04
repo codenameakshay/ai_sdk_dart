@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/ai_motion.dart';
+import 'ui_strings.dart';
 
 /// An animated three-dot "assistant is typing" indicator.
 ///
@@ -64,12 +65,13 @@ class _TypingIndicatorState extends State<TypingIndicator>
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final color = widget.dotColor ?? scheme.onSurfaceVariant;
-    final label = widget.label;
+    final label =
+        widget.label ?? AiSdkUiStringsScope.of(context).assistantTyping;
 
     return Semantics(
       container: true,
       liveRegion: true,
-      label: label ?? 'Assistant is typing',
+      label: label,
       child: ExcludeSemantics(
         child: Row(
           key: const ValueKey('typing-indicator'),
@@ -78,7 +80,7 @@ class _TypingIndicatorState extends State<TypingIndicator>
           children: [
             for (var i = 0; i < 3; i++)
               Padding(
-                padding: EdgeInsets.only(right: i == 2 ? 0 : 5),
+                padding: EdgeInsetsDirectional.only(end: i == 2 ? 0 : 5),
                 child: _Dot(
                   key: ValueKey('typing-dot-$i'),
                   controller: _controller,
@@ -87,7 +89,7 @@ class _TypingIndicatorState extends State<TypingIndicator>
                   size: widget.dotSize,
                 ),
               ),
-            if (label != null) ...[
+            if (widget.label != null) ...[
               const SizedBox(width: 9),
               Text(
                 label,

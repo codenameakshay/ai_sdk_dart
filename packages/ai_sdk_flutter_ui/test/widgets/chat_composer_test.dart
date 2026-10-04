@@ -1,6 +1,7 @@
 import 'dart:ui' as ui;
 
 import 'package:ai_sdk_flutter_ui/src/widgets/chat_composer.dart';
+import 'package:ai_sdk_flutter_ui/src/widgets/ui_strings.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -55,6 +56,150 @@ void main() {
       expect(calls, 0);
     });
 
+    testWidgets('does not submit while IME composition is active', (
+      tester,
+    ) async {
+      var calls = 0;
+      final controller = TextEditingController.fromValue(
+        const TextEditingValue(
+          text: 'かな',
+          composing: TextRange(start: 0, end: 2),
+        ),
+      );
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        _wrap(ChatComposer(controller: controller, onSend: (_) => calls++)),
+      );
+
+      await tester.tap(find.byKey(const ValueKey('chat-composer-send')));
+      await tester.pump();
+      expect(calls, 0);
+
+      controller.value = const TextEditingValue(text: 'かな');
+      await tester.tap(find.byKey(const ValueKey('chat-composer-send')));
+      await tester.pump();
+      expect(calls, 1);
+    });
+
+    testWidgets('uses localized labels from the inherited scope', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AiSdkUiStringsScope(
+              strings: const AiSdkUiStrings(
+                messageHint: 'Nachricht',
+                sendMessage: 'Senden',
+                attachFile: 'Datei anhängen',
+              ),
+              child: ChatComposer(onSend: (_) {}, onAttach: () {}),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('Nachricht'), findsOneWidget);
+      expect(find.byTooltip('Senden'), findsOneWidget);
+      expect(find.byTooltip('Datei anhängen'), findsOneWidget);
+    });
+
+    testWidgets('uses built-in strings when no localization scope exists', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _wrap(
+          Builder(
+            builder: (context) =>
+                Text(AiSdkUiStringsScope.of(context).messageHint),
+          ),
+        ),
+      );
+
+      expect(find.text('Message…'), findsOneWidget);
+    });
+
+    testWidgets('remains usable at large text scale in a narrow width', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MediaQuery(
+            data: const MediaQueryData(textScaler: TextScaler.linear(3)),
+            child: Scaffold(
+              body: SizedBox(width: 240, child: ChatComposer(onSend: (_) {})),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.byKey(const ValueKey('chat-composer-field')), findsOneWidget);
+      expect(find.byKey(const ValueKey('chat-composer-send')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('replaces the editor session when disabled', (tester) async {
+      final controller = TextEditingController(text: 'draft');
+      addTearDown(controller.dispose);
+      var sent = 0;
+      var attached = 0;
+
+      Widget buildComposer({required bool enabled}) => _wrap(
+        ChatComposer(
+          controller: controller,
+          enabled: enabled,
+          onSend: (_) => sent++,
+          onAttach: () => attached++,
+        ),
+      );
+
+      await tester.pumpWidget(buildComposer(enabled: true));
+      await tester.enterText(
+        find.byKey(const ValueKey('chat-composer-field')),
+        'draft text',
+      );
+      expect(controller.text, 'draft text');
+
+      await tester.pumpWidget(buildComposer(enabled: false));
+      await tester.pump();
+
+      expect(
+        tester
+            .widget<TextField>(
+              find.byKey(const ValueKey('chat-composer-field')),
+            )
+            .enabled,
+        isFalse,
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('chat-composer-field')),
+        'blocked',
+      );
+      expect(controller.text, 'draft text');
+      await tester.tap(
+        find.byKey(const ValueKey('chat-composer-send')),
+        warnIfMissed: false,
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('chat-composer-attach')),
+        warnIfMissed: false,
+      );
+      expect(sent, 0);
+      expect(attached, 0);
+
+      await tester.pumpWidget(buildComposer(enabled: true));
+      await tester.pump();
+      expect(controller.text, 'draft text');
+      await tester.enterText(
+        find.byKey(const ValueKey('chat-composer-field')),
+        'ready again',
+      );
+      await tester.tap(find.byKey(const ValueKey('chat-composer-send')));
+      await tester.pump();
+      expect(sent, 1);
+      expect(controller.text, 'ready again');
+    });
+
     testWidgets('send button is disabled while loading', (tester) async {
       var calls = 0;
       await tester.pumpWidget(
@@ -97,6 +242,39 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('chat-composer-stop')));
       await tester.pump();
       expect(stopped, isTrue);
+    });
+
+    testWidgets('disabled composer disables stop physically and semantically', (
+      tester,
+    ) async {
+      var stopped = false;
+      final semantics = tester.ensureSemantics();
+      await tester.pumpWidget(
+        _wrap(
+          ChatComposer(
+            onSend: (_) {},
+            isLoading: true,
+            enabled: false,
+            onStop: () => stopped = true,
+          ),
+        ),
+      );
+      final button = tester.widget<IconButton>(
+        find.byKey(const ValueKey('chat-composer-stop')),
+      );
+      expect(button.onPressed, isNull);
+      final node = tester
+          .getSemantics(
+            find.byKey(const ValueKey('chat-composer-stop-semantics')),
+          )
+          .getSemanticsData();
+      expect(node.hasAction(ui.SemanticsAction.tap), isFalse);
+      await tester.tap(
+        find.byKey(const ValueKey('chat-composer-stop')),
+        warnIfMissed: false,
+      );
+      expect(stopped, isFalse);
+      semantics.dispose();
     });
 
     testWidgets('submitting the field via the keyboard action sends', (

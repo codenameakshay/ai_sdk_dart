@@ -1,3 +1,13 @@
+## 3.0.0
+
+- Decode fragmented NDJSON safely and surface Ollama error lines received after
+  streaming has started.
+- Canceled active streams close cleanly; premature EOF is typed, and non-text
+  tool-result content fails before dispatch instead of being discarded.
+
+
+---
+
 ## 2.0.0
 
 - Migrated Ollama language generation and streaming to the V4 contract,

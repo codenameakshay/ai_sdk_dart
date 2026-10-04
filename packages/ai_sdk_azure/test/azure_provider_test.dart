@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -12,6 +13,13 @@ import '../../ai_sdk_provider/test/support/test_server.dart';
 import '../../ai_sdk_provider/test/support/tracking_http_client_adapter.dart';
 
 void main() {
+  test('chat alias and default provider expose expected models', () {
+    expect(azureOpenAI.responses('deployment').provider, 'azure');
+    expect(azureOpenAI.chat('deployment').modelId, 'deployment');
+    expect(azureOpenAI.embedding('deployment').maxEmbeddingsPerCall, 2048);
+    expect(azureOpenAI.embedding('deployment').supportsParallelCalls, isTrue);
+  });
+
   group('AzureOpenAIProvider', () {
     test('creates language model with correct provider/spec/modelId', () {
       final provider = AzureOpenAIProvider(
@@ -407,7 +415,7 @@ void main() {
       expect(result.embeddings[1].embedding, [0.4, 0.5, 0.6]);
     });
 
-    test('tolerates a response with no data list', () async {
+    test('rejects a response with no data list', () async {
       final server = await TestServer.start((request) async {
         await captureBody(request);
         request.response.statusCode = 200;
@@ -422,56 +430,49 @@ void main() {
         apiKey: 'key',
       ).embedding('text-embedding-ada-002');
 
-      final result = await model.doEmbed(
-        const EmbeddingModelV2CallOptions<String>(values: ['only']),
+      await expectLater(
+        model.doEmbed(
+          const EmbeddingModelV2CallOptions<String>(values: ['only']),
+        ),
+        throwsA(isA<AiApiCallError>()),
       );
-      expect(result.embeddings, isEmpty);
     });
 
-    test(
-      'normalizes numeric vectors and ignores response rows beyond the input',
-      () async {
-        final server = await TestServer.start((request) async {
-          await captureBody(request);
-          request.response.statusCode = 200;
-          request.response.headers.contentType = ContentType.json;
-          request.response.write(
-            jsonEncode({
-              'data': [
-                {
-                  'embedding': [1, 2.5],
-                },
-                {
-                  'embedding': [-3, 4],
-                },
-                {
-                  'embedding': [99],
-                },
-              ],
-            }),
-          );
-          await request.response.close();
-        });
-        addTearDown(server.close);
+    test('normalizes numeric vectors', () async {
+      final server = await TestServer.start((request) async {
+        await captureBody(request);
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'data': [
+              {
+                'embedding': [1, 2.5],
+              },
+              {
+                'embedding': [-3, 4],
+              },
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
 
-        final result =
-            await AzureOpenAIProvider(endpoint: server.baseUrl, apiKey: 'key')
-                .embedding('text-embedding-ada-002')
-                .doEmbed(
-                  const EmbeddingModelV2CallOptions<String>(values: ['a', 'b']),
-                );
+      final result =
+          await AzureOpenAIProvider(endpoint: server.baseUrl, apiKey: 'key')
+              .embedding('text-embedding-ada-002')
+              .doEmbed(
+                const EmbeddingModelV2CallOptions<String>(values: ['a', 'b']),
+              );
 
-        expect(result.embeddings, hasLength(2));
-        expect(result.embeddings.map((embedding) => embedding.value), [
-          'a',
-          'b',
-        ]);
-        expect(result.embeddings.map((embedding) => embedding.embedding), [
-          [1.0, 2.5],
-          [-3.0, 4.0],
-        ]);
-      },
-    );
+      expect(result.embeddings, hasLength(2));
+      expect(result.embeddings.map((embedding) => embedding.value), ['a', 'b']);
+      expect(result.embeddings.map((embedding) => embedding.embedding), [
+        [1.0, 2.5],
+        [-3.0, 4.0],
+      ]);
+    });
 
     test(
       'endpoint ending with slash still posts to deployment embeddings once',
@@ -549,5 +550,145 @@ void main() {
         expect(apiKeys, ['first-key', 'second-key']);
       },
     );
+
+    test(
+      'embed releases the abort-signal listener after success and failure',
+      () async {
+        var fail = false;
+        final server = await TestServer.start((request) async {
+          await captureBody(request);
+          if (fail) {
+            request.response.statusCode = 500;
+            request.response.headers.contentType = ContentType.json;
+            request.response.write(
+              jsonEncode({
+                'error': {'message': 'boom'},
+              }),
+            );
+          } else {
+            request.response.statusCode = 200;
+            request.response.headers.contentType = ContentType.json;
+            request.response.write(
+              jsonEncode({
+                'data': [
+                  {
+                    'embedding': [0.1],
+                  },
+                ],
+              }),
+            );
+          }
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        final model = AzureOpenAIProvider(
+          endpoint: server.baseUrl,
+          apiKey: 'key',
+        ).embedding('text-embedding-ada-002');
+        final signal = _Signal();
+        addTearDown(signal.close);
+
+        await model.doEmbed(
+          EmbeddingModelV2CallOptions<String>(
+            values: const ['hello'],
+            abortSignal: signal,
+          ),
+        );
+        expect(signal.active, 0);
+        final attachedAfterSuccess = signal.attached;
+        expect(attachedAfterSuccess, greaterThan(0));
+
+        fail = true;
+        await expectLater(
+          model.doEmbed(
+            EmbeddingModelV2CallOptions<String>(
+              values: const ['hello'],
+              abortSignal: signal,
+            ),
+          ),
+          throwsA(isA<AiApiCallError>()),
+        );
+        expect(signal.active, 0);
+        expect(signal.attached, greaterThan(attachedAfterSuccess));
+      },
+    );
   });
+
+  group('Azure Responses endpoint', () {
+    for (final streaming in [false, true]) {
+      test('uses the v1 endpoint (stream=$streaming)', () async {
+        late Uri uri;
+        late Map<String, dynamic> body;
+        String? apiKey;
+        final server = await TestServer.start((request) async {
+          uri = request.uri;
+          apiKey = request.headers.value('api-key');
+          body = await captureBody(request);
+          if (streaming) {
+            request.response.headers.contentType = ContentType(
+              'text',
+              'event-stream',
+            );
+            request.response.write(
+              'data: {"type":"response.completed","response":{"id":"response-1","status":"completed","output":[]}}\n\n',
+            );
+          } else {
+            request.response.headers.contentType = ContentType.json;
+            request.response.write(
+              jsonEncode({
+                'id': 'response-1',
+                'status': 'completed',
+                'output': [],
+              }),
+            );
+          }
+          await request.response.close();
+        });
+        addTearDown(server.close);
+        final provider = AzureOpenAIProvider(
+          endpoint: server.baseUrl,
+          apiKey: 'fixture-key',
+          apiVersion: '2024-05-01-preview',
+        );
+        addTearDown(provider.dispose);
+        final model = provider.responses('my-deployment');
+        const options = LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(messages: []),
+        );
+        if (streaming) {
+          final result = await model.doStream(options);
+          await result.stream.toList();
+        } else {
+          await model.doGenerate(options);
+        }
+        expect(uri.path, '/openai/v1/responses');
+        expect(uri.queryParameters, isEmpty);
+        expect(body['model'], 'my-deployment');
+        expect(body['stream'], streaming ? isTrue : anyOf(isFalse, isNull));
+        expect(apiKey, 'fixture-key');
+      });
+    }
+  });
+}
+
+class _Signal implements ObservableAbortSignal {
+  final events = StreamController<void>.broadcast();
+  var active = 0;
+  var attached = 0;
+  @override
+  bool get isCancelled => false;
+  @override
+  Future<void> get onCancelled => Completer<void>().future;
+  @override
+  Stream<void> get cancellationEvents => Stream.multi((controller) {
+    attached++;
+    active++;
+    final subscription = events.stream.listen(controller.addSync);
+    controller.onCancel = () {
+      active--;
+      return subscription.cancel();
+    };
+  }, isBroadcast: true);
+  Future<void> close() => events.close();
 }

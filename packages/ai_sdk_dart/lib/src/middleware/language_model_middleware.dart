@@ -426,7 +426,15 @@ class _SimulateStreamingMiddleware extends LanguageModelMiddlewareBase {
               controller.add(
                 StreamPartReasoningDelta(id: 'sim-reasoning', delta: part.text),
               );
-              controller.add(const StreamPartReasoningEnd(id: 'sim-reasoning'));
+              controller.add(
+                StreamPartReasoningEnd(
+                  id: 'sim-reasoning',
+                  signature: part.signature,
+                  providerMetadata: _providerMetadataFromOptions(
+                    part.providerOptions,
+                  ),
+                ),
+              );
             } else if (part is LanguageModelV4ToolCallPart) {
               final argsJson = part.input.toString();
               controller.add(
@@ -442,8 +450,14 @@ class _SimulateStreamingMiddleware extends LanguageModelMiddlewareBase {
               controller.add(StreamPartToolCall(toolCall: part));
             } else if (part is LanguageModelV4SourcePart) {
               controller.add(StreamPartSource(source: part));
+            } else if (part is LanguageModelV4DocumentSourcePart) {
+              controller.add(StreamPartDocumentSource(source: part));
             } else if (part is LanguageModelV4FilePart) {
               controller.add(StreamPartFile(file: part));
+            } else if (part is LanguageModelV4ReasoningFilePart) {
+              controller.add(StreamPartReasoningFile(file: part));
+            } else if (part is LanguageModelV4OpaquePart) {
+              controller.add(StreamPartOpaque(opaque: part));
             }
           }
           if (generateResult.response != null) {
@@ -473,6 +487,19 @@ class _SimulateStreamingMiddleware extends LanguageModelMiddlewareBase {
 
     return LanguageModelV4StreamResult(stream: controller.stream);
   }
+}
+
+ProviderMetadata? _providerMetadataFromOptions(
+  Map<String, dynamic>? providerOptions,
+) {
+  if (providerOptions == null) return null;
+  final metadata = <String, JsonObject>{};
+  for (final entry in providerOptions.entries) {
+    if (entry.value is Map) {
+      metadata[entry.key] = (entry.value as Map).cast<String, dynamic>();
+    }
+  }
+  return metadata.isEmpty ? null : metadata;
 }
 
 /// Applies default call option overrides to every call.

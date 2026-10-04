@@ -23,6 +23,9 @@ class ProviderChatPage extends StatefulWidget {
 }
 
 class _ProviderChatPageState extends State<ProviderChatPage> {
+  late final _openAi = OpenAIProvider(apiKey: openAiApiKey);
+  late final _anthropic = AnthropicProvider(apiKey: anthropicApiKey);
+  late final _google = GoogleGenerativeAIProvider(apiKey: googleApiKey);
   late final ProviderRegistry _registry;
   ChatController? _ownedChatController;
   late final ChatController _chat;
@@ -41,21 +44,17 @@ class _ProviderChatPageState extends State<ProviderChatPage> {
     super.initState();
     _registry = createProviderRegistry({
       'openai': RegistrableProvider(
-        languageModelFactory: (id) => OpenAIProvider(apiKey: openAiApiKey)(id),
-        embeddingModelFactory: (id) =>
-            OpenAIProvider(apiKey: openAiApiKey).embedding(id),
+        languageModelFactory: (id) => _openAi(id),
+        embeddingModelFactory: (id) => _openAi.embedding(id),
       ),
       'anthropic': RegistrableProvider(
-        languageModelFactory: (id) =>
-            AnthropicProvider(apiKey: anthropicApiKey)(id),
+        languageModelFactory: (id) => _anthropic(id),
         embeddingModelFactory: (_) =>
             throw UnsupportedError('Anthropic has no embedding model'),
       ),
       'google': RegistrableProvider(
-        languageModelFactory: (id) =>
-            GoogleGenerativeAIProvider(apiKey: googleApiKey)(id),
-        embeddingModelFactory: (id) =>
-            GoogleGenerativeAIProvider(apiKey: googleApiKey).embedding(id),
+        languageModelFactory: (id) => _google(id),
+        embeddingModelFactory: (id) => _google.embedding(id),
       ),
     });
     _agent = widget.agent ?? _buildAgent(_selectedModelId);
@@ -75,6 +74,9 @@ class _ProviderChatPageState extends State<ProviderChatPage> {
   @override
   void dispose() {
     _ownedChatController?.dispose();
+    _openAi.dispose();
+    _anthropic.dispose();
+    _google.dispose();
     super.dispose();
   }
 

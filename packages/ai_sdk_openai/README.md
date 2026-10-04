@@ -6,8 +6,8 @@ OpenAI provider for [AI SDK Dart](https://pub.dev/packages/ai_sdk_dart). Support
 
 ```yaml
 dependencies:
-  ai_sdk_dart: ^2.0.0
-  ai_sdk_openai: ^2.0.0
+  ai_sdk_dart: ^3.0.0
+  ai_sdk_openai: ^3.0.0
 ```
 
 ## Usage
@@ -86,6 +86,27 @@ final result = await generateText(
 print(result.text);
 ```
 
+### Responses API + hosted tools
+
+`openai.responses(modelId)` returns a `LanguageModelV4` backed by the OpenAI
+Responses API instead of Chat Completions — same `generateText`/`streamText`
+usage as `openai(modelId)`. It's required for hosted, server-side tools,
+passed via `providerDefinedTools:` (a `List<LanguageModelV4ProviderDefinedTool>`,
+separate from the `tools:` map):
+
+```dart
+final result = await generateText(
+  model: openai.responses('gpt-4.1-mini'),
+  prompt: 'What happened in the news today?',
+  providerDefinedTools: [OpenAIWebSearchTool()],
+);
+```
+
+`OpenAIWebSearchTool`, `OpenAIFileSearchTool` (vector-store search),
+`OpenAICodeInterpreterTool`, and `OpenAIMcpTool` (a remote MCP server) are all
+available — see [`example/example.md`](example/example.md) for the full set,
+plus runnable file/batch lifecycle examples.
+
 ### Native structured output
 
 When using `generateObject` or `Output.object()` with `generateText`, the OpenAI provider
@@ -109,6 +130,41 @@ final result = await generateObject(
 );
 print(result.object); // {city: Paris, country: France}
 ```
+
+### Computer tool output
+
+Computer screenshots use a provider-neutral, camelCase result shape at the
+public `LanguageModelV4` boundary. Supply the screenshot under `output` and
+include safety acknowledgements under `acknowledgedSafetyChecks`:
+
+```dart
+import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+
+const computerToolResult = LanguageModelV4ToolResultPart(
+  toolCallId: 'call-computer',
+  toolName: 'computer',
+  output: ToolResultOutputJson({
+    'output': {
+      'type': 'computer_screenshot',
+      'imageUrl': 'https://example.test/screenshot.png',
+      'detail': 'high',
+    },
+    'acknowledgedSafetyChecks': [
+      {
+        'id': 'safety-1',
+        'code': 'external_side_effect',
+        'message': 'Reviewed by the user',
+      },
+    ],
+  }),
+);
+```
+
+The OpenAI Responses adapter converts this public shape to the wire shape
+(`image_url`, `acknowledged_safety_checks`, and related fields) when it sends
+the computer result. Older provisional integrations that put `type` and
+`image_url` directly at the top level should migrate to the wrapper above and
+use `imageUrl`/`fileId` and `acknowledgedSafetyChecks` at the public boundary.
 
 ### Custom API key / base URL
 

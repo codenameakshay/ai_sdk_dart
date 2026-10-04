@@ -1,6 +1,8 @@
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
-import 'timeout_helpers.dart';
+import 'shared/embedding_validation.dart';
+import '../tools/tool.dart';
+import 'shared/operation_scope.dart';
 
 /// Result returned by [embed].
 ///
@@ -33,19 +35,24 @@ Future<EmbedResult<VALUE>> embed<VALUE>({
   Map<String, String>? headers,
   ProviderOptions? providerOptions,
   Duration? timeout,
+  CancellationToken? abortSignal,
 }) async {
-  final call = model.doEmbed(
-    EmbeddingModelV2CallOptions(
-      values: [value],
-      headers: headers,
-      providerOptions: providerOptions,
-    ),
+  final result = await runOperation(
+    abortSignal: abortSignal,
+    timeout: timeout,
+    operation: (signal) async {
+      final response = await model.doEmbed(
+        EmbeddingModelV2CallOptions(
+          values: [value],
+          headers: headers,
+          providerOptions: providerOptions,
+          abortSignal: signal,
+        ),
+      );
+      validateEmbeddings(response, [value]);
+      return response;
+    },
   );
-  final result = await withOptionalTimeout(call, timeout);
-
-  if (result.embeddings.isEmpty) {
-    throw const AiNoContentGeneratedError('No embedding was generated.');
-  }
 
   final first = result.embeddings.first;
   return EmbedResult<VALUE>(

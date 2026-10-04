@@ -211,7 +211,8 @@ void main() {
         );
 
         await result.fullStream.toList();
-        expect(await result.toolResults, [toolResult]);
+        expect(await result.toolResults, hasLength(2));
+        expect(await result.toolResults, contains(toolResult));
         expect(await result.content, containsAll([toolCall, toolResult]));
         expect(finishes.single.steps.single.toolApprovalRequests, [
           approvalRequest,
@@ -373,6 +374,10 @@ void main() {
           LanguageModelV4ToolApprovalResponse(
             approvalId: 'approval_call-x',
             approved: true,
+            toolCallId: 'call-x',
+            toolName: 'danger',
+            argumentsFingerprint: '{}',
+            policyRevision: 'default',
           ),
         ],
       );
@@ -403,6 +408,10 @@ void main() {
             approvalId: 'approval_call-y',
             approved: false,
             reason: 'nope',
+            toolCallId: 'call-y',
+            toolName: 'danger',
+            argumentsFingerprint: '{}',
+            policyRevision: 'default',
           ),
         ],
       );
@@ -519,8 +528,8 @@ void main() {
       },
     );
 
-    test('toolChoice specific exposes only the named tool', () async {
-      final model = FakeCapturingStreamModel('hi');
+    test('toolChoice specific requires and exposes the named tool', () async {
+      final model = _SpecificCapturingToolModel();
       final result = await streamText(
         model: model,
         prompt: 'go',
@@ -613,6 +622,46 @@ void main() {
       expect(await result.sources, hasLength(1));
       expect(await result.files, hasLength(1));
     });
+
+    test(
+      'emits document, reasoning file, and opaque events and chunks',
+      () async {
+        const document = LanguageModelV4DocumentSourcePart(
+          id: 'd1',
+          mediaType: 'application/pdf',
+          title: 'Document',
+        );
+        const reasoningFile = LanguageModelV4ReasoningFilePart(
+          mediaType: 'text/plain',
+          data: DataContentBase64('dGhpbmtpbmc='),
+        );
+        const opaque = LanguageModelV4OpaquePart(
+          provider: 'fake',
+          raw: {'kind': 'opaque'},
+        );
+        final chunks = <StreamTextChunk>[];
+        final result = await streamText(
+          model: FakeStreamModel([
+            const StreamPartDocumentSource(source: document),
+            const StreamPartReasoningFile(file: reasoningFile),
+            const StreamPartOpaque(opaque: opaque),
+            const StreamPartFinish(
+              finishReason: LanguageModelV4FinishReason.stop,
+            ),
+          ]),
+          prompt: 'go',
+          onChunk: chunks.add,
+        );
+
+        final events = await result.fullStream.toList();
+        expect(events.whereType<StreamTextDocumentSourceEvent>(), hasLength(1));
+        expect(events.whereType<StreamTextReasoningFileEvent>(), hasLength(1));
+        expect(events.whereType<StreamTextOpaqueEvent>(), hasLength(1));
+        expect(chunks.whereType<StreamTextDocumentSourceChunk>(), hasLength(1));
+        expect(chunks.whereType<StreamTextReasoningFileChunk>(), hasLength(1));
+        expect(chunks.whereType<StreamTextRawChunk>(), isEmpty);
+      },
+    );
   });
 
   group('streamText retry and timeout', () {
@@ -1016,6 +1065,34 @@ class _StreamSingleToolModel extends LanguageModelV4 {
           ),
         ),
         StreamPartFinish(finishReason: LanguageModelV4FinishReason.toolCalls),
+      ]),
+    );
+  }
+}
+
+class _SpecificCapturingToolModel extends FakeCapturingStreamModel {
+  _SpecificCapturingToolModel() : super('unused');
+
+  @override
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
+  ) async {
+    lastOptions = options;
+    return LanguageModelV4StreamResult(
+      stream: Stream.fromIterable([
+        const StreamPartToolInputStart(id: 'specific', toolName: 'echo'),
+        const StreamPartToolInputDelta(id: 'specific', delta: '{}'),
+        const StreamPartToolInputEnd(id: 'specific'),
+        const StreamPartToolCall(
+          toolCall: LanguageModelV4ToolCallPart(
+            toolCallId: 'specific',
+            toolName: 'echo',
+            input: {},
+          ),
+        ),
+        const StreamPartFinish(
+          finishReason: LanguageModelV4FinishReason.toolCalls,
+        ),
       ]),
     );
   }

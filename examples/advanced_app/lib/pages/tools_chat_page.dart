@@ -10,12 +10,19 @@ import '../config.dart';
 
 /// Tool-calling chat that renders the *whole* agentic turn with the prebuilt
 /// widgets: [ChatMessageBubble] for text, [ToolCallCard] for each tool call +
-/// its result, [ReasoningView] for the model's `<think>` reasoning, and
-/// [SourceCitations] for any sources. Input is the prebuilt [ChatComposer].
+/// its result, [ReasoningView] for the model's `<think>` reasoning,
+/// [SourceCitations] for any sources, and [ToolApprovalCard] for tool calls
+/// that require human-in-the-loop approval. Input is the prebuilt
+/// [ChatComposer].
 ///
 /// Unlike [ChatController] (which surfaces only the assistant's text), this
-/// page drives `streamText` directly so it can read tool-call / tool-result /
-/// reasoning / source events off `fullStream` and show them as they arrive.
+/// page drives [ToolLoopAgent] directly so it can read tool-call / tool-result
+/// / reasoning / source events off the canonical `stream` and show them as
+/// they arrive. It also demonstrates [toolWithContext] (a typed, bound
+/// per-tool context), a request-level `approvalPolicyFor` selector, and
+/// [ToolLoopAgent.maxToolConcurrency]. Canonical `onEnd`/`onStepEnd`
+/// callbacks record aggregate usage (`result.usage`) alongside the final
+/// step's own usage (`finalStep.usage`).
 enum ToolsChatFixture { normal, approval, error, sourcesTool, longHistory }
 
 typedef ToolsChatStreamRunner =
@@ -30,42 +37,80 @@ class ToolsChatPage extends StatefulWidget {
     this.fixture,
     this.streamRunner,
     this.scrollController,
+    this.testModel,
   });
 
   final ToolsChatFixture? fixture;
   final ToolsChatStreamRunner? streamRunner;
   final ScrollController? scrollController;
 
+  /// When supplied, replaces the OpenAI-backed model so tests can drive the
+  /// agent with no network access.
+  final LanguageModelV4? testModel;
+
   @override
   State<ToolsChatPage> createState() => _ToolsChatPageState();
 }
 
+/// Application context bound to the `deleteFile` tool via [toolWithContext].
+/// Kept out of provider messages and persistence — the executor receives it
+/// directly, typed, without threading it through the model.
+class _WorkspaceContext {
+  const _WorkspaceContext(this.rootPath);
+  final String rootPath;
+}
+
+/// Sensitive tools always require approval; everything else runs immediately.
+ToolApprovalPolicy? _approvalPolicyFor(String toolName, Object input) =>
+    toolName == 'deleteFile' ? ToolApprovalPolicy.always : null;
+
 class _ToolsChatPageState extends State<ToolsChatPage> {
+  late final _openAi = OpenAIProvider(apiKey: openAiApiKey);
   // extractReasoningMiddleware turns `<think>…</think>` spans into reasoning
   // parts, so the model's chain-of-thought shows up in the ReasoningView.
-  late final LanguageModelV4 _model = wrapLanguageModel(
-    model: OpenAIProvider(apiKey: openAiApiKey)('gpt-4.1-mini'),
-    middleware: [extractReasoningMiddleware(tagName: 'think')],
-  );
+  late final LanguageModelV4 _model =
+      widget.testModel ??
+      wrapLanguageModel(
+        model: _openAi('gpt-4.1-mini'),
+        middleware: [extractReasoningMiddleware(tagName: 'think')],
+      );
 
-  static const _system =
+  static const _instructions =
       'You are a helpful assistant. First think briefly inside '
       '<think></think> tags, then answer. Use the getWeather tool for weather '
-      'questions and the calculate tool for arithmetic.';
+      'questions, the calculate tool for arithmetic, and the deleteFile tool '
+      'when asked to remove a file.';
+
+  // Request-level approval policy (via approvalPolicyFor) + bounded tool
+  // concurrency, both threaded through every call this agent makes.
+  late final ToolLoopAgent _agent = ToolLoopAgent(
+    model: _model,
+    instructions: _instructions,
+    tools: _tools,
+    maxSteps: 5,
+    maxToolConcurrency: 2,
+    approvalPolicyFor: _approvalPolicyFor,
+  );
 
   late ScrollController _scrollController;
   late bool _ownsScrollController;
   final List<ModelMessage> _history = [];
   final List<_Item> _items = [];
   final List<LanguageModelV4SourcePart> _pendingSources = [];
-  final StringBuffer _turnText = StringBuffer();
+  final Map<String, LanguageModelV4ToolApprovalResponse> _approvalResponses =
+      {};
 
   _TextItem? _currentAssistant;
   _ReasoningItem? _currentReasoning;
-  StreamSubscription<StreamTextEvent>? _sub;
+  CancellationToken? _cancellation;
+  ToolApprovalReplay? _pendingReplay;
+  List<LanguageModelV4ToolApprovalRequestPart> _pendingApprovals = const [];
+  LanguageModelV4Usage? _aggregateUsage;
+  LanguageModelV4Usage? _finalStepUsage;
   bool _streaming = false;
   bool _pinnedToBottom = true;
   bool _scrollScheduled = false;
+  int _turn = 0;
 
   static final _weatherSchema = Schema<Map<String, dynamic>>(
     jsonSchema: const {
@@ -85,6 +130,17 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
         'expression': {'type': 'string'},
       },
       'required': ['expression'],
+    },
+    fromJson: (j) => j,
+  );
+
+  static final _deleteFileSchema = Schema<Map<String, dynamic>>(
+    jsonSchema: const {
+      'type': 'object',
+      'properties': {
+        'path': {'type': 'string'},
+      },
+      'required': ['path'],
     },
     fromJson: (j) => j,
   );
@@ -110,6 +166,19 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
         }
       },
     ),
+    // A typed, bound context executor — the workspace root never appears in
+    // provider messages, only the tool sees it. Always requires approval via
+    // _approvalPolicyFor above.
+    'deleteFile':
+        toolWithContext<Map<String, dynamic>, String, _WorkspaceContext>(
+          description: 'Delete a file from the workspace.',
+          inputSchema: _deleteFileSchema,
+          context: const _WorkspaceContext('/workspace'),
+          execute: (input, workspace, _) async {
+            final path = input['path']?.toString() ?? '';
+            return 'Deleted ${workspace.rootPath}/$path';
+          },
+        ),
   };
 
   @override
@@ -127,13 +196,14 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
 
   @override
   void dispose() {
-    _sub?.cancel();
+    _cancellation?.cancel();
+    _openAi.dispose();
     if (_ownsScrollController) _scrollController.dispose();
     super.dispose();
   }
 
   Future<void> _send(String text) async {
-    if (_streaming) return;
+    if (_streaming || _pendingApprovals.isNotEmpty) return;
     setState(() {
       _history.add(ModelMessage(role: ModelMessageRole.user, content: text));
       _items.add(_TextItem(ModelMessageRole.user, text));
@@ -141,32 +211,147 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
       _streaming = true;
       _currentAssistant = null;
       _currentReasoning = null;
-      _turnText.clear();
     });
     _scheduleScrollToBottom();
-
-    try {
-      final result = widget.streamRunner != null
-          ? await widget.streamRunner!(_history, _tools)
-          : await streamText(
-              model: _model,
-              system: _system,
-              messages: _history,
-              tools: _tools,
-              maxSteps: 5,
-            );
-      // The `text` future rejects on a streaming error; we surface errors via
-      // fullStream below, so swallow it to avoid an unhandled async error.
-      result.text.then((_) {}, onError: (_) {});
-      _sub = result.fullStream.listen(
-        _onEvent,
-        onError: _onError,
-        onDone: _onDone,
-        cancelOnError: true,
+    await _runTurn(() {
+      if (widget.streamRunner != null) {
+        return widget.streamRunner!(_history, _tools);
+      }
+      final cancellation = CancellationToken();
+      _cancellation = cancellation;
+      return _agent.stream(
+        messages: _history,
+        abortSignal: cancellation,
+        // Canonical onEnd/onStepEnd: capture aggregate usage (all steps) vs.
+        // the final step's own usage, and show both once the turn settles.
+        onEnd: (event) => _aggregateUsage = event.usage,
+        onStepEnd: (event) => _finalStepUsage = event.usage,
       );
+    });
+  }
+
+  /// Runs one turn, draining [runner]'s canonical `stream` and then checking
+  /// for pending tool approvals via `result.steps`. A stream error propagates
+  /// out of the `await for` and is caught below.
+  Future<void> _runTurn(
+    Future<StreamTextResult> Function() runner, {
+    ToolApprovalReplay? replayContext,
+  }) async {
+    final turn = ++_turn;
+    try {
+      final result = await runner();
+      // The `text` future rejects on a streaming error; we surface errors via
+      // the loop below, so swallow it to avoid an unhandled async error.
+      result.text.then((_) {}, onError: (_) {});
+      await for (final event in result.stream) {
+        if (!mounted || turn != _turn) return;
+        _onEvent(event);
+      }
+      final steps = await result.steps;
+      if (!mounted || turn != _turn) return;
+      final approvals = [
+        for (final step in steps) ...step.toolApprovalRequests,
+      ];
+      if (approvals.isNotEmpty) {
+        final response = await result.response;
+        _pendingReplay = ToolApprovalReplay(
+          messages: [
+            if (replayContext != null) ...replayContext.messages,
+            for (final message in response.messages)
+              ModelMessage.fromProvider(
+                LanguageModelV4Message(
+                  role: message.role,
+                  content: [
+                    for (final part in message.content)
+                      if (part is! LanguageModelV4ToolApprovalRequestPart) part,
+                  ],
+                ),
+              ),
+          ],
+          requests: approvals,
+        );
+        if (!mounted) return;
+        setState(() {
+          _pendingApprovals = approvals;
+          _currentAssistant = null;
+          _currentReasoning = null;
+          _streaming = false;
+        });
+        return;
+      }
+      final request = await result.request;
+      final response = await result.response;
+      if (!mounted || turn != _turn) return;
+      if (replayContext == null) {
+        _history
+          ..clear()
+          ..addAll([
+            for (final message in [...request.messages, ...response.messages])
+              ModelMessage.fromProvider(message),
+          ]);
+      } else {
+        _history.addAll([
+          ...replayContext.messages,
+          for (final message in response.messages)
+            ModelMessage.fromProvider(message),
+        ]);
+      }
+      _finishTurn();
     } catch (err) {
+      if (turn != _turn) return;
       _onError(err);
     }
+  }
+
+  void _respondToApproval(
+    LanguageModelV4ToolApprovalRequestPart request, {
+    required bool approved,
+    String? reason,
+  }) {
+    if (!mounted ||
+        !_pendingApprovals.contains(request) ||
+        _approvalResponses.containsKey(request.approvalId)) {
+      return;
+    }
+    _approvalResponses[request.approvalId] =
+        LanguageModelV4ToolApprovalResponse(
+          approvalId: request.approvalId,
+          approved: approved,
+          reason: reason,
+          toolCallId: request.toolCall.toolCallId,
+          toolName: request.toolCall.toolName,
+          argumentsFingerprint: request.argumentsFingerprint,
+          policyRevision: request.policyRevision,
+        );
+    if (_approvalResponses.length < _pendingApprovals.length) {
+      setState(() {}); // Reflect the answered card while others remain.
+      return;
+    }
+    final replay = _pendingReplay;
+    final responses = [
+      for (final pending in _pendingApprovals)
+        _approvalResponses[pending.approvalId]!,
+    ];
+    _approvalResponses.clear();
+    if (replay == null) return;
+    setState(() {
+      _pendingApprovals = const [];
+      _streaming = true;
+    });
+    _scheduleScrollToBottom();
+    unawaited(
+      _runTurn(
+        () => _agent.resume(
+          messages: _history,
+          replay: replay,
+          toolApprovalResponses: responses,
+          abortSignal: _cancellation,
+          onEnd: (event) => _aggregateUsage = event.usage,
+          onStepEnd: (event) => _finalStepUsage = event.usage,
+        ),
+        replayContext: replay,
+      ),
+    );
   }
 
   void _onEvent(StreamTextEvent event) {
@@ -176,7 +361,6 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
         _currentAssistant = null;
         _currentReasoning = null;
       case StreamTextTextDeltaEvent(:final delta):
-        _turnText.write(delta);
         final item = _currentAssistant ??= _push(
           _TextItem(ModelMessageRole.assistant, ''),
         );
@@ -223,28 +407,25 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
         }
         _bump();
       case StreamTextErrorEvent(:final error):
-        _onError(error);
+        throw error;
       default:
         break;
     }
   }
 
   void _onError(Object err) {
-    _sub?.cancel();
-    _sub = null;
+    _cancellation = null;
     if (!mounted) return;
-    setState(() => _streaming = false);
+    setState(() {
+      _streaming = false;
+      _pendingApprovals = const [];
+      _pendingReplay = null;
+    });
     _showSnackBar('Error: $err');
   }
 
-  void _onDone() {
-    _sub = null;
-    final text = _turnText.toString();
-    if (text.isNotEmpty) {
-      _history.add(
-        ModelMessage(role: ModelMessageRole.assistant, content: text),
-      );
-    }
+  void _finishTurn() {
+    _cancellation = null;
     if (!mounted) return;
     setState(() {
       if (_currentAssistant != null && _pendingSources.isNotEmpty) {
@@ -258,27 +439,35 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
       _streaming = false;
       _currentAssistant = null;
       _currentReasoning = null;
+      _pendingApprovals = const [];
+      _pendingReplay = null;
     });
   }
 
   Future<void> _stop() async {
-    await _sub?.cancel();
-    _sub = null;
+    _turn++;
+    _cancellation?.cancel();
+    _cancellation = null;
     if (!mounted) return;
     setState(() => _streaming = false);
   }
 
   void _clear() {
-    _sub?.cancel();
-    _sub = null;
+    _turn++;
+    _cancellation?.cancel();
+    _cancellation = null;
+    _pendingReplay = null;
+    _approvalResponses.clear();
     setState(() {
       _history.clear();
       _items.clear();
       _pendingSources.clear();
-      _turnText.clear();
       _currentAssistant = null;
       _currentReasoning = null;
       _streaming = false;
+      _pendingApprovals = const [];
+      _aggregateUsage = null;
+      _finalStepUsage = null;
     });
   }
 
@@ -483,13 +672,44 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
                         horizontal: 16,
                         vertical: 12,
                       ),
-                      children: [for (final item in _items) _buildItem(item)],
+                      children: [
+                        for (final item in _items) _buildItem(item),
+                        if (_aggregateUsage != null || _finalStepUsage != null)
+                          _UsageComparisonRow(
+                            aggregate: _aggregateUsage,
+                            finalStep: _finalStepUsage,
+                          ),
+                      ],
                     ),
                   ),
           ),
+          if (_pendingApprovals.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final request in _pendingApprovals)
+                    ToolApprovalCard(
+                      request: request,
+                      onApprove: (reason) => _respondToApproval(
+                        request,
+                        approved: true,
+                        reason: reason,
+                      ),
+                      onDeny: (reason) => _respondToApproval(
+                        request,
+                        approved: false,
+                        reason: reason,
+                      ),
+                    ),
+                ],
+              ),
+            ),
           ChatComposer(
             onSend: _send,
             isLoading: _streaming,
+            enabled: _pendingApprovals.isEmpty,
             onStop: _stop,
             hintText: 'Ask about weather or math…',
           ),
@@ -641,6 +861,45 @@ class _EmptyState extends StatelessWidget {
             textAlign: TextAlign.center,
             style: TextStyle(color: scheme.onSurfaceVariant),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Shows the v3 usage split: [finalStep] is the last step's own token count,
+/// while [aggregate] (`result.usage`) sums every step of the turn — they
+/// differ once a turn used more than one step (e.g. a tool call + a reply).
+class _UsageComparisonRow extends StatelessWidget {
+  const _UsageComparisonRow({required this.aggregate, required this.finalStep});
+
+  final LanguageModelV4Usage? aggregate;
+  final LanguageModelV4Usage? finalStep;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final labelStyle = textTheme.labelSmall?.copyWith(
+      color: scheme.onSurfaceVariant,
+    );
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (finalStep != null) ...[
+            Text('Final step usage', style: labelStyle),
+            const SizedBox(height: 2),
+            UsageView(usage: finalStep!),
+            const SizedBox(height: 8),
+          ],
+          if (aggregate != null) ...[
+            Text('Aggregate usage (all steps)', style: labelStyle),
+            const SizedBox(height: 2),
+            UsageView(usage: aggregate!),
+          ],
         ],
       ),
     );

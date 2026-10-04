@@ -18,6 +18,26 @@ const _request = LanguageModelV4ToolApprovalRequestPart(
 
 void main() {
   group('ToolApprovalCard', () {
+    testWidgets('keeps JSON input left-to-right in an RTL UI', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Directionality(
+            textDirection: TextDirection.rtl,
+            child: Scaffold(
+              body: ToolApprovalCard(
+                request: _request,
+                onApprove: (_) {},
+                onDeny: (_) {},
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final json = tester.widget<Text>(find.textContaining('"path"'));
+      expect(json.textDirection, TextDirection.ltr);
+    });
+
     testWidgets('shows the tool name and pretty-printed input', (tester) async {
       await tester.pumpWidget(
         _wrap(
@@ -110,6 +130,32 @@ void main() {
       );
 
       expect(find.textContaining('UNENCODABLE'), findsOneWidget);
+    });
+
+    testWidgets('uses labels from the inherited strings scope', (tester) async {
+      await tester.pumpWidget(
+        _wrap(
+          AiSdkUiStringsScope(
+            strings: const AiSdkUiStrings(
+              toolApprovalTitle: 'Werkzeug bestätigen?',
+              approve: 'Zulassen',
+              deny: 'Ablehnen',
+              approvalReasonHint: 'Begründung',
+            ),
+            child: ToolApprovalCard(
+              request: _request,
+              showReasonField: true,
+              onApprove: (_) {},
+              onDeny: (_) {},
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('Werkzeug bestätigen?'), findsOneWidget);
+      expect(find.text('Zulassen'), findsOneWidget);
+      expect(find.text('Ablehnen'), findsOneWidget);
+      expect(find.text('Begründung'), findsOneWidget);
     });
   });
 }

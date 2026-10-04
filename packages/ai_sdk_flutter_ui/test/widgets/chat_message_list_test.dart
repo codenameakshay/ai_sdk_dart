@@ -1,3 +1,4 @@
+import 'package:ai_sdk_conversation/ai_sdk_conversation.dart';
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 import 'package:flutter/material.dart';
@@ -160,6 +161,48 @@ void main() {
         if (controller.status == ChatStatus.ready) break;
       }
     });
+
+    testWidgets(
+      'renders a conversation adapter answer once while streaming and after completion',
+      (tester) async {
+        final backend = FakeConversationBackend();
+        final conversation = ConversationController(backend);
+        final controller = ConversationChatController(conversation);
+        addTearDown(controller.dispose);
+
+        await tester.pumpWidget(_wrap(ChatMessageList(controller: controller)));
+        final streaming = Conversation(
+          id: 'chat-1',
+          messages: [
+            ConversationMessage(
+              id: 'assistant-1',
+              role: ConversationRole.assistant,
+              status: ConversationMessageStatus.streaming,
+              parts: [TextPart(id: 'text-1', text: 'conversation reply')],
+            ),
+          ],
+        );
+        backend.publish(streaming);
+        await tester.pump();
+        expect(find.text('conversation reply'), findsOneWidget);
+
+        backend.publish(
+          Conversation(
+            id: 'chat-1',
+            messages: [
+              ConversationMessage(
+                id: 'assistant-1',
+                role: ConversationRole.assistant,
+                status: ConversationMessageStatus.complete,
+                parts: [TextPart(id: 'text-1', text: 'conversation reply')],
+              ),
+            ],
+          ),
+        );
+        await tester.pump();
+        expect(find.text('conversation reply'), findsOneWidget);
+      },
+    );
 
     testWidgets('renders the empty state when provided and empty', (
       tester,

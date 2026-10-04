@@ -34,6 +34,24 @@ void main() {
       expect(find.text('my private thoughts'), findsNothing);
     });
 
+    testWidgets('reasoning text keeps its own direction', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Directionality(
+            textDirection: TextDirection.rtl,
+            child: Scaffold(body: ReasoningView(text: 'Check the file.')),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Reasoning'));
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.widget<Text>(find.text('Check the file.')).textDirection,
+        TextDirection.ltr,
+      );
+    });
+
     testWidgets('respects initiallyExpanded', (tester) async {
       await tester.pumpWidget(
         _wrap(

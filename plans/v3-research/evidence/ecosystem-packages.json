@@ -1,0 +1,101 @@
+[
+  {
+    "name": "langchain",
+    "version": "0.9.0",
+    "published": "2026-08-27T16:18:41.823443Z",
+    "description": "Build powerful LLM-based Dart and Flutter applications with LangChain.dart.",
+    "repository": "https://github.com/davidmigloz/langchain_dart/tree/main/packages/langchain",
+    "discontinued": false,
+    "replacedBy": null
+  },
+  {
+    "name": "langchain_openai",
+    "version": "0.9.0",
+    "published": "2026-08-27T16:18:36.835911Z",
+    "description": "LangChain.dart integration module for OpenAI (GPT-5, o3, Embeddings, DALL\u00b7E, etc.).",
+    "repository": "https://github.com/davidmigloz/langchain_dart/tree/main/packages/langchain_openai",
+    "discontinued": false,
+    "replacedBy": null
+  },
+  {
+    "name": "firebase_ai",
+    "version": "4.0.0",
+    "published": "2026-08-24T13:43:17.249543Z",
+    "description": "Firebase AI Logic SDK.",
+    "repository": null,
+    "discontinued": false,
+    "replacedBy": null
+  },
+  {
+    "name": "google_generative_ai",
+    "version": "0.4.7",
+    "published": "2025-04-17T18:16:13.362099Z",
+    "description": "The Google AI Dart SDK enables developers to use Google's state-of-the-art generative AI models (like Gemini).",
+    "repository": "https://github.com/google-gemini/generative-ai-dart/tree/main/pkgs/google_generative_ai",
+    "discontinued": false,
+    "replacedBy": null
+  },
+  {
+    "name": "dart_openai",
+    "version": "8.0.0",
+    "published": "2026-08-25T02:32:06.758945Z",
+    "description": "Unofficial Dart & Flutter SDK for the OpenAI API. Typed clients for Responses, Chat, Realtime, Videos, Batch, Fine-tuning, Vector Stores and more.",
+    "repository": "https://github.com/anasfik/openai",
+    "discontinued": false,
+    "replacedBy": null
+  },
+  {
+    "name": "openai_dart",
+    "version": "9.0.0",
+    "published": "2026-09-16T05:25:29.826214Z",
+    "description": "Dart client for the OpenAI REST APIs and realtime WebSocket/WebRTC workflows with type-safe access to GPT, image, audio, and Responses APIs.",
+    "repository": "https://github.com/davidmigloz/ai_clients_dart/tree/main/packages/openai_dart",
+    "discontinued": false,
+    "replacedBy": null
+  },
+  {
+    "name": "riverpod",
+    "version": "3.4.3",
+    "published": "2026-09-03T22:14:57.641244Z",
+    "description": "A reactive caching and data-binding framework. Riverpod makes working with asynchronous code a breeze.\n",
+    "repository": "https://github.com/rrousselGit/riverpod",
+    "discontinued": false,
+    "replacedBy": null
+  },
+  {
+    "name": "flutter_riverpod",
+    "version": "3.4.3",
+    "published": "2026-09-03T22:15:17.166817Z",
+    "description": "A reactive caching and data-binding framework. Riverpod makes working with asynchronous code a breeze.\n",
+    "repository": "https://github.com/rrousselGit/riverpod",
+    "discontinued": false,
+    "replacedBy": null
+  },
+  {
+    "name": "flutter_bloc",
+    "version": "9.1.1",
+    "published": "2025-05-02T04:01:45.969428Z",
+    "description": "Flutter widgets that make it easy to implement the BLoC (Business Logic Component) design pattern. Built to be used with the bloc state management package.",
+    "repository": "https://github.com/felangel/bloc/tree/master/packages/flutter_bloc",
+    "discontinued": false,
+    "replacedBy": null
+  },
+  {
+    "name": "dio",
+    "version": "5.11.1",
+    "published": "2026-09-04T02:46:21.721502Z",
+    "description": "A powerful HTTP networking package,\nsupports Interceptors,\nAborting and canceling a request,\nCustom adapters, Transformers, etc.\n",
+    "repository": "https://github.com/cfug/dio/blob/main/dio",
+    "discontinued": false,
+    "replacedBy": null
+  },
+  {
+    "name": "http",
+    "version": "1.6.0",
+    "published": "2025-11-10T18:27:56.434747Z",
+    "description": "A composable, multi-platform, Future-based API for HTTP requests.",
+    "repository": "https://github.com/dart-lang/http/tree/master/pkgs/http",
+    "discontinued": false,
+    "replacedBy": null
+  }
+]

@@ -16,9 +16,9 @@ pulling in `image_picker`/`file_selector`/`url_launcher`. Everything themes via
 
 ```yaml
 dependencies:
-  ai_sdk_dart: ^2.0.0
-  ai_sdk_flutter_ui: ^2.0.0
-  ai_sdk_openai: ^2.0.0   # or another provider
+  ai_sdk_dart: ^3.0.0
+  ai_sdk_flutter_ui: ^3.0.0
+  ai_sdk_openai: ^3.0.0   # or another provider
 ```
 
 ## How it works
@@ -244,6 +244,44 @@ class _ChatScreenState extends State<ChatScreen> {
 Need more control? Compose the pieces yourself — e.g. `ChatMessageList` over your own scroll view
 plus a custom `ChatComposer`, or a custom `messageBuilder` that renders `ToolCallCard`,
 `ReasoningView`, and `SourceCitations` inline for richer turns.
+
+## Riverpod and Bloc lifecycle recipes
+
+The package stays framework-neutral at runtime. Concrete recipes live under
+`example/recipes` and use `flutter_riverpod` and `flutter_bloc` as development
+dependencies. Riverpod owns an injected backend through `autoDispose`; Bloc
+owns its stream subscription and can either dispose an injected backend or
+leave it to the caller. Both recipes support replacing a session by cancelling
+the old subscription before attaching the new backend.
+
+Persist `ConversationCodec.encode(controller.conversation)` and restore with
+`backend.restore(encoded)` before attaching the screen. Restore only decodes
+the snapshot and never executes tools. Call `interrupt()` before replacing or
+disposing a backend.
+
+## Conversation backends
+
+Conversation-aware applications can use `ConversationController` with either
+`LocalConversationBackend` (a `ToolLoopAgent`) or
+`RemoteConversationBackend` (`RemoteConversationTransport`). Both expose the
+same typed `Conversation` snapshots and change stream, so widgets can render
+either backend through the same bridge. `ConversationCodec.decode` is used for
+restore and does not execute tools. Unknown parts are retained as
+`UnknownPart`; provider-specific file payloads should remain opaque unless the
+backend supplies a verified URI.
+
+`AiChatScaffold.conversation(conversationController: controller)` renders the
+same scaffold from a `ConversationController` instead of a bare
+`ChatController` — inline `ToolApprovalCard`s and its `errorBuilder` work
+either way. When the backend also implements `ConversationRetryBackend`
+(`LocalConversationBackend` and `RemoteConversationBackend` both do),
+`controller.retryInfo`/`retryLastTurn()` report whether the last turn is
+safely retryable — a turn that already executed a tool or provider action is
+reported `unsafe` rather than silently replayed. `RemoteConversationBackend`
+always reports `unsupported` today; only `LocalConversationBackend` can report
+a retryable turn. Override any of the
+scaffold's built-in copy (button labels, status text, a11y labels) by wrapping
+it in `AiSdkUiStringsScope(strings: const AiSdkUiStrings(...))`.
 
 ## License
 

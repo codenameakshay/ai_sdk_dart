@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../theme/ai_motion.dart';
+import 'ui_strings.dart';
 
 /// A compact row of per-message actions: copy, regenerate, and 👍/👎 feedback.
 ///
@@ -58,6 +59,7 @@ class MessageActionsBar extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final color = scheme.onSurfaceVariant;
     final copyText = this.copyText;
+    final strings = AiSdkUiStringsScope.of(context);
 
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -65,7 +67,7 @@ class MessageActionsBar extends StatelessWidget {
         if (copyText != null && copyText.isNotEmpty)
           _ActionButton(
             buttonKey: const ValueKey('message-copy'),
-            tooltip: 'Copy message',
+            tooltip: strings.copyMessage,
             icon: Icons.copy_rounded,
             color: color,
             iconSize: iconSize,
@@ -74,7 +76,7 @@ class MessageActionsBar extends StatelessWidget {
         if (onRegenerate != null)
           _ActionButton(
             buttonKey: const ValueKey('message-regenerate'),
-            tooltip: 'Regenerate response',
+            tooltip: strings.regenerateResponse,
             icon: Icons.refresh_rounded,
             color: color,
             iconSize: iconSize,
@@ -86,7 +88,7 @@ class MessageActionsBar extends StatelessWidget {
         if (onThumbUp != null)
           _ActionButton(
             buttonKey: const ValueKey('message-thumb-up'),
-            tooltip: 'Good response',
+            tooltip: strings.goodResponse,
             icon: Icons.thumb_up_outlined,
             color: color,
             iconSize: iconSize,
@@ -98,7 +100,7 @@ class MessageActionsBar extends StatelessWidget {
         if (onThumbDown != null)
           _ActionButton(
             buttonKey: const ValueKey('message-thumb-down'),
-            tooltip: 'Bad response',
+            tooltip: strings.badResponse,
             icon: Icons.thumb_down_outlined,
             color: color,
             iconSize: iconSize,

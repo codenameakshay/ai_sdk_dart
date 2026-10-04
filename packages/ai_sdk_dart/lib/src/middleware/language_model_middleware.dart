@@ -456,6 +456,8 @@ class _SimulateStreamingMiddleware extends LanguageModelMiddlewareBase {
               controller.add(StreamPartFile(file: part));
             } else if (part is LanguageModelV4ReasoningFilePart) {
               controller.add(StreamPartReasoningFile(file: part));
+            } else if (part is LanguageModelV4OpaquePart) {
+              controller.add(StreamPartOpaque(opaque: part));
             }
           }
           if (generateResult.response != null) {

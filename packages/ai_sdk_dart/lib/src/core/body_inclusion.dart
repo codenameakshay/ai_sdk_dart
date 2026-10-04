@@ -41,14 +41,27 @@ LanguageModelV4ResponseMetadata? filterResponseMetadata(
 /// Removes provider payloads from actionable API errors unless explicitly
 /// retained by the caller's response-body policy.
 Object filterBodyBearingError(Object error, BodyInclusionPolicy policy) {
-  if (policy.responseBody || error is! AiApiCallError) return error;
-  return AiApiCallError(
-    error.message,
-    statusCode: error.statusCode,
-    url: error.url,
-    responseHeaders: error.responseHeaders,
-    type: error.type,
-    code: error.code,
-    isRetryable: error.isRetryable,
-  );
+  if (policy.responseBody) return error;
+  if (error is AiApiCallError) {
+    return AiApiCallError(
+      error.message,
+      statusCode: error.statusCode,
+      url: error.url,
+      responseHeaders: error.responseHeaders,
+      type: error.type,
+      code: error.code,
+      isRetryable: error.isRetryable,
+    );
+  }
+  if (error is AiRetryError) {
+    return AiRetryError(
+      message: error.message,
+      attempts: error.attempts,
+      lastError: filterBodyBearingError(error.lastError, policy),
+      errors: error.errors
+          .map((attempt) => filterBodyBearingError(attempt, policy))
+          .toList(growable: false),
+    );
+  }
+  return error;
 }

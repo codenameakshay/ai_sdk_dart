@@ -209,7 +209,7 @@ void recordTelemetryMetric(
       );
     }
   } catch (error) {
-    settings?.onDiagnostic?.call(error);
+    _reportTelemetryDiagnostic(settings, error);
   }
 }
 
@@ -260,7 +260,7 @@ TelemetrySpan startTelemetrySpan(
       settings: settings,
     );
   } catch (error) {
-    settings.onDiagnostic?.call(error);
+    _reportTelemetryDiagnostic(settings, error);
     return const _NoOpSpan();
   }
 }
@@ -278,7 +278,7 @@ class _SafeTelemetrySpan implements TelemetrySpan {
         _inner.setAttribute(key, filtered[key]);
       }
     } catch (error) {
-      settings.onDiagnostic?.call(error);
+      _reportTelemetryDiagnostic(settings, error);
     }
   }
 
@@ -290,7 +290,7 @@ class _SafeTelemetrySpan implements TelemetrySpan {
         stackTrace: settings.captureExceptionDetails ? stackTrace : null,
       );
     } catch (error) {
-      settings.onDiagnostic?.call(error);
+      _reportTelemetryDiagnostic(settings, error);
     }
   }
 
@@ -305,9 +305,15 @@ class _SafeTelemetrySpan implements TelemetrySpan {
                   : _TelemetryErrorType(error)),
       );
     } catch (error) {
-      settings.onDiagnostic?.call(error);
+      _reportTelemetryDiagnostic(settings, error);
     }
   }
+}
+
+void _reportTelemetryDiagnostic(TelemetrySettings? settings, Object error) {
+  try {
+    settings?.onDiagnostic?.call(error);
+  } catch (_) {}
 }
 
 Map<String, TelemetryAttributeValue> _filterTelemetryAttributes(

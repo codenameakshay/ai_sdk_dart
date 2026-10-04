@@ -362,6 +362,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
               messages: List.unmodifiable(stepMessages),
               steps: List.unmodifiable(steps),
               instructions: currentInstructions,
+              generationContext: generationContext,
             ),
           ),
         );
@@ -1088,6 +1089,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
           .join();
       final requestInfo = GenerateTextRequest(
         system: buildOutputSystemInstruction(initialInstructions, outputSpec),
+        instructions: initialInstructions,
         messages: List.unmodifiable(firstRequestMessages ?? normalizedMessages),
         body: lastRequestBody,
       );

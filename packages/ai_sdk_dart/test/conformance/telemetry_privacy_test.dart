@@ -192,6 +192,33 @@ void main() {
     expect(() => span.end(error: StateError('secret')), returnsNormally);
   });
 
+  test(
+    'throwing diagnostic callbacks cannot fail generate or stream',
+    () async {
+      final generated = await generateText<String>(
+        model: FakeTextModel('generated'),
+        prompt: 'prompt',
+        telemetry: TelemetrySettings(
+          isEnabled: true,
+          recorder: _ThrowingSpanRecorder(),
+          onDiagnostic: (_) => throw StateError('diagnostic'),
+        ),
+      );
+      final streamed = await streamText<String>(
+        model: FakeTextModel('streamed'),
+        prompt: 'prompt',
+        telemetry: TelemetrySettings(
+          isEnabled: true,
+          recorder: _ThrowingSpanRecorder(),
+          onDiagnostic: (_) => throw StateError('diagnostic'),
+        ),
+      );
+
+      expect(generated.text, 'generated');
+      expect(await streamed.text, 'streamed');
+    },
+  );
+
   test('streaming failures retain sanitized telemetry', () async {
     final recorder = _CapturingRecorder();
     final result = await streamText(

@@ -109,6 +109,103 @@ void main() {
     });
   });
 
+  test('body filtering redacts API errors nested in retry envelopes', () {
+    final apiError = AiApiCallError(
+      'request failed',
+      statusCode: 429,
+      url: 'https://example.com',
+      responseHeaders: const {'x-secret': 'header'},
+      responseBody: 'secret body',
+    );
+    const earlierError = AiApiCallError(
+      'earlier attempt',
+      responseBody: 'earlier secret',
+    );
+    final retryError = AiRetryError(
+      message: 'retries exhausted',
+      attempts: 3,
+      lastError: apiError,
+      errors: [earlierError, apiError],
+    );
+
+    final filtered =
+        filterBodyBearingError(retryError, const BodyInclusionPolicy.none())
+            as AiRetryError;
+    final last = filtered.lastError as AiApiCallError;
+    final first = filtered.errors.last as AiApiCallError;
+    expect(filtered.message, retryError.message);
+    expect(filtered.attempts, 3);
+    expect(last.responseBody, isNull);
+    expect(first.responseBody, isNull);
+    expect(filtered.errors, hasLength(2));
+    expect((filtered.errors.first as AiApiCallError).responseBody, isNull);
+    expect(last.responseHeaders, {'x-secret': 'header'});
+    expect(
+      (filterBodyBearingError(retryError, const BodyInclusionPolicy.all())
+              as AiRetryError)
+          .lastError,
+      same(apiError),
+    );
+  });
+
+  test('generate and stream redact exhausted retry response bodies', () async {
+    final generated = generateText<String>(
+      model: _RetryBodyModel(),
+      prompt: 'prompt',
+      maxRetries: 0,
+    );
+    await expectLater(
+      generated,
+      throwsA(
+        isA<AiRetryError>().having(
+          (error) => (error.lastError as AiApiCallError).responseBody,
+          'last response body',
+          isNull,
+        ),
+      ),
+    );
+
+    final streamed = await streamText<String>(
+      model: _RetryBodyModel(),
+      prompt: 'prompt',
+      maxRetries: 0,
+    );
+    await expectLater(
+      streamed.text,
+      throwsA(
+        isA<AiRetryError>().having(
+          (error) => (error.lastError as AiApiCallError).responseBody,
+          'last response body',
+          isNull,
+        ),
+      ),
+    );
+  });
+
+  test(
+    'simulated generate stream preserves opaque parts by identity',
+    () async {
+      const opaque = LanguageModelV4OpaquePart(
+        provider: 'vendor',
+        raw: {'payload': 'raw'},
+      );
+      final wrapped = wrapLanguageModel(
+        model: _OpaqueGenerateModel(opaque),
+        middleware: simulateStreamingMiddleware(),
+      );
+      final result = await wrapped.doStream(
+        LanguageModelV4CallOptions(
+          prompt: const LanguageModelV4Prompt(messages: []),
+        ),
+      );
+
+      final emitted = (await result.stream.toList())
+          .whereType<StreamPartOpaque>()
+          .single;
+      expect(emitted.opaque, same(opaque));
+    },
+  );
+
   test('unstructured JSON output accepts the JSON null value', () async {
     final result = await generateText(
       model: FakeTextModel('null'),
@@ -425,6 +522,58 @@ void main() {
       expect(partials, isNotEmpty);
       expect(partials.last, isEmpty);
     },
+  );
+}
+
+class _OpaqueGenerateModel extends LanguageModelV4 {
+  _OpaqueGenerateModel(this.opaque);
+  final LanguageModelV4OpaquePart opaque;
+
+  @override
+  String get provider => 'fake';
+  @override
+  String get modelId => 'opaque';
+  @override
+  String get specificationVersion => 'v4';
+
+  @override
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
+  ) async => LanguageModelV4GenerateResult(
+    content: [opaque],
+    finishReason: LanguageModelV4FinishReason.stop,
+  );
+
+  @override
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
+  ) async => throw UnimplementedError();
+}
+
+class _RetryBodyModel extends LanguageModelV4 {
+  @override
+  String get provider => 'fake';
+  @override
+  String get modelId => 'retry-body';
+  @override
+  String get specificationVersion => 'v4';
+
+  @override
+  Future<LanguageModelV4GenerateResult> doGenerate(
+    LanguageModelV4CallOptions options,
+  ) async => throw const AiApiCallError(
+    'request failed',
+    responseBody: 'secret body',
+    isRetryable: true,
+  );
+
+  @override
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
+  ) async => throw const AiApiCallError(
+    'request failed',
+    responseBody: 'secret body',
+    isRetryable: true,
   );
 }
 

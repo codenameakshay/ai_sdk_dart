@@ -594,6 +594,7 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
             messages: List.unmodifiable(stepMessages),
             steps: List.unmodifiable(steps),
             instructions: currentInstructions,
+            generationContext: generationContext,
           ),
         ),
       );
@@ -823,6 +824,7 @@ Future<GenerateTextResult<TOutput>> generateText<TOutput>({
         .toList(growable: false);
     final request = GenerateTextRequest(
       system: buildOutputSystemInstruction(initialInstructions, outputSpec),
+      instructions: initialInstructions,
       messages: List.unmodifiable(firstRequestMessages ?? normalizedMessages),
       body: bodyInclusion.requestBody ? lastResponse?.request?.body : null,
     );

@@ -1077,11 +1077,17 @@ Map<String, dynamic> _anthropicOutputConfig(
 }) {
   if (reasoning == LanguageModelV4Reasoning.providerDefault) return null;
   final lower = modelId.toLowerCase();
-  final adaptive =
-      lower.contains('claude-') &&
-      !lower.contains('claude-3') &&
-      !lower.contains('claude-2') &&
-      !lower.contains('claude-instant');
+  final version =
+      RegExp(r'claude-[a-z]+-(\d+)(?:-(\d)(?=-\d{8}$|$))?').firstMatch(lower) ??
+      RegExp(r'claude-(\d+)-(\d)-[a-z]+').firstMatch(lower);
+  final adaptive = version == null
+      ? lower.contains('claude-') &&
+            !lower.contains('claude-3') &&
+            !lower.contains('claude-2') &&
+            !lower.contains('claude-instant')
+      : int.parse(version.group(1)!) > 4 ||
+            (int.parse(version.group(1)!) == 4 &&
+                int.parse(version.group(2) ?? '0') >= 6);
   if (reasoning == LanguageModelV4Reasoning.none) {
     return adaptive
         ? (thinking: null, effort: 'low')

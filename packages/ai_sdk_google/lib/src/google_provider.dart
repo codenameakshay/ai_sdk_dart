@@ -867,6 +867,42 @@ Map<String, dynamic>? _thinkingConfigForModel(
   final lower = modelId.toLowerCase();
   final gemini3 = lower.contains('gemini-3');
   if (gemini3) {
+    if (lower.contains('gemini-3-pro')) {
+      final level = switch (reasoning) {
+        LanguageModelV4Reasoning.none ||
+        LanguageModelV4Reasoning.minimal ||
+        LanguageModelV4Reasoning.low ||
+        LanguageModelV4Reasoning.medium => 'low',
+        LanguageModelV4Reasoning.high ||
+        LanguageModelV4Reasoning.xhigh => 'high',
+        LanguageModelV4Reasoning.providerDefault => null,
+      };
+      return level == null ? null : {'thinkingLevel': level};
+    }
+    if (lower.contains('gemini-3.1-pro')) {
+      final level = switch (reasoning) {
+        LanguageModelV4Reasoning.none ||
+        LanguageModelV4Reasoning.minimal ||
+        LanguageModelV4Reasoning.low => 'low',
+        LanguageModelV4Reasoning.medium => 'medium',
+        LanguageModelV4Reasoning.high ||
+        LanguageModelV4Reasoning.xhigh => 'high',
+        LanguageModelV4Reasoning.providerDefault => null,
+      };
+      return level == null ? null : {'thinkingLevel': level};
+    }
+    if (lower.contains('gemini-3.1-flash-lite-image')) {
+      final level = switch (reasoning) {
+        LanguageModelV4Reasoning.none ||
+        LanguageModelV4Reasoning.minimal ||
+        LanguageModelV4Reasoning.low ||
+        LanguageModelV4Reasoning.medium => 'minimal',
+        LanguageModelV4Reasoning.high ||
+        LanguageModelV4Reasoning.xhigh => 'high',
+        LanguageModelV4Reasoning.providerDefault => null,
+      };
+      return level == null ? null : {'thinkingLevel': level};
+    }
     final minimum = lower.contains('flash') ? 'low' : 'minimal';
     final level = switch (reasoning) {
       LanguageModelV4Reasoning.none => minimum,

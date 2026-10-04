@@ -273,6 +273,114 @@ void main() {
     });
   });
 
+  test(
+    'maps unsupported Gemini 3 thinking levels to supported levels',
+    () async {
+      final generateAdapter = _Adapter((_) => {'candidates': []});
+      final streamAdapter = _Adapter(
+        (_) => {},
+        stream: [
+          {'candidates': []},
+        ],
+      );
+      final generateDio = Dio()..httpClientAdapter = generateAdapter;
+      final streamDio = Dio()..httpClientAdapter = streamAdapter;
+      addTearDown(() => generateDio.close(force: true));
+      addTearDown(() => streamDio.close(force: true));
+
+      final cases = <(String, LanguageModelV4Reasoning, String)>[
+        ('gemini-3-pro', LanguageModelV4Reasoning.none, 'low'),
+        ('gemini-3-pro', LanguageModelV4Reasoning.minimal, 'low'),
+        ('gemini-3-pro', LanguageModelV4Reasoning.low, 'low'),
+        ('gemini-3-pro', LanguageModelV4Reasoning.medium, 'low'),
+        ('gemini-3-pro', LanguageModelV4Reasoning.high, 'high'),
+        ('gemini-3-pro-preview', LanguageModelV4Reasoning.none, 'low'),
+        ('gemini-3-pro-preview', LanguageModelV4Reasoning.medium, 'low'),
+        ('gemini-3.1-pro-preview', LanguageModelV4Reasoning.none, 'low'),
+        ('gemini-3.1-pro-preview', LanguageModelV4Reasoning.minimal, 'low'),
+        ('gemini-3.1-pro-preview', LanguageModelV4Reasoning.low, 'low'),
+        ('gemini-3.1-pro-preview', LanguageModelV4Reasoning.medium, 'medium'),
+        (
+          'gemini-3.1-flash-lite-image',
+          LanguageModelV4Reasoning.none,
+          'minimal',
+        ),
+        (
+          'gemini-3.1-flash-lite-image',
+          LanguageModelV4Reasoning.minimal,
+          'minimal',
+        ),
+        (
+          'gemini-3.1-flash-lite-image',
+          LanguageModelV4Reasoning.low,
+          'minimal',
+        ),
+        (
+          'gemini-3.1-flash-lite-image',
+          LanguageModelV4Reasoning.medium,
+          'minimal',
+        ),
+        ('gemini-3.1-flash-lite-image', LanguageModelV4Reasoning.high, 'high'),
+        ('gemini-3.1-flash-lite-image', LanguageModelV4Reasoning.xhigh, 'high'),
+      ];
+
+      for (final (modelId, reasoning, expected) in cases) {
+        await _model(
+          generateDio,
+          modelId: modelId,
+        ).doGenerate(_options(reasoning: reasoning));
+        expect(
+          (generateAdapter.input['generationConfig'] as Map)['thinkingConfig'],
+          {'thinkingLevel': expected},
+          reason: 'generate $modelId with $reasoning',
+        );
+        final stream = await _model(
+          streamDio,
+          modelId: modelId,
+        ).doStream(_options(reasoning: reasoning));
+        expect(
+          (streamAdapter.input['generationConfig'] as Map)['thinkingConfig'],
+          {'thinkingLevel': expected},
+          reason: 'stream $modelId with $reasoning',
+        );
+        await stream.stream.drain<void>();
+      }
+
+      await _model(generateDio, modelId: 'gemini-3-pro').doGenerate(
+        _options(
+          reasoning: LanguageModelV4Reasoning.medium,
+          providerOptions: const {
+            'google': {
+              'thinkingConfig': {'thinkingLevel': 'high'},
+            },
+          },
+        ),
+      );
+      expect(
+        (generateAdapter.input['generationConfig'] as Map)['thinkingConfig'],
+        {'thinkingLevel': 'high'},
+      );
+
+      await _model(
+        generateDio,
+        modelId: 'gemini-3.1-flash-lite-image',
+      ).doGenerate(
+        _options(
+          reasoning: LanguageModelV4Reasoning.medium,
+          providerOptions: const {
+            'google': {
+              'thinkingConfig': {'thinkingLevel': 'high'},
+            },
+          },
+        ),
+      );
+      expect(
+        (generateAdapter.input['generationConfig'] as Map)['thinkingConfig'],
+        {'thinkingLevel': 'high'},
+      );
+    },
+  );
+
   test('provider-default reasoning omits thinking configuration', () async {
     final adapter = _Adapter((_) => {'candidates': []});
     final dio = Dio()..httpClientAdapter = adapter;
@@ -567,9 +675,11 @@ LanguageModelV4 _model(Dio dio, {String modelId = 'gemini-test'}) =>
 LanguageModelV4CallOptions _options({
   LanguageModelV4Reasoning reasoning = LanguageModelV4Reasoning.providerDefault,
   int? maxOutputTokens,
+  Map<String, Map<String, dynamic>>? providerOptions,
 }) => LanguageModelV4CallOptions(
   reasoning: reasoning,
   maxOutputTokens: maxOutputTokens,
+  providerOptions: providerOptions,
   prompt: LanguageModelV4Prompt(messages: []),
 );
 

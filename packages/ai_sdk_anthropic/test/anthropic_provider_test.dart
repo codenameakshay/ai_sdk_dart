@@ -308,6 +308,76 @@ void main() {
     expect(captured.last['thinking'], {'type': 'adaptive'});
   });
 
+  test('keeps Claude 4.5 on legacy thinking for generate and stream', () async {
+    final captured = <Map<String, dynamic>>[];
+    final server = await _startServer((request) async {
+      captured.add(
+        (jsonDecode(await utf8.decoder.bind(request).join()) as Map)
+            .cast<String, dynamic>(),
+      );
+      request.response.statusCode = 200;
+      if (request.headers.value('accept')?.contains('text/event-stream') ??
+          false) {
+        request.response.headers.set('content-type', 'text/event-stream');
+        request.response.write(
+          'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n',
+        );
+      } else {
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({'content': []}));
+      }
+      await request.response.close();
+    });
+    addTearDown(server.close);
+
+    final provider = AnthropicProvider(apiKey: 'test', baseUrl: server.baseUrl);
+    for (final modelId in [
+      'claude-sonnet-4-5-20250929',
+      'claude-opus-4-5-20251101',
+      'claude-haiku-4-5-20251001',
+      'claude-sonnet-4-20250514',
+      'claude-opus-4-1-20250805',
+    ]) {
+      for (final reasoning in [
+        LanguageModelV4Reasoning.high,
+        LanguageModelV4Reasoning.none,
+      ]) {
+        await provider
+            .call(modelId)
+            .doGenerate(
+              LanguageModelV4CallOptions(
+                prompt: userPrompt('reason'),
+                reasoning: reasoning,
+                maxOutputTokens: 5000,
+              ),
+            );
+        final stream = await provider
+            .call(modelId)
+            .doStream(
+              LanguageModelV4CallOptions(
+                prompt: userPrompt('reason'),
+                reasoning: reasoning,
+                maxOutputTokens: 5000,
+              ),
+            );
+        await stream.stream.drain<void>();
+      }
+    }
+
+    for (var i = 0; i < captured.length; i += 4) {
+      expect(captured[i]['thinking'], {
+        'type': 'enabled',
+        'budget_tokens': 3000,
+      });
+      expect(captured[i + 1]['thinking'], {
+        'type': 'enabled',
+        'budget_tokens': 3000,
+      });
+      expect(captured[i + 2]['thinking'], {'type': 'disabled'});
+      expect(captured[i + 3]['thinking'], {'type': 'disabled'});
+    }
+  });
+
   group('AnthropicProvider', () {
     test('rejects null and malformed 2xx chat responses', () async {
       final nullServer = await _startServer((request) async {

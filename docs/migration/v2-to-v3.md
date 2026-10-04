@@ -35,7 +35,7 @@ Use a verified provider limit. `null` means unspecified, not known-unlimited. Re
  );
 ```
 
-Concurrency defaults to one. The SDK chooses the smaller explicit/provider batch limit and preserves original input order even when requests finish out of order. Malformed responses now fail with `AiInvalidEmbeddingResponseError`: missing or extra rows, duplicate or out-of-range indices, empty/nonfinite vectors, and inconsistent dimensions are not silently accepted. Completely unindexed OpenAI-compatible responses retain list-order behavior; partially indexed responses fail.
+Concurrency defaults to one. The SDK chooses the smaller explicit/provider batch limit and preserves original input order even when requests finish out of order. Core embedding validation fails with `AiInvalidEmbeddingResponseError` when a model result has missing or extra rows, mismatched input association, empty/nonfinite vectors, or inconsistent dimensions. Provider adapters may reject malformed wire payloads earlier as `AiApiCallError`, preserving HTTP response context. Completely unindexed OpenAI-compatible responses retain list-order behavior; partially indexed responses fail.
 
 ## Structured output
 

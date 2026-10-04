@@ -1,5 +1,10 @@
 # v3 execution and qualification ledger
 
+Historical ledger: entries below remain dated evidence of status at the time
+they were recorded. For current PR #15 integration and merge status, see the
+[2026-10-04 review report](../docs/audits/2026-10-04-pr15-merge-review.md).
+This notice does not imply that release qualification is complete.
+
 Baseline: `b702929811281ac6be4c5ea2c10004b412b74924`. Scope and acceptance criteria: [approved report](v3.0.0-report.md). A passing focused test does not satisfy release qualification. No package publication or merge is authorized by this ledger.
 
 | Work | Scope | Status | Evidence / outstanding gates |

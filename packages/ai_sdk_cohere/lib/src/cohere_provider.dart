@@ -438,10 +438,13 @@ class _CohereLanguageModel extends LanguageModelV4 {
           includeRawChunks: options.includeRawChunks,
           responseHeaders: responseHeaders,
           responseTimestamp: responseTimestamp,
+          isCancelled: () => cancellation.isCancelled,
         );
       } catch (e) {
         if (!controller.isClosed) {
-          controller.add(StreamPartError(error: e));
+          if (!cancellation.isCancelled) {
+            controller.add(StreamPartError(error: e));
+          }
           await controller.close();
         }
       } finally {
@@ -466,8 +469,10 @@ class _CohereLanguageModel extends LanguageModelV4 {
     required bool includeRawChunks,
     required Map<String, String> responseHeaders,
     required DateTime responseTimestamp,
+    required bool Function() isCancelled,
   }) async {
     var textStarted = false;
+    var sawTerminalEvent = false;
     Map<String, dynamic>? lastEvent;
     // Per-index tool-call streaming state.
     final toolStates = <int, _CohereToolState>{};
@@ -483,6 +488,7 @@ class _CohereLanguageModel extends LanguageModelV4 {
           controller.add(StreamPartRaw(rawValue: event));
         }
         final type = event['type'] as String?;
+        if (type == 'message-end') sawTerminalEvent = true;
         final delta = event['delta'] as Map<String, dynamic>?;
         final message = delta?['message'] as Map<String, dynamic>?;
         if (type == 'content-delta') {
@@ -571,6 +577,16 @@ class _CohereLanguageModel extends LanguageModelV4 {
       } catch (_) {
         // Ignore malformed JSON lines.
       }
+    }
+    if (!sawTerminalEvent && !isCancelled()) {
+      controller.add(
+        StreamPartError(
+          error: AiApiCallError(
+            'Cohere stream ended before message-end.',
+            responseHeaders: responseHeaders,
+          ),
+        ),
+      );
     }
     await controller.close();
   }

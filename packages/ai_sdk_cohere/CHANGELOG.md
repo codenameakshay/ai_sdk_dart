@@ -1,5 +1,15 @@
 ## 3.0.0
 
+- Decode fragmented NDJSON responses and detach cancellation observers when
+  request serialization fails.
+- Canceled active streams close cleanly; premature EOF is reported as a typed
+  truncation error.
+
+
+---
+
+## 2.0.0
+
 - Migrated Cohere streaming to explicit V4 text and tool-input lifecycle parts
   with one complete tool call and reliable message-end finalization.
 - Added abort-signal cancellation for in-flight requests.

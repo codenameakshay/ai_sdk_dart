@@ -1,3 +1,6 @@
+import 'package:ai_sdk_provider/ai_sdk_provider.dart';
+import 'package:meta/meta.dart';
+
 import '../tools/tool.dart';
 
 /// Structured output specification for [generateText] and [streamText].
@@ -77,6 +80,25 @@ class ArrayOutput<T> extends Output<List<T>> {
   final Schema<T> element;
   final String? name;
   final String? description;
+
+  @internal
+  List<T> parseElements(Object? jsonValue) {
+    if (jsonValue is! List) {
+      throw AiInvalidToolInputError(
+        'Model did not return a JSON array: $jsonValue',
+      );
+    }
+    final values = <T>[];
+    for (final item in jsonValue) {
+      if (item is! Map<String, dynamic>) {
+        throw AiInvalidToolInputError(
+          'Array element is not a JSON object: $item',
+        );
+      }
+      values.add(element.fromJson(item));
+    }
+    return values;
+  }
 }
 
 /// Choice output with fixed string options.

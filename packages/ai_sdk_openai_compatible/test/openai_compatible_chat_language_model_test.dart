@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:ai_sdk_openai_compatible/ai_sdk_openai_compatible.dart';
@@ -449,6 +450,118 @@ void main() {
       );
     });
 
+    test(
+      'seeded SSE framing sweep preserves Unicode and interleaved tools',
+      () async {
+        const seed = 0x5eed;
+        const caseCount = 32;
+        final random = Random(seed);
+        final wire = [
+          'data: not-json\n\n',
+          'data: {"choices":[]}\n\n',
+          'data: {"choices":[{"delta":{"content":"नम"}}]}\n\n',
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-a","function":{"name":"weather","arguments":"{\\"city\\":"}}]}}]}\n\n',
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call-b","function":{"name":"lookup","arguments":"{\\"q\\":\\"x\\"}"}}]}}]}\n\n',
+          'data: {"choices":[{"delta":{"content":" 🌍"}}]}\n\n',
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\"Paris\\"}"}}]}}]}\n\n',
+          'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n',
+          'data: [DONE]\n\n',
+        ].join();
+        final bytes = Uint8List.fromList(utf8.encode(wire));
+
+        List<Uint8List> chunksForCase() {
+          final chunks = <Uint8List>[];
+          var offset = 0;
+          while (offset < bytes.length) {
+            final length = 1 + random.nextInt(11);
+            final end = min(offset + length, bytes.length);
+            chunks.add(Uint8List.sublistView(bytes, offset, end));
+            offset = end;
+          }
+          return chunks;
+        }
+
+        for (var caseIndex = 0; caseIndex < caseCount; caseIndex++) {
+          final client = _testClient('https://fixture.invalid/v1')
+            ..httpClientAdapter = _ChunkedStreamAdapter(chunksForCase());
+          final model = OpenAICompatibleChatLanguageModel(
+            modelId: 'm',
+            config: OpenAICompatibleConfig(
+              provider: 'test',
+              baseUrl: 'https://fixture.invalid/v1',
+              client: client,
+              headers: () => const {},
+            ),
+          );
+          final result = await model.doStream(
+            const LanguageModelV4CallOptions(
+              prompt: LanguageModelV4Prompt(messages: []),
+            ),
+          );
+          final parts = await result.stream.toList();
+          expect(
+            parts
+                .whereType<StreamPartTextDelta>()
+                .map((part) => part.delta)
+                .join(),
+            'नम 🌍',
+            reason: 'seed=$seed case=$caseIndex',
+          );
+          final calls = parts
+              .whereType<StreamPartToolCall>()
+              .map((part) => part.toolCall)
+              .toList();
+          expect(
+            calls.map((call) => call.toolCallId),
+            ['call-a', 'call-b'],
+            reason: 'seed=$seed case=$caseIndex',
+          );
+          expect(calls.map((call) => call.toolName), ['weather', 'lookup']);
+          expect(calls.map((call) => call.input), [
+            {'city': 'Paris'},
+            {'q': 'x'},
+          ]);
+          expect(
+            parts.whereType<StreamPartError>(),
+            isEmpty,
+            reason: 'seed=$seed case=$caseIndex',
+          );
+          expect(parts.whereType<StreamPartFinish>(), hasLength(1));
+          client.close(force: true);
+        }
+      },
+    );
+
+    test('stream reports EOF before a finish reason as truncation', () async {
+      final client = _testClient('https://fixture.invalid/v1')
+        ..httpClientAdapter = _ChunkedStreamAdapter([
+          Uint8List.fromList(
+            utf8.encode(
+              'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n',
+            ),
+          ),
+        ]);
+      final model = OpenAICompatibleChatLanguageModel(
+        modelId: 'm',
+        config: OpenAICompatibleConfig(
+          provider: 'test',
+          baseUrl: 'https://fixture.invalid/v1',
+          client: client,
+          headers: () => const {},
+        ),
+      );
+      final result = await model.doStream(
+        const LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(messages: []),
+        ),
+      );
+
+      final parts = await result.stream.toList();
+      expect(parts.whereType<StreamPartError>(), hasLength(1));
+      expect(parts.whereType<StreamPartFinish>(), isEmpty);
+      client.close(force: true);
+    });
+
     test('stream finish includes trailing usage after the choice ends', () async {
       final server = await _startServer((request) async {
         _writeSse(request, [
@@ -543,9 +656,43 @@ void main() {
         );
         final parts = await streamResult.stream.toList();
         expect(parts.whereType<StreamPartStreamStart>(), hasLength(1));
+        expect(parts.whereType<StreamPartError>(), hasLength(1));
         expect(parts.whereType<StreamPartFinish>(), isEmpty);
       },
     );
+
+    test('empty response body reports truncation after one start', () async {
+      final server = await _startServer((request) async {
+        _writeSse(request, const []);
+      });
+      addTearDown(server.close);
+
+      final result = await _bearerModel(
+        server.baseUrl,
+      ).doStream(LanguageModelV4CallOptions(prompt: userPrompt('empty')));
+      final parts = await result.stream.toList();
+      expect(parts.whereType<StreamPartStreamStart>(), hasLength(1));
+      expect(parts.whereType<StreamPartError>(), hasLength(1));
+      expect(parts.whereType<StreamPartFinish>(), isEmpty);
+    });
+
+    test('finish-reason-only response remains a valid empty finish', () async {
+      final server = await _startServer((request) async {
+        _writeSse(request, [
+          '{"choices":[{"delta":{},"finish_reason":"stop"}]}',
+          '[DONE]',
+        ]);
+      });
+      addTearDown(server.close);
+
+      final result = await _bearerModel(server.baseUrl).doStream(
+        LanguageModelV4CallOptions(prompt: userPrompt('empty terminal')),
+      );
+      final parts = await result.stream.toList();
+      expect(parts.whereType<StreamPartStreamStart>(), hasLength(1));
+      expect(parts.whereType<StreamPartError>(), isEmpty);
+      expect(parts.whereType<StreamPartFinish>(), hasLength(1));
+    });
 
     // ── finish-reason mapping ────────────────────────────────────────────
     test('maps finish reasons', () async {
@@ -2380,6 +2527,28 @@ void _writeSse(HttpRequest request, List<String> events) {
 Future<TestServer> _startServer(
   Future<void> Function(HttpRequest request) handler,
 ) => TestServer.start(handler, pathSuffix: '/v1');
+
+class _ChunkedStreamAdapter implements HttpClientAdapter {
+  _ChunkedStreamAdapter(this.chunks);
+
+  final List<Uint8List> chunks;
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async => ResponseBody(
+    Stream<Uint8List>.fromIterable(chunks),
+    200,
+    headers: {
+      Headers.contentTypeHeader: ['text/event-stream'],
+    },
+  );
+
+  @override
+  void close({bool force = false}) {}
+}
 
 class _ErroredStreamHttpClientAdapter implements HttpClientAdapter {
   @override

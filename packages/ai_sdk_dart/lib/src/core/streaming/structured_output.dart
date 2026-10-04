@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
 import '../../output/output.dart';
@@ -55,26 +57,11 @@ TOutput parseOutput<TOutput>(
           ? parseCompleteJsonObject(text)
           : extractJsonObject(text);
       return schema.fromJson(jsonMap);
-    case ArrayOutput(:final element):
+    case final ArrayOutput<dynamic> arrayOutput:
       final jsonValue = strict
           ? parseCompleteJsonValue(text)
           : extractJsonValue(text);
-      if (jsonValue is! List) {
-        throw AiInvalidToolInputError(
-          'Model did not return a JSON array: $text',
-        );
-      }
-      final list = <dynamic>[];
-      for (final item in jsonValue) {
-        if (item is Map<String, dynamic>) {
-          list.add(element.fromJson(item));
-        } else {
-          throw AiInvalidToolInputError(
-            'Array element is not a JSON object: $item',
-          );
-        }
-      }
-      return list as TOutput;
+      return arrayOutput.parseElements(jsonValue) as TOutput;
     case ChoiceOutput(:final options):
       final parsed = tryParsePartialJsonValue(
         text,
@@ -127,10 +114,17 @@ Map<String, dynamic> extractJsonObject(String text) {
   throw AiInvalidToolInputError('Model did not return a JSON object: $text');
 }
 
-Object extractJsonValue(String text) {
+Object? extractJsonValue(String text) {
   if (text.trim().isEmpty) {
     throw const AiNoContentGeneratedError('No content was generated.');
   }
+  final trimmed = text.trim();
+  final fenced = RegExp(
+    r'^```(?:json)?\s*([\s\S]*?)\s*```$',
+    caseSensitive: false,
+  ).firstMatch(trimmed);
+  final decoded = _tryDecodeJson(fenced?.group(1) ?? trimmed);
+  if (decoded.success) return decoded.value;
   final parsed = tryParsePartialJsonValue(
     text,
     phase: PartialJsonParsePhase.streamTextPartial,
@@ -140,4 +134,12 @@ Object extractJsonValue(String text) {
     throw AiInvalidToolInputError('Model did not return valid JSON: $text');
   }
   return parsed;
+}
+
+({bool success, Object? value}) _tryDecodeJson(String text) {
+  try {
+    return (success: true, value: jsonDecode(text));
+  } on FormatException {
+    return (success: false, value: null);
+  }
 }

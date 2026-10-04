@@ -425,13 +425,30 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
               },
             ),
           );
+        } else if (!cancellation.isCancelled) {
+          if (!streamStarted) {
+            streamStarted = true;
+            controller.add(const StreamPartStreamStart());
+          }
+          controller.add(
+            StreamPartError(
+              error: AiApiCallError(
+                '$provider stream ended before a finish reason.',
+                statusCode: response.statusCode,
+                url: response.requestOptions.uri.toString(),
+                responseHeaders: responseHeaders,
+              ),
+            ),
+          );
         }
       } catch (error) {
-        if (!streamStarted) {
-          streamStarted = true;
-          controller.add(const StreamPartStreamStart());
+        if (!cancellation.isCancelled && !controller.isClosed) {
+          if (!streamStarted) {
+            streamStarted = true;
+            controller.add(const StreamPartStreamStart());
+          }
+          controller.add(StreamPartError(error: error));
         }
-        controller.add(StreamPartError(error: error));
       } finally {
         if (!streamStarted) {
           controller.add(const StreamPartStreamStart());

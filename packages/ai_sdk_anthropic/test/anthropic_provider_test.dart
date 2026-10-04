@@ -125,10 +125,66 @@ void main() {
     expect(finish.usage.outputTokens.total, 2);
   });
 
-  test('empty stream still starts and closes cleanly', () async {
+  test(
+    'empty stream reports missing protocol terminal after one start',
+    () async {
+      final server = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.set('content-type', 'text/event-stream');
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final result =
+          await AnthropicProvider(apiKey: 'test', baseUrl: server.baseUrl)
+              .call('claude-sonnet-4-5')
+              .doStream(
+                LanguageModelV4CallOptions(prompt: userPrompt('empty')),
+              );
+      final parts = await result.stream.toList();
+      expect(parts.whereType<StreamPartStreamStart>(), hasLength(1));
+      expect(parts.whereType<StreamPartError>(), hasLength(1));
+      expect(parts.whereType<StreamPartFinish>(), isEmpty);
+    },
+  );
+
+  test(
+    'message_delta terminal without content is a valid empty finish',
+    () async {
+      final server = await _startServer((request) async {
+        await utf8.decoder.bind(request).join();
+        request.response.statusCode = 200;
+        request.response.headers.set('content-type', 'text/event-stream');
+        request.response.write(
+          'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n',
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final result =
+          await AnthropicProvider(apiKey: 'test', baseUrl: server.baseUrl)
+              .call('claude-sonnet-4-5')
+              .doStream(
+                LanguageModelV4CallOptions(
+                  prompt: userPrompt('empty terminal'),
+                ),
+              );
+      final parts = await result.stream.toList();
+      expect(parts.whereType<StreamPartStreamStart>(), hasLength(1));
+      expect(parts.whereType<StreamPartError>(), isEmpty);
+      expect(parts.whereType<StreamPartFinish>(), hasLength(1));
+    },
+  );
+
+  test('stream reports EOF before message_delta as truncation', () async {
     final server = await _startServer((request) async {
+      await utf8.decoder.bind(request).join();
       request.response.statusCode = 200;
       request.response.headers.set('content-type', 'text/event-stream');
+      request.response.write(
+        'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}\n\n',
+      );
       await request.response.close();
     });
     addTearDown(server.close);
@@ -136,11 +192,35 @@ void main() {
     final result =
         await AnthropicProvider(apiKey: 'test', baseUrl: server.baseUrl)
             .call('claude-sonnet-4-5')
-            .doStream(LanguageModelV4CallOptions(prompt: userPrompt('empty')));
-    expect(
-      await result.stream.toList(),
-      contains(isA<StreamPartStreamStart>()),
-    );
+            .doStream(LanguageModelV4CallOptions(prompt: userPrompt('hello')));
+    final parts = await result.stream.toList();
+    expect(parts.whereType<StreamPartError>(), hasLength(1));
+    expect(parts.whereType<StreamPartFinish>(), isEmpty);
+  });
+
+  test('stream error events are typed and terminate the stream', () async {
+    final server = await _startServer((request) async {
+      await utf8.decoder.bind(request).join();
+      request.response.statusCode = 200;
+      request.response.headers.set('content-type', 'text/event-stream');
+      request.response.write(
+        'data: {"type":"error","error":{"type":"overloaded_error","message":"try later"}}\n\n'
+        'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n',
+      );
+      await request.response.close();
+    });
+    addTearDown(server.close);
+
+    final result =
+        await AnthropicProvider(apiKey: 'test', baseUrl: server.baseUrl)
+            .call('claude-sonnet-4-5')
+            .doStream(LanguageModelV4CallOptions(prompt: userPrompt('hello')));
+    final parts = await result.stream.toList();
+    final error = parts.whereType<StreamPartError>().single.error;
+    expect(error, isA<AiApiCallError>());
+    expect((error as AiApiCallError).message, 'try later');
+    expect(error.type, 'overloaded_error');
+    expect(parts.whereType<StreamPartFinish>(), isEmpty);
   });
 
   test('maps all reasoning levels and stream JSON/cache options', () async {
@@ -2243,10 +2323,7 @@ void main() {
       );
       expect(parts.whereType<StreamPartTextDelta>().single.delta, 'Hi');
       expect(parts.whereType<StreamPartError>(), isNotEmpty);
-      expect(
-        parts.whereType<StreamPartFinish>().single.finishReason,
-        LanguageModelV4FinishReason.stop,
-      );
+      expect(parts.whereType<StreamPartFinish>(), isEmpty);
     });
 
     test('stream surfaces transport errors as StreamPartError', () async {

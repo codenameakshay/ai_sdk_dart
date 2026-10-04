@@ -5,3 +5,7 @@
   event preservation.
 - Added validated UIMessage request conversion, per-request aborts, terminal
   finish enforcement, and pinned AI SDK reference-server coverage.
+- Preserve existing assistant content and prior tool results when a continuation
+  reuses the same message ID.
+- The JS reference backend now assigns distinct assistant IDs per turn and
+  survives clients aborting partial request bodies.

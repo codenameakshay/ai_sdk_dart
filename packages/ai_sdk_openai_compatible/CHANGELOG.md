@@ -1,5 +1,15 @@
 ## 3.0.0
 
+- Send schema-free JSON mode when requested and retain usage reported after the
+  choice terminal event.
+- Abort canceled stream consumers and report EOF before the protocol terminal
+  as a typed truncation error.
+
+
+---
+
+## 2.0.0
+
 - **Breaking:** migrated the shared language model to the V4 provider contract
   with unified tools, typed response formats, nested usage, and full stream
   lifecycle events.

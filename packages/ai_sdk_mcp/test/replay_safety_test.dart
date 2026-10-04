@@ -1,6 +1,9 @@
+import 'dart:convert';
 import 'dart:async';
 
 import 'package:ai_sdk_mcp/ai_sdk_mcp.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:test/test.dart';
 
 class LostResponseTransport extends MCPTransport {
@@ -95,6 +98,144 @@ void main() {
       throwsA(isA<MCPException>()),
     );
     expect(transport.sideEffects, 3);
+  });
+
+  test(
+    'definite HTTP rejection stays a transport error and is never retried',
+    () async {
+      var toolCalls = 0;
+      final httpClient = MockClient((request) async {
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        final id = body['id'] as int;
+        if (body['method'] == 'server/discover') {
+          return http.Response(
+            jsonEncode({
+              'jsonrpc': '2.0',
+              'id': id,
+              'result': {
+                'supportedVersions': ['2026-07-28'],
+              },
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        if (body['method'] == 'tools/call') toolCalls++;
+        return http.Response('rejected before dispatch', 400);
+      });
+      final transport = StreamableHttpClientTransport(
+        url: Uri.parse('https://mcp.test/'),
+        client: httpClient,
+      );
+      final client = MCPClient(
+        transport: transport,
+        protocolMode: MCPProtocolMode.modern,
+        reconnectPolicy: const MCPReconnectPolicy(
+          maxAttempts: 2,
+          initialDelayMs: 0,
+        ),
+      );
+      addTearDown(client.close);
+      addTearDown(httpClient.close);
+
+      await expectLater(
+        client.callTool('charge', {}, retryOnTransportFailure: true),
+        throwsA(
+          isA<MCPTransportException>().having(
+            (error) => error.statusCode,
+            'statusCode',
+            400,
+          ),
+        ),
+      );
+      expect(toolCalls, 1);
+    },
+  );
+
+  test('unrecognized HTTP client status remains ambiguous', () async {
+    var toolCalls = 0;
+    final httpClient = MockClient((request) async {
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      final id = body['id'] as int;
+      if (body['method'] == 'server/discover') {
+        return http.Response(
+          jsonEncode({
+            'jsonrpc': '2.0',
+            'id': id,
+            'result': {
+              'supportedVersions': ['2026-07-28'],
+            },
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      if (body['method'] == 'tools/call') toolCalls++;
+      return http.Response('request may have been dispatched', 499);
+    });
+    final transport = StreamableHttpClientTransport(
+      url: Uri.parse('https://mcp.test/'),
+      client: httpClient,
+    );
+    final client = MCPClient(
+      transport: transport,
+      protocolMode: MCPProtocolMode.modern,
+      reconnectPolicy: const MCPReconnectPolicy(
+        maxAttempts: 2,
+        initialDelayMs: 0,
+      ),
+    );
+    addTearDown(client.close);
+    addTearDown(httpClient.close);
+
+    await expectLater(
+      client.callTool('charge', {}),
+      throwsA(isA<MCPAmbiguousToolCompletionException>()),
+    );
+    expect(toolCalls, 1);
+  });
+
+  test('HTTP 408 remains ambiguous and does not replay tools/call', () async {
+    var toolCalls = 0;
+    final httpClient = MockClient((request) async {
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      final id = body['id'] as int;
+      if (body['method'] == 'server/discover') {
+        return http.Response(
+          jsonEncode({
+            'jsonrpc': '2.0',
+            'id': id,
+            'result': {
+              'supportedVersions': ['2026-07-28'],
+            },
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      if (body['method'] == 'tools/call') toolCalls++;
+      return http.Response('request timeout', 408);
+    });
+    final transport = StreamableHttpClientTransport(
+      url: Uri.parse('https://mcp.test/'),
+      client: httpClient,
+    );
+    final client = MCPClient(
+      transport: transport,
+      protocolMode: MCPProtocolMode.modern,
+      reconnectPolicy: const MCPReconnectPolicy(
+        maxAttempts: 2,
+        initialDelayMs: 0,
+      ),
+    );
+    addTearDown(client.close);
+    addTearDown(httpClient.close);
+
+    await expectLater(
+      client.callTool('charge', {}, retryOnTransportFailure: true),
+      throwsA(isA<MCPAmbiguousToolCompletionException>()),
+    );
+    expect(toolCalls, 1);
   });
 
   test(

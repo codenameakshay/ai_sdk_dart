@@ -263,6 +263,10 @@ class ToolLoopAgent {
     if (providerExecuted.isNotEmpty) {
       throw ToolApprovalProviderExecutedError(requests: providerExecuted);
     }
+    rejectSystemMessages([
+      ...?messages,
+      ...replay.messages,
+    ], allowSystemInMessages: allowSystemInMessages);
     final scope = OperationScope(
       abortSignal: abortSignal,
       timeout: timeout?.total,
@@ -315,6 +319,14 @@ class ToolLoopAgent {
         timeout: timeout?.total,
         elapsed: scope.elapsed,
       );
+      final responseMessagesPrefix = results.isEmpty
+          ? const <LanguageModelV4Message>[]
+          : [
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.tool,
+                content: List.unmodifiable(results),
+              ),
+            ];
       final result = await streamText(
         model: model,
         instructions: instructions,
@@ -344,16 +356,100 @@ class ToolLoopAgent {
         onStepStart: onStepStart,
         onToolExecutionStart: onToolExecutionStart,
         onToolExecutionEnd: onToolExecutionEnd,
-        onEnd: onEnd,
+        onEnd: onEnd == null
+            ? null
+            : (event) =>
+                  onEnd(_prependResponseHistory(event, responseMessagesPrefix)),
         onStepEnd: onStepEnd,
         prepareStep: prepareStep,
         bodyInclusion: bodyInclusion,
       );
       handedOff = true;
       result.finish.whenComplete(scope.close).ignore();
-      return result;
+      return responseMessagesPrefix.isEmpty
+          ? result
+          : _prependResponseHistoryToResult(result, responseMessagesPrefix);
     } finally {
       if (!handedOff) scope.close();
     }
   }
+}
+
+StreamTextFinishEvent<TOutput> _prependResponseHistory<TOutput>(
+  StreamTextFinishEvent<TOutput> event,
+  List<LanguageModelV4Message> prefix,
+) {
+  final response = GenerateTextResponse(
+    messages: List.unmodifiable([...prefix, ...event.response.messages]),
+    body: event.response.body,
+    metadata: event.response.metadata,
+  );
+  return StreamTextFinishEvent<TOutput>(
+    text: event.text,
+    output: event.output,
+    finishReason: event.finishReason,
+    rawFinishReason: event.rawFinishReason,
+    usage: event.usage,
+    totalUsage: event.totalUsage,
+    providerMetadata: event.providerMetadata,
+    steps: event.steps,
+    reasoning: event.reasoning,
+    reasoningText: event.reasoningText,
+    sources: event.sources,
+    documentSources: event.documentSources,
+    files: event.files,
+    reasoningFiles: event.reasoningFiles,
+    responseMessages: List.unmodifiable([...prefix, ...event.responseMessages]),
+    request: event.request,
+    response: response,
+    finalStep: event.finalStep,
+    warnings: event.warnings,
+  );
+}
+
+StreamTextResult<TOutput> _prependResponseHistoryToResult<TOutput>(
+  StreamTextResult<TOutput> result,
+  List<LanguageModelV4Message> prefix,
+) {
+  final response = result.response.then(
+    (value) => GenerateTextResponse(
+      messages: List.unmodifiable([...prefix, ...value.messages]),
+      body: value.body,
+      metadata: value.metadata,
+    ),
+  );
+  response.ignore();
+  return StreamTextResult<TOutput>(
+    stream: result.stream.map(
+      (event) => event is StreamTextFinishEvent<TOutput>
+          ? _prependResponseHistory(event, prefix)
+          : event,
+    ),
+    providerStream: result.providerStream,
+    textStream: result.textStream,
+    partialOutputStream: result.partialOutputStream,
+    elementStream: result.elementStream,
+    text: result.text,
+    output: result.output,
+    content: result.content,
+    reasoning: result.reasoning,
+    reasoningText: result.reasoningText,
+    files: result.files,
+    reasoningFiles: result.reasoningFiles,
+    sources: result.sources,
+    documentSources: result.documentSources,
+    toolCalls: result.toolCalls,
+    toolResults: result.toolResults,
+    finishReason: result.finishReason,
+    rawFinishReason: result.rawFinishReason,
+    usage: result.usage,
+    totalUsage: result.totalUsage,
+    warnings: result.warnings,
+    steps: result.steps,
+    request: result.request,
+    response: response,
+    providerMetadata: result.providerMetadata,
+    finish: result.finish,
+    finalStep: result.finalStep,
+  );
 }

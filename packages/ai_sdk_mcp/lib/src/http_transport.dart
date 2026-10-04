@@ -475,7 +475,7 @@ class StreamableHttpClientTransport implements MCPTransport {
   static const _maxBufferedResponseChars = 1024 * 1024;
 
   StreamSubscription<_SseEvent>? _listenerSubscription;
-  final _subscriptionStreams = <int, StreamSubscription<_SseEvent>>{};
+  final _modernSubscriptions = <int, _ModernSubscriptionLifetime>{};
   Timer? _listenerReconnectTimer;
   bool _listenerConnecting = false;
   int _listenerEpoch = 0;
@@ -678,6 +678,7 @@ class StreamableHttpClientTransport implements MCPTransport {
   Future<http.StreamedResponse> _sendRequest(
     http.Request request, {
     bool persistent = false,
+    _ModernSubscriptionLifetime? subscriptionState,
   }) async {
     final lifetime = _HttpRequestLifetime(
       requestTimeout,
@@ -688,7 +689,16 @@ class StreamableHttpClientTransport implements MCPTransport {
       ),
     );
     _activeRequests.add(lifetime);
-    lifetime.onFinished = () => _activeRequests.remove(lifetime);
+    if (subscriptionState != null) {
+      subscriptionState.requestLifetime = lifetime;
+    }
+    lifetime.onFinished = () {
+      _activeRequests.remove(lifetime);
+      if (subscriptionState != null &&
+          identical(subscriptionState.requestLifetime, lifetime)) {
+        subscriptionState.requestLifetime = null;
+      }
+    };
     Future<http.StreamedResponse> dispatch(String? token) async {
       lifetime.checkActive();
       final abortable =
@@ -848,14 +858,23 @@ class StreamableHttpClientTransport implements MCPTransport {
 
   Future<JsonRpcResponse> _parseSseResponse(
     http.StreamedResponse response,
-    JsonRpcRequest request,
-  ) async {
+    JsonRpcRequest request, {
+    _ModernSubscriptionLifetime? subscriptionState,
+    _ModernSubscriptionAttempt? subscriptionAttempt,
+  }) async {
     final completer = Completer<JsonRpcResponse>();
     unawaited(completer.future.then<void>((_) {}, onError: (_, _) {}));
 
     late final StreamSubscription<_SseEvent> subscription;
     subscription = _parseSse(response.stream).listen(
       (event) {
+        if (subscriptionState != null &&
+            !_isActiveSubscriptionAttempt(
+              subscriptionState,
+              subscriptionAttempt,
+            )) {
+          return;
+        }
         final data = event.data.trim();
         if (data.isEmpty) {
           return;
@@ -886,7 +905,24 @@ class StreamableHttpClientTransport implements MCPTransport {
             return;
           }
           if (!completer.isCompleted) {
-            _subscriptionStreams[request.id] = subscription;
+            final isActiveSubscription =
+                subscriptionState != null &&
+                subscriptionAttempt != null &&
+                !_closed &&
+                identical(
+                  _modernSubscriptions[request.id],
+                  subscriptionState,
+                ) &&
+                identical(subscriptionState.attempt, subscriptionAttempt);
+            if (isActiveSubscription) {
+              subscriptionState
+                ..stream = subscription
+                ..requestLifetime = null;
+              subscriptionState.reconnectTimer?.cancel();
+              subscriptionState.reconnectTimer = null;
+            } else {
+              unawaited(subscription.cancel());
+            }
             completer.complete(
               JsonRpcResponse(
                 id: request.id,
@@ -910,7 +946,11 @@ class StreamableHttpClientTransport implements MCPTransport {
               completer.completeError(error, stackTrace);
             }
           }
-          _subscriptionStreams.remove(request.id);
+          if (subscriptionState != null &&
+              identical(_modernSubscriptions[request.id], subscriptionState) &&
+              identical(subscriptionState.attempt, subscriptionAttempt)) {
+            _finishModernSubscription(subscriptionState);
+          }
           unawaited(subscription.cancel());
           return;
         }
@@ -925,15 +965,45 @@ class StreamableHttpClientTransport implements MCPTransport {
           );
         }
         if (!completer.isCompleted) {
+          if (subscriptionState != null &&
+              _isActiveSubscriptionAttempt(
+                subscriptionState,
+                subscriptionAttempt,
+              )) {
+            subscriptionState
+              ..stream = null
+              ..requestLifetime = null;
+            unawaited(subscription.cancel());
+          }
           completer.completeError(
             MCPException('SSE response stream error: $error'),
             stackTrace,
           );
+        } else if (subscriptionState != null &&
+            _isCurrentSubscriptionAttempt(
+              subscriptionState,
+              subscriptionAttempt,
+              subscription,
+            )) {
+          subscriptionState.stream = null;
+          unawaited(subscription.cancel());
+          _scheduleSubscriptionReconnect(subscriptionState);
         }
       },
       onDone: () {
-        _subscriptionStreams.remove(request.id);
-        if (!completer.isCompleted) {
+        final isCurrent =
+            subscriptionState != null &&
+            _isCurrentSubscriptionAttempt(
+              subscriptionState,
+              subscriptionAttempt,
+              subscription,
+            );
+        if (isCurrent) {
+          subscriptionState.stream = null;
+        }
+        if (isCurrent && completer.isCompleted) {
+          _scheduleSubscriptionReconnect(subscriptionState);
+        } else if (!completer.isCompleted) {
           completer.completeError(
             MCPException(
               'SSE response stream closed before responding to ${request.method}',
@@ -948,6 +1018,13 @@ class StreamableHttpClientTransport implements MCPTransport {
       requestTimeout,
       onTimeout: () {
         unawaited(subscription.cancel());
+        if (subscriptionState != null &&
+            identical(_modernSubscriptions[request.id], subscriptionState) &&
+            identical(subscriptionState.attempt, subscriptionAttempt)) {
+          subscriptionState.stream = null;
+          subscriptionState.requestLifetime = null;
+          _scheduleSubscriptionReconnect(subscriptionState);
+        }
         if (!_modern) {
           unawaited(
             _sendCancelledNotification(
@@ -965,8 +1042,81 @@ class StreamableHttpClientTransport implements MCPTransport {
 
   /// Stops a modern `subscriptions/listen` response stream.
   Future<void> cancelSubscription(int requestId) async {
-    final subscription = _subscriptionStreams.remove(requestId);
+    final state = _modernSubscriptions.remove(requestId);
+    if (state == null) return;
+    state.reconnectTimer?.cancel();
+    state.requestLifetime?.abort(
+      _transportError(
+        method: 'POST',
+        uri: url,
+        context: 'subscription cancelled',
+      ),
+    );
+    final subscription = state.stream;
+    state
+      ..stream = null
+      ..attempt = null;
     await subscription?.cancel();
+  }
+
+  bool _isCurrentSubscriptionAttempt(
+    _ModernSubscriptionLifetime state,
+    _ModernSubscriptionAttempt? attempt,
+    StreamSubscription<_SseEvent> stream,
+  ) =>
+      !_closed &&
+      identical(_modernSubscriptions[state.request.id], state) &&
+      identical(state.attempt, attempt) &&
+      identical(state.stream, stream);
+
+  bool _isActiveSubscriptionAttempt(
+    _ModernSubscriptionLifetime state,
+    _ModernSubscriptionAttempt? attempt,
+  ) =>
+      !_closed &&
+      identical(_modernSubscriptions[state.request.id], state) &&
+      identical(state.attempt, attempt);
+
+  void _finishModernSubscription(_ModernSubscriptionLifetime state) {
+    if (!identical(_modernSubscriptions[state.request.id], state)) return;
+    _modernSubscriptions.remove(state.request.id);
+    state.reconnectTimer?.cancel();
+    state.requestLifetime?.abort();
+    state
+      ..reconnectTimer = null
+      ..requestLifetime = null
+      ..stream = null
+      ..attempt = null;
+  }
+
+  void _scheduleSubscriptionReconnect(_ModernSubscriptionLifetime state) {
+    if (_closed ||
+        !identical(_modernSubscriptions[state.request.id], state) ||
+        state.reconnectTimer != null) {
+      return;
+    }
+    final attempt = state.reconnectAttempts++;
+    var delayMs = listenerReconnectDelay.inMilliseconds;
+    if (delayMs < 1) delayMs = 1;
+    for (var index = 0; index < attempt && delayMs < 30000; index++) {
+      delayMs = delayMs > 15000 ? 30000 : delayMs * 2;
+    }
+    state.reconnectTimer = Timer(Duration(milliseconds: delayMs), () {
+      state.reconnectTimer = null;
+      if (_closed ||
+          !identical(_modernSubscriptions[state.request.id], state)) {
+        return;
+      }
+      unawaited(_reopenSubscription(state));
+    });
+  }
+
+  Future<void> _reopenSubscription(_ModernSubscriptionLifetime state) async {
+    try {
+      await send(state.request);
+    } catch (_) {
+      _scheduleSubscriptionReconnect(state);
+    }
   }
 
   Future<void> _sendCancelledNotification(int requestId, String reason) async {
@@ -989,8 +1139,44 @@ class StreamableHttpClientTransport implements MCPTransport {
   Future<JsonRpcResponse> send(JsonRpcRequest request) async {
     _ensureOpen();
     if (_modern) {
-      final response = await _postModern(request);
-      return response;
+      if (request.method == 'subscriptions/listen') {
+        var state = _modernSubscriptions[request.id];
+        if (state == null || !identical(state.request, request)) {
+          if (state != null) {
+            state.reconnectTimer?.cancel();
+            state.requestLifetime?.abort();
+            unawaited(state.stream?.cancel());
+          }
+          state = _ModernSubscriptionLifetime(request);
+          _modernSubscriptions[request.id] = state;
+        } else if (state.stream != null) {
+          unawaited(state.stream!.cancel());
+          state.stream = null;
+        }
+        final attempt = _ModernSubscriptionAttempt(
+          reconnect: state.reconnectAttempts > 0,
+        );
+        state.attempt = attempt;
+        try {
+          return await _postModern(request, state, attempt);
+        } catch (error) {
+          if (identical(_modernSubscriptions[request.id], state) &&
+              identical(state.attempt, attempt)) {
+            state.requestLifetime = null;
+            state.stream = null;
+            if (!attempt.reconnect ||
+                (error is MCPTransportException &&
+                    error.statusCode != null &&
+                    error.statusCode! >= 400 &&
+                    error.statusCode! < 500 &&
+                    error.statusCode != 408)) {
+              _finishModernSubscription(state);
+            }
+          }
+          rethrow;
+        }
+      }
+      return _postModern(request);
     }
     final isInitialize = request.method == 'initialize';
     if (!isInitialize) {
@@ -1041,13 +1227,18 @@ class StreamableHttpClientTransport implements MCPTransport {
     );
   }
 
-  Future<JsonRpcResponse> _postModern(JsonRpcRequest request) async {
+  Future<JsonRpcResponse> _postModern(
+    JsonRpcRequest request, [
+    _ModernSubscriptionLifetime? subscriptionState,
+    _ModernSubscriptionAttempt? subscriptionAttempt,
+  ]) async {
     final httpRequest = http.Request('POST', url)
       ..headers.addAll(_modernPostHeaders(request))
       ..body = jsonEncode(request.toJson());
     final response = await _sendRequest(
       httpRequest,
       persistent: request.method == 'subscriptions/listen',
+      subscriptionState: subscriptionState,
     );
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final bodyText = await _readBoundedResponseBody(response, method: 'POST');
@@ -1060,10 +1251,21 @@ class StreamableHttpClientTransport implements MCPTransport {
     }
     final contentType = _responseHeader(response.headers, 'content-type');
     if (_isJsonContentType(contentType)) {
-      return _parseJsonResponse(response, expectedId: request.id);
+      final parsed = await _parseJsonResponse(response, expectedId: request.id);
+      if (subscriptionState != null &&
+          identical(_modernSubscriptions[request.id], subscriptionState) &&
+          identical(subscriptionState.attempt, subscriptionAttempt)) {
+        _finishModernSubscription(subscriptionState);
+      }
+      return parsed;
     }
     if (_isSseContentType(contentType)) {
-      return _parseSseResponse(response, request);
+      return _parseSseResponse(
+        response,
+        request,
+        subscriptionState: subscriptionState,
+        subscriptionAttempt: subscriptionAttempt,
+      );
     }
     await _drainResponse(response);
     throw MCPException(
@@ -1259,10 +1461,18 @@ class StreamableHttpClientTransport implements MCPTransport {
 
     Object? closeError;
     await _stopListener();
-    for (final subscription in _subscriptionStreams.values.toList()) {
-      await subscription.cancel();
+    final modernSubscriptions = _modernSubscriptions.values.toList();
+    _modernSubscriptions.clear();
+    for (final state in modernSubscriptions) {
+      state.reconnectTimer?.cancel();
+      state.requestLifetime?.abort();
+      await state.stream?.cancel();
+      state
+        ..reconnectTimer = null
+        ..requestLifetime = null
+        ..stream = null
+        ..attempt = null;
     }
-    _subscriptionStreams.clear();
     if (!_modern &&
         _sessionId != null &&
         !_sessionExpired &&
@@ -1342,6 +1552,23 @@ class StreamableHttpClientTransport implements MCPTransport {
       );
     }
   }
+}
+
+class _ModernSubscriptionLifetime {
+  _ModernSubscriptionLifetime(this.request);
+
+  final JsonRpcRequest request;
+  int reconnectAttempts = 0;
+  Timer? reconnectTimer;
+  StreamSubscription<_SseEvent>? stream;
+  _HttpRequestLifetime? requestLifetime;
+  _ModernSubscriptionAttempt? attempt;
+}
+
+class _ModernSubscriptionAttempt {
+  const _ModernSubscriptionAttempt({required this.reconnect});
+
+  final bool reconnect;
 }
 
 class _HttpRequestLifetime {

@@ -1,5 +1,16 @@
 ## 3.0.0
 
+- Bound and cancel HTTP request lifetimes; validate modern subscription acknowledgements and
+  prevent late acknowledgements from reviving canceled subscriptions.
+- Recover notification listeners after dead-stream/reconnect failures while preserving
+  unauthorized refresh errors and unexpected cleanup failures.
+- Reconnect acknowledged modern subscriptions after response EOF; preserve transport errors for
+  selected HTTP client rejections while keeping 408 and unclassified failures conservative.
+
+---
+
+## 2.0.0
+
 - Hardened Streamable HTTP reconnection, session cleanup, cancellation
   notifications, response trust boundaries, and concurrent shutdown.
 - Removed stdio lifecycle races and prevented cleanup from suppressing

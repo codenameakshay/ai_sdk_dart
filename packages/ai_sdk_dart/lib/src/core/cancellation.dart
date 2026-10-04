@@ -17,6 +17,9 @@ Future<T> raceWithCancellation<T>(
     return operation;
   }
   if (abortSignal.isCancelled) {
+    // The caller may have created an operation that rejects after it cancels
+    // the signal. Observe that late rejection even though cancellation wins.
+    operation.ignore();
     return Future<T>.error(const AiOperationCancelledError());
   }
 

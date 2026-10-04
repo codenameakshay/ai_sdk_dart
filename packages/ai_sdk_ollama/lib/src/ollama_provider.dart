@@ -162,6 +162,11 @@ class _OllamaLanguageModel extends LanguageModelV4 {
     }
     if (output is ToolResultOutputExecutionDenied) return output.reason;
     if (output is ToolResultOutputContent) {
+      if (output.parts.any((part) => part is! LanguageModelV4TextPart)) {
+        throw UnsupportedError(
+          'Ollama cannot serialize non-text tool result content.',
+        );
+      }
       return output.parts
           .whereType<LanguageModelV4TextPart>()
           .map((p) => p.text)
@@ -331,10 +336,13 @@ class _OllamaLanguageModel extends LanguageModelV4 {
           includeRawChunks: options.includeRawChunks,
           responseHeaders: responseHeaders,
           responseTimestamp: responseTimestamp,
+          isCancelled: () => cancellation.isCancelled,
         );
       } catch (e) {
         if (!controller.isClosed) {
-          controller.add(StreamPartError(error: e));
+          if (!cancellation.isCancelled) {
+            controller.add(StreamPartError(error: e));
+          }
           await controller.close();
         }
       } finally {
@@ -359,9 +367,11 @@ class _OllamaLanguageModel extends LanguageModelV4 {
     required bool includeRawChunks,
     required Map<String, String> responseHeaders,
     required DateTime responseTimestamp,
+    required bool Function() isCancelled,
   }) async {
     var textStarted = false;
     var sawAnyToolCall = false;
+    var sawTerminalEvent = false;
     Map<String, dynamic>? lastEvent;
     controller.add(const StreamPartStreamStart());
     await for (final line
@@ -420,6 +430,7 @@ class _OllamaLanguageModel extends LanguageModelV4 {
 
         final done = event['done'] as bool? ?? false;
         if (done) {
+          sawTerminalEvent = true;
           final doneReason = event['done_reason'] as String?;
           if (textStarted) {
             controller.add(const StreamPartTextEnd(id: 'text-0'));
@@ -447,6 +458,16 @@ class _OllamaLanguageModel extends LanguageModelV4 {
       } catch (_) {
         // Ignore malformed JSON lines.
       }
+    }
+    if (!sawTerminalEvent && !isCancelled()) {
+      controller.add(
+        StreamPartError(
+          error: AiApiCallError(
+            'Ollama stream ended before done: true.',
+            responseHeaders: responseHeaders,
+          ),
+        ),
+      );
     }
     await controller.close();
   }

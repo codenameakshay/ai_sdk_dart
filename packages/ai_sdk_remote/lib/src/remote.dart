@@ -521,6 +521,7 @@ class _ConversationReducer {
   final Map<String, int> _toolIndexes = {};
   int _currentStepStart = 0;
   Map<String, dynamic> _messageMetadata = {};
+  Map<String, dynamic> _messageExtra = {};
   ConversationMessageStatus _status = ConversationMessageStatus.streaming;
   bool _hasTerminalEvent = false;
   bool get hasTerminalEvent => _hasTerminalEvent;
@@ -640,10 +641,39 @@ class _ConversationReducer {
     _toolIndexes.clear();
     _inputBuffers.clear();
     _approvalCalls.clear();
-    _currentStepStart = 0;
-    _messageMetadata = event['messageMetadata'] == null
-        ? {}
-        : _map(event['messageMetadata'], 'messageMetadata');
+    ConversationMessage? continuedMessage;
+    for (final message in _messages) {
+      if (message.id == _assistantId &&
+          message.role == ConversationRole.assistant) {
+        continuedMessage = message;
+        break;
+      }
+    }
+    if (continuedMessage != null) {
+      _parts.addAll(continuedMessage.parts);
+      for (var index = 0; index < _parts.length; index++) {
+        final part = _parts[index];
+        if (part case final ToolCallPart call) {
+          _toolIndexes[call.callId] = index;
+        } else if (part case final ApprovalPart approval
+            when approval.approvalId != null) {
+          _approvalCalls[approval.approvalId!] = approval.callId;
+        }
+      }
+    }
+    _currentStepStart = continuedMessage == null ? 0 : _parts.length;
+    _messageMetadata = Map<String, dynamic>.of(
+      continuedMessage?.metadata ?? const {},
+    );
+    _messageExtra = Map<String, dynamic>.of(
+      continuedMessage?.extra ?? const {},
+    );
+    if (event['messageMetadata'] != null) {
+      _messageMetadata = _mergeProviderMetadata(
+        _messageMetadata,
+        _map(event['messageMetadata'], 'messageMetadata'),
+      );
+    }
     _status = ConversationMessageStatus.streaming;
   }
 
@@ -769,7 +799,7 @@ class _ConversationReducer {
     final dynamicTool =
         e['dynamic'] == true || (previousCall?.extra['dynamic'] == true);
     final part = ToolCallPart(
-      id: 'tool-$callId',
+      id: previousCall?.id ?? 'tool-$callId',
       callId: callId,
       name: name,
       arguments: args,
@@ -781,6 +811,10 @@ class _ConversationReducer {
         _optionalMap(e, 'providerMetadata'),
       ),
       extra: {
+        if (previousCall != null)
+          for (final entry in previousCall.extra.entries)
+            if (entry.key != 'inputPending' && entry.key != 'rawInput')
+              entry.key: entry.value,
         if (dynamicTool) 'dynamic': true,
         if (keepRaw) 'rawInput': rawInput,
       },
@@ -819,12 +853,25 @@ class _ConversationReducer {
       );
     }
     _approvalCalls[approvalId] = callId;
+    final previousIndex = _parts.indexWhere(
+      (part) =>
+          part is ApprovalPart &&
+          (part.approvalId == approvalId || part.callId == callId),
+    );
+    final previous = previousIndex < 0
+        ? null
+        : _parts[previousIndex] as ApprovalPart;
     _addPart(
       ApprovalPart(
-        id: 'approval-$approvalId',
+        id: previous?.id ?? 'approval-$approvalId',
         callId: callId,
         status: ApprovalStatus.pending,
         approvalId: approvalId,
+        metadata: _mergeProviderMetadata(
+          previous?.metadata ?? const {},
+          _optionalMap(e, 'providerMetadata'),
+        ),
+        extra: previous?.extra ?? const {},
       ),
     );
     _status = ConversationMessageStatus.pendingApproval;
@@ -837,20 +884,27 @@ class _ConversationReducer {
       throw RemoteProtocolException('Unknown approval $approvalId');
     }
     final index = _parts.indexWhere(
-      (part) => part.id == 'approval-$approvalId',
+      (part) => part is ApprovalPart && part.approvalId == approvalId,
     );
     if (index < 0) {
       throw RemoteProtocolException('Missing approval part $approvalId');
     }
+    final previous = _parts[index] as ApprovalPart;
     _parts[index] = ApprovalPart(
-      id: 'approval-$approvalId',
+      id: previous.id,
       callId: callId,
       status: e['approved'] == true
           ? ApprovalStatus.approved
           : ApprovalStatus.rejected,
       approvalId: approvalId,
-      metadata: _optionalMap(e, 'providerMetadata'),
-      extra: {if (e['reason'] case final String reason) 'reason': reason},
+      metadata: _mergeProviderMetadata(
+        previous.metadata,
+        _optionalMap(e, 'providerMetadata'),
+      ),
+      extra: {
+        ...previous.extra,
+        if (e['reason'] case final String reason) 'reason': reason,
+      },
     );
     _status = ConversationMessageStatus.streaming;
   }
@@ -860,18 +914,29 @@ class _ConversationReducer {
     if (!_toolIndexes.containsKey(callId)) {
       throw RemoteProtocolException('Tool output without input $callId');
     }
+    ToolResultPart? previousResult;
+    for (final part in _parts) {
+      if (part is ToolResultPart && part.callId == callId) {
+        previousResult = part;
+        break;
+      }
+    }
     _addPart(
       ToolResultPart(
-        id: 'result-$callId',
+        id: previousResult?.id ?? 'result-$callId',
         callId: callId,
         output: error ? _string(e, 'errorText') : e['output'],
         isError: error,
-        toolName: e['toolName'] as String?,
+        toolName: e['toolName'] as String? ?? previousResult?.toolName,
         outputKind:
             e['outputKind'] as String? ?? (error ? 'error_text' : 'json'),
         preliminary: e['preliminary'] == true,
         isDynamic: e['dynamic'] == true,
-        providerOptions: _optionalMap(e, 'providerMetadata'),
+        providerOptions: _mergeProviderMetadata(
+          previousResult?.providerOptions ?? const {},
+          _optionalMap(e, 'providerMetadata'),
+        ),
+        extra: previousResult?.extra ?? const {},
       ),
     );
   }
@@ -881,20 +946,28 @@ class _ConversationReducer {
     if (!_toolIndexes.containsKey(callId)) {
       throw RemoteProtocolException('Tool output without input $callId');
     }
+    final previousResult = _parts
+        .whereType<ToolResultPart>()
+        .where((result) => result.callId == callId)
+        .firstOrNull;
     _addPart(
       ToolResultPart(
-        id: 'denied-$callId',
+        id: previousResult?.id ?? 'denied-$callId',
         callId: callId,
         output: null,
         isError: true,
-        toolName: e['toolName'] as String?,
+        toolName: e['toolName'] as String? ?? previousResult?.toolName,
         outputKind: 'execution_denied',
         executionDeniedReason:
             e['reason'] as String? ?? 'Tool execution denied',
         executionDeniedApprovalId: e['approvalId'] as String?,
         preliminary: e['preliminary'] == true,
         isDynamic: e['dynamic'] == true,
-        providerOptions: _optionalMap(e, 'providerMetadata'),
+        providerOptions: _mergeProviderMetadata(
+          previousResult?.providerOptions ?? const {},
+          _optionalMap(e, 'providerMetadata'),
+        ),
+        extra: previousResult?.extra ?? const {},
       ),
     );
   }
@@ -992,8 +1065,18 @@ class _ConversationReducer {
       status: _status,
       parts: List.of(_parts),
       metadata: _messageMetadata,
+      extra: _messageExtra,
     );
-    final messages = [..._messages.where((m) => m.id != message.id), message];
+    final index = _messages.indexWhere(
+      (item) =>
+          item.id == message.id && item.role == ConversationRole.assistant,
+    );
+    final messages = [..._messages];
+    if (index < 0) {
+      messages.add(message);
+    } else {
+      messages[index] = message;
+    }
     return Conversation(
       id: _conversationId,
       messages: messages,

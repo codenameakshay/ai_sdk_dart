@@ -1074,6 +1074,342 @@ void main() {
   });
 
   test(
+    'chained approvals retain complete history and one result per call',
+    () async {
+      const firstCall = LanguageModelV4ToolCallPart(
+        toolCallId: 'call-first',
+        toolName: 'deleteFile',
+        input: {'path': '/tmp/first'},
+      );
+      const secondCall = LanguageModelV4ToolCallPart(
+        toolCallId: 'call-second',
+        toolName: 'deleteFile',
+        input: {'path': '/tmp/second'},
+      );
+      final model = _ApprovalSequenceModel([
+        [const LanguageModelV4TextPart(text: 'first phase'), firstCall],
+        [const LanguageModelV4TextPart(text: 'second phase'), secondCall],
+        [const LanguageModelV4TextPart(text: 'complete')],
+      ]);
+      var executions = 0;
+      final backend = LocalConversationBackend(
+        agent: ToolLoopAgent(
+          model: model,
+          tools: {'deleteFile': _countedApprovalTool(() => executions++)},
+        ),
+        initial: _empty(),
+      );
+
+      await backend.send('run the approved steps');
+      await pumpUntil(
+        () =>
+            backend.conversation.messages.last.status ==
+            ConversationMessageStatus.pendingApproval,
+      );
+      Future<void> approveCall(String callId) async {
+        final approval = backend.conversation.messages.last.parts
+            .whereType<ApprovalPart>()
+            .singleWhere((part) => part.callId == callId);
+        await backend.respondToApproval(
+          approvalId: approval.approvalId!,
+          approved: true,
+        );
+      }
+
+      await approveCall('call-first');
+      await pumpUntil(
+        () =>
+            backend.conversation.messages.last.status ==
+            ConversationMessageStatus.pendingApproval,
+      );
+      await approveCall('call-second');
+      await pumpUntil(
+        () =>
+            backend.conversation.messages.last.status ==
+                ConversationMessageStatus.complete &&
+            backend.conversation.messages.last.parts.whereType<TextPart>().any(
+              (part) => part.text == 'complete',
+            ),
+      );
+
+      expect(executions, 2);
+      final assistant = backend.conversation.messages.last;
+      expect(assistant.parts.whereType<TextPart>().map((part) => part.text), [
+        'first phase',
+        'second phase',
+        'complete',
+      ]);
+      expect(
+        assistant.parts.whereType<ToolCallPart>().map((part) => part.callId),
+        ['call-first', 'call-second'],
+      );
+      expect(
+        assistant.parts.whereType<ToolResultPart>().map((part) => part.callId),
+        ['call-first', 'call-second'],
+      );
+      expect(
+        assistant.parts.map(
+          (part) => switch (part) {
+            TextPart(:final text) => 'text:$text',
+            ToolCallPart(:final callId) => 'call:$callId',
+            ApprovalPart(:final callId) => 'approval:$callId',
+            ToolResultPart(:final callId) => 'result:$callId',
+            _ => part.type,
+          },
+        ),
+        [
+          'text:first phase',
+          'call:call-first',
+          'approval:call-first',
+          'result:call-first',
+          'text:second phase',
+          'call:call-second',
+          'approval:call-second',
+          'result:call-second',
+          'text:complete',
+        ],
+      );
+      for (final prompt in model.seenMessages.skip(1)) {
+        final results = prompt
+            .expand((message) => message.content)
+            .whereType<LanguageModelV4ToolResultPart>()
+            .map((part) => part.toolCallId)
+            .toList();
+        expect(results.toSet(), containsAll(['call-first']));
+        if (prompt == model.seenMessages.last) {
+          expect(results, ['call-first', 'call-second']);
+        }
+      }
+
+      await backend.send('follow up');
+      await pumpUntil(
+        () =>
+            backend.conversation.messages.last.status ==
+                ConversationMessageStatus.complete &&
+            backend.conversation.messages.last.parts.whereType<TextPart>().any(
+              (part) => part.text == 'complete',
+            ),
+      );
+      final laterPrompt = model.seenMessages.last;
+      expect(laterPrompt.map((message) => message.role), [
+        LanguageModelV4Role.user,
+        LanguageModelV4Role.assistant,
+        LanguageModelV4Role.user,
+      ]);
+      expect(
+        laterPrompt[1].content.map(
+          (part) => switch (part) {
+            LanguageModelV4TextPart(:final text) => 'text:$text',
+            LanguageModelV4ToolCallPart(:final toolCallId) =>
+              'call:$toolCallId',
+            LanguageModelV4ToolResultPart(:final toolCallId) =>
+              'result:$toolCallId',
+            _ => part.runtimeType.toString(),
+          },
+        ),
+        [
+          'text:first phase',
+          'call:call-first',
+          'result:call-first',
+          'text:second phase',
+          'call:call-second',
+          'result:call-second',
+          'text:complete',
+        ],
+      );
+      final laterResults = laterPrompt
+          .expand((message) => message.content)
+          .whereType<LanguageModelV4ToolResultPart>()
+          .map((part) => part.toolCallId)
+          .toList();
+      expect(laterResults, ['call-first', 'call-second']);
+      expect(
+        laterPrompt
+            .expand((message) => message.content)
+            .whereType<LanguageModelV4TextPart>()
+            .map((part) => part.text),
+        containsAll(['first phase', 'second phase', 'complete']),
+      );
+      await backend.dispose();
+    },
+  );
+
+  test(
+    'restoring between chained approvals does not rerun completed tools',
+    () async {
+      const firstCall = LanguageModelV4ToolCallPart(
+        toolCallId: 'restore-first',
+        toolName: 'deleteFile',
+        input: {'path': '/tmp/first'},
+      );
+      const deniedCall = LanguageModelV4ToolCallPart(
+        toolCallId: 'restore-denied',
+        toolName: 'deleteFile',
+        input: {'path': '/tmp/denied'},
+      );
+      const secondCall = LanguageModelV4ToolCallPart(
+        toolCallId: 'restore-second',
+        toolName: 'deleteFile',
+        input: {'path': '/tmp/second'},
+      );
+      final firstModel = _ApprovalSequenceModel([
+        [firstCall, deniedCall],
+        [secondCall],
+      ]);
+      final originalExecutions = <String>[];
+      Tool<Map<String, dynamic>, String> trackedTool(List<String> executions) =>
+          Tool<Map<String, dynamic>, String>(
+            inputSchema: Schema<Map<String, dynamic>>(
+              jsonSchema: const {'type': 'object'},
+              fromJson: (json) => json,
+            ),
+            approvalPolicy: ToolApprovalPolicy.always,
+            executeDynamic: (input, options) async {
+              final path = (input as Map<String, dynamic>)['path'] as String;
+              executions.add(path);
+              if (path == '/tmp/first') throw StateError('first tool failed');
+              return 'done';
+            },
+          );
+      final original = LocalConversationBackend(
+        agent: ToolLoopAgent(
+          model: firstModel,
+          tools: {'deleteFile': trackedTool(originalExecutions)},
+        ),
+        initial: _empty(),
+      );
+      await original.send('run both steps');
+      await pumpUntil(
+        () =>
+            original.conversation.messages.last.status ==
+            ConversationMessageStatus.pendingApproval,
+      );
+      final firstApprovals = original.conversation.messages.last.parts
+          .whereType<ApprovalPart>()
+          .toList();
+      final firstApproval = firstApprovals.singleWhere(
+        (part) => part.callId == 'restore-first',
+      );
+      final deniedApproval = firstApprovals.singleWhere(
+        (part) => part.callId == 'restore-denied',
+      );
+      await original.respondToApproval(
+        approvalId: firstApproval.approvalId!,
+        approved: true,
+      );
+      await original.respondToApproval(
+        approvalId: deniedApproval.approvalId!,
+        approved: false,
+        reason: 'not authorized',
+      );
+      await pumpUntil(
+        () =>
+            original.conversation.messages.last.status ==
+                ConversationMessageStatus.pendingApproval &&
+            original.conversation.messages.last.parts
+                .whereType<ApprovalPart>()
+                .any((part) => part.callId == 'restore-second'),
+      );
+      expect(originalExecutions, ['/tmp/first']);
+      final beforeRestore = original.conversation.messages.last;
+      final beforeRestoreResults = beforeRestore.parts
+          .whereType<ToolResultPart>()
+          .toList();
+      expect(beforeRestoreResults.map((part) => part.callId), [
+        'restore-first',
+        'restore-denied',
+      ]);
+      expect(
+        beforeRestoreResults
+            .singleWhere((part) => part.callId == 'restore-first')
+            .isError,
+        isTrue,
+      );
+      expect(
+        beforeRestoreResults
+            .singleWhere((part) => part.callId == 'restore-denied')
+            .executionDeniedReason,
+        'not authorized',
+      );
+
+      final restoredModel = _ApprovalSequenceModel([
+        [const LanguageModelV4TextPart(text: 'restored complete')],
+      ]);
+      final restoredExecutions = <String>[];
+      final restored = LocalConversationBackend(
+        agent: ToolLoopAgent(
+          model: restoredModel,
+          tools: {'deleteFile': trackedTool(restoredExecutions)},
+        ),
+        initial: _empty(),
+      );
+      await restored.restore(ConversationCodec.encode(original.conversation));
+      final restoredPending = restored.conversation.messages.last.parts
+          .whereType<ApprovalPart>()
+          .singleWhere((part) => part.callId == 'restore-second');
+      await restored.respondToApproval(
+        approvalId: restoredPending.approvalId!,
+        approved: true,
+      );
+      await pumpUntil(
+        () =>
+            restored.conversation.messages.last.status ==
+                ConversationMessageStatus.complete &&
+            restored.conversation.messages.last.parts.whereType<TextPart>().any(
+              (part) => part.text == 'restored complete',
+            ),
+      );
+
+      expect(restoredExecutions, ['/tmp/second']);
+      final restoredResults = restored.conversation.messages.last.parts
+          .whereType<ToolResultPart>()
+          .toList();
+      expect(restoredResults.map((part) => part.callId), [
+        'restore-first',
+        'restore-denied',
+        'restore-second',
+      ]);
+      expect(
+        restoredResults
+            .singleWhere((part) => part.callId == 'restore-first')
+            .isError,
+        isTrue,
+      );
+      expect(
+        restoredResults
+            .singleWhere((part) => part.callId == 'restore-denied')
+            .executionDeniedReason,
+        'not authorized',
+      );
+      final restoredPrompt = restoredModel.seenMessages.single;
+      expect(
+        restoredPrompt
+            .expand((message) => message.content)
+            .map(
+              (part) => switch (part) {
+                LanguageModelV4TextPart(:final text) => 'text:$text',
+                LanguageModelV4ToolCallPart(:final toolCallId) =>
+                  'call:$toolCallId',
+                LanguageModelV4ToolResultPart(:final toolCallId) =>
+                  'result:$toolCallId',
+                _ => part.runtimeType.toString(),
+              },
+            ),
+        containsAllInOrder([
+          'call:restore-first',
+          'call:restore-denied',
+          'result:restore-first',
+          'result:restore-denied',
+          'call:restore-second',
+          'result:restore-second',
+        ]),
+      );
+      await original.dispose();
+      await restored.dispose();
+    },
+  );
+
+  test(
     'persists a pending approval and resumes it exactly once after restore',
     () async {
       final first = LocalConversationBackend(
@@ -1718,6 +2054,8 @@ void main() {
     expect(result.isError, isTrue);
     expect(result.outputKind, 'text');
     expect(result.output, contains('tool failed'));
+    expect(result.executionDeniedReason, isNull);
+    expect(result.executionDeniedApprovalId, isNull);
     await backend.dispose();
   });
 

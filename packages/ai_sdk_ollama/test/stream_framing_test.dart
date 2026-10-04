@@ -50,6 +50,64 @@ void main() {
     );
   }
 
+  test('reports EOF before done as truncation', () async {
+    final client = Dio()
+      ..httpClientAdapter = _StreamAdapter(
+        Stream.value(
+          Uint8List.fromList(
+            utf8.encode('{"message":{"content":"partial"},"done":false}\n'),
+          ),
+        ),
+      );
+    addTearDown(() => client.close(force: true));
+    final result = await OllamaProvider(client: client)
+        .call('llama3')
+        .doStream(
+          const LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(messages: []),
+          ),
+        );
+    final parts = await result.stream.toList();
+    expect(parts.whereType<StreamPartError>(), hasLength(1));
+    expect(parts.whereType<StreamPartFinish>(), isEmpty);
+  });
+
+  test('empty response body reports truncation after one start', () async {
+    final client = Dio()
+      ..httpClientAdapter = _StreamAdapter(const Stream.empty());
+    addTearDown(() => client.close(force: true));
+    final result = await OllamaProvider(client: client)
+        .call('llama3')
+        .doStream(
+          const LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(messages: []),
+          ),
+        );
+    final parts = await result.stream.toList();
+    expect(parts.whereType<StreamPartStreamStart>(), hasLength(1));
+    expect(parts.whereType<StreamPartError>(), hasLength(1));
+    expect(parts.whereType<StreamPartFinish>(), isEmpty);
+  });
+
+  test('done-only response remains a valid empty finish', () async {
+    final client = Dio()
+      ..httpClientAdapter = _StreamAdapter(
+        Stream.value(Uint8List.fromList(utf8.encode('{"done":true}'))),
+      );
+    addTearDown(() => client.close(force: true));
+    final result = await OllamaProvider(client: client)
+        .call('llama3')
+        .doStream(
+          const LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(messages: []),
+          ),
+        );
+    final parts = await result.stream.toList();
+    expect(parts.whereType<StreamPartStreamStart>(), hasLength(1));
+    expect(parts.whereType<StreamPartError>(), isEmpty);
+    expect(parts.whereType<StreamPartFinish>(), hasLength(1));
+  });
+
   test('reports a mid-stream error line as a stream error', () async {
     final body = [
       jsonEncode({

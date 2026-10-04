@@ -91,23 +91,34 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
     var (thinking, cacheControl, effort, cleanedPo) = await cancellation.run(
       () => _extractAnthropicOptions(po),
     );
+    final providerThinkingConfigured = thinking != null;
+    ({Map<String, dynamic>? thinking, String? effort})? mappedReasoning;
     if (effort == null) {
-      final mapped = await cancellation.run(
+      mappedReasoning = await cancellation.run(
         () => _anthropicReasoning(
           options.reasoning,
           modelId: modelId,
           maxOutputTokens: options.maxOutputTokens,
         ),
       );
-      if (mapped != null) {
-        thinking ??= mapped.thinking;
-        effort = mapped.effort;
+      if (mappedReasoning != null) {
+        thinking ??= mappedReasoning.thinking;
+        effort = mappedReasoning.effort;
       }
     }
+    final maxTokens = await cancellation.run(
+      () => _anthropicMaxTokens(
+        requested: options.maxOutputTokens,
+        thinking: thinking,
+        generatedLegacyThinking:
+            !providerThinkingConfigured &&
+            mappedReasoning?.thinking?['type'] == 'enabled',
+      ),
+    );
     final requestBody = await cancellation.run(
       () => {
         'model': modelId,
-        'max_tokens': options.maxOutputTokens ?? 1024,
+        'max_tokens': maxTokens,
         'system': options.prompt.system,
         'messages': _toAnthropicMessages(options.prompt),
         if (options.temperature != null) 'temperature': options.temperature,
@@ -259,23 +270,34 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
     var (thinking, cacheControl, effort, cleanedPo) = await cancellation.run(
       () => _extractAnthropicOptions(po),
     );
+    final providerThinkingConfigured = thinking != null;
+    ({Map<String, dynamic>? thinking, String? effort})? mappedReasoning;
     if (effort == null) {
-      final mapped = await cancellation.run(
+      mappedReasoning = await cancellation.run(
         () => _anthropicReasoning(
           options.reasoning,
           modelId: modelId,
           maxOutputTokens: options.maxOutputTokens,
         ),
       );
-      if (mapped != null) {
-        thinking ??= mapped.thinking;
-        effort = mapped.effort;
+      if (mappedReasoning != null) {
+        thinking ??= mappedReasoning.thinking;
+        effort = mappedReasoning.effort;
       }
     }
+    final maxTokens = await cancellation.run(
+      () => _anthropicMaxTokens(
+        requested: options.maxOutputTokens,
+        thinking: thinking,
+        generatedLegacyThinking:
+            !providerThinkingConfigured &&
+            mappedReasoning?.thinking?['type'] == 'enabled',
+      ),
+    );
     final requestBody = await cancellation.run(
       () => {
         'model': modelId,
-        'max_tokens': options.maxOutputTokens ?? 1024,
+        'max_tokens': maxTokens,
         'system': options.prompt.system,
         'messages': _toAnthropicMessages(options.prompt),
         'stream': true,
@@ -331,6 +353,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
     final reasoningState = <int, _ReasoningState>{};
     var textStarted = false;
     var streamStarted = false;
+    var sawTerminalEvent = false;
     LanguageModelV4Usage? streamUsage;
     final streamWarnings = <LanguageModelV4Warning>[];
     String? responseId;
@@ -501,6 +524,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
               }
               final stopReason = delta['stop_reason']?.toString();
               if (stopReason != null) {
+                sawTerminalEvent = true;
                 if (textStarted) {
                   controller.add(const StreamPartTextEnd(id: 'text-0'));
                 }
@@ -563,16 +587,39 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
               }
               break;
             case 'error':
-              controller.add(StreamPartError(error: json));
-              break;
+              controller.add(
+                StreamPartError(
+                  error: AiApiCallError.fromResponse(
+                    statusCode: response.statusCode,
+                    url: response.requestOptions.uri.toString(),
+                    body: json,
+                    responseHeaders: responseHeaders,
+                    provider: provider,
+                  ),
+                ),
+              );
+              return;
           }
         }
-      } catch (error) {
-        if (!streamStarted) {
-          streamStarted = true;
-          controller.add(const StreamPartStreamStart());
+        if (!sawTerminalEvent && !cancellation.isCancelled) {
+          if (!streamStarted) {
+            streamStarted = true;
+            controller.add(const StreamPartStreamStart());
+          }
+          controller.add(
+            StreamPartError(
+              error: _anthropicTruncatedStreamError(response, responseHeaders),
+            ),
+          );
         }
-        controller.add(StreamPartError(error: error));
+      } catch (error) {
+        if (!cancellation.isCancelled && !controller.isClosed) {
+          if (!streamStarted) {
+            streamStarted = true;
+            controller.add(const StreamPartStreamStart());
+          }
+          controller.add(StreamPartError(error: error));
+        }
       } finally {
         if (!streamStarted) {
           controller.add(const StreamPartStreamStart());
@@ -1069,6 +1116,55 @@ Map<String, dynamic> _anthropicOutputConfig(
     effort: null,
   );
 }
+
+int _anthropicMaxTokens({
+  required int? requested,
+  required Map<String, dynamic>? thinking,
+  required bool generatedLegacyThinking,
+}) {
+  final rawBudget = thinking == null || thinking['type'] != 'enabled'
+      ? null
+      : thinking['budget_tokens'];
+  if (rawBudget != null && rawBudget is! int) {
+    throw ArgumentError.value(
+      rawBudget,
+      'thinking.budget_tokens',
+      'must be an integer',
+    );
+  }
+  final budget = rawBudget as int?;
+  if (budget != null && budget < 1024) {
+    throw ArgumentError.value(
+      budget,
+      'thinking.budget_tokens',
+      'must be at least 1024',
+    );
+  }
+  if (budget != null && requested != null && budget >= requested) {
+    throw ArgumentError.value(
+      requested,
+      'maxOutputTokens',
+      'must be greater than thinking.budget_tokens ($budget)',
+    );
+  }
+
+  final defaultMaximum = generatedLegacyThinking ? 4096 : 1024;
+  if (requested != null) return requested;
+  if (budget != null && !generatedLegacyThinking) {
+    return budget + defaultMaximum;
+  }
+  return defaultMaximum;
+}
+
+AiApiCallError _anthropicTruncatedStreamError(
+  Response<ResponseBody> response,
+  Map<String, String> responseHeaders,
+) => AiApiCallError(
+  'Anthropic stream ended before message_delta stop_reason.',
+  statusCode: response.statusCode,
+  url: response.requestOptions.uri.toString(),
+  responseHeaders: responseHeaders,
+);
 
 /// Maps a [DioException] from a non-2xx response to a typed [AiApiCallError]
 /// carrying the provider's message/status/code. Drains a streamed error body

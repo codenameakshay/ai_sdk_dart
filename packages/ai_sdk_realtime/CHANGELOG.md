@@ -12,3 +12,5 @@
   identities that protect against duplicate execution.
 - Detached cancellation observers through the shared provider abort support.
 - Added a preview example and package documentation.
+- Kept preview qualification explicit; device, transport, and lifecycle
+  qualification is still required before stable release.

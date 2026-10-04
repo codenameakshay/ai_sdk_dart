@@ -515,6 +515,11 @@ void main() {
           ),
         },
         maxSteps: 3,
+        prepareStep: (context) => GenerateTextPrepareStepResult(
+          toolChoice: context.stepNumber == 0
+              ? const ToolChoiceSpecific(toolName: 'weather')
+              : const ToolChoiceAuto(),
+        ),
       );
 
       expect(specificResult.text, contains('specific done'));

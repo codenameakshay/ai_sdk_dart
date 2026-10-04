@@ -2164,6 +2164,33 @@ void main() {
       );
     });
 
+    test('doStream reports EOF before finishReason as truncation', () async {
+      final server = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.set('content-type', 'text/event-stream');
+        request.response.write(
+          'data: {"candidates":[{"content":{"parts":[{"text":"partial"}]}}]}\n\n',
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final stream =
+          await GoogleGenerativeAIProvider(
+                apiKey: 'test',
+                baseUrl: server.baseUrl,
+              )
+              .call('gemini-2.0-flash')
+              .doStream(
+                LanguageModelV4CallOptions(
+                  prompt: LanguageModelV4Prompt(messages: []),
+                ),
+              );
+      final parts = await stream.stream.toList();
+      expect(parts.whereType<StreamPartError>(), hasLength(1));
+      expect(parts.whereType<StreamPartFinish>(), isEmpty);
+    });
+
     test(
       'doStream emits StreamPartError when reading the body fails',
       () async {

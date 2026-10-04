@@ -36,7 +36,7 @@ class RemoteCancellationToken {
 
   Future<void> dispose() async {
     cancel();
-    await _changes.close();
+    unawaited(_changes.close().catchError((Object _) {}));
   }
 }
 
@@ -356,7 +356,7 @@ List<Map<String, dynamic>> _toUiMessages(Conversation conversation) {
         case SourcePart():
           parts.add({
             'type': 'source-url',
-            'sourceId': part.id,
+            'sourceId': part.sourceId ?? part.id,
             'url': part.uri,
             if (part.title != null) 'title': part.title,
             if (part.providerMetadata.isNotEmpty)
@@ -365,7 +365,7 @@ List<Map<String, dynamic>> _toUiMessages(Conversation conversation) {
         case DocumentSourcePart():
           parts.add({
             'type': 'source-document',
-            'sourceId': part.id,
+            'sourceId': part.sourceId ?? part.id,
             'mediaType': part.mediaType,
             'title': part.title,
             if (part.name != null) 'filename': part.name,
@@ -616,13 +616,14 @@ class _ConversationReducer {
             final part = _parts[index];
             if (part is ToolCallPart) _toolIndexes[part.callId] = index;
           }
-          if (_status == ConversationMessageStatus.failed ||
-              (_status == ConversationMessageStatus.pendingApproval &&
-                  !_parts.any(
-                    (part) =>
-                        part is ApprovalPart &&
-                        part.status == ApprovalStatus.pending,
-                  ))) {
+          final hasPendingApproval = _parts.any(
+            (part) =>
+                part is ApprovalPart && part.status == ApprovalStatus.pending,
+          );
+          if (hasPendingApproval) {
+            _status = ConversationMessageStatus.pendingApproval;
+          } else if (_status == ConversationMessageStatus.pendingApproval ||
+              _status == ConversationMessageStatus.failed) {
             _status = ConversationMessageStatus.streaming;
           }
           _currentStepStart = _parts.length;
@@ -674,7 +675,13 @@ class _ConversationReducer {
         _map(event['messageMetadata'], 'messageMetadata'),
       );
     }
-    _status = ConversationMessageStatus.streaming;
+    _status =
+        _parts.any(
+          (part) =>
+              part is ApprovalPart && part.status == ApprovalStatus.pending,
+        )
+        ? ConversationMessageStatus.pendingApproval
+        : ConversationMessageStatus.streaming;
   }
 
   void _textStart(Map<String, dynamic> e, {required bool reasoning}) {
@@ -906,7 +913,13 @@ class _ConversationReducer {
         if (e['reason'] case final String reason) 'reason': reason,
       },
     );
-    _status = ConversationMessageStatus.streaming;
+    _status =
+        _parts.any(
+          (part) =>
+              part is ApprovalPart && part.status == ApprovalStatus.pending,
+        )
+        ? ConversationMessageStatus.pendingApproval
+        : ConversationMessageStatus.streaming;
   }
 
   void _toolOutput(Map<String, dynamic> e, bool error) {
@@ -972,23 +985,41 @@ class _ConversationReducer {
     );
   }
 
-  void _sourceUrl(Map<String, dynamic> e) => _addPart(
-    SourcePart(
-      id: 'source-${_string(e, 'sourceId')}',
-      uri: _string(e, 'url'),
-      title: e['title'] as String?,
-      providerMetadata: _optionalMap(e, 'providerMetadata'),
-    ),
-  );
-  void _sourceDocument(Map<String, dynamic> e) => _addPart(
-    DocumentSourcePart(
-      id: 'source-${_string(e, 'sourceId')}',
-      mediaType: _string(e, 'mediaType'),
-      title: _string(e, 'title'),
-      name: e['filename'] as String?,
-      providerMetadata: _optionalMap(e, 'providerMetadata'),
-    ),
-  );
+  void _sourceUrl(Map<String, dynamic> e) {
+    final sourceId = _string(e, 'sourceId');
+    final previous = _parts
+        .whereType<SourcePart>()
+        .where((part) => part.sourceId == sourceId)
+        .firstOrNull;
+    _addPart(
+      SourcePart(
+        id: previous?.id ?? _uniqueId('source-url-$sourceId'),
+        sourceId: sourceId,
+        uri: _string(e, 'url'),
+        title: e['title'] as String?,
+        providerMetadata: _optionalMap(e, 'providerMetadata'),
+      ),
+    );
+  }
+
+  void _sourceDocument(Map<String, dynamic> e) {
+    final sourceId = _string(e, 'sourceId');
+    final previous = _parts
+        .whereType<DocumentSourcePart>()
+        .where((part) => part.sourceId == sourceId)
+        .firstOrNull;
+    _addPart(
+      DocumentSourcePart(
+        id: previous?.id ?? _uniqueId('source-document-$sourceId'),
+        sourceId: sourceId,
+        mediaType: _string(e, 'mediaType'),
+        title: _string(e, 'title'),
+        name: e['filename'] as String?,
+        providerMetadata: _optionalMap(e, 'providerMetadata'),
+      ),
+    );
+  }
+
   void _file(Map<String, dynamic> e, {required bool reasoning}) {
     final url = e['url'] as String?;
     final typedData = _fileData(e['data']);

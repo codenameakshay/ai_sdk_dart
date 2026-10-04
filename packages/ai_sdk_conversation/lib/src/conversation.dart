@@ -278,9 +278,14 @@ class ImagePart extends ConversationPart {
     if (uri != null) 'uri': uri,
     if (mimeType != null) 'mimeType': mimeType,
     if (data case final ConversationFileBytes bytes)
-      'data': {'kind': 'bytes', 'base64': base64Encode(bytes.bytes)},
+      'data': {
+        ...bytes.extra,
+        'kind': 'bytes',
+        'base64': base64Encode(bytes.bytes),
+      },
     if (data case final ConversationFileProviderReference reference)
       'data': {
+        ...reference.extra,
         'kind': 'provider_reference',
         'namespace': reference.namespace,
         'id': reference.id,
@@ -294,13 +299,16 @@ class RedactedReasoningPart extends ConversationPart {
   RedactedReasoningPart({
     required super.id,
     required Uint8List data,
+    Map<String, dynamic> dataExtra = const {},
     Map<String, dynamic> providerOptions = const {},
     super.extra,
   }) : data = Uint8List.fromList(data).asUnmodifiableView(),
+       dataExtra = _freezeMap(dataExtra),
        providerOptions = _freezeMap(providerOptions),
        super(type: 'redacted_reasoning');
 
   final Uint8List data;
+  final Map<String, dynamic> dataExtra;
   final Map<String, dynamic> providerOptions;
 
   @override
@@ -308,7 +316,7 @@ class RedactedReasoningPart extends ConversationPart {
     ...extra,
     'id': id,
     'type': type,
-    'data': {'kind': 'bytes', 'base64': base64Encode(data)},
+    'data': {...dataExtra, 'kind': 'bytes', 'base64': base64Encode(data)},
     if (providerOptions.isNotEmpty) 'providerOptions': providerOptions,
   };
 }
@@ -352,9 +360,14 @@ class ReasoningFilePart extends ConversationPart {
     'mimeType': mimeType,
     if (name != null) 'name': name,
     if (data case final ConversationFileBytes bytes)
-      'data': {'kind': 'bytes', 'base64': base64Encode(bytes.bytes)},
+      'data': {
+        ...bytes.extra,
+        'kind': 'bytes',
+        'base64': base64Encode(bytes.bytes),
+      },
     if (data case final ConversationFileProviderReference reference)
       'data': {
+        ...reference.extra,
         'kind': 'provider_reference',
         'namespace': reference.namespace,
         'id': reference.id,
@@ -368,16 +381,21 @@ sealed class ConversationFileData {
 }
 
 class ConversationFileBytes extends ConversationFileData {
-  ConversationFileBytes(Uint8List bytes)
-    : bytes = Uint8List.fromList(bytes).asUnmodifiableView();
+  ConversationFileBytes(
+    Uint8List bytes, {
+    Map<String, dynamic> extra = const {},
+  }) : bytes = Uint8List.fromList(bytes).asUnmodifiableView(),
+       extra = _freezeMap(extra);
   final Uint8List bytes;
+  final Map<String, dynamic> extra;
 }
 
 class ConversationFileProviderReference extends ConversationFileData {
   ConversationFileProviderReference({
     required this.namespace,
     required this.id,
-  }) {
+    Map<String, dynamic> extra = const {},
+  }) : extra = _freezeMap(extra) {
     if (namespace.isEmpty || id.isEmpty) {
       throw const ConversationValidationException(
         'Provider file data requires a non-empty namespace and id',
@@ -386,6 +404,7 @@ class ConversationFileProviderReference extends ConversationFileData {
   }
   final String namespace;
   final String id;
+  final Map<String, dynamic> extra;
 }
 
 class FilePart extends ConversationPart {
@@ -427,9 +446,14 @@ class FilePart extends ConversationPart {
     'mimeType': mimeType,
     if (name != null) 'name': name,
     if (data case final ConversationFileBytes bytes)
-      'data': {'kind': 'bytes', 'base64': base64Encode(bytes.bytes)},
+      'data': {
+        ...bytes.extra,
+        'kind': 'bytes',
+        'base64': base64Encode(bytes.bytes),
+      },
     if (data case final ConversationFileProviderReference reference)
       'data': {
+        ...reference.extra,
         'kind': 'provider_reference',
         'namespace': reference.namespace,
         'id': reference.id,
@@ -443,6 +467,7 @@ class SourcePart extends ConversationPart {
   SourcePart({
     required super.id,
     required this.uri,
+    this.sourceId,
     this.title,
     Map<String, dynamic> metadata = const {},
     Map<String, dynamic> providerMetadata = const {},
@@ -451,6 +476,9 @@ class SourcePart extends ConversationPart {
        providerMetadata = _freezeMap(providerMetadata),
        super(type: 'source');
   final String uri;
+
+  /// Provider/UI source identity, retained separately from this part's ID.
+  final String? sourceId;
   final String? title;
   final Map<String, dynamic> metadata;
   final Map<String, dynamic> providerMetadata;
@@ -460,6 +488,7 @@ class SourcePart extends ConversationPart {
     'id': id,
     'type': type,
     'uri': uri,
+    if (sourceId != null) 'sourceId': sourceId,
     if (title != null) 'title': title,
     if (metadata.isNotEmpty) 'metadata': metadata,
     if (providerMetadata.isNotEmpty) 'providerMetadata': providerMetadata,
@@ -470,6 +499,7 @@ class SourcePart extends ConversationPart {
 class DocumentSourcePart extends ConversationPart {
   DocumentSourcePart({
     required super.id,
+    this.sourceId,
     required this.mediaType,
     required this.title,
     this.name,
@@ -479,6 +509,9 @@ class DocumentSourcePart extends ConversationPart {
        super(type: 'source-document');
 
   final String mediaType;
+
+  /// Provider/UI source identity, retained separately from this part's ID.
+  final String? sourceId;
   final String title;
   final String? name;
   final Map<String, dynamic> providerMetadata;
@@ -488,6 +521,7 @@ class DocumentSourcePart extends ConversationPart {
     ...extra,
     'id': id,
     'type': type,
+    if (sourceId != null) 'sourceId': sourceId,
     'mediaType': mediaType,
     'title': title,
     if (name != null) 'name': name,
@@ -761,6 +795,7 @@ class ConversationCodec {
         return RedactedReasoningPart(
           id: id,
           data: _decodeBytes(json['data'], 'Redacted reasoning'),
+          dataExtra: _bytesExtra(json['data'], 'Redacted reasoning'),
           providerOptions: _optionalMap(json, 'providerOptions'),
           extra: _extras(json, {'id', 'type', 'data', 'providerOptions'}),
         );
@@ -806,6 +841,7 @@ class ConversationCodec {
         return SourcePart(
           id: id,
           uri: _string(json, 'uri'),
+          sourceId: _optionalString(json, 'sourceId'),
           title: _optionalString(json, 'title'),
           metadata: _optionalMap(json, 'metadata'),
           providerMetadata: _optionalMap(json, 'providerMetadata'),
@@ -813,6 +849,7 @@ class ConversationCodec {
             'id',
             'type',
             'uri',
+            'sourceId',
             'title',
             'metadata',
             'providerMetadata',
@@ -821,6 +858,7 @@ class ConversationCodec {
       case 'source-document':
         return DocumentSourcePart(
           id: id,
+          sourceId: _optionalString(json, 'sourceId'),
           mediaType: _string(json, 'mediaType'),
           title: _string(json, 'title'),
           name: _optionalString(json, 'name'),
@@ -828,6 +866,7 @@ class ConversationCodec {
           extra: _extras(json, {
             'id',
             'type',
+            'sourceId',
             'mediaType',
             'title',
             'name',
@@ -979,6 +1018,7 @@ ConversationFileData? _decodeFileData(Object? wireData, String label) {
       try {
         return ConversationFileBytes(
           Uint8List.fromList(base64Decode(wireData['base64'] as String)),
+          extra: _extras(_wireMap(wireData, '$label data'), {'kind', 'base64'}),
         );
       } on FormatException {
         throw ConversationValidationException(
@@ -994,6 +1034,11 @@ ConversationFileData? _decodeFileData(Object? wireData, String label) {
       return ConversationFileProviderReference(
         namespace: wireData['namespace'] as String,
         id: wireData['id'] as String,
+        extra: _extras(_wireMap(wireData, '$label data'), {
+          'kind',
+          'namespace',
+          'id',
+        }),
       );
     default:
       throw ConversationValidationException(
@@ -1017,6 +1062,13 @@ Uint8List _decodeBytes(Object? wireData, String label) {
       '$label byte data has invalid base64',
     );
   }
+}
+
+Map<String, dynamic> _bytesExtra(Object? wireData, String label) {
+  if (wireData is! Map) {
+    throw ConversationValidationException('$label data must be byte data');
+  }
+  return _extras(_wireMap(wireData, '$label data'), {'kind', 'base64'});
 }
 
 T _enum<T extends Enum>(Object? value, List<T> values, String field) {

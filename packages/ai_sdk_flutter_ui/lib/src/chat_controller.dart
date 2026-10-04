@@ -383,8 +383,32 @@ class ChatController extends StreamingControllerBase {
   /// metadata, then either surface pending approval requests or commit the
   /// assistant message.
   Iterable<ModelMessage> _replayMessagesForStep(GenerateTextStep step) sync* {
+    if (step.responseMessages.isNotEmpty) {
+      for (final responseMessage in step.responseMessages) {
+        final content = responseMessage.content
+            .where((part) => part is! LanguageModelV4ToolApprovalRequestPart)
+            .toList(growable: false);
+        if (content.isNotEmpty) {
+          yield ModelMessage.fromProvider(
+            LanguageModelV4Message(
+              role: responseMessage.role,
+              content: content,
+            ),
+          );
+        }
+      }
+      return;
+    }
+    final locallyExecutedResultIds = {
+      for (final result in step.toolResults) result.toolCallId,
+    };
     final assistantParts = step.content
-        .where((part) => part is! LanguageModelV4ToolApprovalRequestPart)
+        .where(
+          (part) =>
+              part is! LanguageModelV4ToolApprovalRequestPart &&
+              (part is! LanguageModelV4ToolResultPart ||
+                  !locallyExecutedResultIds.contains(part.toolCallId)),
+        )
         .toList(growable: false);
     if (assistantParts.isNotEmpty) {
       yield ModelMessage.parts(

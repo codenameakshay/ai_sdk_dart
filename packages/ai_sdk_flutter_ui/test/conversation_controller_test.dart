@@ -101,6 +101,18 @@ Tool<Map<String, dynamic>, String> _countedApprovalTool(
   },
 );
 
+Tool<Map<String, dynamic>, String> _countedTool(void Function() onExecute) =>
+    Tool<Map<String, dynamic>, String>(
+      inputSchema: Schema<Map<String, dynamic>>(
+        jsonSchema: const {'type': 'object'},
+        fromJson: (json) => json,
+      ),
+      executeDynamic: (input, options) async {
+        onExecute();
+        return 'automatic result';
+      },
+    );
+
 class _ControllableModel extends LanguageModelV4 {
   final started = Completer<void>();
   final release = Completer<void>();
@@ -318,6 +330,42 @@ class _StreamPartsModel extends LanguageModelV4 {
 
 void main() {
   test(
+    'conversation stream disposals do not wait for paused listeners',
+    () async {
+      Future<void> disposeWithPausedListener(
+        Stream<dynamic> stream,
+        Future<void> Function() dispose,
+      ) async {
+        final subscription = stream.listen((_) {})..pause();
+        await dispose().timeout(const Duration(seconds: 1));
+        await subscription.cancel();
+      }
+
+      final local = LocalConversationBackend(
+        agent: _textAgent('unused'),
+        initial: _empty(),
+      );
+      final controller = ConversationController(local, disposeBackend: false);
+      await disposeWithPausedListener(controller.changes, controller.dispose);
+      await disposeWithPausedListener(local.changes, local.dispose);
+
+      final remote = RemoteConversationBackend(
+        transport: RemoteConversationTransport(
+          endpoint: Uri.parse('http://127.0.0.1:1/chat'),
+        ),
+        initial: _empty(),
+      );
+      await disposeWithPausedListener(remote.changes, remote.dispose);
+
+      final cancellation = RemoteCancellationToken();
+      await disposeWithPausedListener(
+        cancellation.changes,
+        cancellation.dispose,
+      );
+    },
+  );
+
+  test(
     'local and remote adapters normalize a scripted text turn equally',
     () async {
       final local = LocalConversationBackend(
@@ -404,11 +452,18 @@ void main() {
               ),
               DocumentSourcePart(
                 id: 'doc-source',
+                sourceId: 'provider-document-1',
                 mediaType: 'application/pdf',
                 title: 'Paper',
                 providerMetadata: {
                   'vendor': {'documentId': 'doc-1'},
                 },
+              ),
+              SourcePart(
+                id: 'source-part-1',
+                sourceId: 'provider-source-1',
+                uri: 'https://example.test/source',
+                title: 'Citation',
               ),
               UnknownPart(
                 id: 'opaque-part',
@@ -424,9 +479,24 @@ void main() {
           ),
         ],
       );
+      final restored = ConversationCodec.decode(
+        jsonDecode(jsonEncode(ConversationCodec.encode(initial)))
+            as Map<String, dynamic>,
+      );
+      expect(
+        restored.messages.single.parts
+            .whereType<DocumentSourcePart>()
+            .single
+            .sourceId,
+        'provider-document-1',
+      );
+      expect(
+        restored.messages.single.parts.whereType<SourcePart>().single.sourceId,
+        'provider-source-1',
+      );
       final backend = LocalConversationBackend(
         agent: ToolLoopAgent(model: model),
-        initial: initial,
+        initial: restored,
       );
 
       await backend.send('continue');
@@ -450,8 +520,10 @@ void main() {
       final document = parts
           .whereType<LanguageModelV4DocumentSourcePart>()
           .single;
-      expect(document.id, 'doc-source');
+      expect(document.id, 'provider-document-1');
       expect(document.providerMetadata?['vendor'], {'documentId': 'doc-1'});
+      final source = parts.whereType<LanguageModelV4SourcePart>().single;
+      expect(source.id, 'provider-source-1');
       final opaque = parts.whereType<LanguageModelV4OpaquePart>().single;
       expect(opaque.provider, 'vendor-x');
       expect(opaque.raw, ['opaque', 3]);
@@ -988,6 +1060,98 @@ void main() {
     await backend.dispose();
   });
 
+  test(
+    'restored approval uses its approval ID when the part ID differs',
+    () async {
+      final model = _ApprovalSequenceModel([
+        [const LanguageModelV4TextPart(text: 'resumed')],
+      ]);
+      var executions = 0;
+      final backend = LocalConversationBackend(
+        agent: ToolLoopAgent(
+          model: model,
+          approvalPolicyRevision: 'v1',
+          tools: {'delete': _countedApprovalTool(() => executions++)},
+        ),
+        initial: _empty(),
+      );
+      final restored = Conversation(
+        id: 'arbitrary-approval-part-id',
+        messages: [
+          ConversationMessage(
+            id: 'user-1',
+            role: ConversationRole.user,
+            parts: [TextPart(id: 'user-text', text: 'delete it')],
+          ),
+          ConversationMessage(
+            id: 'assistant-1',
+            role: ConversationRole.assistant,
+            status: ConversationMessageStatus.pendingApproval,
+            parts: [
+              ToolCallPart(
+                id: 'call-part',
+                callId: 'call-1',
+                name: 'delete',
+                arguments: const {'path': '/tmp/a'},
+              ),
+              ApprovalPart(
+                id: 'part-42',
+                approvalId: 'approval-A',
+                callId: 'call-1',
+                toolName: 'delete',
+                argumentsFingerprint: '{"path":"/tmp/a"}',
+                policyVersion: 'v1',
+                status: ApprovalStatus.pending,
+                extra: {
+                  'vendor': {'binding': 'kept'},
+                },
+              ),
+              ToolCallPart(
+                id: 'call-part-2',
+                callId: 'call-2',
+                name: 'delete',
+                arguments: const {'path': '/tmp/b'},
+              ),
+              ApprovalPart(
+                id: 'approval-fallback',
+                callId: 'call-2',
+                toolName: 'delete',
+                argumentsFingerprint: '{"path":"/tmp/b"}',
+                policyVersion: 'v1',
+                status: ApprovalStatus.pending,
+                extra: {
+                  'vendor': {'fallback': 'kept'},
+                },
+              ),
+            ],
+          ),
+        ],
+      );
+      await backend.restore(ConversationCodec.encode(restored));
+      await backend.respondToApproval(approvalId: 'approval-A', approved: true);
+      await backend.respondToApproval(
+        approvalId: 'approval-fallback',
+        approved: true,
+      );
+      await pumpUntil(
+        () =>
+            backend.conversation.messages.last.status ==
+            ConversationMessageStatus.complete,
+      );
+      expect(executions, 2);
+      final approvals = backend.conversation.messages.last.parts
+          .whereType<ApprovalPart>()
+          .toList();
+      expect(approvals.map((part) => part.status), [
+        ApprovalStatus.approved,
+        ApprovalStatus.approved,
+      ]);
+      expect(approvals.first.extra['vendor'], {'binding': 'kept'});
+      expect(approvals.last.extra['vendor'], {'fallback': 'kept'});
+      await backend.dispose();
+    },
+  );
+
   test('remote failures settle only the latest assistant turn', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(server.close);
@@ -1194,6 +1358,10 @@ void main() {
       expect(laterPrompt.map((message) => message.role), [
         LanguageModelV4Role.user,
         LanguageModelV4Role.assistant,
+        LanguageModelV4Role.tool,
+        LanguageModelV4Role.assistant,
+        LanguageModelV4Role.tool,
+        LanguageModelV4Role.assistant,
         LanguageModelV4Role.user,
       ]);
       expect(
@@ -1202,20 +1370,37 @@ void main() {
             LanguageModelV4TextPart(:final text) => 'text:$text',
             LanguageModelV4ToolCallPart(:final toolCallId) =>
               'call:$toolCallId',
-            LanguageModelV4ToolResultPart(:final toolCallId) =>
-              'result:$toolCallId',
             _ => part.runtimeType.toString(),
           },
         ),
-        [
-          'text:first phase',
-          'call:call-first',
-          'result:call-first',
-          'text:second phase',
-          'call:call-second',
-          'result:call-second',
-          'text:complete',
-        ],
+        ['text:first phase', 'call:call-first'],
+      );
+      expect(
+        laterPrompt[2].content.whereType<LanguageModelV4ToolResultPart>().map(
+          (part) => part.toolCallId,
+        ),
+        ['call-first'],
+      );
+      expect(
+        laterPrompt[3].content.map(
+          (part) => switch (part) {
+            LanguageModelV4TextPart(:final text) => 'text:$text',
+            LanguageModelV4ToolCallPart(:final toolCallId) =>
+              'call:$toolCallId',
+            _ => part.runtimeType.toString(),
+          },
+        ),
+        ['text:second phase', 'call:call-second'],
+      );
+      expect(
+        laterPrompt[4].content.whereType<LanguageModelV4ToolResultPart>().map(
+          (part) => part.toolCallId,
+        ),
+        ['call-second'],
+      );
+      expect(
+        laterPrompt[5].content.whereType<LanguageModelV4TextPart>().single.text,
+        'complete',
       );
       final laterResults = laterPrompt
           .expand((message) => message.content)
@@ -1230,6 +1415,73 @@ void main() {
             .map((part) => part.text),
         containsAll(['first phase', 'second phase', 'complete']),
       );
+      await backend.dispose();
+    },
+  );
+
+  test(
+    'mixed automatic and approval replay keeps each tool result in one role',
+    () async {
+      const automaticCall = LanguageModelV4ToolCallPart(
+        toolCallId: 'call-auto',
+        toolName: 'lookup',
+        input: {'q': 'dart'},
+      );
+      const approvalCall = LanguageModelV4ToolCallPart(
+        toolCallId: 'call-delete',
+        toolName: 'delete',
+        input: {'path': '/tmp/a'},
+      );
+      final model = _ApprovalSequenceModel([
+        [automaticCall, approvalCall],
+        [const LanguageModelV4TextPart(text: 'complete')],
+      ]);
+      var automaticExecutions = 0;
+      var approvalExecutions = 0;
+      final backend = LocalConversationBackend(
+        agent: ToolLoopAgent(
+          model: model,
+          tools: {
+            'lookup': _countedTool(() => automaticExecutions++),
+            'delete': _countedApprovalTool(() => approvalExecutions++),
+          },
+        ),
+        initial: _empty(),
+      );
+
+      await backend.send('look up then delete');
+      await pumpUntil(
+        () =>
+            backend.conversation.messages.last.status ==
+            ConversationMessageStatus.pendingApproval,
+      );
+      final approval = backend.conversation.messages.last.parts
+          .whereType<ApprovalPart>()
+          .single;
+      await backend.respondToApproval(
+        approvalId: approval.approvalId!,
+        approved: true,
+      );
+      await pumpUntil(
+        () =>
+            backend.conversation.messages.last.status ==
+            ConversationMessageStatus.complete,
+      );
+
+      expect(automaticExecutions, 1);
+      expect(approvalExecutions, 1);
+      final resumedPrompt = model.seenMessages.last;
+      final resultRoles = <String, List<LanguageModelV4Role>>{};
+      for (final message in resumedPrompt) {
+        for (final result
+            in message.content.whereType<LanguageModelV4ToolResultPart>()) {
+          resultRoles
+              .putIfAbsent(result.toolCallId, () => [])
+              .add(message.role);
+        }
+      }
+      expect(resultRoles['call-auto'], [LanguageModelV4Role.tool]);
+      expect(resultRoles['call-delete'], [LanguageModelV4Role.tool]);
       await backend.dispose();
     },
   );
@@ -1718,7 +1970,7 @@ void main() {
       expect(pendingCall.providerExecuted, isFalse);
 
       final oldResult = prompt
-          .where((message) => message.role == LanguageModelV4Role.tool)
+          .where((message) => message.role == LanguageModelV4Role.assistant)
           .expand((message) => message.content)
           .whereType<LanguageModelV4ToolResultPart>()
           .singleWhere((part) => part.toolCallId == 'old-call');
@@ -2646,6 +2898,77 @@ void main() {
     expect(parts.whereType<SourcePart>(), hasLength(1));
     expect(parts.whereType<DocumentSourcePart>(), hasLength(1));
     expect(parts.whereType<UnknownPart>(), hasLength(1));
+    await backend.dispose();
+  });
+
+  test('local source part IDs stay unique across turns and updates', () async {
+    final backend = LocalConversationBackend(
+      agent: ToolLoopAgent(
+        model: _StreamPartsModel([
+          const StreamPartSource(
+            source: LanguageModelV4SourcePart(
+              id: 'source-shared',
+              url: 'https://example.test/first',
+            ),
+          ),
+          const StreamPartDocumentSource(
+            source: LanguageModelV4DocumentSourcePart(
+              id: 'document-shared',
+              mediaType: 'application/pdf',
+              title: 'First',
+            ),
+          ),
+          const StreamPartSource(
+            source: LanguageModelV4SourcePart(
+              id: 'source-shared',
+              url: 'https://example.test/updated',
+            ),
+          ),
+          const StreamPartDocumentSource(
+            source: LanguageModelV4DocumentSourcePart(
+              id: 'document-shared',
+              mediaType: 'application/pdf',
+              title: 'Updated',
+            ),
+          ),
+          const StreamPartFinish(
+            finishReason: LanguageModelV4FinishReason.stop,
+          ),
+        ]),
+      ),
+      initial: _empty(),
+    );
+    await backend.send('first');
+    await backend.send('second');
+    final messages = backend.conversation.messages
+        .where((message) => message.role == ConversationRole.assistant)
+        .toList();
+    final sources = messages
+        .expand((message) => message.parts)
+        .where((part) => part is SourcePart || part is DocumentSourcePart)
+        .toList();
+    expect(sources, hasLength(4));
+    expect(sources.map((part) => part.id).toSet(), hasLength(4));
+    expect(
+      sources.map(
+        (part) => switch (part) {
+          SourcePart(:final sourceId) => sourceId,
+          DocumentSourcePart(:final sourceId) => sourceId,
+          _ => null,
+        },
+      ),
+      ['source-shared', 'document-shared', 'source-shared', 'document-shared'],
+    );
+    for (final message in messages) {
+      expect(
+        message.parts.whereType<SourcePart>().single.uri,
+        'https://example.test/updated',
+      );
+      expect(
+        message.parts.whereType<DocumentSourcePart>().single.title,
+        'Updated',
+      );
+    }
     await backend.dispose();
   });
 

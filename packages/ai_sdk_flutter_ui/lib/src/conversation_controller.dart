@@ -151,7 +151,7 @@ class ConversationController {
         ? backend.dispose()
         : Future<void>.value();
     await Future.wait([cancelSubscription, disposeOwnedBackend]);
-    await _listeners.close();
+    unawaited(_listeners.close().catchError((Object _) {}));
   }
 }
 
@@ -943,24 +943,42 @@ class LocalConversationBackend
         ),
       );
     } else if (event case StreamTextSourceEvent(:final source)) {
-      _liveParts.add(
-        SourcePart(
-          id: source.id,
-          uri: source.url,
-          title: source.title,
-          providerMetadata: source.providerMetadata ?? const {},
-        ),
+      final index = _liveParts.indexWhere(
+        (part) => part is SourcePart && part.sourceId == source.id,
       );
+      final previous = index < 0 ? null : _liveParts[index] as SourcePart;
+      final part = SourcePart(
+        id: previous?.id ?? _freshLivePartId('source'),
+        sourceId: source.id,
+        uri: source.url,
+        title: source.title,
+        providerMetadata: source.providerMetadata ?? const {},
+      );
+      if (index < 0) {
+        _liveParts.add(part);
+      } else {
+        _liveParts[index] = part;
+      }
     } else if (event case StreamTextDocumentSourceEvent(:final source)) {
-      _liveParts.add(
-        DocumentSourcePart(
-          id: source.id,
-          mediaType: source.mediaType,
-          title: source.title,
-          name: source.filename,
-          providerMetadata: source.providerMetadata ?? const {},
-        ),
+      final index = _liveParts.indexWhere(
+        (part) => part is DocumentSourcePart && part.sourceId == source.id,
       );
+      final previous = index < 0
+          ? null
+          : _liveParts[index] as DocumentSourcePart;
+      final part = DocumentSourcePart(
+        id: previous?.id ?? _freshLivePartId('source'),
+        sourceId: source.id,
+        mediaType: source.mediaType,
+        title: source.title,
+        name: source.filename,
+        providerMetadata: source.providerMetadata ?? const {},
+      );
+      if (index < 0) {
+        _liveParts.add(part);
+      } else {
+        _liveParts[index] = part;
+      }
     } else if (event case StreamTextFileEvent(:final file)) {
       final data = file.data;
       _liveParts.add(
@@ -1319,51 +1337,36 @@ class LocalConversationBackend
   }
 
   List<ModelMessage> _modelMessagesForSnapshot(ConversationMessage message) {
-    final result = <ModelMessage>[];
-    var assistantParts = <LanguageModelV4ContentPart>[];
-    var toolParts = <LanguageModelV4ContentPart>[];
-
-    void flushAssistant() {
-      if (assistantParts.isEmpty) return;
-      result.add(
-        ModelMessage.parts(
-          role: ModelMessageRole.assistant,
-          parts: List.of(assistantParts),
-        ),
-      );
-      assistantParts = [];
-    }
-
-    void flushTools() {
-      if (toolParts.isEmpty) return;
-      result.add(
-        ModelMessage.parts(
-          role: ModelMessageRole.tool,
-          parts: List.of(toolParts),
-        ),
-      );
-      toolParts = [];
-    }
-
-    for (final part in message.parts) {
-      final converted = _toProviderPart(part);
-      if (converted == null) continue;
-      if (part is ToolResultPart) {
-        flushAssistant();
-        toolParts.add(converted);
-      } else {
-        flushTools();
-        assistantParts.add(converted);
-      }
-    }
-    flushTools();
-    flushAssistant();
-    return result;
+    return _modelMessagesForParts(message.parts, ConversationRole.assistant);
   }
 
   Iterable<ModelMessage> _replayMessagesForStep(GenerateTextStep step) sync* {
+    if (step.responseMessages.isNotEmpty) {
+      for (final responseMessage in step.responseMessages) {
+        final content = responseMessage.content
+            .where((part) => part is! LanguageModelV4ToolApprovalRequestPart)
+            .toList(growable: false);
+        if (content.isNotEmpty) {
+          yield ModelMessage.fromProvider(
+            LanguageModelV4Message(
+              role: responseMessage.role,
+              content: content,
+            ),
+          );
+        }
+      }
+      return;
+    }
+    final locallyExecutedResultIds = {
+      for (final result in step.toolResults) result.toolCallId,
+    };
     final parts = step.content
-        .where((part) => part is! LanguageModelV4ToolApprovalRequestPart)
+        .where(
+          (part) =>
+              part is! LanguageModelV4ToolApprovalRequestPart &&
+              (part is! LanguageModelV4ToolResultPart ||
+                  !locallyExecutedResultIds.contains(part.toolCallId)),
+        )
         .toList(growable: false);
     if (parts.isNotEmpty) {
       yield ModelMessage.parts(role: ModelMessageRole.assistant, parts: parts);
@@ -1377,14 +1380,13 @@ class LocalConversationBackend
   }
 
   void _setApproval(String approvalId, bool approved) {
-    final target = 'approval-$approvalId';
     final messages = [
       for (final message in _conversation.messages)
         (() {
           final parts = [
             for (final part in message.parts)
               if (part case final ApprovalPart approval
-                  when approval.id == target)
+                  when (approval.approvalId ?? approval.id) == approvalId)
                 ApprovalPart(
                   id: approval.id,
                   callId: approval.callId,
@@ -1396,6 +1398,7 @@ class LocalConversationBackend
                   argumentsFingerprint: approval.argumentsFingerprint,
                   policyVersion: approval.policyVersion,
                   metadata: approval.metadata,
+                  extra: approval.extra,
                 )
               else
                 part,
@@ -1438,7 +1441,7 @@ class LocalConversationBackend
     if (_disposed) return;
     _disposed = true;
     await interrupt();
-    await _changes.close();
+    unawaited(_changes.close().catchError((Object _) {}));
   }
 }
 
@@ -1769,7 +1772,7 @@ class RemoteConversationBackend
     _disposed = true;
     await interrupt();
     _transport.dispose();
-    await _changes.close();
+    unawaited(_changes.close().catchError((Object _) {}));
   }
 }
 
@@ -1806,129 +1809,140 @@ Iterable<LanguageModelV4ContentPart> _conversationParts(
   }
 }
 
-LanguageModelV4ContentPart? _toProviderPart(
-  ConversationPart part,
-) => switch (part) {
-  TextPart(:final text, :final providerOptions) => LanguageModelV4TextPart(
-    text: text,
-    providerOptions: providerOptions.isEmpty ? null : providerOptions,
-  ),
-  ReasoningPart(:final text, :final signature, :final providerOptions) =>
-    LanguageModelV4ReasoningPart(
-      text: text,
-      signature: signature,
-      providerOptions: providerOptions.isEmpty ? null : providerOptions,
-    ),
-  ImagePart(:final uri, :final data, :final mimeType, :final providerOptions) =>
-    LanguageModelV4ImagePart(
-      image: _toProviderData(data, uri),
-      mediaType: mimeType,
-      providerOptions: providerOptions.isEmpty ? null : providerOptions,
-    ),
-  RedactedReasoningPart(:final data, :final providerOptions) =>
-    LanguageModelV4RedactedReasoningPart(
-      data: data,
-      providerOptions: providerOptions.isEmpty ? null : providerOptions,
-    ),
-  ToolCallPart(
-    :final callId,
-    :final name,
-    :final arguments,
-    :final providerOptions,
-    :final providerExecuted,
-  ) =>
-    LanguageModelV4ToolCallPart(
-      toolCallId: callId,
-      toolName: name,
-      input: arguments,
-      providerOptions: providerOptions.isEmpty ? null : providerOptions,
-      providerExecuted: providerExecuted,
-    ),
-  ToolResultPart(
-    :final callId,
-    :final toolName,
-    :final output,
-    :final isError,
-    :final outputKind,
-    :final preliminary,
-    :final isDynamic,
-    :final providerOptions,
-    :final executionDeniedReason,
-    :final executionDeniedApprovalId,
-  ) =>
-    LanguageModelV4ToolResultPart(
-      toolCallId: callId,
-      toolName: toolName ?? 'unknown',
-      output: _toProviderToolOutput(
-        outputKind,
-        output,
-        isError,
-        executionDeniedReason,
-        executionDeniedApprovalId,
+LanguageModelV4ContentPart? _toProviderPart(ConversationPart part) =>
+    switch (part) {
+      TextPart(:final text, :final providerOptions) => LanguageModelV4TextPart(
+        text: text,
+        providerOptions: providerOptions.isEmpty ? null : providerOptions,
       ),
-      isError: isError,
-      preliminary: preliminary,
-      isDynamic: isDynamic,
-      providerOptions: providerOptions.isEmpty ? null : providerOptions,
-    ),
-  FilePart(
-    :final uri,
-    :final data,
-    :final mimeType,
-    :final name,
-    :final providerOptions,
-  ) =>
-    LanguageModelV4FilePart(
-      mediaType: mimeType,
-      filename: name,
-      data: _toProviderData(data, uri),
-      providerOptions: providerOptions.isEmpty ? null : providerOptions,
-    ),
-  ReasoningFilePart(
-    :final uri,
-    :final data,
-    :final mimeType,
-    :final name,
-    :final providerOptions,
-  ) =>
-    LanguageModelV4ReasoningFilePart(
-      mediaType: mimeType,
-      filename: name,
-      data: _toProviderData(data, uri),
-      providerOptions: providerOptions.isEmpty ? null : providerOptions,
-    ),
-  SourcePart(:final id, :final uri, :final title, :final providerMetadata) =>
-    LanguageModelV4SourcePart(
-      id: id,
-      url: uri,
-      title: title,
-      providerMetadata: providerMetadata.isEmpty ? null : providerMetadata,
-    ),
-  DocumentSourcePart(
-    :final id,
-    :final mediaType,
-    :final title,
-    :final name,
-    :final providerMetadata,
-  ) =>
-    LanguageModelV4DocumentSourcePart(
-      id: id,
-      mediaType: mediaType,
-      title: title,
-      filename: name,
-      providerMetadata: providerMetadata.isEmpty ? null : providerMetadata,
-    ),
-  UnknownPart(:final raw) => LanguageModelV4OpaquePart(
-    provider: raw['provider'] is String
-        ? raw['provider'] as String
-        : 'conversation',
-    raw: raw['raw'] ?? raw,
-  ),
-  ApprovalPart() => null,
-  ConversationPart() => throw UnsupportedError(
-    'Cannot replay unsupported conversation part type ${part.type}',
-  ),
-};
+      ReasoningPart(:final text, :final signature, :final providerOptions) =>
+        LanguageModelV4ReasoningPart(
+          text: text,
+          signature: signature,
+          providerOptions: providerOptions.isEmpty ? null : providerOptions,
+        ),
+      ImagePart(
+        :final uri,
+        :final data,
+        :final mimeType,
+        :final providerOptions,
+      ) =>
+        LanguageModelV4ImagePart(
+          image: _toProviderData(data, uri),
+          mediaType: mimeType,
+          providerOptions: providerOptions.isEmpty ? null : providerOptions,
+        ),
+      RedactedReasoningPart(:final data, :final providerOptions) =>
+        LanguageModelV4RedactedReasoningPart(
+          data: data,
+          providerOptions: providerOptions.isEmpty ? null : providerOptions,
+        ),
+      ToolCallPart(
+        :final callId,
+        :final name,
+        :final arguments,
+        :final providerOptions,
+        :final providerExecuted,
+      ) =>
+        LanguageModelV4ToolCallPart(
+          toolCallId: callId,
+          toolName: name,
+          input: arguments,
+          providerOptions: providerOptions.isEmpty ? null : providerOptions,
+          providerExecuted: providerExecuted,
+        ),
+      ToolResultPart(
+        :final callId,
+        :final toolName,
+        :final output,
+        :final isError,
+        :final outputKind,
+        :final preliminary,
+        :final isDynamic,
+        :final providerOptions,
+        :final executionDeniedReason,
+        :final executionDeniedApprovalId,
+      ) =>
+        LanguageModelV4ToolResultPart(
+          toolCallId: callId,
+          toolName: toolName ?? 'unknown',
+          output: _toProviderToolOutput(
+            outputKind,
+            output,
+            isError,
+            executionDeniedReason,
+            executionDeniedApprovalId,
+          ),
+          isError: isError,
+          preliminary: preliminary,
+          isDynamic: isDynamic,
+          providerOptions: providerOptions.isEmpty ? null : providerOptions,
+        ),
+      FilePart(
+        :final uri,
+        :final data,
+        :final mimeType,
+        :final name,
+        :final providerOptions,
+      ) =>
+        LanguageModelV4FilePart(
+          mediaType: mimeType,
+          filename: name,
+          data: _toProviderData(data, uri),
+          providerOptions: providerOptions.isEmpty ? null : providerOptions,
+        ),
+      ReasoningFilePart(
+        :final uri,
+        :final data,
+        :final mimeType,
+        :final name,
+        :final providerOptions,
+      ) =>
+        LanguageModelV4ReasoningFilePart(
+          mediaType: mimeType,
+          filename: name,
+          data: _toProviderData(data, uri),
+          providerOptions: providerOptions.isEmpty ? null : providerOptions,
+        ),
+      SourcePart(
+        :final id,
+        :final sourceId,
+        :final uri,
+        :final title,
+        :final providerMetadata,
+      ) =>
+        LanguageModelV4SourcePart(
+          id: sourceId ?? id,
+          url: uri,
+          title: title,
+          providerMetadata: providerMetadata.isEmpty ? null : providerMetadata,
+        ),
+      DocumentSourcePart(
+        :final id,
+        :final sourceId,
+        :final mediaType,
+        :final title,
+        :final name,
+        :final providerMetadata,
+      ) =>
+        LanguageModelV4DocumentSourcePart(
+          id: sourceId ?? id,
+          mediaType: mediaType,
+          title: title,
+          filename: name,
+          providerMetadata: providerMetadata.isEmpty ? null : providerMetadata,
+        ),
+      UnknownPart(:final raw) => LanguageModelV4OpaquePart(
+        provider: raw['provider'] is String
+            ? raw['provider'] as String
+            : 'conversation',
+        raw: raw['raw'] ?? raw,
+      ),
+      ApprovalPart() => null,
+      ConversationPart() => throw UnsupportedError(
+        'Cannot replay unsupported conversation part type ${part.type}',
+      ),
+    };
 
 LanguageModelV4DataContent _toProviderData(
   ConversationFileData? data,
@@ -2071,26 +2085,58 @@ LanguageModelV4DataContent _decodeDataContent(Object? value) {
 
 List<ModelMessage> _toModelMessages(Conversation value) => [
   for (final message in value.messages)
-    ModelMessage.parts(
-      role: switch (message.role) {
-        ConversationRole.system => ModelMessageRole.system,
-        ConversationRole.user => ModelMessageRole.user,
-        ConversationRole.assistant => ModelMessageRole.assistant,
-        ConversationRole.tool => ModelMessageRole.tool,
-      },
-      parts: [..._providerPartsForReplay(message.parts)],
-    ),
+    ..._modelMessagesForParts(message.parts, message.role),
 ];
 
-List<LanguageModelV4ContentPart> _providerPartsForReplay(
+List<ModelMessage> _modelMessagesForParts(
   Iterable<ConversationPart> parts,
+  ConversationRole messageRole,
 ) {
-  final result = <LanguageModelV4ContentPart>[];
-  for (final part in parts) {
+  final partList = parts.toList(growable: false);
+  final role = switch (messageRole) {
+    ConversationRole.system => ModelMessageRole.system,
+    ConversationRole.user => ModelMessageRole.user,
+    ConversationRole.assistant => ModelMessageRole.assistant,
+    ConversationRole.tool => ModelMessageRole.tool,
+  };
+  if (messageRole != ConversationRole.assistant) {
+    final converted = <LanguageModelV4ContentPart>[
+      for (final part in partList)
+        if (part is! ApprovalPart) ?_toProviderPart(part),
+    ];
+    return converted.isEmpty
+        ? const []
+        : [ModelMessage.parts(role: role, parts: converted)];
+  }
+
+  final providerExecutedCalls = {
+    for (final part in partList)
+      if (part case ToolCallPart(:final callId, providerExecuted: true)) callId,
+  };
+  final result = <ModelMessage>[];
+  var currentRole = ModelMessageRole.assistant;
+  var currentParts = <LanguageModelV4ContentPart>[];
+  void flush() {
+    if (currentParts.isEmpty) return;
+    result.add(
+      ModelMessage.parts(role: currentRole, parts: List.of(currentParts)),
+    );
+    currentParts = [];
+  }
+
+  for (final part in partList) {
     if (part is ApprovalPart) continue;
     final converted = _toProviderPart(part);
-    if (converted != null) result.add(converted);
+    if (converted == null) continue;
+    final partRole =
+        part is ToolResultPart && !providerExecutedCalls.contains(part.callId)
+        ? ModelMessageRole.tool
+        : ModelMessageRole.assistant;
+    if (currentParts.isNotEmpty && partRole != currentRole) flush();
+    currentRole = partRole;
+    currentParts.add(converted);
   }
+  flush();
   return result;
 }
 
@@ -2210,6 +2256,7 @@ Map<String, dynamic> _encodeProviderContentPart(
   ) =>
     {
       'id': id,
+      'sourceId': id,
       'type': 'source',
       'url': url,
       ...?title == null ? null : {'title': title},
@@ -2226,6 +2273,7 @@ Map<String, dynamic> _encodeProviderContentPart(
   ) =>
     {
       'id': id,
+      'sourceId': id,
       'type': 'source-document',
       'mediaType': mediaType,
       'title': title,

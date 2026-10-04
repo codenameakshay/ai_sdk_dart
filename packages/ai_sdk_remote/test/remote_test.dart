@@ -145,6 +145,278 @@ void main() {
   });
 
   test(
+    'keeps source part IDs unique across messages and replays source IDs',
+    () async {
+      Map<String, dynamic>? sentBody;
+      server.listen((request) async {
+        sentBody =
+            jsonDecode(
+                  await request
+                      .cast<List<int>>()
+                      .transform(utf8.decoder)
+                      .join(),
+                )
+                as Map<String, dynamic>;
+        request.response
+          ..statusCode = 200
+          ..headers.contentType = ContentType('text', 'event-stream')
+          ..headers.set('x-vercel-ai-ui-message-stream', 'v1');
+        final events = [
+          {'type': 'start', 'messageId': 'assistant-1'},
+          {
+            'type': 'source-url',
+            'sourceId': 'same-url',
+            'url': 'https://one.test',
+          },
+          {
+            'type': 'source-document',
+            'sourceId': 'same-doc',
+            'mediaType': 'application/pdf',
+            'title': 'First',
+          },
+          {
+            'type': 'source-url',
+            'sourceId': 'same-url',
+            'url': 'https://updated.test',
+          },
+          {
+            'type': 'source-document',
+            'sourceId': 'same-doc',
+            'mediaType': 'application/pdf',
+            'title': 'Updated',
+          },
+          {'type': 'finish'},
+        ];
+        for (final event in events) {
+          request.response.write('data: ${jsonEncode(event)}\n\n');
+        }
+        request.response.write('data: [DONE]\n\n');
+        await request.response.close();
+      });
+      final conversation =
+          (await RemoteConversationTransport(endpoint: endpoint)
+                  .send(
+                    Conversation(
+                      id: 'c1',
+                      messages: [
+                        ConversationMessage(
+                          id: 'assistant-history',
+                          role: ConversationRole.assistant,
+                          parts: [
+                            SourcePart(
+                              id: 'history-url-part',
+                              sourceId: 'same-url',
+                              uri: 'https://history.test',
+                            ),
+                            DocumentSourcePart(
+                              id: 'history-doc-part',
+                              sourceId: 'same-doc',
+                              mediaType: 'application/pdf',
+                              title: 'History',
+                            ),
+                          ],
+                        ),
+                        ConversationMessage(
+                          id: 'user-current',
+                          role: ConversationRole.user,
+                          parts: [TextPart(id: 'user-text', text: 'next turn')],
+                        ),
+                      ],
+                    ),
+                  )
+                  .toList())
+              .last;
+      final sourceParts = conversation.messages
+          .expand((message) => message.parts)
+          .where((part) => part is SourcePart || part is DocumentSourcePart)
+          .toList();
+      expect(sourceParts, hasLength(4));
+      expect(sourceParts.map((part) => part.id).toSet(), hasLength(4));
+      expect(
+        sourceParts.map(
+          (part) => switch (part) {
+            SourcePart(:final sourceId) => sourceId,
+            DocumentSourcePart(:final sourceId) => sourceId,
+            _ => null,
+          },
+        ),
+        ['same-url', 'same-doc', 'same-url', 'same-doc'],
+      );
+      expect((sourceParts[2] as SourcePart).uri, 'https://updated.test');
+      expect((sourceParts[3] as DocumentSourcePart).title, 'Updated');
+      final sentMessages = sentBody!['messages'] as List;
+      final sentAssistantParts = (sentMessages.first as Map)['parts'] as List;
+      expect(sentAssistantParts.map((part) => (part as Map)['sourceId']), [
+        'same-url',
+        'same-doc',
+      ]);
+    },
+  );
+
+  test(
+    'keeps pending status while another approval remains unanswered',
+    () async {
+      server.listen((request) async {
+        request.response
+          ..statusCode = 200
+          ..headers.contentType = ContentType('text', 'event-stream')
+          ..headers.set('x-vercel-ai-ui-message-stream', 'v1');
+        final events = [
+          {'type': 'start', 'messageId': 'assistant-approvals'},
+          {
+            'type': 'tool-input-available',
+            'toolCallId': 'call-1',
+            'toolName': 'one',
+            'input': {},
+          },
+          {
+            'type': 'tool-approval-request',
+            'approvalId': 'approval-1',
+            'toolCallId': 'call-1',
+          },
+          {
+            'type': 'tool-input-available',
+            'toolCallId': 'call-2',
+            'toolName': 'two',
+            'input': {},
+          },
+          {
+            'type': 'tool-approval-request',
+            'approvalId': 'approval-2',
+            'toolCallId': 'call-2',
+          },
+          {
+            'type': 'tool-approval-response',
+            'approvalId': 'approval-1',
+            'approved': true,
+          },
+          {'type': 'finish'},
+        ];
+        for (final event in events) {
+          request.response.write('data: ${jsonEncode(event)}\n\n');
+        }
+        request.response.write('data: [DONE]\n\n');
+        await request.response.close();
+      });
+      final snapshots = await RemoteConversationTransport(
+        endpoint: endpoint,
+      ).send(Conversation(id: 'c1', messages: const [])).toList();
+      expect(
+        snapshots.last.messages.single.status,
+        ConversationMessageStatus.pendingApproval,
+      );
+      expect(
+        snapshots.any(
+          (snapshot) =>
+              snapshot.messages.single.status ==
+              ConversationMessageStatus.pendingApproval,
+        ),
+        isTrue,
+      );
+      expect(
+        snapshots.last.messages.single.parts.whereType<ApprovalPart>().where(
+          (approval) => approval.status == ApprovalStatus.pending,
+        ),
+        hasLength(1),
+      );
+    },
+  );
+
+  test('resetting a later step retains an earlier pending approval', () async {
+    server.listen((request) async {
+      request.response
+        ..statusCode = 200
+        ..headers.contentType = ContentType('text', 'event-stream')
+        ..headers.set('x-vercel-ai-ui-message-stream', 'v1');
+      final events = [
+        {'type': 'start', 'messageId': 'assistant-reset'},
+        {
+          'type': 'tool-input-available',
+          'toolCallId': 'call-retained',
+          'toolName': 'retained',
+          'input': {},
+        },
+        {
+          'type': 'tool-approval-request',
+          'approvalId': 'approval-retained',
+          'toolCallId': 'call-retained',
+        },
+        {'type': 'start-step'},
+        {
+          'type': 'tool-input-available',
+          'toolCallId': 'call-reset',
+          'toolName': 'reset',
+          'input': {},
+        },
+        {
+          'type': 'tool-approval-request',
+          'approvalId': 'approval-reset',
+          'toolCallId': 'call-reset',
+        },
+        {'type': 'reset-step'},
+        {'type': 'finish'},
+      ];
+      for (final event in events) {
+        request.response.write('data: ${jsonEncode(event)}\n\n');
+      }
+      request.response.write('data: [DONE]\n\n');
+      await request.response.close();
+    });
+    final snapshots = await RemoteConversationTransport(
+      endpoint: endpoint,
+    ).send(Conversation(id: 'c1', messages: const [])).toList();
+    final retained = snapshots.last.messages.single;
+    expect(retained.status, ConversationMessageStatus.pendingApproval);
+    expect(
+      retained.parts.whereType<ApprovalPart>().map((part) => part.approvalId),
+      ['approval-retained'],
+    );
+    expect(
+      retained.parts.whereType<ToolCallPart>().map((part) => part.callId),
+      ['call-retained'],
+    );
+  });
+
+  test(
+    'resetting a failed step resumes streaming when no approval remains',
+    () async {
+      server.listen((request) async {
+        request.response
+          ..statusCode = 200
+          ..headers.contentType = ContentType('text', 'event-stream')
+          ..headers.set('x-vercel-ai-ui-message-stream', 'v1');
+        final events = [
+          {'type': 'start', 'messageId': 'assistant-failed-reset'},
+          {'type': 'start-step'},
+          {'type': 'error', 'errorText': 'temporary'},
+          {'type': 'reset-step'},
+          {'type': 'finish'},
+        ];
+        for (final event in events) {
+          request.response.write('data: ${jsonEncode(event)}\n\n');
+        }
+        request.response.write('data: [DONE]\n\n');
+        await request.response.close();
+      });
+      final snapshots = await RemoteConversationTransport(
+        endpoint: endpoint,
+      ).send(Conversation(id: 'c1', messages: const [])).toList();
+      expect(
+        snapshots.last.messages.single.status,
+        ConversationMessageStatus.complete,
+      );
+      expect(
+        snapshots.any(
+          (snapshot) =>
+              snapshot.messages.single.status ==
+              ConversationMessageStatus.streaming,
+        ),
+        isTrue,
+      );
+    },
+  );
+
+  test(
     'retains typed files, document sources, opaque frames, and result flags',
     () async {
       server.listen((request) async {

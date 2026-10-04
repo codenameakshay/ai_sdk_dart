@@ -396,6 +396,106 @@ void main() {
     expect(bytes, [1, 2, 3]);
   });
 
+  test('round trips immutable extensions inside binary data envelopes', () {
+    final wire = {
+      'schemaVersion': 1,
+      'id': 'binary-extensions',
+      'messages': [
+        {
+          'id': 'm1',
+          'role': 'assistant',
+          'status': 'complete',
+          'parts': [
+            {
+              'id': 'file1',
+              'type': 'file',
+              'mimeType': 'application/octet-stream',
+              'data': {
+                'kind': 'bytes',
+                'base64': 'AQI=',
+                'vendor': {'checksum': 'abc'},
+              },
+            },
+            {
+              'id': 'redacted1',
+              'type': 'redacted_reasoning',
+              'data': {
+                'kind': 'bytes',
+                'base64': 'AwQ=',
+                'vendor': {'cipher': 'opaque'},
+              },
+            },
+            {
+              'id': 'image1',
+              'type': 'image',
+              'mimeType': 'image/png',
+              'data': {
+                'kind': 'bytes',
+                'base64': 'BQY=',
+                'vendor': {'image': 'retained'},
+              },
+            },
+            {
+              'id': 'reasoning-file1',
+              'type': 'reasoning_file',
+              'mimeType': 'application/octet-stream',
+              'data': {
+                'kind': 'bytes',
+                'base64': 'Bwg=',
+                'vendor': {'trace': 'retained'},
+              },
+            },
+            {
+              'id': 'reference1',
+              'type': 'file',
+              'mimeType': 'application/octet-stream',
+              'data': {
+                'kind': 'provider_reference',
+                'namespace': 'vendor',
+                'id': 'object-1',
+                'vendor': {'reference': 'retained'},
+              },
+            },
+          ],
+        },
+      ],
+    };
+    final restored = ConversationCodec.decode(wire);
+    final parts = restored.messages.single.parts;
+    final fileData = (parts[0] as FilePart).data! as ConversationFileBytes;
+    final redacted = parts[1] as RedactedReasoningPart;
+    expect(fileData.extra, {
+      'vendor': {'checksum': 'abc'},
+    });
+    expect(redacted.dataExtra, {
+      'vendor': {'cipher': 'opaque'},
+    });
+    expect(((parts[2] as ImagePart).data! as ConversationFileBytes).extra, {
+      'vendor': {'image': 'retained'},
+    });
+    expect(
+      ((parts[3] as ReasoningFilePart).data! as ConversationFileBytes).extra,
+      {
+        'vendor': {'trace': 'retained'},
+      },
+    );
+    expect(
+      ((parts[4] as FilePart).data! as ConversationFileProviderReference).extra,
+      {
+        'vendor': {'reference': 'retained'},
+      },
+    );
+    expect(
+      () => (fileData.extra['vendor'] as Map)['checksum'] = 'changed',
+      throwsA(anything),
+    );
+    expect(
+      () => (redacted.dataExtra['vendor'] as Map)['cipher'] = 'changed',
+      throwsA(anything),
+    );
+    expect(ConversationCodec.encode(restored), wire);
+  });
+
   test('rejects ambiguous URI and typed file data', () {
     expect(
       () => FilePart(

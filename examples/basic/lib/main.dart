@@ -215,20 +215,17 @@ Future<void> demo5ToolsV3() async {
   // Persist the paused turn without the client-only approval request parts.
   final replay = ToolApprovalReplay(
     messages: [
-      for (final step in pending.steps) ...[
-        ModelMessage.parts(
-          role: ModelMessageRole.assistant,
-          parts: [
-            for (final part in step.content)
-              if (part is! LanguageModelV4ToolApprovalRequestPart) part,
-          ],
-        ),
-        if (step.toolResults.isNotEmpty)
-          ModelMessage.parts(
-            role: ModelMessageRole.tool,
-            parts: step.toolResults,
+      for (final step in pending.steps)
+        for (final message in step.responseMessages)
+          ModelMessage.fromProvider(
+            LanguageModelV4Message(
+              role: message.role,
+              content: [
+                for (final part in message.content)
+                  if (part is! LanguageModelV4ToolApprovalRequestPart) part,
+              ],
+            ),
           ),
-      ],
     ],
     requests: pending.toolApprovalRequests,
   );

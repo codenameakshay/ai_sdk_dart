@@ -539,14 +539,14 @@ void main() {
             for (final part in message.content)
               if (part is LanguageModelV4ToolCallPart) part.toolCallId,
       };
-      final resultIds = {
+      final resultIds = [
         for (final message in messages)
           for (final part in message.content)
             if (part is LanguageModelV4ToolResultPart) part.toolCallId,
-      };
+      ];
       expect(callIds, {'call-delete-1'});
-      expect(resultIds, {'call-delete-1'});
-      expect(resultIds.containsAll(callIds), isTrue);
+      expect(resultIds, ['call-delete-1']);
+      expect(resultIds.toSet().containsAll(callIds), isTrue);
 
       final assistantText = [
         for (final message in messages)
@@ -557,6 +557,96 @@ void main() {
       expect(
         assistantText.where((text) => text.contains('Deleting now. ')),
         hasLength(1),
+      );
+    },
+  );
+
+  testWidgets(
+    'tools chat preserves results across chained approvals and the next turn',
+    (tester) async {
+      final model = QueuedLanguageModel([
+        [
+          mockToolCall(
+            toolName: 'deleteFile',
+            input: {'path': 'first.pdf'},
+            toolCallId: 'delete-first',
+          ),
+        ],
+        [
+          mockToolCall(
+            toolName: 'deleteFile',
+            input: {'path': 'second.pdf'},
+            toolCallId: 'delete-second',
+          ),
+        ],
+        [mockText('Both files deleted.')],
+        [mockText('Ready for the next request.')],
+      ]);
+      await tester.pumpWidget(
+        MaterialApp(home: ToolsChatPage(testModel: model)),
+      );
+      await tester.pump();
+
+      Future<void> sendAndWaitFor(String text, Finder expected) async {
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.enterText(
+          find.byKey(const ValueKey('chat-composer-field')),
+          text,
+        );
+        await tester.runAsync(() async {
+          await tester.tap(find.byKey(const ValueKey('chat-composer-send')));
+          for (var i = 0; i < 50; i++) {
+            await Future<void>.delayed(const Duration(milliseconds: 20));
+            await tester.pump();
+            if (expected.evaluate().isNotEmpty) return;
+          }
+        });
+      }
+
+      Future<void> approveAndWaitFor({
+        required int calls,
+        required Finder expected,
+      }) async {
+        await tester.runAsync(() async {
+          tester
+              .widget<ToolApprovalCard>(find.byType(ToolApprovalCard))
+              .onApprove(null);
+          for (var i = 0; i < 50; i++) {
+            await Future<void>.delayed(const Duration(milliseconds: 20));
+            await tester.pump();
+            if (model.calls.length >= calls && expected.evaluate().isNotEmpty) {
+              return;
+            }
+          }
+        });
+      }
+
+      await sendAndWaitFor('Delete two files', find.byType(ToolApprovalCard));
+      await approveAndWaitFor(
+        calls: 2,
+        expected: find.byType(ToolApprovalCard),
+      );
+      await approveAndWaitFor(
+        calls: 3,
+        expected: find.text('Both files deleted.'),
+      );
+      await sendAndWaitFor(
+        'What next?',
+        find.text('Ready for the next request.'),
+      );
+
+      final replayResults = [
+        for (final message in model.calls.last.prompt.messages)
+          for (final part in message.content)
+            if (part is LanguageModelV4ToolResultPart) (message.role, part),
+      ];
+      expect(replayResults.map((entry) => entry.$2.toolCallId), [
+        'delete-first',
+        'delete-second',
+      ]);
+      expect(
+        replayResults.every((entry) => entry.$1 == LanguageModelV4Role.tool),
+        isTrue,
       );
     },
   );
@@ -713,6 +803,69 @@ void main() {
       },
     );
   }
+
+  testWidgets(
+    'tools chat replays mixed automatic and approved results once in tool chronology',
+    (tester) async {
+      final model = QueuedLanguageModel([
+        [
+          mockToolCall(
+            toolName: 'calculate',
+            input: {'expression': '2+3'},
+            toolCallId: 'calculate-1',
+          ),
+          mockToolCall(
+            toolName: 'deleteFile',
+            input: {'path': 'q4.pdf'},
+            toolCallId: 'delete-2',
+          ),
+        ],
+        [mockText('Both tools completed.')],
+      ]);
+      await tester.pumpWidget(
+        MaterialApp(home: ToolsChatPage(testModel: model)),
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('chat-composer-field')),
+        'Calculate and remove q4.pdf',
+      );
+
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const ValueKey('chat-composer-send')));
+        for (var i = 0; i < 50; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+          await tester.pump();
+          if (find.byType(ToolApprovalCard).evaluate().isNotEmpty) break;
+        }
+        tester
+            .widget<ToolApprovalCard>(find.byType(ToolApprovalCard))
+            .onApprove(null);
+        for (var i = 0; i < 50; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+          await tester.pump();
+          if (find.text('Both tools completed.').evaluate().isNotEmpty) break;
+        }
+      });
+
+      expect(find.text('Both tools completed.'), findsOneWidget);
+      expect(model.calls, hasLength(2));
+      final replayResults = [
+        for (final message in model.calls.last.prompt.messages)
+          for (final part in message.content)
+            if (part is LanguageModelV4ToolResultPart) (message.role, part),
+      ];
+      expect(replayResults, hasLength(2));
+      expect(replayResults.map((entry) => entry.$2.toolCallId).toSet(), {
+        'calculate-1',
+        'delete-2',
+      });
+      expect(
+        replayResults.every((entry) => entry.$1 == LanguageModelV4Role.tool),
+        isTrue,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('responses page renders reasoning and hosted-tool sources', (
     tester,

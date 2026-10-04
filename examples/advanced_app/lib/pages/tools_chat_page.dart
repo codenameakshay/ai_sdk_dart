@@ -233,7 +233,10 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
   /// Runs one turn, draining [runner]'s canonical `stream` and then checking
   /// for pending tool approvals via `result.steps`. A stream error propagates
   /// out of the `await for` and is caught below.
-  Future<void> _runTurn(Future<StreamTextResult> Function() runner) async {
+  Future<void> _runTurn(
+    Future<StreamTextResult> Function() runner, {
+    ToolApprovalReplay? replayContext,
+  }) async {
     final turn = ++_turn;
     try {
       final result = await runner();
@@ -250,22 +253,20 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
         for (final step in steps) ...step.toolApprovalRequests,
       ];
       if (approvals.isNotEmpty) {
+        final response = await result.response;
         _pendingReplay = ToolApprovalReplay(
           messages: [
-            for (final step in steps) ...[
-              ModelMessage.parts(
-                role: ModelMessageRole.assistant,
-                parts: [
-                  for (final part in step.content)
-                    if (part is! LanguageModelV4ToolApprovalRequestPart) part,
-                ],
-              ),
-              if (step.toolResults.isNotEmpty)
-                ModelMessage.parts(
-                  role: ModelMessageRole.tool,
-                  parts: step.toolResults,
+            if (replayContext != null) ...replayContext.messages,
+            for (final message in response.messages)
+              ModelMessage.fromProvider(
+                LanguageModelV4Message(
+                  role: message.role,
+                  content: [
+                    for (final part in message.content)
+                      if (part is! LanguageModelV4ToolApprovalRequestPart) part,
+                  ],
                 ),
-            ],
+              ),
           ],
           requests: approvals,
         );
@@ -281,12 +282,20 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
       final request = await result.request;
       final response = await result.response;
       if (!mounted || turn != _turn) return;
-      _history
-        ..clear()
-        ..addAll([
-          for (final message in [...request.messages, ...response.messages])
+      if (replayContext == null) {
+        _history
+          ..clear()
+          ..addAll([
+            for (final message in [...request.messages, ...response.messages])
+              ModelMessage.fromProvider(message),
+          ]);
+      } else {
+        _history.addAll([
+          ...replayContext.messages,
+          for (final message in response.messages)
             ModelMessage.fromProvider(message),
         ]);
+      }
       _finishTurn();
     } catch (err) {
       if (turn != _turn) return;
@@ -340,6 +349,7 @@ class _ToolsChatPageState extends State<ToolsChatPage> {
           onEnd: (event) => _aggregateUsage = event.usage,
           onStepEnd: (event) => _finalStepUsage = event.usage,
         ),
+        replayContext: replay,
       ),
     );
   }

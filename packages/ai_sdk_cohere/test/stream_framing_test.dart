@@ -123,6 +123,55 @@ void main() {
     expect(parts.whereType<StreamPartError>(), isEmpty);
     expect(parts.whereType<StreamPartFinish>(), hasLength(1));
   });
+
+  test('parses Cohere v2 SSE event and data framing', () async {
+    final wire = [
+      'event: content-delta',
+      'data: ${jsonEncode({
+        'type': 'content-delta',
+        'delta': {
+          'message': {
+            'content': {'text': 'SSE answer'},
+          },
+        },
+      })}',
+      '',
+      'event: message-end',
+      'data: ${jsonEncode({
+        'type': 'message-end',
+        'delta': {
+          'finish_reason': 'COMPLETE',
+          'usage': {
+            'tokens': {'input_tokens': 2, 'output_tokens': 3},
+          },
+        },
+      })}',
+      '',
+    ].join('\n');
+    final client = Dio()
+      ..httpClientAdapter = _StreamAdapter(
+        Stream.value(Uint8List.fromList(utf8.encode(wire))),
+      );
+    addTearDown(() => client.close(force: true));
+    final result = await CohereProvider(client: client)
+        .call('command-r-plus')
+        .doStream(
+          const LanguageModelV4CallOptions(
+            prompt: LanguageModelV4Prompt(messages: []),
+          ),
+        );
+
+    final parts = await result.stream.toList();
+    expect(parts.whereType<StreamPartError>(), isEmpty);
+    expect(
+      parts.whereType<StreamPartTextDelta>().map((part) => part.delta).join(),
+      'SSE answer',
+    );
+    expect(
+      parts.whereType<StreamPartFinish>().single.usage.outputTokens.total,
+      3,
+    );
+  });
 }
 
 class _StreamAdapter implements HttpClientAdapter {

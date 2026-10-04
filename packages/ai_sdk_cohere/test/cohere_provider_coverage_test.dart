@@ -204,6 +204,67 @@ void main() {
       expect(result.embeddings[1].embedding, [0.4, 0.5, 0.6]);
     });
 
+    test('rejects empty and inconsistent embedding vectors', () async {
+      for (final vectors in [
+        [
+          [1.0, 2.0],
+          <double>[],
+        ],
+        [
+          [1.0, 2.0],
+          [3.0],
+        ],
+      ]) {
+        final server = await TestServer.start((request) async {
+          await utf8.decoder.bind(request).join();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'embeddings': {'float': vectors},
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        await expectLater(
+          CohereProvider(apiKey: 'test', baseUrl: server.baseUrl)
+              .embedding('embed-v4.0')
+              .doEmbed(
+                const EmbeddingModelV2CallOptions<String>(
+                  values: ['first', 'second'],
+                ),
+              ),
+          throwsA(
+            isA<AiApiCallError>()
+                .having((error) => error.statusCode, 'statusCode', 200)
+                .having((error) => error.url, 'url', endsWith('/embed')),
+          ),
+        );
+      }
+    });
+
+    test('rejects numeric overflow in an embedding vector', () async {
+      final server = await TestServer.start((request) async {
+        await utf8.decoder.bind(request).join();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write('{"embeddings":{"float":[[1e999]]}}');
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      await expectLater(
+        CohereProvider(apiKey: 'test', baseUrl: server.baseUrl)
+            .embedding('embed-v4.0')
+            .doEmbed(
+              const EmbeddingModelV2CallOptions<String>(values: ['first']),
+            ),
+        throwsA(isA<AiApiCallError>()),
+      );
+    });
+
     test(
       'forwards providerOptions and defaults input_type when omitted',
       () async {

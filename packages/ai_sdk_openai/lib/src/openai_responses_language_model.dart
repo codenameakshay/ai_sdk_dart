@@ -1099,14 +1099,23 @@ LanguageModelV4Usage _usage(Object? raw) {
   final m = raw is Map
       ? raw.cast<String, dynamic>()
       : const <String, dynamic>{};
-  final inT = m['input_tokens'] as int?;
-  final outT = m['output_tokens'] as int?;
-  final reason =
-      (m['output_tokens_details'] as Map?)?['reasoning_tokens'] as int?;
+  final inT = intOrNull(m['input_tokens']);
+  final outT = intOrNull(m['output_tokens']);
+  final inputDetails = (m['input_tokens_details'] as Map?)
+      ?.cast<String, dynamic>();
+  final outputDetails = (m['output_tokens_details'] as Map?)
+      ?.cast<String, dynamic>();
+  final cacheRead = intOrNull(inputDetails?['cached_tokens']);
+  final reason = intOrNull(outputDetails?['reasoning_tokens']);
   return LanguageModelV4Usage(
-    inputTokens: LanguageModelV4InputTokenUsage(total: inT),
+    inputTokens: LanguageModelV4InputTokenUsage(
+      total: inT,
+      noCache: inT == null || cacheRead == null ? null : inT - cacheRead,
+      cacheRead: cacheRead,
+    ),
     outputTokens: LanguageModelV4OutputTokenUsage(
       total: outT,
+      text: outT == null || reason == null ? null : outT - reason,
       reasoning: reason,
     ),
     raw: raw,

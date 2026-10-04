@@ -67,6 +67,67 @@ void main() {
       );
     });
 
+    test('rejects empty and inconsistent embedding vectors', () async {
+      for (final vectors in [
+        [
+          [1.0, 2.0],
+          <double>[],
+        ],
+        [
+          [1.0, 2.0],
+          [3.0],
+        ],
+      ]) {
+        final server = await _startServer((request) async {
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'embeddings': vectors
+                  .map((values) => {'values': values})
+                  .toList(),
+            }),
+          );
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        await expectLater(
+          GoogleGenerativeAIProvider(apiKey: 'test', baseUrl: server.baseUrl)
+              .embedding('text-embedding-004')
+              .doEmbed(
+                const EmbeddingModelV2CallOptions(values: ['first', 'second']),
+              ),
+          throwsA(
+            isA<AiApiCallError>()
+                .having((error) => error.statusCode, 'statusCode', 200)
+                .having(
+                  (error) => error.url,
+                  'url',
+                  contains('batchEmbedContents'),
+                ),
+          ),
+        );
+      }
+    });
+
+    test('rejects numeric overflow in an embedding vector', () async {
+      final server = await _startServer((request) async {
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write('{"embeddings":[{"values":[1e999]}]}');
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      await expectLater(
+        GoogleGenerativeAIProvider(apiKey: 'test', baseUrl: server.baseUrl)
+            .embedding('text-embedding-004')
+            .doEmbed(const EmbeddingModelV2CallOptions(values: ['first'])),
+        throwsA(isA<AiApiCallError>()),
+      );
+    });
+
     test(
       'types empty embedding responses and preserves credential failures',
       () async {

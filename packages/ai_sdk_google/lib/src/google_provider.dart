@@ -459,36 +459,39 @@ class _GoogleLanguageModel extends LanguageModelV4 {
             final part = parts[partIndex];
             final map = (part as Map).cast<String, dynamic>();
             final text = map['text']?.toString();
-            if (text != null && map['thought'] != true) {
-              textProviderOptions =
-                  _googleThoughtOptions(map) ?? textProviderOptions;
-            }
-            if (text != null && text.isNotEmpty) {
-              if (map['thought'] == true) {
+            if (map['thought'] == true) {
+              final thoughtSignature = map['thoughtSignature'];
+              if ((text != null && text.isNotEmpty) ||
+                  thoughtSignature != null) {
                 final id = 'reasoning-$partIndex';
-                activeReasoning.putIfAbsent(partIndex, () {
+                final state = activeReasoning.putIfAbsent(partIndex, () {
                   controller.add(
                     StreamPartReasoningStart(
                       id: id,
                       providerMetadata: {
-                        provider: {
-                          'thought': true,
-                          if (map['thoughtSignature'] != null)
-                            'thoughtSignature': map['thoughtSignature'],
-                        },
+                        provider: {'thought': true},
                       },
                     ),
                   );
                   return _GoogleStreamReasoningState(id);
                 });
-                controller.add(StreamPartReasoningDelta(id: id, delta: text));
-              } else {
-                if (!textStarted) {
-                  textStarted = true;
-                  controller.add(const StreamPartTextStart(id: 'text-0'));
+                if (thoughtSignature != null) {
+                  state.thoughtSignature = thoughtSignature;
                 }
-                controller.add(StreamPartTextDelta(id: 'text-0', delta: text));
+                if (text != null && text.isNotEmpty) {
+                  controller.add(StreamPartReasoningDelta(id: id, delta: text));
+                }
               }
+            } else if (text != null) {
+              textProviderOptions =
+                  _googleThoughtOptions(map) ?? textProviderOptions;
+            }
+            if (text != null && text.isNotEmpty && map['thought'] != true) {
+              if (!textStarted) {
+                textStarted = true;
+                controller.add(const StreamPartTextStart(id: 'text-0'));
+              }
+              controller.add(StreamPartTextDelta(id: 'text-0', delta: text));
             }
 
             final functionCall = (map['functionCall'] as Map?)
@@ -515,6 +518,10 @@ class _GoogleLanguageModel extends LanguageModelV4 {
                     toolName: state.toolName,
                   ),
                 );
+              }
+              final providerOptions = _googleThoughtOptions(map);
+              if (providerOptions != null) {
+                state.providerOptions = providerOptions;
               }
 
               final argsDelta = _googleFunctionArgsDelta(
@@ -611,7 +618,12 @@ class _GoogleLanguageModel extends LanguageModelV4 {
             }
             activeToolCalls.clear();
             for (final state in activeReasoning.values) {
-              controller.add(StreamPartReasoningEnd(id: state.id));
+              controller.add(
+                StreamPartReasoningEnd(
+                  id: state.id,
+                  providerMetadata: state.providerMetadata,
+                ),
+              );
             }
             activeReasoning.clear();
             controller.add(
@@ -766,11 +778,18 @@ class _GoogleEmbeddingModel implements EmbeddingModelV2<String> {
           'Expected one embedding row for each input.',
         );
       }
+      int? dimensions;
       for (final row in rawEmbeddings) {
         if (row is! Map) throw StateError('embedding is not an object');
         final values = row['values'];
-        if (values is! List || values.any((value) => value is! num)) {
-          throw StateError('embedding values are not numeric');
+        if (values is! List ||
+            values.isEmpty ||
+            values.any((value) => value is! num || !value.isFinite)) {
+          throw StateError('embedding values must be non-empty finite numbers');
+        }
+        dimensions ??= values.length;
+        if (values.length != dimensions) {
+          throw StateError('embedding dimensions differ between rows');
         }
       }
     } on Object catch (error) {
@@ -1137,7 +1156,7 @@ class _GoogleStreamFunctionCallState {
   final String toolCallId;
   final String toolName;
   Object input;
-  final Map<String, dynamic>? providerOptions;
+  Map<String, dynamic>? providerOptions;
   String argsText = '';
 }
 
@@ -1145,6 +1164,14 @@ class _GoogleStreamReasoningState {
   _GoogleStreamReasoningState(this.id);
 
   final String id;
+  Object? thoughtSignature;
+
+  ProviderMetadata get providerMetadata => {
+    'google': {
+      'thought': true,
+      if (thoughtSignature != null) 'thoughtSignature': thoughtSignature,
+    },
+  };
 }
 
 Map<String, dynamic>? _toGoogleInlinePart(

@@ -455,9 +455,7 @@ class _OllamaLanguageModel extends LanguageModelV4 {
             ),
           );
         }
-      } catch (_) {
-        // Ignore malformed JSON lines.
-      }
+      } catch (_) {}
     }
     if (!sawTerminalEvent && !isCancelled()) {
       controller.add(
@@ -595,8 +593,23 @@ class _OllamaEmbeddingModel implements EmbeddingModelV2<String> {
           'Expected one embedding row for each input.',
         );
       }
+      int? dimensions;
       final embeddings = embeddingsList.indexed.map((entry) {
-        final vector = (entry.$2 as List)
+        final rawVector = entry.$2;
+        if (rawVector is! List ||
+            rawVector.isEmpty ||
+            rawVector.any((value) => value is! num || !value.isFinite)) {
+          throw const FormatException(
+            'Embedding vectors must contain finite numbers.',
+          );
+        }
+        dimensions ??= rawVector.length;
+        if (rawVector.length != dimensions) {
+          throw const FormatException(
+            'Embedding dimensions differ between rows.',
+          );
+        }
+        final vector = rawVector
             .map((value) => (value as num).toDouble())
             .toList();
         return EmbeddingModelV2Embedding<String>(

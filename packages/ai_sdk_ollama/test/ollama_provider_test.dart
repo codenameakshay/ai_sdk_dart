@@ -1207,6 +1207,63 @@ void main() {
       ]);
     });
 
+    test('rejects empty and inconsistent embedding vectors', () async {
+      for (final vectors in [
+        [
+          [1.0, 2.0],
+          <double>[],
+        ],
+        [
+          [1.0, 2.0],
+          [3.0],
+        ],
+      ]) {
+        final server = await _startServer((request) async {
+          await utf8.decoder.bind(request).join();
+          request.response.statusCode = 200;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(jsonEncode({'embeddings': vectors}));
+          await request.response.close();
+        });
+        addTearDown(server.close);
+
+        await expectLater(
+          OllamaProvider(baseUrl: server.baseUrl)
+              .embedding('nomic-embed-text')
+              .doEmbed(
+                const EmbeddingModelV2CallOptions<String>(
+                  values: ['first', 'second'],
+                ),
+              ),
+          throwsA(
+            isA<AiApiCallError>()
+                .having((error) => error.statusCode, 'statusCode', 200)
+                .having((error) => error.url, 'url', contains('/api/embed')),
+          ),
+        );
+      }
+    });
+
+    test('rejects numeric overflow in an embedding vector', () async {
+      final server = await _startServer((request) async {
+        await utf8.decoder.bind(request).join();
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write('{"embeddings":[[1e999]]}');
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      await expectLater(
+        OllamaProvider(baseUrl: server.baseUrl)
+            .embedding('nomic-embed-text')
+            .doEmbed(
+              const EmbeddingModelV2CallOptions<String>(values: ['first']),
+            ),
+        throwsA(isA<AiApiCallError>()),
+      );
+    });
+
     test(
       'pre-cancelled embeddings skip dispatch and empty bodies are typed',
       () async {

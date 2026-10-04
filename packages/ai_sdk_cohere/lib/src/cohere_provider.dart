@@ -480,9 +480,19 @@ class _CohereLanguageModel extends LanguageModelV4 {
     await for (final line
         in utf8.decoder.bind(byteStream).transform(const LineSplitter())) {
       final trimmed = line.trim();
-      if (trimmed.isEmpty) continue;
+      if (trimmed.isEmpty ||
+          trimmed.startsWith('event:') ||
+          trimmed.startsWith(':')) {
+        continue;
+      }
       try {
-        final event = jsonDecode(trimmed) as Map<String, dynamic>;
+        // Cohere v2 streams are SSE (`event:` + `data:`), while older
+        // fixtures and compatible gateways may send one JSON object per line.
+        final payload = trimmed.startsWith('data:')
+            ? trimmed.substring('data:'.length).trimLeft()
+            : trimmed;
+        if (payload.isEmpty) continue;
+        final event = jsonDecode(payload) as Map<String, dynamic>;
         lastEvent = event;
         if (includeRawChunks) {
           controller.add(StreamPartRaw(rawValue: event));
@@ -574,9 +584,7 @@ class _CohereLanguageModel extends LanguageModelV4 {
             ),
           );
         }
-      } catch (_) {
-        // Ignore malformed JSON lines.
-      }
+      } catch (_) {}
     }
     if (!sawTerminalEvent && !isCancelled()) {
       controller.add(
@@ -718,8 +726,23 @@ class _CohereEmbeddingModel implements EmbeddingModelV2<String> {
           'Expected one embedding row for each input.',
         );
       }
+      int? dimensions;
       final embeddings = floats.indexed.map((entry) {
-        final vector = (entry.$2 as List)
+        final rawVector = entry.$2;
+        if (rawVector is! List ||
+            rawVector.isEmpty ||
+            rawVector.any((value) => value is! num || !value.isFinite)) {
+          throw const FormatException(
+            'Embedding vectors must contain finite numbers.',
+          );
+        }
+        dimensions ??= rawVector.length;
+        if (rawVector.length != dimensions) {
+          throw const FormatException(
+            'Embedding dimensions differ between rows.',
+          );
+        }
+        final vector = rawVector
             .map((value) => (value as num).toDouble())
             .toList();
         return EmbeddingModelV2Embedding<String>(

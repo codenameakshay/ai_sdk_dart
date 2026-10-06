@@ -1,6 +1,6 @@
 # Migrating AI SDK Dart 2.x to 3.x
 
-This guide is being qualified alongside v3. The [contract ADR](../adr/0005-v3-public-contract.md) describes the full target; the [execution ledger](../../plans/v3-execution.md) identifies changes still in progress. Do not publish this working guide as a declaration that v3 has shipped.
+This guide covers the upgrade to AI SDK Dart 3.0.0. Upgrade every `ai_sdk` package together. The [contract ADR](../adr/0005-v3-public-contract.md) describes the full v3 public contract.
 
 ## Custom provider cancellation
 
@@ -231,10 +231,9 @@ A failed or interrupted operation does not invent a final step.
 
 The migration example in
 [`v3_contracts.dart`](../../packages/ai_sdk_dart/example/migration/v3_contracts.dart)
-and its focused test compile these public boundaries. Overall v3 release
-qualification remains incomplete until live provider, platform, hosted-file,
-and production remote evidence is collected; these examples document the
-contract and do not replace that evidence.
+and its focused test compile these public boundaries. They document the
+contract; they do not replace live provider, platform, hosted-file, or
+production remote testing.
 
 ## Realtime preview packaging
 

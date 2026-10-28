@@ -141,6 +141,17 @@ class _DelayedSendBackend implements ConversationBackend {
 
 Conversation _empty() => Conversation(id: 'retry-chat', messages: const []);
 
+String? _lastAssistantText(List<ConversationMessage> messages) {
+  final assistant = messages.where(
+    (message) => message.role == ConversationRole.assistant,
+  );
+  if (assistant.isEmpty) return null;
+  return assistant.last.parts
+      .whereType<TextPart>()
+      .map((part) => part.text)
+      .join();
+}
+
 void main() {
   test(
     'local retry replaces a failed assistant without duplicating the user',
@@ -566,4 +577,63 @@ void main() {
       await conversation.dispose();
     },
   );
+
+  test(
+    'local backend keeps streamed text on a failed assistant turn',
+    () async {
+      final model = HoldingTextModel('partial answer');
+      final backend = LocalConversationBackend(
+        agent: ToolLoopAgent(model: model),
+        initial: _empty(),
+      );
+      final sending = backend.send('hello');
+      await pumpUntil(
+        () =>
+            _lastAssistantText(backend.conversation.messages) ==
+            'partial answer',
+      );
+
+      model.fail(StateError('network drop'));
+      await sending;
+
+      final last = backend.conversation.messages.last;
+      expect(last.role, ConversationRole.assistant);
+      expect(last.status, ConversationMessageStatus.failed);
+      expect(last.parts, [
+        isA<TextPart>().having((part) => part.text, 'text', 'partial answer'),
+      ]);
+      await backend.dispose();
+    },
+  );
+
+  test('conversation chat keeps the failed partial in messages', () async {
+    final model = HoldingTextModel('partial answer');
+    final backend = LocalConversationBackend(
+      agent: ToolLoopAgent(model: model),
+      initial: _empty(),
+    );
+    final chat = ConversationChatController(ConversationController(backend));
+    addTearDown(chat.dispose);
+
+    unawaited(chat.sendText('hello'));
+    await pumpUntil(
+      () =>
+          _lastAssistantText(backend.conversation.messages) == 'partial answer',
+    );
+
+    model.fail(StateError('network drop'));
+    await pumpUntil(() => chat.status == ChatStatus.error);
+
+    final last = chat.messages.last;
+    expect(last.role, ModelMessageRole.assistant);
+    expect(last.parts, [
+      isA<LanguageModelV4TextPart>().having(
+        (part) => part.text,
+        'text',
+        'partial answer',
+      ),
+    ]);
+    expect(chat.errorPartialContent, isEmpty);
+    expect(chat.streamingContent, isEmpty);
+  });
 }

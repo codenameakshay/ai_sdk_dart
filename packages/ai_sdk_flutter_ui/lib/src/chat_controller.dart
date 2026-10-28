@@ -37,6 +37,7 @@ enum ChatStatus {
 /// - [clearError] — clear the current error state
 /// - [addToolApprovalResponse] — inject a tool approval decision mid-stream
 /// - Optimistic assistant message during streaming via [streamingContent]
+/// - Text that streamed before a failure via [errorPartialContent]
 /// - [isLoading] — true while submitted or streaming
 class ChatController extends StreamingControllerBase {
   ChatController({
@@ -69,8 +70,8 @@ class ChatController extends StreamingControllerBase {
 
   /// Notifies when transcript/content state changes.
   ///
-  /// This covers [messages], [streamingContent], [streamingReasoning],
-  /// [reasoningText], [lastUsage], [lastSources], [lastToolCalls], and
+  /// This covers [messages], [streamingContent], [errorPartialContent],
+  /// [streamingReasoning], [reasoningText], [lastUsage], [lastSources], [lastToolCalls], and
   /// [lastToolResults].
   @override
   Listenable get contentListenable => super.contentListenable;
@@ -100,6 +101,14 @@ class ChatController extends StreamingControllerBase {
   /// Live content of the currently-streaming assistant message.
   /// Empty string when not streaming.
   String get streamingContent => _streamBuffer.toString();
+
+  /// Text that streamed before the current error, so the UI can show or copy
+  /// it. Empty unless [status] is [ChatStatus.error].
+  ///
+  /// The partial text is not added to [messages], so [reload] retries the same
+  /// user turn. The next request, [clearError], [stop], and [clear] discard it.
+  String get errorPartialContent => _errorPartialContent;
+  String _errorPartialContent = '';
 
   /// Live reasoning ("thinking") text for the in-flight turn, accumulated from
   /// the model's reasoning deltas. Empty when there is none. Pair it with
@@ -238,8 +247,9 @@ class ChatController extends StreamingControllerBase {
     if (isDisposed) return;
     if (_status == ChatStatus.error) {
       _error = null;
+      _errorPartialContent = '';
       _status = ChatStatus.ready;
-      notifyListenersSafely(immediate: true, status: true);
+      notifyListenersSafely(immediate: true, status: true, content: true);
     }
   }
 
@@ -305,6 +315,7 @@ class ChatController extends StreamingControllerBase {
     _activeAbortSignal = abortSignal;
     _streamBuffer.clear();
     _streamingReasoning = '';
+    _errorPartialContent = '';
     _pendingApprovalRequests = const [];
     if (consumeApprovals) _pendingApprovalReplay = null;
     if (!consumeApprovals) {
@@ -539,6 +550,7 @@ class ChatController extends StreamingControllerBase {
     unawaited(_errorSubscription?.cancel());
     _errorSubscription = null;
     _error = err;
+    _errorPartialContent = _streamBuffer.toString();
     _streamBuffer.clear();
     _streamingReasoning = '';
     _status = ChatStatus.error;
@@ -556,6 +568,7 @@ class ChatController extends StreamingControllerBase {
     await _cancelActiveRequest(commitPartial: true);
     if (isDisposed || generation != nextRequestId) return;
     _discardApprovalState();
+    _errorPartialContent = '';
     _status = ChatStatus.ready;
     notifyListenersSafely(immediate: true, status: true, content: true);
   }
@@ -573,6 +586,7 @@ class ChatController extends StreamingControllerBase {
     _lastToolCalls = const [];
     _lastToolResults = const [];
     _discardApprovalState();
+    _errorPartialContent = '';
     _status = ChatStatus.ready;
     _error = null;
     notifyListenersSafely(immediate: true, status: true, content: true);

@@ -25,11 +25,22 @@ import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 
 final result = await generateText(
-  model: openai('gpt-4.1-mini'),
+  model: openai.responses('gpt-6-luna'),
   prompt: 'Say hello!',
 );
 print(result.text);
 ```
+
+The provider has two language-model entry points:
+
+- `openai.responses(modelId)` sends OpenAI Responses API requests. Use it for
+  the GPT-6 models (`gpt-6-luna`, `gpt-6-sol`, `gpt-6-astra`). The
+  [provider capability catalog](https://github.com/codenameakshay/ai_sdk_dart/blob/main/docs/provider-capability-catalog.md)
+  lists them on the Responses API. The canary harness is configured to use
+  this path, but no live canary run has been performed.
+- `openai(modelId)` and `openai.chat(modelId)` send Chat Completions requests.
+  This package has not qualified the GPT-6 models on that path. Use it for
+  models that support Chat Completions, such as `gpt-4.1`.
 
 ### Streaming
 
@@ -37,7 +48,7 @@ print(result.text);
 import 'dart:io';
 
 final result = await streamText(
-  model: openai('gpt-4.1'),
+  model: openai.responses('gpt-6-luna'),
   prompt: 'Tell me a joke.',
 );
 await for (final chunk in result.textStream) {
@@ -67,14 +78,14 @@ final result = await generateImage(
 );
 ```
 
-### Reasoning models (o1, o3, o4-mini)
+### Reasoning
 
 ```dart
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 
 final result = await generateText(
-  model: openai('o4-mini'),
+  model: openai.responses('gpt-6-luna'),
   prompt: 'Solve the Tower of Hanoi for 4 disks.',
   providerOptions: {
     'openai': OpenAILanguageModelOptions(
@@ -90,13 +101,14 @@ print(result.text);
 
 `openai.responses(modelId)` returns a `LanguageModelV4` backed by the OpenAI
 Responses API instead of Chat Completions — same `generateText`/`streamText`
-usage as `openai(modelId)`. It's required for hosted, server-side tools,
-passed via `providerDefinedTools:` (a `List<LanguageModelV4ProviderDefinedTool>`,
-separate from the `tools:` map):
+usage as `openai(modelId)`. The adapter supports streaming, structured output,
+reasoning, and function tools on this API surface. Use it for hosted,
+server-side tools, passed via `providerDefinedTools:` (a
+`List<LanguageModelV4ProviderDefinedTool>`, separate from the `tools:` map):
 
 ```dart
 final result = await generateText(
-  model: openai.responses('gpt-4.1-mini'),
+  model: openai.responses('gpt-6-luna'),
   prompt: 'What happened in the news today?',
   providerDefinedTools: [OpenAIWebSearchTool()],
 );
@@ -109,12 +121,14 @@ plus runnable file/batch lifecycle examples.
 
 ### Native structured output
 
-When using `generateObject` or `Output.object()` with `generateText`, the OpenAI provider
-automatically uses `response_format: json_schema` for schema-validated responses:
+For Chat Completions, using `generateObject` or `Output.object()` with
+`generateText` sends schema-validated output through
+`response_format: json_schema`. Responses API requests use `text.format` for
+structured output instead:
 
 ```dart
 final result = await generateObject(
-  model: openai('gpt-4.1-mini'),
+  model: openai.chat('gpt-4.1'),
   schema: Schema<Map<String, dynamic>>(
     jsonSchema: const {
       'type': 'object',
@@ -123,6 +137,7 @@ final result = await generateObject(
         'country': {'type': 'string'},
       },
       'required': ['city', 'country'],
+      'additionalProperties': false,
     },
     fromJson: (json) => json,
   ),
@@ -175,7 +190,7 @@ final myOpenAi = OpenAIProvider(
 );
 
 final result = await generateText(
-  model: myOpenAi('gpt-4.1-mini'),
+  model: myOpenAi.responses('gpt-6-luna'),
   prompt: 'Hello!',
 );
 ```
@@ -185,13 +200,16 @@ final result = await generateText(
 ```dart
 final registry = createProviderRegistry({
   'openai': RegistrableProvider(
-    languageModelFactory: openai.call,
+    languageModelFactory: openai.responses,
     embeddingModelFactory: openai.embedding,
   ),
 });
 
-final model = registry.languageModel('openai:gpt-4.1-mini');
+final model = registry.languageModel('openai:gpt-6-luna');
 ```
+
+Pass `openai.call` as `languageModelFactory` to route the registry through
+Chat Completions instead.
 
 ## License
 

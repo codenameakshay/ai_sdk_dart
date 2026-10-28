@@ -162,6 +162,59 @@ void main() {
       }
     });
 
+    testWidgets('removes a failed partial from the live assistant row', (
+      tester,
+    ) async {
+      final controller = ChatController();
+      addTearDown(controller.dispose);
+      final agent = RecordingStreamAgent();
+
+      await tester.pumpWidget(
+        _wrap(
+          ChatMessageList(
+            controller: controller,
+            messageBuilder: (context, message, isStreaming) => Text(
+              '${message.role.name}:${isStreaming ? 'live' : 'committed'}:${message.content ?? ''}',
+            ),
+          ),
+        ),
+      );
+
+      await controller.sendMessage(agent: agent, text: 'question');
+      final invocation = agent.invocations.single;
+      invocation.emitText('partial answer');
+      await pumpTesterUntil(
+        tester,
+        () => controller.streamingContent == 'partial answer',
+        maxPumps: 30,
+        step: const Duration(milliseconds: 10),
+      );
+
+      expect(find.text('assistant:live:partial answer'), findsOneWidget);
+      invocation.emitError(StateError('network drop'));
+      await pumpTesterUntil(
+        tester,
+        () => controller.status == ChatStatus.error,
+        step: const Duration(milliseconds: 10),
+      );
+      expect(controller.status, ChatStatus.error);
+      await tester.pump();
+
+      expect(controller.errorPartialContent, 'partial answer');
+      expect(controller.streamingContent, isEmpty);
+      expect(controller.messages, hasLength(1));
+      expect(controller.messages.single.role, ModelMessageRole.user);
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is Text &&
+              widget.data?.startsWith('assistant:live:') == true,
+        ),
+        findsNothing,
+      );
+      expect(find.text('assistant:committed:partial answer'), findsNothing);
+    });
+
     testWidgets(
       'renders a conversation adapter answer once while streaming and after completion',
       (tester) async {

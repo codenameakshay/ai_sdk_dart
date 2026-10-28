@@ -13,12 +13,17 @@ const _defaultBaseUrl = 'https://api.openai.com/v1';
 
 /// OpenAI provider for language models, embeddings, images, speech, and transcription.
 ///
-/// Use [call] for language models, [embedding] for embeddings, [image] for image
-/// generation, [speech] for text-to-speech, [transcription] for speech-to-text.
+/// Use [responses] for the Responses API or [call] for Chat Completions.
+/// [embedding], [image], [speech], and [transcription] provide the other model
+/// APIs.
+///
+/// [responses] sends OpenAI Responses API requests. Use it for the GPT-6
+/// models (`gpt-6-luna`, `gpt-6-sol`, `gpt-6-astra`). [call] and [chat] send
+/// Chat Completions requests, which this package has not qualified for GPT-6.
 ///
 /// Example:
 /// ```dart
-/// final model = openai('gpt-4o');
+/// final model = openai.responses('gpt-6-luna');
 /// final result = await generateText(model: model, prompt: 'Hello');
 /// ```
 class OpenAIProvider {
@@ -56,6 +61,9 @@ class OpenAIProvider {
 
   /// Returns a language model for the given [modelId].
   ///
+  /// Sends Chat Completions requests. This package has not qualified the GPT-6
+  /// models on this path; use [responses] for them.
+  ///
   /// Built on the shared `ai_sdk_openai_compatible` base; OpenAI-specific
   /// `reasoning_effort` / `reasoning_summary` and pass-through provider options
   /// are injected via the config's `extraBody` hook.
@@ -71,6 +79,9 @@ class OpenAIProvider {
   );
 
   /// Returns a model backed by the OpenAI Responses API.
+  ///
+  /// Use this for the GPT-6 models (`gpt-6-luna`, `gpt-6-sol`, `gpt-6-astra`)
+  /// and for hosted tools.
   LanguageModelV4 responses(String modelId) => OpenAIResponsesLanguageModel(
     modelId: modelId,
     baseUrl: baseUrl ?? _defaultBaseUrl,
@@ -119,9 +130,10 @@ class OpenAIProvider {
       );
 }
 
-/// Default OpenAI provider instance — call it with a model id, e.g.
-/// `openai('gpt-4.1-mini')`. Reads the API key from the `OPENAI_API_KEY`
-/// environment variable unless an [OpenAIProvider] is constructed explicitly.
+/// Default OpenAI provider instance, e.g. `openai.responses('gpt-6-luna')`
+/// or `openai('gpt-4.1')` for Chat Completions. Reads the API key from the
+/// `OPENAI_API_KEY` environment variable unless an [OpenAIProvider] is
+/// constructed explicitly.
 final openai = OpenAIProvider();
 
 /// Builds the OpenAI-specific request-body additions for the shared base's

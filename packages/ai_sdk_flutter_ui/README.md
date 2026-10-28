@@ -110,6 +110,12 @@ class _ChatPageState extends State<ChatPage> {
 **State:** `messages` (`List<ModelMessage>`), `status` (`ChatStatus.ready|submitted|streaming|awaitingApproval|error`),
 `isLoading`, `error`, `streamingContent` (live buffer of the in-flight reply).
 
+**Per-message state:** `chatMessages` (`List<ChatMessage>`) is `messages` with a stable `id`
+per message. A generated turn also records the agent's `provider` and `modelId` and its
+`finishReason`. A turn cut short by `stop()` has `status == ConversationMessageStatus.interrupted`.
+Key per-message UI state (an "answered by" label, a "stopped" marker) by `id`, not by list index.
+Pass `generateId` to the constructor to choose the id format.
+
 **Methods:** `sendMessage({agent, text})`, `append(ModelMessage)` (add without generating),
 `reload({agent})` / `regenerate({agent})`, `stop()`, `clear()`, `clearError()`,
 `addToolApprovalResponse({approvalId, approved, reason})` (for tools with `needsApproval`).

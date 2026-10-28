@@ -1,3 +1,13 @@
+## Unreleased
+
+- Added `ChatController.chatMessages`: each message with a stable `id`, the `provider` and
+  `modelId` of the agent model that generated it, its `finishReason`, and an `interrupted`
+  status when `stop()` cut the turn short. `messages` is unchanged. Added the optional
+  `generateId` constructor argument. `ConversationChatController.chatMessages` reports the
+  snapshot ids and statuses.
+
+---
+
 ## 3.0.0
 
 - Added conversation controllers and local/remote backends, persisted conversation snapshots,

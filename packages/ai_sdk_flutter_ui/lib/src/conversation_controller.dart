@@ -193,6 +193,19 @@ class ConversationChatController extends ChatController {
     for (final message in _snapshot.messages) _toModelMessage(message),
   ];
 
+  /// Snapshot messages with their persisted [ConversationMessage.id] and
+  /// [ConversationMessage.status]. Model and finish reason are not part of
+  /// the snapshot, so those fields are null.
+  @override
+  List<ChatMessage> get chatMessages => [
+    for (final message in _snapshot.messages)
+      ChatMessage(
+        id: message.id,
+        message: _toModelMessage(message),
+        status: message.status,
+      ),
+  ];
+
   @override
   ChatStatus get status => _conversationStatus;
 

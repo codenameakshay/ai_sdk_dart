@@ -116,6 +116,9 @@ per message. A generated turn also records the agent's `provider` and `modelId` 
 Key per-message UI state (an "answered by" label, a "stopped" marker) by `id`, not by list index.
 Pass `generateId` to the constructor to choose the id format.
 
+`initialMessages` remains the caller's live list. `clear()` restores the list's current contents.
+Messages that retain the same identity and occurrence keep their ids; new entries get fresh ids.
+
 **Methods:** `sendMessage({agent, text})`, `append(ModelMessage)` (add without generating),
 `reload({agent})` / `regenerate({agent})`, `stop()`, `clear()`, `clearError()`,
 `addToolApprovalResponse({approvalId, approved, reason})` (for tools with `needsApproval`).

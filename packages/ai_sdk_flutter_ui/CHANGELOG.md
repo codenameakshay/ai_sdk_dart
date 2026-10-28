@@ -5,6 +5,9 @@
   status when `stop()` cut the turn short. `messages` is unchanged. Added the optional
   `generateId` constructor argument. `ConversationChatController.chatMessages` reports the
   snapshot ids and statuses.
+- Fixed reentrant sends and cancellation lifecycle handling so an earlier operation cannot
+  take ownership of a later turn. Reloads and tool-approval resumes retain the model metadata
+  for the agent that handled that operation.
 
 ---
 

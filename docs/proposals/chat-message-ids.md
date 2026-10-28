@@ -17,6 +17,7 @@ The JS AI SDK gives each `UIMessage` an `id` for this reason.
 ## Constraints
 
 - Existing `List<ModelMessage>` consumers must not change. Widgets, `onFinish`, and the agent call keep `ModelMessage`.
+- `initialMessages` remains a live caller-owned list. `clear()` restores its current contents.
 - ADR 0005 keeps two shapes apart. `ModelMessage` is the prompt shape that `ChatController` sends to the agent. `ConversationMessage` in `ai_sdk_conversation` is the persistence shape, with part ids, validation, and a schema version. "A persistence codec is not a provider-prompt converter."
 - `ConversationChatController` extends `ChatController` and reads a `Conversation` snapshot. Its messages already have ids and a `ConversationMessageStatus`. The new API must report those, not new ids.
 
@@ -65,16 +66,16 @@ Rejected:
 | `stop()` with partial text | The partial answer gets a new id. | `status` is `interrupted`. `provider` and `modelId` are set. `finishReason` is null, because the model did not report one. |
 | `stop()` with no text | No entry is added. | Nothing can attach to the next turn. |
 | `reload` / `regenerate` | The old answer's id leaves the list. The new answer gets a new id. | Metadata of the agent that ran the reload. |
-| `clear()` | `initialMessages` return with their first ids. Later ids are new. | |
+| `clear()` | Restores the current `initialMessages` contents. An original message identity and occurrence keeps its id. Added entries get fresh ids. | |
 | Error, then retry | The error adds no entry. The retry answer gets a new id. | Metadata of the retry. |
 | Tool approval resume | One answer entry, added when the resumed turn completes. | Metadata of the resumed run. |
 | `append` | New id. | No model metadata. |
 
-An id never comes back after it leaves the list. State keyed by a removed id can not land on another message.
+An id stays tied to a message identity and occurrence. `clear()` can restore an initial message with its prior id. Other removed ids are not reused, so state keyed by a removed id cannot land on another message.
 
 ## Out of scope
 
-- Caller-chosen ids for `append` and `initialMessages`. Ids are stable for the controller's lifetime. Apps that persist chats across restarts should use `ConversationController`.
+- Caller-chosen ids for `append` and `initialMessages`. Ids are stable for the controller's lifetime and follow the identity and occurrence of initial messages. Apps that persist chats across restarts should use `ConversationController`.
 - Model metadata for `ConversationChatController`. A `Conversation` snapshot does not store the model or finish reason, so those fields are null there.
 - Per-message usage. `lastUsage` still covers the latest turn.
 - A placeholder entry for the in-flight answer. `streamingContent` still carries the live text.

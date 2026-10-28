@@ -289,7 +289,8 @@ model list before pinning an ID in production.
 
 The catalog records the GPT-6 models (`gpt-6-luna`, `gpt-6-sol`, `gpt-6-astra`)
 on the OpenAI Responses API. Use `openai.responses('gpt-6-luna')` for them.
-`openai('...')` and `openai.chat('...')` send Chat Completions requests. This
+`openai('...')` and `openai.chat('...')` send Chat Completions requests, and
+add a `compatibility` warning to `result.warnings` for `gpt-6*` IDs. This
 repository has not qualified the GPT-6 models on that path, and no live provider
 canary has run for Responses. The catalog reports upstream model information;
 it does not qualify a model for an SDK operation.

@@ -62,7 +62,8 @@ class OpenAIProvider {
   /// Returns a language model for the given [modelId].
   ///
   /// Sends Chat Completions requests. This package has not qualified the GPT-6
-  /// models on this path; use [responses] for them.
+  /// models on this path; use [responses] for them. A `gpt-6*` [modelId] adds a
+  /// [LanguageModelV4CompatibilityWarning] to every result.
   ///
   /// Built on the shared `ai_sdk_openai_compatible` base; OpenAI-specific
   /// `reasoning_effort` / `reasoning_summary` and pass-through provider options
@@ -75,6 +76,7 @@ class OpenAIProvider {
       headers: _headers,
       client: _client,
       extraBody: _openAiExtraBody,
+      warnings: modelId.startsWith('gpt-6') ? _gpt6ChatWarnings : const [],
     ),
   );
 
@@ -129,6 +131,15 @@ class OpenAIProvider {
         headers: _headers,
       );
 }
+
+const _gpt6ChatWarnings = [
+  LanguageModelV4CompatibilityWarning(
+    feature: 'chat-completions',
+    details:
+        'GPT-6 models are not qualified on Chat Completions. '
+        'Use openai.responses(modelId) instead.',
+  ),
+];
 
 /// Default OpenAI provider instance, e.g. `openai.responses('gpt-6-luna')`
 /// or `openai('gpt-4.1')` for Chat Completions. Reads the API key from the

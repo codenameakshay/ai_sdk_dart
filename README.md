@@ -256,14 +256,14 @@ above.
 | Package | pub.dev | What it gives you |
 |---------|---------|-------------------|
 | [`ai_sdk_dart`](https://pub.dev/packages/ai_sdk_dart) | `dart pub add ai_sdk_dart` | `generateText`, `streamText`, tools, middleware, embeddings, registry |
-| [`ai_sdk_openai`](https://pub.dev/packages/ai_sdk_openai) | `dart pub add ai_sdk_openai` | `openai('gpt-4.1-mini')`, embeddings, image gen, speech, transcription, reasoning options |
-| [`ai_sdk_anthropic`](https://pub.dev/packages/ai_sdk_anthropic) | `dart pub add ai_sdk_anthropic` | `anthropic('claude-sonnet-4-5')`, extended thinking, speed options |
-| [`ai_sdk_google`](https://pub.dev/packages/ai_sdk_google) | `dart pub add ai_sdk_google` | `google('gemini-2.0-flash')`, embeddings |
+| [`ai_sdk_openai`](https://pub.dev/packages/ai_sdk_openai) | `dart pub add ai_sdk_openai` | `openai.responses('gpt-6-luna')` (Responses API), `openai(id)` (Chat Completions), embeddings, image gen, speech, transcription, reasoning options |
+| [`ai_sdk_anthropic`](https://pub.dev/packages/ai_sdk_anthropic) | `dart pub add ai_sdk_anthropic` | `anthropic('claude-opus-5-5')`, extended thinking, speed options |
+| [`ai_sdk_google`](https://pub.dev/packages/ai_sdk_google) | `dart pub add ai_sdk_google` | `google('gemini-3.8-flash')`, embeddings |
 | [`ai_sdk_azure`](https://pub.dev/packages/ai_sdk_azure) | `dart pub add ai_sdk_azure` | `AzureOpenAIProvider(endpoint, apiKey)`, language models, embeddings |
-| [`ai_sdk_cohere`](https://pub.dev/packages/ai_sdk_cohere) | `dart pub add ai_sdk_cohere` | `cohere('command-r-plus')`, embeddings, reranking |
-| [`ai_sdk_groq`](https://pub.dev/packages/ai_sdk_groq) | `dart pub add ai_sdk_groq` | `groq('llama3-8b-8192')`, ultra-low latency inference |
-| [`ai_sdk_mistral`](https://pub.dev/packages/ai_sdk_mistral) | `dart pub add ai_sdk_mistral` | `mistral('mistral-large-latest')`, embeddings |
-| [`ai_sdk_ollama`](https://pub.dev/packages/ai_sdk_ollama) | `dart pub add ai_sdk_ollama` | `ollama('llama3')`, local inference, embeddings |
+| [`ai_sdk_cohere`](https://pub.dev/packages/ai_sdk_cohere) | `dart pub add ai_sdk_cohere` | `cohere('command-a-plus-05-2026')`, embeddings, reranking |
+| [`ai_sdk_groq`](https://pub.dev/packages/ai_sdk_groq) | `dart pub add ai_sdk_groq` | `groq('openai/gpt-oss-120b')`, ultra-low latency inference |
+| [`ai_sdk_mistral`](https://pub.dev/packages/ai_sdk_mistral) | `dart pub add ai_sdk_mistral` | `mistral('mistral-medium-3-5')`, embeddings |
+| [`ai_sdk_ollama`](https://pub.dev/packages/ai_sdk_ollama) | `dart pub add ai_sdk_ollama` | `ollama(modelId)` with a locally installed tag, local inference, embeddings |
 | [`ai_sdk_flutter_ui`](https://pub.dev/packages/ai_sdk_flutter_ui) | `dart pub add ai_sdk_flutter_ui` | `ChatController`, `CompletionController`, `ObjectStreamController` + 19 prebuilt chat widgets |
 | [`ai_sdk_mcp`](https://pub.dev/packages/ai_sdk_mcp) | `dart pub add ai_sdk_mcp` | `MCPClient`, `StreamableHttpClientTransport`, native-only `StdioMCPTransport` |
 | [`ai_sdk_provider`](https://pub.dev/packages/ai_sdk_provider) | *(transitive)* | Provider interfaces for building custom providers |
@@ -275,6 +275,24 @@ above.
 | [`ai_sdk_realtime`](packages/ai_sdk_realtime) | Unpublished preview | Realtime session and event transport; protocol and device qualification remain in progress |
 
 > `ai_sdk_provider` and `ai_sdk_openai_compatible` are transitive dependencies — you **do not** need to add them directly.
+
+### Model IDs
+
+The named language-model IDs in the provider table come from the
+[provider capability catalog](docs/provider-capability-catalog.md)
+([JSON](docs/provider-capability-catalog.json), retrieved 2026-09-23). Ollama
+uses `ollama(modelId)` because its model ID is a locally installed tag; the
+catalog uses `*` because installed tags vary by server. The catalog is
+advisory, not an allowlist: factories accept caller-supplied model IDs, subject
+to the provider, account, deployment, or local server. Check the provider's own
+model list before pinning an ID in production.
+
+The catalog records the GPT-6 models (`gpt-6-luna`, `gpt-6-sol`, `gpt-6-astra`)
+on the OpenAI Responses API. Use `openai.responses('gpt-6-luna')` for them.
+`openai('...')` and `openai.chat('...')` send Chat Completions requests. This
+repository has not qualified the GPT-6 models on that path, and no live provider
+canary has run for Responses. The catalog reports upstream model information;
+it does not qualify a model for an SDK operation.
 
 ---
 
@@ -301,7 +319,7 @@ Future<void> main() async {
   final provider = OpenAIProvider(apiKey: apiKey);
   try {
     final result = await generateText(
-      model: provider('gpt-4.1-mini'),
+      model: provider.responses('gpt-6-luna'),
       prompt: 'Say hello from AI SDK Dart!',
     );
     print(result.text);
@@ -362,7 +380,7 @@ not retry or resume a disconnected turn automatically.
 import 'dart:io';
 
 final result = await streamText(
-  model: openai('gpt-4.1-mini'),
+  model: openai.responses('gpt-6-luna'),
   prompt: 'Count from 1 to 5.',
 );
 await for (final chunk in result.textStream) {
@@ -374,7 +392,7 @@ await for (final chunk in result.textStream) {
 
 ```dart
 final result = await generateText<Map<String, dynamic>>(
-  model: openai('gpt-4.1-mini'),
+  model: openai.responses('gpt-6-luna'),
   prompt: 'Return the capital and currency of Japan as JSON.',
   output: Output.object(
     schema: Schema<Map<String, dynamic>>(
@@ -384,6 +402,8 @@ final result = await generateText<Map<String, dynamic>>(
           'capital': {'type': 'string'},
           'currency': {'type': 'string'},
         },
+        'required': ['capital', 'currency'],
+        'additionalProperties': false,
       },
       fromJson: (json) => json,
     ),
@@ -396,16 +416,19 @@ print(result.output); // {capital: Tokyo, currency: JPY}
 
 ```dart
 final result = await generateText(
-  model: openai('gpt-4.1-mini'),
+  model: openai.responses('gpt-6-luna'),
   prompt: 'What is the weather in Paris?',
   maxSteps: 5,
   tools: {
     'getWeather': tool<Map<String, dynamic>, String>(
       description: 'Get current weather for a city.',
+      strict: true,
       inputSchema: Schema(
         jsonSchema: const {
           'type': 'object',
           'properties': {'city': {'type': 'string'}},
+          'required': ['city'],
+          'additionalProperties': false,
         },
         fromJson: (json) => json,
       ),
@@ -421,7 +444,7 @@ print(result.text);
 ```dart
 try {
   final result = await generateText(
-    model: openai('gpt-4.1-mini'),
+    model: openai.responses('gpt-6-luna'),
     prompt: 'Hello',
   );
 } on AiApiCallError catch (e) {
@@ -442,7 +465,7 @@ import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 
 final agent = ToolLoopAgent(
-  model: openai('gpt-4.1-mini'),
+  model: openai.responses('gpt-6-luna'),
   instructions: 'You are a helpful assistant.',
 );
 final chat = ChatController();
@@ -492,7 +515,7 @@ import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
 import 'package:ai_sdk_openai/ai_sdk_openai.dart';
 
-final agent = ToolLoopAgent(model: openai('gpt-4.1-mini'));
+final agent = ToolLoopAgent(model: openai.responses('gpt-6-luna'));
 final chat = ChatController();
 
 // A complete message list + composer, wired to the controller + agent:
@@ -507,7 +530,7 @@ read only the controllers' public state, so they work with any state-management 
 ### ChatController — Multi-turn streaming chat
 
 ```dart
-final agent = ToolLoopAgent(model: openai('gpt-4.1-mini'));
+final agent = ToolLoopAgent(model: openai.responses('gpt-6-luna'));
 final chat = ChatController();
 
 // In your widget:
@@ -532,7 +555,7 @@ await chat.sendMessage(agent: agent, text: 'What is the capital of France?');
 
 ```dart
 final completion = CompletionController(
-  agent: ToolLoopAgent(model: openai('gpt-4.1-mini')),
+  agent: ToolLoopAgent(model: openai.responses('gpt-6-luna')),
 );
 await completion.complete('Write a haiku about Dart.');
 print(completion.completion);
@@ -542,13 +565,21 @@ print(completion.completion);
 
 ```dart
 final controller = ObjectStreamController<Map<String, dynamic>>(
-  model: openai('gpt-4.1-mini'),
+  model: openai.responses('gpt-6-luna'),
   schema: Schema<Map<String, dynamic>>(
-    jsonSchema: const {'type': 'object'},
+    jsonSchema: const {
+      'type': 'object',
+      'properties': {
+        'capital': {'type': 'string'},
+        'currency': {'type': 'string'},
+      },
+      'required': ['capital', 'currency'],
+      'additionalProperties': false,
+    },
     fromJson: (json) => json,
   ),
 );
-await controller.submit('Describe Japan as a JSON object.');
+await controller.submit('Return the capital and currency of Japan as JSON.');
 print(controller.value); // Partial updates arrive in real-time
 ```
 
@@ -574,7 +605,7 @@ await client.initialize();
 final tools = await client.tools(); // Returns a ToolSet
 
 final result = await generateText(
-  model: openai('gpt-4.1-mini'),
+  model: openai.responses('gpt-6-luna'),
   prompt: 'What files are in the project?',
   tools: tools,
   maxSteps: 5,

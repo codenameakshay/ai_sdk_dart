@@ -1,5 +1,13 @@
 ## Unreleased
 
+- Added `ChatController.chatMessages`: each message with a stable `id`, the `provider` and
+  `modelId` of the agent model that generated it, its `finishReason`, and an `interrupted`
+  status when `stop()` cut the turn short. `messages` is unchanged. Added the optional
+  `generateId` constructor argument. `ConversationChatController.chatMessages` reports the
+  snapshot ids and statuses.
+- Fixed reentrant sends and cancellation lifecycle handling so an earlier operation cannot
+  take ownership of a later turn. Reloads and tool-approval resumes retain the model metadata
+  for the agent that handled that operation.
 - `ChatController.errorPartialContent` keeps the text that streamed before a mid-stream
   error, instead of dropping it. It stays out of `messages`, so `reload()` retries the same turn.
 - `ChatMessageBubble` now renders the text parts of a parts-based message instead of a

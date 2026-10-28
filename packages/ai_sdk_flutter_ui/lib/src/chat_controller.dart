@@ -2,10 +2,15 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import 'package:ai_sdk_conversation/ai_sdk_conversation.dart'
+    show ConversationMessageStatus;
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
 import 'streaming_controller_base.dart';
+
+export 'package:ai_sdk_conversation/ai_sdk_conversation.dart'
+    show ConversationMessageStatus;
 
 /// Status of the chat controller.
 enum ChatStatus {
@@ -27,6 +32,48 @@ enum ChatStatus {
   error,
 }
 
+/// One entry of [ChatController.chatMessages]: a [ModelMessage] with a stable
+/// [id] and the facts about the turn that produced it.
+///
+/// The [id] stays the same for as long as the message is in the transcript.
+/// Removed messages do not reuse their ids. The exception is an initial
+/// message restored by [ChatController.clear], which keeps its original id.
+@immutable
+class ChatMessage {
+  const ChatMessage({
+    required this.id,
+    required this.message,
+    this.status = ConversationMessageStatus.complete,
+    this.provider,
+    this.modelId,
+    this.finishReason,
+  });
+
+  /// Stable identifier, unique within the controller.
+  final String id;
+
+  /// The message as sent to the model. Equal to the entry at the same index
+  /// in [ChatController.messages].
+  final ModelMessage message;
+
+  /// [ConversationMessageStatus.interrupted] when [ChatController.stop] cut
+  /// the turn short and kept its partial text. Otherwise
+  /// [ConversationMessageStatus.complete] for a [ChatController] transcript.
+  final ConversationMessageStatus status;
+
+  /// [LanguageModelV4.provider] of the agent model that generated this
+  /// message. Null for messages the model did not generate.
+  final String? provider;
+
+  /// [LanguageModelV4.modelId] of the agent model that generated this
+  /// message. Null for messages the model did not generate.
+  final String? modelId;
+
+  /// Why the model ended the turn. Null when the model did not generate this
+  /// message, and when [status] is [ConversationMessageStatus.interrupted].
+  final LanguageModelV4FinishReason? finishReason;
+}
+
 /// Flutter controller for chat interfaces — mirrors the JS `useChat` hook.
 ///
 /// Provides:
@@ -39,14 +86,22 @@ enum ChatStatus {
 /// - Optimistic assistant message during streaming via [streamingContent]
 /// - Text that streamed before a failure via [errorPartialContent]
 /// - [isLoading] — true while submitted or streaming
+/// - [chatMessages] — [messages] with stable ids and per-turn metadata
 class ChatController extends StreamingControllerBase {
   ChatController({
     this.id,
     this.initialMessages = const [],
     this.onFinish,
     this.onError,
+    String Function()? generateId,
     super.notificationScheduler,
-  }) : _messages = List<ModelMessage>.from(initialMessages);
+  }) : _generateId = generateId ?? createIdGenerator(size: 16) {
+    _initialEntries = [
+      for (final message in initialMessages)
+        ChatMessage(id: _generateId(), message: message),
+    ];
+    _entries.addAll(_initialEntries);
+  }
 
   /// Optional identifier for this chat session.
   final String? id;
@@ -76,9 +131,23 @@ class ChatController extends StreamingControllerBase {
   @override
   Listenable get contentListenable => super.contentListenable;
 
-  final List<ModelMessage> _messages;
+  final String Function() _generateId;
+  late final List<ChatMessage> _initialEntries;
+  final List<ChatMessage> _entries = [];
 
-  List<ModelMessage> get messages => List.unmodifiable(_messages);
+  List<ModelMessage> get messages =>
+      List.unmodifiable(_entries.map((entry) => entry.message));
+
+  /// [messages] with a stable [ChatMessage.id] per message, plus the model and
+  /// finish reason of each generated turn. Key per-message UI state by
+  /// [ChatMessage.id] instead of by list index.
+  ///
+  /// Ids come from the `generateId` constructor argument, which must return a
+  /// new value on each call, or a random 16-character generator by default.
+  /// [clear] restores the current contents of [initialMessages]. Each message
+  /// object keeps its original id across clears, including when reordered;
+  /// repeated occurrences of the same object have separate ids.
+  List<ChatMessage> get chatMessages => List.unmodifiable(_entries);
 
   ChatStatus _status = ChatStatus.ready;
   ChatStatus get status => _status;
@@ -151,42 +220,57 @@ class ChatController extends StreamingControllerBase {
   StreamSubscription<String>? _activeSubscription;
   StreamSubscription<StreamTextEvent>? _errorSubscription;
   CancellationToken? _activeAbortSignal;
+  LanguageModelV4? _activeModel;
   ToolLoopAgent? _lastAgent;
 
   // Pending tool-approval responses indexed by approvalId.
   final Map<String, LanguageModelV4ToolApprovalResponse> _pendingApprovals = {};
   ToolApprovalReplay? _pendingApprovalReplay;
+  ToolLoopAgent? _approvalAgent;
 
   void _cancelActiveRequestSync() {
     activeRequestId = null;
-    _activeAbortSignal?.cancel();
+    final abortSignal = _activeAbortSignal;
+    final subscription = _activeSubscription;
+    final errorSubscription = _errorSubscription;
     _activeAbortSignal = null;
-    unawaited(_activeSubscription?.cancel());
+    _activeModel = null;
     _activeSubscription = null;
-    unawaited(_errorSubscription?.cancel());
     _errorSubscription = null;
     _streamBuffer.clear();
     _streamingReasoning = '';
+    abortSignal?.cancel();
+    unawaited(subscription?.cancel());
+    unawaited(errorSubscription?.cancel());
   }
 
   Future<void> _cancelActiveRequest({bool commitPartial = false}) async {
     activeRequestId = null;
-    _activeAbortSignal?.cancel();
+    final abortSignal = _activeAbortSignal;
     _activeAbortSignal = null;
     final subscription = _activeSubscription;
     final errorSubscription = _errorSubscription;
     _activeSubscription = null;
     _errorSubscription = null;
+    final model = _activeModel;
+    _activeModel = null;
     if (commitPartial && _streamBuffer.isNotEmpty) {
-      _messages.add(
-        ModelMessage(
-          role: ModelMessageRole.assistant,
-          content: _streamBuffer.toString(),
+      _entries.add(
+        ChatMessage(
+          id: _generateId(),
+          message: ModelMessage(
+            role: ModelMessageRole.assistant,
+            content: _streamBuffer.toString(),
+          ),
+          status: ConversationMessageStatus.interrupted,
+          provider: model?.provider,
+          modelId: model?.modelId,
         ),
       );
     }
     _streamBuffer.clear();
     _streamingReasoning = '';
+    abortSignal?.cancel();
     await subscription?.cancel();
     await errorSubscription?.cancel();
   }
@@ -195,6 +279,7 @@ class ChatController extends StreamingControllerBase {
     _pendingApprovalRequests = const [];
     _pendingApprovals.clear();
     _pendingApprovalReplay = null;
+    _approvalAgent = null;
   }
 
   /// Submit [text] as a user message and stream the assistant response.
@@ -203,38 +288,41 @@ class ChatController extends StreamingControllerBase {
     required String text,
   }) async {
     if (isDisposed) return;
+    final requestId = ++nextRequestId;
     _lastAgent = agent;
     _discardApprovalState();
     append(ModelMessage(role: ModelMessageRole.user, content: text));
-    await _runGeneration(agent);
+    await _runGeneration(agent, reservedRequestId: requestId);
   }
 
   /// Add a [message] to the list without triggering generation.
   void append(ModelMessage message) {
     if (isDisposed) return;
-    _messages.add(message);
+    _entries.add(ChatMessage(id: _generateId(), message: message));
     notifyListenersSafely(immediate: true, content: true);
   }
 
   /// Re-run generation using the current message list.
   ///
   /// Removes the last assistant message (if any) so the model produces a
-  /// fresh response. Requires a prior call to [sendMessage].
+  /// fresh response. The new response gets a new [ChatMessage.id]. Requires a
+  /// prior call to [sendMessage].
   /// Alias: [regenerate].
   Future<void> reload({ToolLoopAgent? agent}) async {
     if (isDisposed) return;
     final effectiveAgent = agent ?? _lastAgent;
     if (effectiveAgent == null) return;
+    final requestId = ++nextRequestId;
     _discardApprovalState();
 
     // Remove trailing assistant message to allow regeneration.
-    if (_messages.isNotEmpty &&
-        _messages.last.role == ModelMessageRole.assistant) {
-      _messages.removeLast();
+    if (_entries.isNotEmpty &&
+        _entries.last.message.role == ModelMessageRole.assistant) {
+      _entries.removeLast();
       notifyListenersSafely(immediate: true, content: true);
     }
 
-    await _runGeneration(effectiveAgent);
+    await _runGeneration(effectiveAgent, reservedRequestId: requestId);
   }
 
   /// Alias for [reload] — mirrors the JS `useChat` `regenerate()` method.
@@ -266,6 +354,7 @@ class ChatController extends StreamingControllerBase {
     String? reason,
   }) {
     if (isDisposed) return;
+    final requestId = nextRequestId;
     final request = _pendingApprovalRequests
         .cast<LanguageModelV4ToolApprovalRequestPart?>()
         .firstWhere(
@@ -285,13 +374,14 @@ class ChatController extends StreamingControllerBase {
         .where((request) => request.approvalId != approvalId)
         .toList();
     notifyListenersSafely(immediate: true, status: true);
+    if (isDisposed || requestId != nextRequestId) return;
 
     // Once every paused request has a decision, replay the turn with the
     // collected responses so the agent can execute (or skip) the tools.
     if (_status == ChatStatus.awaitingApproval &&
         _pendingApprovalRequests.isEmpty &&
-        _lastAgent != null) {
-      unawaited(_runGeneration(_lastAgent!, consumeApprovals: true));
+        _approvalAgent != null) {
+      unawaited(_runGeneration(_approvalAgent!, consumeApprovals: true));
     }
   }
 
@@ -306,18 +396,28 @@ class ChatController extends StreamingControllerBase {
   Future<void> _runGeneration(
     ToolLoopAgent agent, {
     bool consumeApprovals = false,
+    int? reservedRequestId,
   }) async {
+    if (isDisposed ||
+        (reservedRequestId != null && reservedRequestId != nextRequestId)) {
+      return;
+    }
     final approvalReplay = consumeApprovals ? _pendingApprovalReplay : null;
+    final requestId = reservedRequestId ?? ++nextRequestId;
     _cancelActiveRequestSync();
-    final requestId = ++nextRequestId;
+    if (isDisposed || requestId != nextRequestId) return;
     final abortSignal = CancellationToken();
     activeRequestId = requestId;
     _activeAbortSignal = abortSignal;
+    _activeModel = agent.model;
     _streamBuffer.clear();
     _streamingReasoning = '';
     _errorPartialContent = '';
     _pendingApprovalRequests = const [];
-    if (consumeApprovals) _pendingApprovalReplay = null;
+    if (consumeApprovals) {
+      _pendingApprovalReplay = null;
+      _approvalAgent = null;
+    }
     if (!consumeApprovals) {
       _reasoningText = '';
       _lastUsage = null;
@@ -328,6 +428,7 @@ class ChatController extends StreamingControllerBase {
     _status = ChatStatus.submitted;
     _error = null;
     notifyListenersSafely(immediate: true, status: true, content: true);
+    if (!isCurrentRequest(requestId)) return;
 
     try {
       final List<LanguageModelV4ToolApprovalResponse> approvals =
@@ -346,7 +447,6 @@ class ChatController extends StreamingControllerBase {
             );
       if (!isCurrentRequest(requestId)) return;
       _status = ChatStatus.streaming;
-      notifyListenersSafely(immediate: true, status: true);
 
       // The result's `text`/`output` futures reject on a streaming error; we
       // surface errors via [stream] instead, so swallow those completions
@@ -377,6 +477,7 @@ class ChatController extends StreamingControllerBase {
           _finalizeTurn(
             streamResult,
             requestId,
+            agent: agent,
             mergeMetadata: consumeApprovals,
             approvalReplay: approvalReplay,
           ),
@@ -384,6 +485,7 @@ class ChatController extends StreamingControllerBase {
         onError: (Object err) => _handleError(err, requestId),
         cancelOnError: true,
       );
+      notifyListenersSafely(immediate: true, status: true);
     } catch (err) {
       if (!isCurrentRequest(requestId) || abortSignal.isCancelled) return;
       _handleError(err, requestId);
@@ -438,12 +540,17 @@ class ChatController extends StreamingControllerBase {
   Future<void> _finalizeTurn(
     StreamTextResult streamResult,
     int requestId, {
+    required ToolLoopAgent agent,
     required bool mergeMetadata,
     ToolApprovalReplay? approvalReplay,
   }) async {
+    if (!isCurrentRequest(requestId) || _status != ChatStatus.streaming) {
+      return;
+    }
     _activeSubscription = null;
-    unawaited(_errorSubscription?.cancel());
+    final errorSubscription = _errorSubscription;
     _errorSubscription = null;
+    unawaited(errorSubscription?.cancel());
 
     // An error event may already have moved us out of streaming.
     if (!isCurrentRequest(requestId) || _status != ChatStatus.streaming) {
@@ -457,6 +564,7 @@ class ChatController extends StreamingControllerBase {
     List<LanguageModelV4ToolCallPart> toolCalls = const [];
     List<LanguageModelV4ToolResultPart> toolResults = const [];
     String reasoningText = '';
+    LanguageModelV4FinishReason? finishReason;
     try {
       steps = await streamResult.steps;
       approvals = [for (final step in steps) ...step.toolApprovalRequests];
@@ -468,6 +576,9 @@ class ChatController extends StreamingControllerBase {
     } catch (_) {
       // Metadata is best-effort; a late stream error must not break finalize.
     }
+    try {
+      finishReason = await streamResult.finishReason;
+    } catch (_) {}
 
     // A late error may have arrived while awaiting the result futures.
     if (!isCurrentRequest(requestId) || _status != ChatStatus.streaming) {
@@ -476,6 +587,8 @@ class ChatController extends StreamingControllerBase {
 
     activeRequestId = null;
     _activeAbortSignal = null;
+    final model = _activeModel;
+    _activeModel = null;
     _lastUsage = usage ?? _lastUsage;
     _lastSources = mergeMetadata
         ? _mergeById(_lastSources, sources, (s) => '${s.id}|${s.url}')
@@ -491,6 +604,7 @@ class ChatController extends StreamingControllerBase {
     }
 
     if (approvals.isNotEmpty) {
+      _approvalAgent = agent;
       _pendingApprovalReplay = ToolApprovalReplay(
         messages: [
           ...?approvalReplay?.messages,
@@ -510,7 +624,15 @@ class ChatController extends StreamingControllerBase {
       role: ModelMessageRole.assistant,
       content: _streamBuffer.toString(),
     );
-    _messages.add(assistantMessage);
+    _entries.add(
+      ChatMessage(
+        id: _generateId(),
+        message: assistantMessage,
+        provider: model?.provider,
+        modelId: model?.modelId,
+        finishReason: finishReason,
+      ),
+    );
     _streamBuffer.clear();
     _streamingReasoning = '';
     _status = ChatStatus.ready;
@@ -545,6 +667,7 @@ class ChatController extends StreamingControllerBase {
     if (!isCurrentRequest(requestId) || _status == ChatStatus.error) return;
     activeRequestId = null;
     _activeAbortSignal = null;
+    _activeModel = null;
     unawaited(_activeSubscription?.cancel());
     _activeSubscription = null;
     unawaited(_errorSubscription?.cancel());
@@ -564,7 +687,7 @@ class ChatController extends StreamingControllerBase {
   /// Cancel the active stream.
   Future<void> stop() async {
     if (isDisposed) return;
-    final generation = nextRequestId;
+    final generation = ++nextRequestId;
     await _cancelActiveRequest(commitPartial: true);
     if (isDisposed || generation != nextRequestId) return;
     _discardApprovalState();
@@ -576,10 +699,30 @@ class ChatController extends StreamingControllerBase {
   /// Remove all messages and reset to initial state.
   void clear() {
     if (isDisposed) return;
+    final requestId = ++nextRequestId;
     _cancelActiveRequestSync();
-    _messages
+    if (isDisposed || requestId != nextRequestId) return;
+    final restored = <ChatMessage>[];
+    final used = <ChatMessage>{};
+    for (final message in initialMessages) {
+      ChatMessage? entry;
+      for (final candidate in _initialEntries) {
+        if (!used.contains(candidate) &&
+            identical(candidate.message, message)) {
+          entry = candidate;
+          break;
+        }
+      }
+      if (entry == null) {
+        entry = ChatMessage(id: _generateId(), message: message);
+        _initialEntries.add(entry);
+      }
+      used.add(entry);
+      restored.add(entry);
+    }
+    _entries
       ..clear()
-      ..addAll(initialMessages);
+      ..addAll(restored);
     _reasoningText = '';
     _lastUsage = null;
     _lastSources = const [];
@@ -594,6 +737,7 @@ class ChatController extends StreamingControllerBase {
 
   @override
   void dispose() {
+    nextRequestId++;
     isDisposed = true;
     _cancelActiveRequestSync();
     super.dispose();

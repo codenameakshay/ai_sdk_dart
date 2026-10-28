@@ -39,7 +39,8 @@ The provider has two language-model entry points:
   lists them on the Responses API. The canary harness is configured to use
   this path, but no live canary run has been performed.
 - `openai(modelId)` and `openai.chat(modelId)` send Chat Completions requests.
-  This package has not qualified the GPT-6 models on that path. Use it for
+  This package has not qualified the GPT-6 models on that path, so a `gpt-6*`
+  ID adds a `compatibility` warning to `result.warnings`. Use it for
   models that support Chat Completions, such as `gpt-4.1`.
 
 ### Streaming

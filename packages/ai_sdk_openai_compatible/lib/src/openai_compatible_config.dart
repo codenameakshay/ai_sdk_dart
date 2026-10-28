@@ -34,6 +34,7 @@ class OpenAICompatibleConfig {
     this.includeStreamUsageOption = true,
     this.reasoningKeys = const ['reasoning_content', 'reasoning', 'thinking'],
     this.extraBody,
+    this.warnings = const [],
   });
 
   /// Short provider name, e.g. `'openai'`, `'azure'`, `'groq'`, `'mistral'`.
@@ -112,6 +113,10 @@ class OpenAICompatibleConfig {
   /// `providerOptions[provider]`.
   final Map<String, dynamic>? Function(LanguageModelV4CallOptions options)?
   extraBody;
+
+  /// Warnings added to every generate and stream result of the model, ahead
+  /// of any warnings the provider returns. Defaults to none.
+  final List<LanguageModelV4Warning> warnings;
 }
 
 /// Parses an OpenAI-shaped `data: [{ embedding: [...] }]` embeddings

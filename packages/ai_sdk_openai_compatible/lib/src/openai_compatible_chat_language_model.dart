@@ -184,7 +184,7 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
       );
 
       final usageMap = (data['usage'] as Map?)?.cast<String, dynamic>();
-      final warnings = _readWarnings(data['warnings']);
+      final warnings = [...config.warnings, ..._readWarnings(data['warnings'])];
       return LanguageModelV4GenerateResult(
         content: content,
         finishReason: _mapFinishReason(
@@ -269,7 +269,7 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
     var streamStarted = false;
     LanguageModelV4Usage? streamUsage;
     String? finishReason;
-    final streamWarnings = <LanguageModelV4Warning>[];
+    final streamWarnings = <LanguageModelV4Warning>[...config.warnings];
     String? responseId;
     String? responseModel;
     Map<String, dynamic>? lastChunk;
@@ -428,7 +428,11 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
         } else if (!cancellation.isCancelled) {
           if (!streamStarted) {
             streamStarted = true;
-            controller.add(const StreamPartStreamStart());
+            controller.add(
+              StreamPartStreamStart(
+                warnings: List.unmodifiable(streamWarnings),
+              ),
+            );
           }
           controller.add(
             StreamPartError(
@@ -445,13 +449,19 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
         if (!cancellation.isCancelled && !controller.isClosed) {
           if (!streamStarted) {
             streamStarted = true;
-            controller.add(const StreamPartStreamStart());
+            controller.add(
+              StreamPartStreamStart(
+                warnings: List.unmodifiable(streamWarnings),
+              ),
+            );
           }
           controller.add(StreamPartError(error: error));
         }
       } finally {
         if (!streamStarted) {
-          controller.add(const StreamPartStreamStart());
+          controller.add(
+            StreamPartStreamStart(warnings: List.unmodifiable(streamWarnings)),
+          );
         }
         await controller.close();
         await cancellation.dispose();

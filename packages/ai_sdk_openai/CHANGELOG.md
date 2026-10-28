@@ -1,3 +1,8 @@
+## Unreleased
+
+- Chat Completions models for `gpt-6*` IDs now add a `compatibility` warning
+  that points to `openai.responses(modelId)`.
+
 ## 3.0.0
 
 - Added the OpenAI Responses API language model with streaming, reasoning, hosted tools, and validated function/tool continuation history.

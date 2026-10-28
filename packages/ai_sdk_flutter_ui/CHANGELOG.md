@@ -1,3 +1,10 @@
+## Unreleased
+
+- `ChatController.errorPartialContent` keeps the text that streamed before a mid-stream
+  error, instead of dropping it. It stays out of `messages`, so `reload()` retries the same turn.
+
+---
+
 ## 3.0.0
 
 - Added conversation controllers and local/remote backends, persisted conversation snapshots,

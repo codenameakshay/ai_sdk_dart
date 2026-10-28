@@ -1,3 +1,10 @@
+## Unreleased
+
+- Added `ModelMessage.text`, which returns a message's plain text: `content`, or its text parts
+  joined in order. Reasoning, tool, file, and source parts are excluded.
+
+---
+
 ## 3.0.0
 
 - Added v3 instruction precedence, canonical lifecycle callbacks, per-step result semantics,

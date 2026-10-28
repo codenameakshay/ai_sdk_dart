@@ -13,7 +13,7 @@ import 'ui_strings.dart';
 ///
 /// ```dart
 /// MessageActionsBar(
-///   copyText: message.content,
+///   copyText: message.text,
 ///   onRegenerate: controller.regenerate,
 /// )
 /// ```

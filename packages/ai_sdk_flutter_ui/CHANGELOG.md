@@ -2,6 +2,8 @@
 
 - `ChatController.errorPartialContent` keeps the text that streamed before a mid-stream
   error, instead of dropping it. It stays out of `messages`, so `reload()` retries the same turn.
+- `ChatMessageBubble` now renders the text parts of a parts-based message instead of a
+  placeholder ellipsis.
 
 ---
 

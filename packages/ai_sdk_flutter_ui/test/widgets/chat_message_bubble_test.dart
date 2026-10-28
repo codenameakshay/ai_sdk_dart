@@ -1,5 +1,6 @@
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
+import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -53,6 +54,122 @@ void main() {
     testWidgets('empty content renders a placeholder ellipsis', (tester) async {
       await tester.pumpWidget(_wrap(ChatMessageBubble.text(text: '')));
       expect(find.text('…'), findsOneWidget);
+    });
+
+    testWidgets('renders the text parts of a parts-based message', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _wrap(
+          ChatMessageBubble(
+            message: ModelMessage.parts(
+              role: ModelMessageRole.user,
+              parts: [
+                LanguageModelV4TextPart(text: 'look at '),
+                LanguageModelV4ReasoningPart(text: 'hidden'),
+                LanguageModelV4TextPart(text: 'this'),
+              ],
+            ),
+          ),
+        ),
+      );
+      expect(find.text('look at this'), findsOneWidget);
+      expect(find.text('hidden'), findsNothing);
+      expect(find.text('…'), findsNothing);
+    });
+
+    for (final (role, label) in [
+      (ModelMessageRole.user, 'User message'),
+      (ModelMessageRole.tool, 'Tool message'),
+    ]) {
+      testWidgets('exposes parts-based ${role.name} text to semantics', (
+        tester,
+      ) async {
+        final semantics = tester.ensureSemantics();
+        await tester.pumpWidget(
+          _wrap(
+            ChatMessageBubble(
+              message: ModelMessage.parts(
+                role: role,
+                parts: const [
+                  LanguageModelV4TextPart(text: 'look at '),
+                  LanguageModelV4ToolResultPart(
+                    toolCallId: 'c1',
+                    toolName: 'search',
+                    output: ToolResultOutputText('hidden result'),
+                  ),
+                  LanguageModelV4TextPart(text: 'this'),
+                ],
+              ),
+            ),
+          ),
+        );
+
+        final node = tester
+            .getSemantics(find.byType(ChatMessageBubble))
+            .getSemanticsData();
+        expect(node.label, label);
+        expect(node.value, 'look at this');
+        expect(find.text('look at this'), findsOneWidget);
+        expect(find.text('hidden result'), findsNothing);
+        semantics.dispose();
+      });
+    }
+
+    testWidgets('updates parts text, placeholder, and cursor on rebuild', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      Widget bubble(
+        List<LanguageModelV4ContentPart> parts, {
+        bool isStreaming = true,
+      }) => _wrap(
+        ChatMessageBubble(
+          message: ModelMessage.parts(
+            role: ModelMessageRole.assistant,
+            parts: parts,
+          ),
+          isStreaming: isStreaming,
+        ),
+      );
+
+      await tester.pumpWidget(
+        bubble(const [LanguageModelV4TextPart(text: 'first answer')]),
+      );
+      expect(find.text('first answer'), findsOneWidget);
+      expect(find.byKey(const ValueKey('streaming-cursor')), findsOneWidget);
+
+      await tester.pumpWidget(
+        bubble(const [LanguageModelV4ReasoningPart(text: 'hidden')]),
+      );
+      expect(find.text('…'), findsOneWidget);
+      expect(find.text('first answer'), findsNothing);
+      expect(find.text('hidden'), findsNothing);
+      expect(
+        tester
+            .getSemantics(find.byType(ChatMessageBubble))
+            .getSemanticsData()
+            .value,
+        '…',
+      );
+      expect(find.byKey(const ValueKey('streaming-cursor')), findsOneWidget);
+
+      await tester.pumpWidget(
+        bubble(const [
+          LanguageModelV4TextPart(text: 'new answer'),
+        ], isStreaming: false),
+      );
+      expect(find.text('new answer'), findsOneWidget);
+      expect(find.text('…'), findsNothing);
+      expect(
+        tester
+            .getSemantics(find.byType(ChatMessageBubble))
+            .getSemanticsData()
+            .value,
+        'new answer',
+      );
+      expect(find.byKey(const ValueKey('streaming-cursor')), findsNothing);
+      semantics.dispose();
     });
 
     testWidgets('renders a tool message with the tool styling branch', (

@@ -30,4 +30,17 @@ class ModelMessage {
   final ModelMessageRole role;
   final String? content;
   final List<LanguageModelV4ContentPart>? parts;
+
+  /// The plain text of this message.
+  ///
+  /// For a [content] message, this is [content]. For a [parts] message, this
+  /// is the text of each [LanguageModelV4TextPart] in order, joined with no
+  /// separator. Reasoning, tool calls, tool results, approvals, files, images,
+  /// and sources are excluded. A message with no text parts returns `''`.
+  String get text =>
+      content ??
+      parts!
+          .whereType<LanguageModelV4TextPart>()
+          .map((part) => part.text)
+          .join();
 }

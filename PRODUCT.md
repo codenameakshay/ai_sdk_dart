@@ -3,7 +3,8 @@
 > Scope: this document governs the **design surface** of the AI SDK Dart monorepo —
 > the `ai_sdk_flutter_ui` package (controllers + prebuilt Material widgets) and the
 > example apps that showcase it (`examples/flutter_chat`, `examples/advanced_app`).
-> The other packages are non-UI providers and carry no design register.
+> The other packages (core, providers, and non-UI companions such as `ai_sdk_conversation` and
+> `ai_sdk_remote`) carry no design register.
 
 ## Register
 

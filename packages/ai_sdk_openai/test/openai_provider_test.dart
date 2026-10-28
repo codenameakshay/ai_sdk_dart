@@ -155,6 +155,145 @@ void main() {
       );
     });
 
+    test('chat model for a GPT-6 id warns to use Responses', () async {
+      final server = await _startServer((request) async {
+        expect(request.uri.path, '/v1/chat/completions');
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'id': 'chatcmpl_1',
+            'model': 'gpt-6-luna',
+            'choices': [
+              {
+                'finish_reason': 'stop',
+                'message': {'content': 'ok'},
+              },
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+
+      addTearDown(server.close);
+
+      final provider = OpenAIProvider(apiKey: 'test', baseUrl: server.baseUrl);
+      final model = provider.call('gpt-6-luna');
+
+      final result = await model.doGenerate(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
+            messages: [
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'Hi')],
+              ),
+            ],
+          ),
+        ),
+      );
+
+      expect(result.warnings, hasLength(1));
+      expect(
+        result.warnings.single,
+        isA<LanguageModelV4CompatibilityWarning>()
+            .having((w) => w.feature, 'feature', 'chat-completions')
+            .having(
+              (w) => w.details,
+              'details',
+              'GPT-6 models are not qualified on Chat Completions. '
+                  'Use openai.responses(modelId) instead.',
+            ),
+      );
+    });
+
+    test('chat stream for a GPT-6 id warns to use Responses', () async {
+      final server = await _startServer((request) async {
+        expect(request.uri.path, '/v1/chat/completions');
+        request.response.statusCode = 200;
+        request.response.headers.set('content-type', 'text/event-stream');
+        request.response.write(
+          'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n',
+        );
+        request.response.write('data: [DONE]\n\n');
+        await request.response.close();
+      });
+
+      addTearDown(server.close);
+
+      final provider = OpenAIProvider(apiKey: 'test', baseUrl: server.baseUrl);
+      final model = provider.call('gpt-6-luna');
+
+      final streamResult = await model.doStream(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
+            messages: [
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'Hi')],
+              ),
+            ],
+          ),
+        ),
+      );
+
+      final parts = await streamResult.stream.toList();
+      final streamStart = parts.whereType<StreamPartStreamStart>().first;
+      expect(streamStart.warnings, hasLength(1));
+      expect(
+        streamStart.warnings.single,
+        isA<LanguageModelV4CompatibilityWarning>()
+            .having((w) => w.feature, 'feature', 'chat-completions')
+            .having(
+              (w) => w.details,
+              'details',
+              'GPT-6 models are not qualified on Chat Completions. '
+                  'Use openai.responses(modelId) instead.',
+            ),
+      );
+    });
+
+    test('chat model for a non-GPT-6 id has no routing warning', () async {
+      final server = await _startServer((request) async {
+        expect(request.uri.path, '/v1/chat/completions');
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'id': 'chatcmpl_1',
+            'model': 'gpt-4.1',
+            'choices': [
+              {
+                'finish_reason': 'stop',
+                'message': {'content': 'ok'},
+              },
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+
+      addTearDown(server.close);
+
+      final provider = OpenAIProvider(apiKey: 'test', baseUrl: server.baseUrl);
+      final model = provider.call('gpt-4.1');
+
+      final result = await model.doGenerate(
+        LanguageModelV4CallOptions(
+          prompt: LanguageModelV4Prompt(
+            messages: [
+              LanguageModelV4Message(
+                role: LanguageModelV4Role.user,
+                content: [LanguageModelV4TextPart(text: 'Hi')],
+              ),
+            ],
+          ),
+        ),
+      );
+
+      expect(result.warnings, isEmpty);
+    });
+
     test('credentials are resolved immediately before each request', () async {
       final authorizations = <String?>[];
       final server = await _startServer((request) async {

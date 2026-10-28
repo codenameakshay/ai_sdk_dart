@@ -184,7 +184,7 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
       );
 
       final usageMap = (data['usage'] as Map?)?.cast<String, dynamic>();
-      final warnings = _readWarnings(data['warnings']);
+      final warnings = [...config.warnings, ..._readWarnings(data['warnings'])];
       return LanguageModelV4GenerateResult(
         content: content,
         finishReason: _mapFinishReason(
@@ -269,7 +269,7 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
     var streamStarted = false;
     LanguageModelV4Usage? streamUsage;
     String? finishReason;
-    final streamWarnings = <LanguageModelV4Warning>[];
+    final streamWarnings = <LanguageModelV4Warning>[...config.warnings];
     String? responseId;
     String? responseModel;
     Map<String, dynamic>? lastChunk;

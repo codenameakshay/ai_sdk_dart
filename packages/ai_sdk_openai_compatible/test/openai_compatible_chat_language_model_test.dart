@@ -2116,6 +2116,78 @@ void main() {
       },
     );
 
+    test('prepends config warnings to provider warnings on generate', () async {
+      final server = await _startServer((request) async {
+        _writeJson(request, {
+          'id': 'chatcmpl_cw',
+          'model': 'm',
+          'warnings': ['from provider'],
+          'choices': [
+            {
+              'finish_reason': 'stop',
+              'message': {'content': 'hi'},
+            },
+          ],
+        });
+      });
+      addTearDown(server.close);
+
+      final model = OpenAICompatibleChatLanguageModel(
+        modelId: 'm',
+        config: OpenAICompatibleConfig(
+          provider: 'test',
+          baseUrl: server.baseUrl,
+          client: _testClient(server.baseUrl),
+          headers: () => {'Authorization': 'Bearer test-token'},
+          warnings: const [LanguageModelV4OtherWarning(message: 'from config')],
+        ),
+      );
+      final result = await model.doGenerate(
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
+      );
+
+      expect(
+        result.warnings
+            .map((w) => (w as LanguageModelV4OtherWarning).message)
+            .toList(),
+        ['from config', 'from provider'],
+      );
+    });
+
+    test('prepends config warnings to provider warnings on stream', () async {
+      final server = await _startServer((request) async {
+        _writeSse(request, [
+          '{"id":"chatcmpl_cw","model":"m","warnings":["from provider"],"choices":[{"delta":{"content":"Hi"}}]}',
+          '{"id":"chatcmpl_cw","model":"m","choices":[{"delta":{},"finish_reason":"stop"}]}',
+          '[DONE]',
+        ]);
+      });
+      addTearDown(server.close);
+
+      final model = OpenAICompatibleChatLanguageModel(
+        modelId: 'm',
+        config: OpenAICompatibleConfig(
+          provider: 'test',
+          baseUrl: server.baseUrl,
+          client: _testClient(server.baseUrl),
+          headers: () => {'Authorization': 'Bearer test-token'},
+          warnings: const [LanguageModelV4OtherWarning(message: 'from config')],
+        ),
+      );
+      final streamResult = await model.doStream(
+        LanguageModelV4CallOptions(prompt: userPrompt('hi')),
+      );
+      final parts = await streamResult.stream.toList();
+
+      final start = parts.whereType<StreamPartStreamStart>().first;
+      expect(
+        start.warnings
+            .map((w) => (w as LanguageModelV4OtherWarning).message)
+            .toList(),
+        ['from config', 'from provider'],
+      );
+    });
+
     test(
       'emits stream-start before StreamPartError when the response stream fails before the first chunk',
       () async {

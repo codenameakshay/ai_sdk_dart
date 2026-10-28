@@ -1,3 +1,8 @@
+## Unreleased
+
+- Added `OpenAICompatibleConfig.warnings`, which the chat model adds ahead of
+  provider-returned warnings on every result.
+
 ## 3.0.0
 
 - Send schema-free JSON mode when requested and retain usage reported after the

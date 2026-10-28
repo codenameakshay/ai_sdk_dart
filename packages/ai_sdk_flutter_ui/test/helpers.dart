@@ -47,6 +47,14 @@ class HoldingTextModel extends LanguageModelV4 {
     _controller.close();
   }
 
+  /// Emits [error] as a stream error part and closes the stream, simulating a
+  /// failure after [text] has already streamed.
+  void fail(Object error) {
+    if (_controller.isClosed) return;
+    _controller.add(StreamPartError(error: error));
+    _controller.close();
+  }
+
   @override
   String get provider => 'mock';
   @override

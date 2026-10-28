@@ -64,6 +64,19 @@ class _ApprovalReplayModel extends LanguageModelV4 {
   }
 }
 
+class _ImmediateFailingTextModel extends HoldingTextModel {
+  _ImmediateFailingTextModel() : super('final delta');
+
+  @override
+  Future<LanguageModelV4StreamResult> doStream(
+    LanguageModelV4CallOptions options,
+  ) async {
+    final result = await super.doStream(options);
+    super.fail(StateError('immediate drop'));
+    return result;
+  }
+}
+
 void main() {
   group('ChatController', () {
     test('starts ready and empty (or with initial messages)', () {
@@ -853,6 +866,327 @@ void main() {
       scheduler.flush();
 
       expect(notifications, 0);
+    });
+  });
+
+  group('errorPartialContent', () {
+    Future<ChatController> failMidStream(String partial) async {
+      final controller = ChatController();
+      final model = HoldingTextModel(partial);
+      unawaited(
+        controller.sendMessage(
+          agent: ToolLoopAgent(model: model),
+          text: 'q',
+        ),
+      );
+      await pumpUntil(() => controller.streamingContent == partial);
+      model.fail(StateError('network drop'));
+      await pumpUntil(() => controller.status == ChatStatus.error);
+      return controller;
+    }
+
+    test('keeps streamed text after a mid-stream error', () async {
+      final controller = await failMidStream('partial answer');
+
+      expect(controller.errorPartialContent, 'partial answer');
+      expect(controller.streamingContent, isEmpty);
+      expect(controller.error, isA<StateError>());
+      expect(controller.messages.length, 1);
+      expect(controller.messages.single.role, ModelMessageRole.user);
+      controller.dispose();
+    });
+
+    test(
+      'preserves the final delta when failure follows before buffer pump',
+      () async {
+        final controller = ChatController();
+        final model = _ImmediateFailingTextModel();
+
+        await controller.sendMessage(
+          agent: ToolLoopAgent(model: model),
+          text: 'q',
+        );
+        await pumpUntil(() => controller.status == ChatStatus.error);
+
+        expect(controller.errorPartialContent, 'final delta');
+        expect(controller.error, isA<StateError>());
+        expect(controller.messages, hasLength(1));
+        expect(controller.messages.single.role, ModelMessageRole.user);
+        controller.dispose();
+      },
+    );
+
+    test('notifies content listeners when the partial is preserved', () async {
+      final scheduler = FakeFrameNotificationScheduler();
+      final controller = ChatController(notificationScheduler: scheduler);
+      final model = HoldingTextModel('partial answer');
+
+      unawaited(
+        controller.sendMessage(
+          agent: ToolLoopAgent(model: model),
+          text: 'q',
+        ),
+      );
+      await pumpUntil(() => controller.streamingContent == 'partial answer');
+      expect(controller.streamingContent, 'partial answer');
+      scheduler.flush();
+
+      final notifications = <(ChatStatus, String, String)>[];
+      controller.contentListenable.addListener(() {
+        notifications.add((
+          controller.status,
+          controller.streamingContent,
+          controller.errorPartialContent,
+        ));
+      });
+
+      model.fail(StateError('network drop'));
+      await pumpUntil(() => controller.status == ChatStatus.error);
+
+      expect(notifications, [(ChatStatus.error, '', 'partial answer')]);
+      expect(controller.errorPartialContent, 'partial answer');
+      scheduler.flush();
+      expect(notifications, [(ChatStatus.error, '', 'partial answer')]);
+      controller.dispose();
+    });
+
+    test('reload keeps the user turn and clears the partial', () async {
+      final controller = await failMidStream('partial answer');
+
+      await controller.reload(agent: textAgent('full answer'));
+      await pumpUntil(() => controller.status == ChatStatus.ready);
+
+      expect(controller.errorPartialContent, isEmpty);
+      expect(controller.messages.map((m) => m.role).toList(), [
+        ModelMessageRole.user,
+        ModelMessageRole.assistant,
+      ]);
+      expect(controller.messages.last.content, 'full answer');
+      controller.dispose();
+    });
+
+    test('clearError discards the partial', () async {
+      final controller = await failMidStream('partial answer');
+
+      controller.clearError();
+
+      expect(controller.status, ChatStatus.ready);
+      expect(controller.errorPartialContent, isEmpty);
+      controller.dispose();
+    });
+
+    test('publishes partial clearing through contentListenable', () async {
+      final cases = <String, Future<void> Function(ChatController)>{
+        'clearError': (controller) async => controller.clearError(),
+        'stop': (controller) async => controller.stop(),
+        'clear': (controller) async => controller.clear(),
+        'next request': (controller) async =>
+            controller.sendMessage(agent: textAgent('next'), text: 'again'),
+      };
+
+      for (final entry in cases.entries) {
+        final controller = await failMidStream('partial answer');
+        final observed = <String>[];
+        controller.contentListenable.addListener(() {
+          observed.add(controller.errorPartialContent);
+        });
+
+        await entry.value(controller);
+        await pumpUntil(() => controller.status != ChatStatus.submitted);
+
+        expect(
+          observed,
+          contains(''),
+          reason: '${entry.key} must publish the cleared partial',
+        );
+        expect(controller.errorPartialContent, isEmpty);
+        if (entry.key == 'clearError' || entry.key == 'stop') {
+          expect(controller.status, ChatStatus.ready);
+        }
+        controller.dispose();
+      }
+    });
+
+    test(
+      'clears the partial in the submitted transition notification',
+      () async {
+        final controller = await failMidStream('partial answer');
+        final submittedPartials = <String>[];
+        controller.addListener(() {
+          if (controller.status == ChatStatus.submitted) {
+            submittedPartials.add(controller.errorPartialContent);
+          }
+        });
+
+        unawaited(
+          controller.sendMessage(agent: textAgent('next'), text: 'again'),
+        );
+        await pumpUntil(() => controller.status == ChatStatus.ready);
+
+        expect(submittedPartials, ['']);
+        expect(controller.errorPartialContent, isEmpty);
+        controller.dispose();
+      },
+    );
+
+    test('stop with an error queued prevents stale partial state', () async {
+      final agent = RecordingStreamAgent();
+      final controller = ChatController();
+      unawaited(controller.sendMessage(agent: agent, text: 'go'));
+      await pumpUntil(() => agent.invocations.length == 1);
+      final invocation = agent.invocations.single;
+      invocation.emitText('partial');
+      await pumpUntil(() => controller.streamingContent == 'partial');
+
+      invocation.emitError(StateError('queued failure'));
+      await controller.stop();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.status, ChatStatus.ready);
+      expect(controller.error, isNull);
+      expect(controller.errorPartialContent, isEmpty);
+      expect(controller.streamingContent, isEmpty);
+      expect(controller.messages.map((m) => m.content), ['go', 'partial']);
+      controller.dispose();
+    });
+
+    test('dispose with queued text and error emits no stale state', () async {
+      final agent = RecordingStreamAgent();
+      final controller = ChatController();
+      var notifications = 0;
+      controller.addListener(() => notifications++);
+      unawaited(controller.sendMessage(agent: agent, text: 'go'));
+      await pumpUntil(() => agent.invocations.length == 1);
+      final invocation = agent.invocations.single;
+      notifications = 0;
+
+      invocation.emitText('queued text');
+      invocation.emitError(StateError('queued failure'));
+      controller.dispose();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(notifications, 0);
+      expect(controller.streamingContent, isEmpty);
+      expect(controller.errorPartialContent, isEmpty);
+      expect(controller.error, isNull);
+      expect(controller.messages.map((m) => m.content), ['go']);
+    });
+
+    test(
+      'approval resume failure snapshots resumed text and retry ignores late events',
+      () async {
+        final controller = ChatController();
+        final agent = RecordingStreamAgent();
+        const call = LanguageModelV4ToolCallPart(
+          toolCallId: 'c1',
+          toolName: 'secureTool',
+          input: {'path': '/x'},
+        );
+        const request = LanguageModelV4ToolApprovalRequestPart(
+          approvalId: 'approval_c1',
+          toolCall: call,
+        );
+
+        unawaited(controller.sendMessage(agent: agent, text: 'go'));
+        await pumpUntil(() => agent.invocations.length == 1);
+        final initial = agent.invocations.first;
+        initial.emitText('before approval');
+        await initial.finish(
+          finalText: 'before approval',
+          steps: const [
+            GenerateTextStep(
+              stepNumber: 1,
+              content: [call],
+              toolCalls: [call],
+              toolResults: [],
+              toolApprovalRequests: [request],
+              response: LanguageModelV4GenerateResult(
+                content: [call],
+                finishReason: LanguageModelV4FinishReason.toolCalls,
+              ),
+              text: '',
+              finishReason: LanguageModelV4FinishReason.toolCalls,
+            ),
+          ],
+          toolCalls: const [call],
+        );
+        await pumpUntil(() => controller.status == ChatStatus.awaitingApproval);
+        expect(controller.errorPartialContent, isEmpty);
+
+        controller.addToolApprovalResponse(
+          approvalId: 'approval_c1',
+          approved: true,
+        );
+        await pumpUntil(() => agent.invocations.length == 2);
+        final resumed = agent.invocations.last;
+        resumed.emitText('resumed only');
+        await pumpUntil(() => controller.streamingContent == 'resumed only');
+        resumed.emitError(StateError('resumed failure'));
+        await pumpUntil(() => controller.status == ChatStatus.error);
+
+        expect(controller.errorPartialContent, 'resumed only');
+        expect(controller.messages.map((m) => m.role), [ModelMessageRole.user]);
+
+        await controller.reload(agent: textAgent('retry answer'));
+        await pumpUntil(() => controller.status == ChatStatus.ready);
+        resumed.emitText(' stale');
+        resumed.emitError(StateError('stale failure'));
+        await Future<void>.delayed(Duration.zero);
+
+        expect(controller.errorPartialContent, isEmpty);
+        expect(controller.error, isNull);
+        expect(controller.messages.map((m) => m.content), [
+          'go',
+          'retry answer',
+        ]);
+        controller.dispose();
+      },
+    );
+
+    test('clear discards the partial', () async {
+      final controller = await failMidStream('partial answer');
+
+      controller.clear();
+
+      expect(controller.errorPartialContent, isEmpty);
+      expect(controller.messages, isEmpty);
+      controller.dispose();
+    });
+
+    test('stop discards the partial', () async {
+      final controller = await failMidStream('partial answer');
+
+      await controller.stop();
+
+      expect(controller.errorPartialContent, isEmpty);
+      expect(controller.status, ChatStatus.ready);
+      controller.dispose();
+    });
+
+    test('sendMessage clears the partial', () async {
+      final controller = await failMidStream('partial answer');
+
+      await controller.sendMessage(agent: textAgent('next'), text: 'again');
+      await pumpUntil(() => controller.status == ChatStatus.ready);
+
+      expect(controller.errorPartialContent, isEmpty);
+      expect(controller.messages.last.content, 'next');
+      controller.dispose();
+    });
+
+    test('is empty when the request fails before any text', () async {
+      final controller = ChatController();
+
+      unawaited(
+        controller.sendMessage(
+          agent: erroringAgent(StateError('boom')),
+          text: 'q',
+        ),
+      );
+      await pumpUntil(() => controller.status == ChatStatus.error);
+
+      expect(controller.errorPartialContent, isEmpty);
+      controller.dispose();
     });
   });
 }

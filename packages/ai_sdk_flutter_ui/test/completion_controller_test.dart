@@ -491,5 +491,41 @@ void main() {
       expect(events, ['root', 'status', 'content']);
       controller.dispose();
     });
+
+    test('keeps the streamed text when the stream fails mid-answer', () async {
+      final model = HoldingTextModel('partial answer');
+      final controller = CompletionController(
+        agent: ToolLoopAgent(model: model),
+      );
+
+      unawaited(controller.complete('go'));
+      await pumpUntil(() => controller.completion == 'partial answer');
+      model.fail(StateError('network drop'));
+      await pumpUntil(() => controller.error != null);
+
+      expect(controller.completion, 'partial answer');
+      expect(controller.error, isA<StateError>());
+      expect(controller.isLoading, isFalse);
+      expect(controller.isStreaming, isFalse);
+      controller.dispose();
+    });
+
+    test('clear discards text kept after an error', () async {
+      final model = HoldingTextModel('partial answer');
+      final controller = CompletionController(
+        agent: ToolLoopAgent(model: model),
+      );
+
+      unawaited(controller.complete('go'));
+      await pumpUntil(() => controller.completion == 'partial answer');
+      model.fail(StateError('network drop'));
+      await pumpUntil(() => controller.error != null);
+
+      controller.clear();
+
+      expect(controller.completion, isEmpty);
+      expect(controller.error, isNull);
+      controller.dispose();
+    });
   });
 }

@@ -108,7 +108,8 @@ class _ChatPageState extends State<ChatPage> {
 ```
 
 **State:** `messages` (`List<ModelMessage>`), `status` (`ChatStatus.ready|submitted|streaming|awaitingApproval|error`),
-`isLoading`, `error`, `streamingContent` (live buffer of the in-flight reply).
+`isLoading`, `error`, `streamingContent` (live buffer of the in-flight reply), `errorPartialContent`
+(text that streamed before a failure).
 
 **Per-message state:** `chatMessages` (`List<ChatMessage>`) is `messages` with a stable `id`
 per message. A generated turn also records the agent's `provider` and `modelId` and its
@@ -122,6 +123,10 @@ Messages that retain the same identity and occurrence keep their ids; new entrie
 **Methods:** `sendMessage({agent, text})`, `append(ModelMessage)` (add without generating),
 `reload({agent})` / `regenerate({agent})`, `stop()`, `clear()`, `clearError()`,
 `addToolApprovalResponse({approvalId, approved, reason})` (for tools with `needsApproval`).
+
+If a stream fails mid-answer, the text that came through moves to `errorPartialContent`. It is not
+added to `messages`, so `reload()` retries the same user turn. The next request, `clearError()`,
+`stop()`, and `clear()` discard it.
 
 > All three controllers expose an `isStreaming` bool. `ChatController` additionally exposes the
 > richer `status`/`isLoading` (`isStreaming` there is just `status == ChatStatus.streaming`).
@@ -138,6 +143,9 @@ print(completion.completion); // accumulates as it streams
 
 completion.dispose();
 ```
+
+After an error, `completion` keeps the text that streamed before the failure until the next
+`complete()` or `clear()`.
 
 **State:** `completion` (`String`), `isLoading`, `isStreaming`, `error`.
 **Methods:** `complete(prompt)`, `stop()`, `clear()`.

@@ -8,6 +8,8 @@
 - Fixed reentrant sends and cancellation lifecycle handling so an earlier operation cannot
   take ownership of a later turn. Reloads and tool-approval resumes retain the model metadata
   for the agent that handled that operation.
+- `ChatController.errorPartialContent` keeps the text that streamed before a mid-stream
+  error, instead of dropping it. It stays out of `messages`, so `reload()` retries the same turn.
 
 ---
 

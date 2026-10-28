@@ -428,7 +428,11 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
         } else if (!cancellation.isCancelled) {
           if (!streamStarted) {
             streamStarted = true;
-            controller.add(const StreamPartStreamStart());
+            controller.add(
+              StreamPartStreamStart(
+                warnings: List.unmodifiable(streamWarnings),
+              ),
+            );
           }
           controller.add(
             StreamPartError(
@@ -445,13 +449,19 @@ class OpenAICompatibleChatLanguageModel extends LanguageModelV4 {
         if (!cancellation.isCancelled && !controller.isClosed) {
           if (!streamStarted) {
             streamStarted = true;
-            controller.add(const StreamPartStreamStart());
+            controller.add(
+              StreamPartStreamStart(
+                warnings: List.unmodifiable(streamWarnings),
+              ),
+            );
           }
           controller.add(StreamPartError(error: error));
         }
       } finally {
         if (!streamStarted) {
-          controller.add(const StreamPartStreamStart());
+          controller.add(
+            StreamPartStreamStart(warnings: List.unmodifiable(streamWarnings)),
+          );
         }
         await controller.close();
         await cancellation.dispose();

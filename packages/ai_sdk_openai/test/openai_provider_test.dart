@@ -215,6 +215,9 @@ void main() {
         request.response.write(
           'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n',
         );
+        request.response.write(
+          'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+        );
         request.response.write('data: [DONE]\n\n');
         await request.response.close();
       });
@@ -238,7 +241,12 @@ void main() {
       );
 
       final parts = await streamResult.stream.toList();
+      expect(parts.whereType<StreamPartError>(), isEmpty);
       final streamStart = parts.whereType<StreamPartStreamStart>().first;
+      expect(
+        parts.whereType<StreamPartFinish>().single.finishReason,
+        LanguageModelV4FinishReason.stop,
+      );
       expect(streamStart.warnings, hasLength(1));
       expect(
         streamStart.warnings.single,

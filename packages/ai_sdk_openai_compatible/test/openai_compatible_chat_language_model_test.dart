@@ -650,12 +650,24 @@ void main() {
         });
         addTearDown(server.close);
 
-        final model = _bearerModel(server.baseUrl);
+        const warning = LanguageModelV4OtherWarning(message: 'from config');
+        final model = OpenAICompatibleChatLanguageModel(
+          modelId: 'm',
+          config: OpenAICompatibleConfig(
+            provider: 'test',
+            baseUrl: server.baseUrl,
+            client: _testClient(server.baseUrl),
+            headers: () => {'Authorization': 'Bearer test-token'},
+            warnings: const [warning],
+          ),
+        );
         final streamResult = await model.doStream(
           LanguageModelV4CallOptions(prompt: userPrompt('hi')),
         );
         final parts = await streamResult.stream.toList();
-        expect(parts.whereType<StreamPartStreamStart>(), hasLength(1));
+        expect(parts.whereType<StreamPartStreamStart>().single.warnings, const [
+          warning,
+        ]);
         expect(parts.whereType<StreamPartError>(), hasLength(1));
         expect(parts.whereType<StreamPartFinish>(), isEmpty);
       },
@@ -667,14 +679,59 @@ void main() {
       });
       addTearDown(server.close);
 
-      final result = await _bearerModel(
-        server.baseUrl,
-      ).doStream(LanguageModelV4CallOptions(prompt: userPrompt('empty')));
+      const warning = LanguageModelV4OtherWarning(message: 'from config');
+      final model = OpenAICompatibleChatLanguageModel(
+        modelId: 'm',
+        config: OpenAICompatibleConfig(
+          provider: 'test',
+          baseUrl: server.baseUrl,
+          client: _testClient(server.baseUrl),
+          headers: () => {'Authorization': 'Bearer test-token'},
+          warnings: const [warning],
+        ),
+      );
+      final result = await model.doStream(
+        LanguageModelV4CallOptions(prompt: userPrompt('empty')),
+      );
       final parts = await result.stream.toList();
-      expect(parts.whereType<StreamPartStreamStart>(), hasLength(1));
+      expect(parts.whereType<StreamPartStreamStart>().single.warnings, const [
+        warning,
+      ]);
       expect(parts.whereType<StreamPartError>(), hasLength(1));
       expect(parts.whereType<StreamPartFinish>(), isEmpty);
     });
+
+    test(
+      'malformed JSON chunks still seed the fallback stream start',
+      () async {
+        final server = await _startServer((request) async {
+          _writeSse(request, ['not-json', '[DONE]']);
+        });
+        addTearDown(server.close);
+
+        const warning = LanguageModelV4OtherWarning(message: 'from config');
+        final model = OpenAICompatibleChatLanguageModel(
+          modelId: 'm',
+          config: OpenAICompatibleConfig(
+            provider: 'test',
+            baseUrl: server.baseUrl,
+            client: _testClient(server.baseUrl),
+            headers: () => {'Authorization': 'Bearer test-token'},
+            warnings: const [warning],
+          ),
+        );
+        final result = await model.doStream(
+          LanguageModelV4CallOptions(prompt: userPrompt('malformed')),
+        );
+
+        final parts = await result.stream.toList();
+        expect(parts.whereType<StreamPartStreamStart>().single.warnings, const [
+          warning,
+        ]);
+        expect(parts.whereType<StreamPartError>(), hasLength(1));
+        expect(parts.whereType<StreamPartFinish>(), isEmpty);
+      },
+    );
 
     test('finish-reason-only response remains a valid empty finish', () async {
       final server = await _startServer((request) async {
@@ -2062,13 +2119,25 @@ void main() {
         });
         addTearDown(server.close);
 
-        final model = _bearerModel(server.baseUrl);
+        const warning = LanguageModelV4OtherWarning(message: 'from config');
+        final model = OpenAICompatibleChatLanguageModel(
+          modelId: 'm',
+          config: OpenAICompatibleConfig(
+            provider: 'test',
+            baseUrl: server.baseUrl,
+            client: _testClient(server.baseUrl),
+            headers: () => {'Authorization': 'Bearer test-token'},
+            warnings: const [warning],
+          ),
+        );
         final streamResult = await model.doStream(
           LanguageModelV4CallOptions(prompt: userPrompt('hi')),
         );
 
         final parts = await streamResult.stream.toList();
-        expect(parts.first, isA<StreamPartStreamStart>());
+        expect((parts.first as StreamPartStreamStart).warnings, const [
+          warning,
+        ]);
         final error = parts.whereType<StreamPartError>().single;
         expect(error.error, isA<TypeError>());
       },
@@ -2154,6 +2223,62 @@ void main() {
       );
     });
 
+    test(
+      'generate warning lists are request-local for a shared config',
+      () async {
+        var requestCount = 0;
+        final server = await _startServer((request) async {
+          requestCount++;
+          _writeJson(request, {
+            if (requestCount == 1) 'warnings': ['from provider'],
+            'choices': [
+              {
+                'finish_reason': 'stop',
+                'message': {'content': 'hi'},
+              },
+            ],
+          });
+        });
+        addTearDown(server.close);
+
+        const configWarning = LanguageModelV4OtherWarning(
+          message: 'from config',
+        );
+        const resultOnlyWarning = LanguageModelV4OtherWarning(
+          message: 'result only',
+        );
+        final configWarnings = <LanguageModelV4Warning>[configWarning];
+        final model = OpenAICompatibleChatLanguageModel(
+          modelId: 'm',
+          config: OpenAICompatibleConfig(
+            provider: 'test',
+            baseUrl: server.baseUrl,
+            client: _testClient(server.baseUrl),
+            headers: () => {'Authorization': 'Bearer test-token'},
+            warnings: configWarnings,
+          ),
+        );
+
+        final firstResult = await model.doGenerate(
+          LanguageModelV4CallOptions(prompt: userPrompt('hi')),
+        );
+        expect(
+          firstResult.warnings.map(
+            (warning) => (warning as LanguageModelV4OtherWarning).message,
+          ),
+          ['from config', 'from provider'],
+        );
+        firstResult.warnings.add(resultOnlyWarning);
+        expect(configWarnings, [configWarning]);
+
+        final secondResult = await model.doGenerate(
+          LanguageModelV4CallOptions(prompt: userPrompt('again')),
+        );
+        expect(secondResult.warnings, [configWarning]);
+        expect(configWarnings, [configWarning]);
+      },
+    );
+
     test('prepends config warnings to provider warnings on stream', () async {
       final server = await _startServer((request) async {
         _writeSse(request, [
@@ -2189,6 +2314,73 @@ void main() {
     });
 
     test(
+      'stream warning state does not leak across shared-config calls',
+      () async {
+        var requestCount = 0;
+        final server = await _startServer((request) async {
+          requestCount++;
+          _writeSse(request, [
+            '{"choices":[{"delta":{"content":"Hi"}}]}',
+            if (requestCount == 1)
+              '{"warnings":["from provider"],"choices":[{"delta":{},"finish_reason":"stop"}]}'
+            else
+              '{"choices":[{"delta":{},"finish_reason":"stop"}]}',
+            '[DONE]',
+          ]);
+        });
+        addTearDown(server.close);
+
+        const configWarning = LanguageModelV4UnsupportedWarning(
+          feature: 'configured',
+        );
+        final configWarnings = <LanguageModelV4Warning>[configWarning];
+        final model = OpenAICompatibleChatLanguageModel(
+          modelId: 'm',
+          config: OpenAICompatibleConfig(
+            provider: 'test',
+            baseUrl: server.baseUrl,
+            client: _testClient(server.baseUrl),
+            headers: () => {'Authorization': 'Bearer test-token'},
+            warnings: configWarnings,
+          ),
+        );
+
+        Future<List<LanguageModelV4StreamPart>> partsFor(String prompt) async {
+          final result = await model.doStream(
+            LanguageModelV4CallOptions(prompt: userPrompt(prompt)),
+          );
+          expect(result.warnings, [configWarning]);
+          return result.stream.toList();
+        }
+
+        final firstParts = await partsFor('first');
+        expect(firstParts.whereType<StreamPartStreamStart>().single.warnings, [
+          configWarning,
+        ]);
+        expect(
+          firstParts
+              .whereType<StreamPartFinish>()
+              .single
+              .providerMetadata?['test']?['warnings'],
+          ['unsupported', 'other'],
+        );
+
+        final secondParts = await partsFor('second');
+        expect(secondParts.whereType<StreamPartStreamStart>().single.warnings, [
+          configWarning,
+        ]);
+        expect(
+          secondParts
+              .whereType<StreamPartFinish>()
+              .single
+              .providerMetadata?['test']?['warnings'],
+          ['unsupported'],
+        );
+        expect(configWarnings, [configWarning]);
+      },
+    );
+
+    test(
       'emits stream-start before StreamPartError when the response stream fails before the first chunk',
       () async {
         final adapter = _ErroredStreamHttpClientAdapter();
@@ -2201,6 +2393,9 @@ void main() {
             baseUrl: 'http://unused/v1',
             client: client,
             headers: () => {'Authorization': 'Bearer k'},
+            warnings: const [
+              LanguageModelV4OtherWarning(message: 'from config'),
+            ],
           ),
         );
 
@@ -2209,8 +2404,48 @@ void main() {
         );
         final parts = await streamResult.stream.toList();
 
-        expect(parts.first, isA<StreamPartStreamStart>());
+        expect((parts.first as StreamPartStreamStart).warnings, const [
+          LanguageModelV4OtherWarning(message: 'from config'),
+        ]);
         expect(parts.last, isA<StreamPartError>());
+      },
+    );
+
+    test(
+      'canceled before the first chunk retains warnings on final stream start',
+      () async {
+        final adapter = _HeldStreamAdapter();
+        final client = Dio(BaseOptions(baseUrl: 'http://unused'))
+          ..httpClientAdapter = adapter;
+        final abortSignal = TestAbortSignal();
+        final model = OpenAICompatibleChatLanguageModel(
+          modelId: 'm',
+          config: OpenAICompatibleConfig(
+            provider: 'test',
+            baseUrl: 'http://unused/v1',
+            client: client,
+            headers: () => {'Authorization': 'Bearer k'},
+            warnings: const [
+              LanguageModelV4OtherWarning(message: 'from config'),
+            ],
+          ),
+        );
+
+        final result = await model.doStream(
+          LanguageModelV4CallOptions(
+            prompt: userPrompt('hi'),
+            abortSignal: abortSignal,
+          ),
+        );
+        final partsFuture = result.stream.toList();
+        await adapter.listened.future;
+        abortSignal.cancel();
+        await adapter.body.close();
+
+        final parts = await partsFuture;
+        expect((parts.single as StreamPartStreamStart).warnings, const [
+          LanguageModelV4OtherWarning(message: 'from config'),
+        ]);
       },
     );
 
@@ -2637,6 +2872,31 @@ class _ErroredStreamHttpClientAdapter implements HttpClientAdapter {
       },
     );
   }
+
+  @override
+  void close({bool force = false}) {}
+}
+
+class _HeldStreamAdapter implements HttpClientAdapter {
+  _HeldStreamAdapter() {
+    body = StreamController<Uint8List>(onListen: () => listened.complete());
+  }
+
+  final listened = Completer<void>();
+  late final StreamController<Uint8List> body;
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async => ResponseBody(
+    body.stream,
+    200,
+    headers: {
+      Headers.contentTypeHeader: ['text/event-stream'],
+    },
+  );
 
   @override
   void close({bool force = false}) {}

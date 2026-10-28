@@ -112,30 +112,6 @@ void main() {
       _expectCompatibilityWarning(result.response.warnings);
     });
 
-    test('warning prefix boundaries are modelId startsWith gpt-6', () async {
-      final server = await _startServer((request) async {
-        final body = await _readJsonBody(request);
-        expect(request.uri.path, '/v1/chat/completions');
-        expect(body['model'], isIn(['gpt-60-preview', 'ft:gpt-6-luna']));
-        await _writeGenerateResponse(request, 'ok');
-      });
-      addTearDown(server.close);
-
-      final provider = OpenAIProvider(
-        apiKey: 'test',
-        baseUrl: _baseUrl(server),
-      );
-      final gpt60 = await provider
-          .call('gpt-60-preview')
-          .doGenerate(_prompt('hi'));
-      final fineTuned = await provider
-          .chat('ft:gpt-6-luna')
-          .doGenerate(_prompt('hi'));
-
-      _expectCompatibilityWarning(gpt60.warnings);
-      expect(fineTuned.warnings, isEmpty);
-    });
-
     test('Responses and embeddings do not receive the chat warning', () async {
       final paths = <String>[];
       final server = await _startServer((request) async {

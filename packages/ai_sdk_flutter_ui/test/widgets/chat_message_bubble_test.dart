@@ -1,5 +1,6 @@
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
+import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -53,6 +54,28 @@ void main() {
     testWidgets('empty content renders a placeholder ellipsis', (tester) async {
       await tester.pumpWidget(_wrap(ChatMessageBubble.text(text: '')));
       expect(find.text('…'), findsOneWidget);
+    });
+
+    testWidgets('renders the text parts of a parts-based message', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _wrap(
+          ChatMessageBubble(
+            message: ModelMessage.parts(
+              role: ModelMessageRole.user,
+              parts: [
+                LanguageModelV4TextPart(text: 'look at '),
+                LanguageModelV4ReasoningPart(text: 'hidden'),
+                LanguageModelV4TextPart(text: 'this'),
+              ],
+            ),
+          ),
+        ),
+      );
+      expect(find.text('look at this'), findsOneWidget);
+      expect(find.text('hidden'), findsNothing);
+      expect(find.text('…'), findsNothing);
     });
 
     testWidgets('renders a tool message with the tool styling branch', (

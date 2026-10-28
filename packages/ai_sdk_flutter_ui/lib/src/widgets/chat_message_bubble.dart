@@ -65,7 +65,7 @@ class ChatMessageBubble extends StatelessWidget {
       foreground = scheme.onSurface;
     }
 
-    final text = message.content ?? '';
+    final text = message.text;
     final strings = AiSdkUiStringsScope.of(context);
     final semanticLabel = switch (message.role) {
       ModelMessageRole.user => strings.userMessage,

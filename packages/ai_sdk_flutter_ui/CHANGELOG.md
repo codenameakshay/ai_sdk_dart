@@ -1,3 +1,10 @@
+## Unreleased
+
+- `ChatMessageBubble` now renders the text parts of a parts-based message instead of a
+  placeholder ellipsis.
+
+---
+
 ## 3.0.0
 
 - Added conversation controllers and local/remote backends, persisted conversation snapshots,

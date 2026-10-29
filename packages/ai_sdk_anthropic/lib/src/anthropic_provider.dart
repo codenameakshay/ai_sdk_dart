@@ -213,12 +213,15 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
           ),
         );
       } else if (type == 'thinking') {
+        // Adaptive thinking can return a signed block with empty text. Keep
+        // it: tool-use continuations must send it back unchanged.
         final text = map['thinking']?.toString() ?? '';
-        if (text.isNotEmpty) {
+        final signature = map['signature']?.toString() ?? '';
+        if (text.isNotEmpty || signature.isNotEmpty) {
           content.add(
             LanguageModelV4ReasoningPart(
               text: text,
-              signature: map['signature']?.toString(),
+              signature: signature.isEmpty ? null : signature,
             ),
           );
         }
@@ -475,10 +478,12 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
               } else if (deltaType == 'signature_delta') {
                 final signature = delta['signature']?.toString();
                 if (signature != null && signature.isNotEmpty) {
-                  final state = reasoningState[index];
-                  if (state != null) {
-                    state.signature = '${state.signature ?? ''}$signature';
-                  }
+                  final state = reasoningState.putIfAbsent(index, () {
+                    final next = _ReasoningState(id: 'reasoning-$index');
+                    controller.add(StreamPartReasoningStart(id: next.id));
+                    return next;
+                  });
+                  state.signature = '${state.signature ?? ''}$signature';
                 }
               }
               break;
@@ -706,13 +711,9 @@ List<Map<String, dynamic>> _toAnthropicMessages(LanguageModelV4Prompt prompt) {
           'name': part.toolName,
           'input': part.input,
         });
-      } else if (part is LanguageModelV4ReasoningPart &&
-          part.signature != null) {
-        contentParts.add({
-          'type': 'thinking',
-          'thinking': part.text,
-          'signature': part.signature,
-        });
+      } else if (part is LanguageModelV4ReasoningPart) {
+        final block = _toAnthropicThinkingBlock(part);
+        if (block != null) contentParts.add(block);
       } else if (part is LanguageModelV4RedactedReasoningPart) {
         contentParts.add({
           'type': 'redacted_thinking',
@@ -735,6 +736,26 @@ List<Map<String, dynamic>> _toAnthropicMessages(LanguageModelV4Prompt prompt) {
   }
 
   return out;
+}
+
+/// Replays a reasoning part as the thinking block Anthropic sent. Streamed
+/// `redacted_thinking` blocks arrive as reasoning parts that carry the
+/// encrypted data in their Anthropic metadata. Unsigned reasoning from other
+/// sources cannot be replayed, so it is dropped.
+Map<String, dynamic>? _toAnthropicThinkingBlock(
+  LanguageModelV4ReasoningPart part,
+) {
+  final metadata = part.providerOptions?['anthropic'];
+  final redacted = metadata is Map ? metadata['redactedData'] : null;
+  if (redacted is String && redacted.isNotEmpty) {
+    return {'type': 'redacted_thinking', 'data': redacted};
+  }
+  if (part.signature == null) return null;
+  return {
+    'type': 'thinking',
+    'thinking': part.text,
+    'signature': part.signature,
+  };
 }
 
 Map<String, dynamic> _toAnthropicToolChoice(LanguageModelV4ToolChoice choice) {

@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# Verification harness for the AI SDK Dart packages. Runs the driver in
+# ../driver (a standalone package pinned to this checkout's packages) and
+# writes evidence under /tmp/ai-sdk-verify/evidence/<run-id>/.
+set -euo pipefail
+
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO="$(cd "$SKILL_DIR/../../.." && pwd)"
+DRIVER="$SKILL_DIR/driver"
+EVIDENCE_ROOT="${VERIFY_EVIDENCE_ROOT:-/tmp/ai-sdk-verify/evidence}"
+if [[ -z "${DART:-}" ]]; then
+  if command -v fvm >/dev/null; then DART="fvm dart"; else DART="dart"; fi
+fi
+PACKAGES=(ai_sdk_provider ai_sdk_dart ai_sdk_json_schema ai_sdk_conversation ai_sdk_remote
+  ai_sdk_realtime ai_sdk_telemetry ai_sdk_openai_compatible ai_sdk_openai ai_sdk_anthropic
+  ai_sdk_google ai_sdk_mcp ai_sdk_cohere ai_sdk_azure ai_sdk_mistral ai_sdk_groq ai_sdk_ollama)
+JS_FIXTURES=(examples/remote_backend/js examples/mcp_reference/js)
+SECRETS=(OPENAI_API_KEY ANTHROPIC_API_KEY)
+
+die() { echo "verify: $*" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+Usage: verify <command> [args]
+
+  setup                         pub get for the driver; npm ci for the JS fixtures if missing.
+  doctor                        Read-only readiness check. Non-zero exit on failure.
+  list [package]                List checks (id, mode, feature, description).
+  run <package|all> [--check <id>] [--live]
+                                Run checks. Evidence: /tmp/ai-sdk-verify/evidence/<VERIFY_RUN_ID>/.
+  new                           Print a fresh run id.
+
+Secrets for --live: set OPENAI_API_KEY / ANTHROPIC_API_KEY, or OPENAI_API_KEY_FILE /
+ANTHROPIC_API_KEY_FILE pointing at a file that holds only the key.
+EOF
+}
+
+# Load KEY from KEY_FILE when KEY itself is unset. Never echo values.
+load_secrets() {
+  local name file file_var value
+  for name in "${SECRETS[@]}"; do
+    file_var="${name}_FILE"
+    file="${!file_var:-}"
+    if [[ -z "${!name:-}" && -n "$file" ]]; then
+      [[ -f "$file" && -r "$file" ]] || die "$file_var must point at a readable regular file"
+      value="$(tr -d '\r\n' < "$file" 2>/dev/null)" || die "could not read $file_var"
+      [[ -n "$value" ]] || die "$file_var is empty"
+      export "$name=$value"
+    fi
+  done
+}
+
+js_ready() {
+  local dir="$REPO/$1"
+  [[ -d "$dir/node_modules" ]] && (cd "$dir" && npm ls --depth=0 >/dev/null 2>&1)
+}
+
+cmd_setup() {
+  (cd "$DRIVER" && $DART pub get) || die "driver pub get failed"
+  for dir in "${JS_FIXTURES[@]}"; do
+    if js_ready "$dir"; then
+      echo "ok: $dir dependencies present"
+    else
+      echo "installing pinned dependencies in $dir (npm ci --ignore-scripts)"
+      npm ci --ignore-scripts --prefix "$REPO/$dir" >/dev/null
+    fi
+  done
+}
+
+cmd_doctor() {
+  local fail=0
+  ok() { echo "OK   $*"; }
+  bad() { echo "FAIL $*"; fail=1; }
+  info() { echo "INFO $*"; }
+  if $DART --version >/dev/null 2>&1; then ok "dart: $($DART --version 2>&1 | head -1)"; else bad "dart not runnable ($DART)"; fi
+  if command -v node >/dev/null; then ok "node $(node --version) (remote and MCP fixtures)"; else bad "node missing (ai_sdk_remote and ai_sdk_mcp checks need it)"; fi
+  for dir in "${JS_FIXTURES[@]}"; do
+    if js_ready "$dir"; then ok "$dir direct dependencies satisfy package.json"; else bad "$dir dependencies missing; run 'verify setup'"; fi
+  done
+  local lock="$DRIVER/pubspec.lock"
+  if [[ -f "$lock" && -d "$DRIVER/.dart_tool" ]]; then
+    local missing=()
+    for p in "${PACKAGES[@]}"; do
+      grep -A3 "^  $p:" "$lock" | grep -q "path: \"../../../../packages/$p\"" || missing+=("$p")
+    done
+    if ((${#missing[@]} == 0)); then
+      ok "driver resolves all ${#PACKAGES[@]} packages from this checkout"
+    else
+      bad "driver does not resolve from this checkout: ${missing[*]} (run 'verify setup')"
+    fi
+    if [[ "$DRIVER/pubspec.yaml" -nt "$lock" ]]; then bad "driver pubspec changed since pub get; run 'verify setup'"; fi
+  else
+    bad "driver dependencies not resolved; run 'verify setup'"
+  fi
+  local name file_var value
+  for name in "${SECRETS[@]}"; do
+    file_var="${name}_FILE"
+    if [[ -n "${!name:-}" ]]; then info "$name set (live checks for it will run with --live)"
+    elif [[ -n "${!file_var:-}" ]]; then
+      if [[ -f "${!file_var}" && -r "${!file_var}" ]] && value="$(tr -d '\r\n' < "${!file_var}" 2>/dev/null)" && [[ -n "$value" ]]; then
+        info "$name from $file_var"
+      else
+        bad "$file_var must be a readable regular file containing a nonempty key"
+      fi
+    else info "$name not set (its live checks will be skipped)"; fi
+  done
+  info "evidence root: $EVIDENCE_ROOT"
+  info "UI surface (ai_sdk_flutter_ui): use .cursor/skills/verify-flutter-chat"
+  return "$fail"
+}
+
+cmd_run() {
+  [[ $# -ge 1 ]] || die "usage: verify run <package|all> [--check <id>] [--live]"
+  [[ -d "$DRIVER/.dart_tool" ]] || die "driver not set up; run 'verify setup'"
+  load_secrets
+  local id="${VERIFY_RUN_ID:-}"
+  if [[ -z "$id" ]]; then id="verify-$(date +%Y%m%d-%H%M%S)-$RANDOM"; fi
+  [[ "$id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "invalid VERIFY_RUN_ID"
+  local evidence="$EVIDENCE_ROOT/$id"
+  mkdir -p "$evidence"
+  echo "run id: $id"
+  echo "evidence: $evidence"
+  # Own process group: anything the driver spawns (node fixtures) is killed
+  # with it, even if a check crashes before its own cleanup runs.
+  local status=0
+  (cd "$DRIVER" && exec setsid $DART run bin/verify.dart run "$@" --evidence "$evidence" --repo "$REPO") &
+  local pid=$!
+  stop_group() {
+    trap '' INT TERM
+    kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+    for _ in {1..20}; do
+      kill -0 -- "-$pid" 2>/dev/null || break
+      sleep 0.1 || true
+    done
+    kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+  }
+  trap 'stop_group; exit 130' INT
+  trap 'stop_group; exit 143' TERM
+  wait "$pid" || status=$?
+  stop_group
+  trap - INT TERM
+  return "$status"
+}
+
+case "${1:-}" in
+  setup) cmd_setup ;;
+  doctor) cmd_doctor ;;
+  list) shift; [[ -d "$DRIVER/.dart_tool" ]] || die "run 'verify setup' first"; (cd "$DRIVER" && $DART run bin/verify.dart list "$@") ;;
+  run) shift; cmd_run "$@" ;;
+  new) echo "verify-$(date +%Y%m%d-%H%M%S)-$RANDOM" ;;
+  -h|--help|help|"") usage ;;
+  *) usage; exit 2 ;;
+esac

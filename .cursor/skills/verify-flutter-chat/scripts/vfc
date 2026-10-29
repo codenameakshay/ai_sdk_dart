@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
-# Verification harness for examples/flutter_chat: a release web build served on
-# loopback, the pinned JS reference backend, and a headless Chromium that
-# drive.cjs controls over CDP. Every call needs VERIFY_RUN_ID; each run owns its
-# ports, build, browser profile and evidence directory.
+# Verification harness for the Flutter example apps (examples/flutter_chat by
+# default, examples/advanced_app with VFC_APP=advanced_app at build time): a
+# release web build served on loopback, for flutter_chat the pinned JS reference
+# backend, and a headless Chromium that drive.cjs controls over CDP. Every call
+# needs VERIFY_RUN_ID; each run owns its app choice, ports, build, browser
+# profile and evidence directory.
 set -euo pipefail
 
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO="$(cd "$SKILL_DIR/../../.." && pwd)"
-APP_DIR="$REPO/examples/flutter_chat"
+APP=flutter_chat   # replaced by the run state's APP once it is loaded
+APP_DIR="$REPO/examples/$APP"
 BACKEND_DIR="$REPO/examples/remote_backend/js"
 RUNS_ROOT="${VFC_RUNS_ROOT:-/tmp/verify-flutter-chat/runs}"
 EVIDENCE_ROOT="${VFC_EVIDENCE_ROOT:-/tmp/verify-flutter-chat/evidence}"
@@ -24,12 +27,14 @@ usage() {
 Usage: VERIFY_RUN_ID=<id> vfc <command> [args]
 
   new                      Print a fresh run id (no state is created).
-  build                    Allocate ports, pub get, build web with the run's backend URL.
-  up                       Start backend, static web server and headless Chromium; wait until ready.
+  build                    Allocate ports, pub get, build web. VFC_APP=flutter_chat (default) or
+                           advanced_app picks the app; it is recorded in the run state.
+  up                       Start the static web server and headless Chromium (flutter_chat also
+                           starts the reference backend); wait until ready.
   doctor                   Read-only health check of this run's instance. Non-zero exit on failure.
   browser <cmd> [args]     Drive the app (see drive.cjs: open, tab, click, type, send, ...).
   scenario <name>          Run a canned end-to-end proof (see drive.cjs scenario list).
-  backend stop|start       Stop or restart only this run's reference backend.
+  backend stop|start       Stop or restart only this run's reference backend (flutter_chat only).
   env                      Print this run's ports, URLs and paths.
   down                     Kill this run's processes and delete its scratch dir. Keeps evidence.
 EOF
@@ -43,10 +48,11 @@ require_run() {
   STATE="$RUN_DIR/state.env"
   [[ ! -L "$RUN_DIR" ]] || die "run directory must not be a symlink: $RUN_DIR"
   [[ ! -L "$EVIDENCE_DIR" ]] || die "evidence directory must not be a symlink: $EVIDENCE_DIR"
-  python3 - "$RUNS_ROOT" "$RUN_DIR" "$EVIDENCE_DIR" <<'PY' || die "run/evidence paths overlap or run path escapes its root"
+  python3 - "$RUNS_ROOT" "$EVIDENCE_ROOT" "$RUN_DIR" "$EVIDENCE_DIR" <<'PY' || die "run/evidence roots overlap or run path escapes its root"
 import os, sys
-root, run, evidence = map(os.path.realpath, sys.argv[1:])
-if os.path.dirname(run) != root or os.path.commonpath((run, evidence)) == run:
+root, evidence_root, run, evidence = map(os.path.realpath, sys.argv[1:])
+if (os.path.dirname(run) != root or os.path.dirname(evidence) != evidence_root
+        or os.path.commonpath((root, evidence_root)) in (root, evidence_root)):
     raise SystemExit(1)
 PY
 }
@@ -56,6 +62,8 @@ load_state() {
   local key value
   while IFS='=' read -r key value; do
     case "$key" in
+      APP) [[ "$value" == flutter_chat || "$value" == advanced_app ]] || die "invalid app in run state"; APP="$value" ;;
+      KEYS_BAKED) [[ "$value" =~ ^[a-z,]*$ ]] || die "invalid key metadata in run state"; KEYS_BAKED="$value" ;;
       WEB_PORT|BACKEND_PORT|CDP_PORT)
         [[ "$value" =~ ^[0-9]{1,5}$ ]] && ((value >= 1 && value <= 65535)) || die "invalid $key in run state"
         printf -v "$key" '%s' "$value" ;;
@@ -70,8 +78,16 @@ load_state() {
       *) die "unknown field in run state: $key" ;;
     esac
   done <"$STATE"
-  [[ -n "${WEB_PORT:-}" && -n "${BACKEND_PORT:-}" && -n "${CDP_PORT:-}" ]] || die "incomplete run state"
+  [[ -z "${VFC_APP:-}" || "$VFC_APP" == "$APP" ]] || die "run $VERIFY_RUN_ID was built for $APP, not $VFC_APP; use a new VERIFY_RUN_ID"
+  [[ -n "${WEB_PORT:-}" && -n "${CDP_PORT:-}" ]] || die "incomplete run state"
+  if uses_backend; then [[ -n "${BACKEND_PORT:-}" ]] || die "incomplete run state"; fi
+  APP_DIR="$REPO/examples/$APP"
 }
+
+uses_backend() { [[ "$APP" == flutter_chat ]]; }
+# Processes and ports this run owns, in start order.
+run_procs() { if uses_backend; then echo backend web chromium; else echo web chromium; fi; }
+run_port() { case "$1" in backend) echo "$BACKEND_PORT" ;; web) echo "$WEB_PORT" ;; chromium) echo "$CDP_PORT" ;; esac; }
 
 free_port() {
   python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()'
@@ -83,13 +99,13 @@ source_fingerprint() {
   (
     cd "$REPO"
     git rev-parse HEAD
-    git diff HEAD -- packages examples/flutter_chat pubspec.yaml pubspec.lock .fvmrc
-    git ls-files -o --exclude-standard -z -- packages examples/flutter_chat \
+    git diff HEAD -- packages "examples/$APP" pubspec.yaml pubspec.lock .fvmrc
+    git ls-files -o --exclude-standard -z -- packages "examples/$APP" \
       | sort -z | while IFS= read -r -d '' f; do
         case "$f" in */build/*|*/.dart_tool/*) continue ;; esac
         sha256sum "$f"
       done
-    find packages examples/flutter_chat -path '*/.dart_tool/package_config.json' -type f -print0 \
+    find packages "examples/$APP" -path '*/.dart_tool/package_config.json' -type f -print0 \
       | sort -z | xargs -0 -r sha256sum
     for f in pubspec.lock .dart_tool/package_config.json; do
       if [[ -f "$f" ]]; then sha256sum "$f"; else printf 'missing %s\n' "$f"; fi
@@ -103,7 +119,9 @@ require_current_build() {
   [[ -n "${BUILD_FINGERPRINT:-}" && -n "${BUILD_SHA256:-}" ]] || die "build metadata missing; run 'vfc build'"
   [[ "$(source_fingerprint)" == "$BUILD_FINGERPRINT" ]] || die "build is stale; run 'vfc build'"
   [[ "$(sha256sum "$RUN_DIR/web/main.dart.js" | cut -d' ' -f1)" == "$BUILD_SHA256" ]] || die "web build artifact changed; run 'vfc build'"
-  grep -Fq "http://127.0.0.1:$BACKEND_PORT/chat" "$RUN_DIR/web/main.dart.js" || die "build targets a different backend; run 'vfc build'"
+  if uses_backend; then
+    grep -Fq "http://127.0.0.1:$BACKEND_PORT/chat" "$RUN_DIR/web/main.dart.js" || die "build targets a different backend; run 'vfc build'"
+  fi
 }
 
 pid_alive() { [[ -n "${1:-}" ]] && kill -0 "$1" 2>/dev/null; }
@@ -158,6 +176,7 @@ start_group() {
   # setsid gives the child its own process group so 'down' can kill exactly the
   # tree this run started and nothing else.
   local name="$1" log="$2"; shift 2
+  STARTING_GROUP=yes
   setsid "$@" >"$log" 2>&1 < /dev/null &
   local pid=$! start
   for _ in $(seq 1 20); do
@@ -167,6 +186,13 @@ start_group() {
   done
   [[ -n "$start" ]] || die "could not record identity for $name process $pid"
   echo "$pid $start" >"$RUN_DIR/$name.pid"
+  STARTING_GROUP=no
+  [[ -z "${START_SIGNAL:-}" ]] || exit "$START_SIGNAL"
+}
+
+startup_signal() {
+  START_SIGNAL="$1"
+  [[ "${STARTING_GROUP:-no}" == yes ]] || exit "$START_SIGNAL"
 }
 
 stop_group() {
@@ -178,7 +204,10 @@ stop_group() {
     owns_process_group "$pid" "$start" || { echo "refusing to stop $name: recorded process identity no longer matches" >&2; return 1; }
     kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
     for _ in $(seq 1 20); do group_alive "$pid" || break; sleep 0.25; done
-    group_alive "$pid" && kill -KILL -- "-$pid" 2>/dev/null || true
+    if group_alive "$pid"; then
+      owns_process_group "$pid" "$start" || { echo "refusing to kill $name: process identity changed during shutdown" >&2; return 1; }
+      kill -KILL -- "-$pid" 2>/dev/null || true
+    fi
     rm -f "$RUN_DIR/$name.pid"
     echo "stopped $name (pgid $pid)"
   elif group_alive "$pid"; then
@@ -200,26 +229,38 @@ ensure_backend_deps() {
 
 cmd_build() {
   require_run
+  local want_app="${VFC_APP:-}"
+  [[ -z "$want_app" || "$want_app" == flutter_chat || "$want_app" == advanced_app ]] || die "VFC_APP must be flutter_chat or advanced_app"
   mkdir -p "$RUN_DIR" "$EVIDENCE_DIR"
   if [[ ! -f "$STATE" ]]; then
-    local web backend cdp
-    web="$(free_port)"; backend="$(free_port)"; cdp="$(free_port)"
-    cat >"$STATE" <<EOF
-WEB_PORT=$web
-BACKEND_PORT=$backend
-CDP_PORT=$cdp
-EOF
+    local web cdp app="${want_app:-flutter_chat}"
+    web="$(free_port)"; cdp="$(free_port)"
+    {
+      echo "APP=$app"
+      echo "WEB_PORT=$web"
+      echo "CDP_PORT=$cdp"
+      # Only flutter_chat talks to the reference backend.
+      if [[ "$app" == flutter_chat ]]; then echo "BACKEND_PORT=$(free_port)"; fi
+    } >"$STATE"
   fi
   load_state
+  [[ -z "$want_app" || "$want_app" == "$APP" ]] || die "run $VERIFY_RUN_ID was built for $APP, not $want_app; use a new VERIFY_RUN_ID"
   echo 'BUILD_OK=no' >>"$STATE"
-  local backend_url="http://127.0.0.1:$BACKEND_PORT/chat"
-  local defines=(--dart-define=REMOTE_BACKEND_URL="$backend_url")
-  local key_baked=no
-  if [[ -n "${OPENAI_API_KEY:-}" ]]; then
-    defines+=(--dart-define=OPENAI_API_KEY="$OPENAI_API_KEY")
-    key_baked=yes
+  local defines=() backend_url="" keys_baked=""
+  if uses_backend; then
+    backend_url="http://127.0.0.1:$BACKEND_PORT/chat"
+    defines+=(--dart-define=REMOTE_BACKEND_URL="$backend_url")
+    if [[ -n "${OPENAI_API_KEY:-}" ]]; then defines+=(--dart-define=OPENAI_API_KEY="$OPENAI_API_KEY"); keys_baked=openai; fi
+  else
+    # advanced_app reads all three provider keys (lib/config.dart).
+    if [[ -n "${OPENAI_API_KEY:-}" ]]; then defines+=(--dart-define=OPENAI_API_KEY="$OPENAI_API_KEY"); keys_baked+=",openai"; fi
+    if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then defines+=(--dart-define=ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"); keys_baked+=",anthropic"; fi
+    if [[ -n "${GOOGLE_API_KEY:-}" ]]; then defines+=(--dart-define=GOOGLE_API_KEY="$GOOGLE_API_KEY"); keys_baked+=",google"; fi
+    keys_baked="${keys_baked#,}"
   fi
-  echo "building flutter_chat web for run $VERIFY_RUN_ID (backend $backend_url, OpenAI key baked: $key_baked)"
+  local key_baked=no
+  [[ -z "$keys_baked" ]] || key_baked=yes
+  echo "building $APP web for run $VERIFY_RUN_ID (${backend_url:+backend $backend_url, }keys baked: ${keys_baked:-none})"
   echo "log: $RUN_DIR/build.log"
   $FLUTTER pub get >"$RUN_DIR/build.log" 2>&1 || { tail -30 "$RUN_DIR/build.log" >&2; die "pub get failed"; }
   local fingerprint
@@ -230,14 +271,15 @@ EOF
   local artifact_hash
   artifact_hash="$(sha256sum "$RUN_DIR/web/main.dart.js" | cut -d' ' -f1)"
   {
-    echo "BACKEND_URL=$backend_url"
+    if uses_backend; then echo "BACKEND_URL=$backend_url"; fi
     echo "KEY_BAKED=$key_baked"
+    echo "KEYS_BAKED=$keys_baked"
     echo "BUILD_FINGERPRINT=$fingerprint"
     echo "BUILD_SHA256=$artifact_hash"
     echo "BUILD_HEAD=$(git -C "$REPO" rev-parse --short HEAD)"
     echo "BUILD_OK=yes"
   } >>"$STATE"
-  ensure_backend_deps
+  if uses_backend; then ensure_backend_deps; fi
   echo "built: $RUN_DIR/web"
 }
 
@@ -245,7 +287,7 @@ cmd_up() {
   require_run; load_state
   require_current_build
   [[ -n "$CHROMIUM" ]] || die "no Chromium found; set CHROMIUM=/path/to/chrome"
-  for name in backend web chromium; do
+  for name in $(run_procs); do
     local pid start
     pid="$(read_pid "$name")"; start="$(read_pid_start "$name")"
     if pid_alive "$pid"; then
@@ -254,27 +296,35 @@ cmd_up() {
     fi
     group_alive "$pid" && die "$name group still exists without its leader; inspect group $pid before restarting"
   done
-  for port in "$WEB_PORT" "$BACKEND_PORT" "$CDP_PORT"; do
+  for name in $(run_procs); do
+    port="$(run_port "$name")"
     [[ -z "$(listener_pid "$port")" ]] || die "port $port is taken by another process; use a new VERIFY_RUN_ID"
   done
-  ensure_backend_deps
+  if uses_backend; then ensure_backend_deps; fi
   cleanup_up() { local name; for name in chromium web backend; do stop_group "$name" || true; done; }
-  trap cleanup_up EXIT INT TERM
-  start_group backend "$RUN_DIR/backend.log" env -C "$BACKEND_DIR" PORT="$BACKEND_PORT" node server.mjs
+  trap cleanup_up EXIT
+  trap 'startup_signal 130' INT
+  trap 'startup_signal 143' TERM
+  if uses_backend; then
+    start_group backend "$RUN_DIR/backend.log" env -C "$BACKEND_DIR" PORT="$BACKEND_PORT" node server.mjs
+  fi
   start_group web "$RUN_DIR/web.log" python3 -m http.server "$WEB_PORT" --bind 127.0.0.1 --directory "$RUN_DIR/web"
   start_group chromium "$RUN_DIR/chromium.log" "$CHROMIUM" --headless=new --no-sandbox \
     --remote-debugging-address=127.0.0.1 --remote-debugging-port="$CDP_PORT" \
     --user-data-dir="$RUN_DIR/profile" --no-first-run --no-default-browser-check \
     --window-size=1280,900 about:blank
-  wait_until "backend :$BACKEND_PORT" 30 backend_ready
+  if uses_backend; then wait_until "backend :$BACKEND_PORT" 30 backend_ready; fi
   wait_until "web :$WEB_PORT" 30 web_ready
   wait_until "chromium CDP :$CDP_PORT" 30 cdp_ready
-  for pair in "backend:$BACKEND_PORT" "web:$WEB_PORT" "chromium:$CDP_PORT"; do
-    name="${pair%%:*}"
-    port_owned_by "${pair##*:}" "$(read_pid "$name")" "$name" || die "$name did not acquire its recorded port"
+  for name in $(run_procs); do
+    port_owned_by "$(run_port "$name")" "$(read_pid "$name")" "$name" || die "$name did not acquire its recorded port"
   done
   trap - EXIT INT TERM
-  echo "ready: app http://127.0.0.1:$WEB_PORT  backend http://127.0.0.1:$BACKEND_PORT/chat  cdp :$CDP_PORT"
+  if uses_backend; then
+    echo "ready: $APP http://127.0.0.1:$WEB_PORT  backend http://127.0.0.1:$BACKEND_PORT/chat  cdp :$CDP_PORT"
+  else
+    echo "ready: $APP http://127.0.0.1:$WEB_PORT  cdp :$CDP_PORT"
+  fi
 }
 
 cmd_doctor() {
@@ -291,29 +341,38 @@ cmd_doctor() {
   else
     bad "web build artifact changed or has no hash; run 'vfc build'"
   fi
-  if grep -Fq "http://127.0.0.1:$BACKEND_PORT/chat" "$RUN_DIR/web/main.dart.js" 2>/dev/null; then
-    ok "build targets backend http://127.0.0.1:$BACKEND_PORT/chat"
-  else
-    bad "build does not contain http://127.0.0.1:$BACKEND_PORT/chat (rebuild)"
+  ok "app: $APP (examples/$APP)"
+  if uses_backend; then
+    if grep -Fq "http://127.0.0.1:$BACKEND_PORT/chat" "$RUN_DIR/web/main.dart.js" 2>/dev/null; then
+      ok "build targets backend http://127.0.0.1:$BACKEND_PORT/chat"
+    else
+      bad "build does not contain http://127.0.0.1:$BACKEND_PORT/chat (rebuild)"
+    fi
   fi
   if [[ "$(source_fingerprint)" == "${BUILD_FINGERPRINT:-}" ]]; then
     ok "build matches current source (HEAD ${BUILD_HEAD:-unknown} + working tree)"
   else
     bad "build is stale: source changed since build; run 'vfc build', then reload with 'vfc browser open <route>'"
   fi
-  echo "INFO OpenAI key baked into build: ${KEY_BAKED:-no} (Chat/Completion/Object need yes)"
+  if uses_backend; then
+    echo "INFO OpenAI key baked into build: ${KEY_BAKED:-no} (Chat/Completion/Object need yes)"
+  else
+    echo "INFO provider keys baked into build: ${KEYS_BAKED:-none} (provider pages need the matching key; the Widget Gallery and Tools Chat fixtures need none)"
+  fi
   local name port pid
-  for pair in "backend:$BACKEND_PORT" "web:$WEB_PORT" "chromium:$CDP_PORT"; do
-    name="${pair%%:*}"; port="${pair##*:}"; pid="$(read_pid "$name")"
+  for name in $(run_procs); do
+    port="$(run_port "$name")"; pid="$(read_pid "$name")"
     if ! pid_alive "$pid"; then bad "$name not running"; continue; fi
     if port_owned_by "$port" "$pid" "$name"; then ok "$name pid $pid owns :$port"; else bad "$name pid $pid does not own :$port"; fi
   done
-  local headers
-  headers="$(curl --connect-timeout 2 --max-time 5 -s -i -X OPTIONS "http://127.0.0.1:$BACKEND_PORT/chat" 2>/dev/null || true)"
-  if grep -qi '^access-control-expose-headers: x-vercel-ai-ui-message-stream' <<<"$headers"; then
-    ok "backend answers CORS preflight with the UI-stream header exposed"
-  else
-    bad "backend preflight failed"
+  if uses_backend; then
+    local headers
+    headers="$(curl --connect-timeout 2 --max-time 5 -s -i -X OPTIONS "http://127.0.0.1:$BACKEND_PORT/chat" 2>/dev/null || true)"
+    if grep -qi '^access-control-expose-headers: x-vercel-ai-ui-message-stream' <<<"$headers"; then
+      ok "backend answers CORS preflight with the UI-stream header exposed"
+    else
+      bad "backend preflight failed"
+    fi
   fi
   local served_hash
   if served_hash="$(curl --connect-timeout 2 --max-time 5 -fsS "http://127.0.0.1:$WEB_PORT/main.dart.js" 2>/dev/null | sha256sum | cut -d' ' -f1)" && [[ -n "${BUILD_SHA256:-}" && "$served_hash" == "$BUILD_SHA256" ]]; then
@@ -330,6 +389,7 @@ cmd_doctor() {
 
 cmd_backend() {
   require_run; load_state
+  uses_backend || die "$APP has no reference backend"
   case "${1:-}" in
     stop) stop_group backend ;;
     start)
@@ -342,10 +402,12 @@ cmd_backend() {
       group_alive "$pid" && die "backend group still exists without its leader; run 'vfc down' and inspect it"
       [[ -z "$(listener_pid "$BACKEND_PORT")" ]] || die "backend port $BACKEND_PORT is taken by another process"
       trap 'stop_group backend || true' EXIT
+      trap 'startup_signal 130' INT
+      trap 'startup_signal 143' TERM
       start_group backend "$RUN_DIR/backend.log" env -C "$BACKEND_DIR" PORT="$BACKEND_PORT" node server.mjs
       wait_until "backend :$BACKEND_PORT" 30 backend_ready
       port_owned_by "$BACKEND_PORT" "$(read_pid backend)" backend || die "backend did not acquire its recorded port"
-      trap - EXIT
+      trap - EXIT INT TERM
       echo "backend ready on :$BACKEND_PORT" ;;
     *) die "usage: vfc backend stop|start" ;;
   esac
@@ -355,12 +417,14 @@ cmd_env() {
   require_run; load_state
   cat <<EOF
 VERIFY_RUN_ID=$VERIFY_RUN_ID
+APP=$APP
 APP_URL=http://127.0.0.1:$WEB_PORT
-BACKEND_URL=${BACKEND_URL:-http://127.0.0.1:$BACKEND_PORT/chat}
+BACKEND_URL=${BACKEND_URL:-none}
 CDP_URL=http://127.0.0.1:$CDP_PORT
 RUN_DIR=$RUN_DIR
 EVIDENCE_DIR=$EVIDENCE_DIR
 KEY_BAKED=${KEY_BAKED:-no}
+KEYS_BAKED=${KEYS_BAKED:-}
 EOF
 }
 
@@ -368,12 +432,11 @@ cmd_drive() {
   require_run; load_state
   require_current_build
   mkdir -p "$EVIDENCE_DIR"
-  local pair name
-  for pair in "web:$WEB_PORT" "chromium:$CDP_PORT"; do
-    name="${pair%%:*}"
-    port_owned_by "${pair##*:}" "$(read_pid "$name")" "$name" || die "$name does not own its recorded port for run $VERIFY_RUN_ID; run 'vfc doctor'"
+  local name
+  for name in web chromium; do
+    port_owned_by "$(run_port "$name")" "$(read_pid "$name")" "$name" || die "$name does not own its recorded port for run $VERIFY_RUN_ID; run 'vfc doctor'"
   done
-  VFC_WEB_PORT="$WEB_PORT" VFC_CDP_PORT="$CDP_PORT" VFC_EVIDENCE_DIR="$EVIDENCE_DIR" \
+  VFC_APP="$APP" VFC_WEB_PORT="$WEB_PORT" VFC_CDP_PORT="$CDP_PORT" VFC_EVIDENCE_DIR="$EVIDENCE_DIR" \
     VFC_RUN_DIR="$RUN_DIR" VFC_NPM_GLOBAL="$(npm root -g 2>/dev/null || true)" node "$SKILL_DIR/scripts/drive.cjs" "$@"
 }
 
@@ -390,7 +453,7 @@ cmd_down() {
 }
 
 case "${1:-}" in
-  new) echo "vfc-$(date +%Y%m%d-%H%M%S)-$RANDOM" ;;
+  new) echo "codex-$(date +%Y%m%d-%H%M%S)-$RANDOM" ;;
   build) cmd_build ;;
   up) cmd_up ;;
   doctor) cmd_doctor ;;

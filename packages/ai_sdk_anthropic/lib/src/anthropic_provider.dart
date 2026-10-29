@@ -213,12 +213,15 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
           ),
         );
       } else if (type == 'thinking') {
+        // Adaptive thinking can return a signed block with empty text. Keep
+        // it: tool-use continuations must send it back unchanged.
         final text = map['thinking']?.toString() ?? '';
-        if (text.isNotEmpty) {
+        final signature = map['signature']?.toString() ?? '';
+        if (text.isNotEmpty || signature.isNotEmpty) {
           content.add(
             LanguageModelV4ReasoningPart(
               text: text,
-              signature: map['signature']?.toString(),
+              signature: signature.isEmpty ? null : signature,
             ),
           );
         }
@@ -417,21 +420,22 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
               } else if (blockType == 'thinking') {
                 final id = block['id']?.toString() ?? 'reasoning-$index';
                 reasoningState[index] = _ReasoningState(id: id);
-                controller.add(StreamPartReasoningStart(id: id));
               } else if (blockType == 'redacted_thinking') {
                 final id = block['id']?.toString() ?? 'reasoning-$index';
-                reasoningState[index] = _ReasoningState(id: id);
+                final state = _ReasoningState(id: id);
+                reasoningState[index] = state;
                 final redacted = block['data']?.toString();
-                controller.add(
-                  StreamPartReasoningStart(
-                    id: id,
-                    providerMetadata: redacted == null || redacted.isEmpty
-                        ? null
-                        : {
-                            provider: {'redactedData': redacted},
-                          },
-                  ),
-                );
+                if (redacted != null && redacted.isNotEmpty) {
+                  state.started = true;
+                  controller.add(
+                    StreamPartReasoningStart(
+                      id: id,
+                      providerMetadata: {
+                        provider: {'redactedData': redacted},
+                      },
+                    ),
+                  );
+                }
               }
               break;
             case 'content_block_delta':
@@ -463,11 +467,14 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
               } else if (deltaType == 'thinking_delta') {
                 final reasoning = delta['thinking']?.toString();
                 if (reasoning != null && reasoning.isNotEmpty) {
-                  final state = reasoningState.putIfAbsent(index, () {
-                    final next = _ReasoningState(id: 'reasoning-$index');
-                    controller.add(StreamPartReasoningStart(id: next.id));
-                    return next;
-                  });
+                  final state = reasoningState.putIfAbsent(
+                    index,
+                    () => _ReasoningState(id: 'reasoning-$index'),
+                  );
+                  if (!state.started) {
+                    state.started = true;
+                    controller.add(StreamPartReasoningStart(id: state.id));
+                  }
                   controller.add(
                     StreamPartReasoningDelta(id: state.id, delta: reasoning),
                   );
@@ -475,10 +482,15 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
               } else if (deltaType == 'signature_delta') {
                 final signature = delta['signature']?.toString();
                 if (signature != null && signature.isNotEmpty) {
-                  final state = reasoningState[index];
-                  if (state != null) {
-                    state.signature = '${state.signature ?? ''}$signature';
+                  final state = reasoningState.putIfAbsent(
+                    index,
+                    () => _ReasoningState(id: 'reasoning-$index'),
+                  );
+                  if (!state.started) {
+                    state.started = true;
+                    controller.add(StreamPartReasoningStart(id: state.id));
                   }
+                  state.signature = '${state.signature ?? ''}$signature';
                 }
               }
               break;
@@ -498,7 +510,7 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
                 );
               }
               final reasoning = reasoningState.remove(index);
-              if (reasoning != null) {
+              if (reasoning != null && reasoning.started) {
                 controller.add(
                   StreamPartReasoningEnd(
                     id: reasoning.id,
@@ -542,17 +554,19 @@ class _AnthropicLanguageModel extends LanguageModelV4 {
                 }
                 toolState.clear();
                 for (final state in reasoningState.values.toList()) {
-                  controller.add(
-                    StreamPartReasoningEnd(
-                      id: state.id,
-                      signature: state.signature,
-                      providerMetadata: state.signature == null
-                          ? null
-                          : {
-                              provider: {'signature': state.signature},
-                            },
-                    ),
-                  );
+                  if (state.started) {
+                    controller.add(
+                      StreamPartReasoningEnd(
+                        id: state.id,
+                        signature: state.signature,
+                        providerMetadata: state.signature == null
+                            ? null
+                            : {
+                                provider: {'signature': state.signature},
+                              },
+                      ),
+                    );
+                  }
                 }
                 reasoningState.clear();
                 controller.add(
@@ -706,13 +720,9 @@ List<Map<String, dynamic>> _toAnthropicMessages(LanguageModelV4Prompt prompt) {
           'name': part.toolName,
           'input': part.input,
         });
-      } else if (part is LanguageModelV4ReasoningPart &&
-          part.signature != null) {
-        contentParts.add({
-          'type': 'thinking',
-          'thinking': part.text,
-          'signature': part.signature,
-        });
+      } else if (part is LanguageModelV4ReasoningPart) {
+        final block = _toAnthropicThinkingBlock(part);
+        if (block != null) contentParts.add(block);
       } else if (part is LanguageModelV4RedactedReasoningPart) {
         contentParts.add({
           'type': 'redacted_thinking',
@@ -735,6 +745,26 @@ List<Map<String, dynamic>> _toAnthropicMessages(LanguageModelV4Prompt prompt) {
   }
 
   return out;
+}
+
+/// Replays a reasoning part as the thinking block Anthropic sent. Streamed
+/// `redacted_thinking` blocks arrive as reasoning parts that carry the
+/// encrypted data in their Anthropic metadata. Unsigned reasoning from other
+/// sources cannot be replayed, so it is dropped.
+Map<String, dynamic>? _toAnthropicThinkingBlock(
+  LanguageModelV4ReasoningPart part,
+) {
+  final signature = part.signature;
+  if (signature != null && signature.isNotEmpty) {
+    return {'type': 'thinking', 'thinking': part.text, 'signature': signature};
+  }
+  if (part.text.isNotEmpty) return null;
+  final metadata = part.providerOptions?['anthropic'];
+  final redacted = metadata is Map ? metadata['redactedData'] : null;
+  if (redacted is String && redacted.isNotEmpty) {
+    return {'type': 'redacted_thinking', 'data': redacted};
+  }
+  return null;
 }
 
 Map<String, dynamic> _toAnthropicToolChoice(LanguageModelV4ToolChoice choice) {
@@ -1004,6 +1034,7 @@ class _ReasoningState {
   _ReasoningState({required this.id});
 
   final String id;
+  bool started = false;
   String? signature;
 }
 

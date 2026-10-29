@@ -1,0 +1,69 @@
+name: ai_sdk_verify
+description: Verification driver for the AI SDK Dart packages. Not published.
+publish_to: none
+
+environment:
+  sdk: ^3.11.1
+
+# Every workspace package is pinned to this checkout. dependency_overrides is
+# required: the packages depend on each other through hosted constraints, and
+# without the overrides pub would resolve siblings from pub.dev instead.
+dependencies:
+  dio: ^5.9.0
+  web_socket_channel: ^3.0.3
+  ai_sdk_provider: any
+  ai_sdk_dart: any
+  ai_sdk_json_schema: any
+  ai_sdk_conversation: any
+  ai_sdk_remote: any
+  ai_sdk_realtime: any
+  ai_sdk_telemetry: any
+  ai_sdk_openai_compatible: any
+  ai_sdk_openai: any
+  ai_sdk_anthropic: any
+  ai_sdk_google: any
+  ai_sdk_mcp: any
+  ai_sdk_cohere: any
+  ai_sdk_azure: any
+  ai_sdk_mistral: any
+  ai_sdk_groq: any
+  ai_sdk_ollama: any
+
+dependency_overrides:
+  ai_sdk_provider:
+    path: ../../../../packages/ai_sdk_provider
+  ai_sdk_dart:
+    path: ../../../../packages/ai_sdk_dart
+  ai_sdk_json_schema:
+    path: ../../../../packages/ai_sdk_json_schema
+  ai_sdk_conversation:
+    path: ../../../../packages/ai_sdk_conversation
+  ai_sdk_remote:
+    path: ../../../../packages/ai_sdk_remote
+  ai_sdk_realtime:
+    path: ../../../../packages/ai_sdk_realtime
+  ai_sdk_telemetry:
+    path: ../../../../packages/ai_sdk_telemetry
+  ai_sdk_openai_compatible:
+    path: ../../../../packages/ai_sdk_openai_compatible
+  ai_sdk_openai:
+    path: ../../../../packages/ai_sdk_openai
+  ai_sdk_anthropic:
+    path: ../../../../packages/ai_sdk_anthropic
+  ai_sdk_google:
+    path: ../../../../packages/ai_sdk_google
+  ai_sdk_mcp:
+    path: ../../../../packages/ai_sdk_mcp
+  ai_sdk_cohere:
+    path: ../../../../packages/ai_sdk_cohere
+  ai_sdk_azure:
+    path: ../../../../packages/ai_sdk_azure
+  ai_sdk_mistral:
+    path: ../../../../packages/ai_sdk_mistral
+  ai_sdk_groq:
+    path: ../../../../packages/ai_sdk_groq
+  ai_sdk_ollama:
+    path: ../../../../packages/ai_sdk_ollama
+
+dev_dependencies:
+  lints: ^6.1.0

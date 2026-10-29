@@ -2,6 +2,9 @@
 
 - Added `ModelMessage.text`, which returns a message's plain text: `content`, or its text parts
   joined in order. Reasoning, tool, file, and source parts are excluded.
+- Fixed `extractReasoningMiddleware` streaming when one text delta holds a whole
+  `<think>...</think>` block, several blocks, or a close tag followed by a new open tag. The
+  answer text after the close tag is no longer emitted as reasoning.
 
 ---
 

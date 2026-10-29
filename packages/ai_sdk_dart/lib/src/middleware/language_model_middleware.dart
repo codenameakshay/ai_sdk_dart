@@ -245,53 +245,39 @@ class _ExtractReasoningMiddleware extends LanguageModelMiddlewareBase {
     await for (final part in source) {
       if (part is StreamPartTextDelta) {
         buffer.write(part.delta);
-        final accumulated = buffer.toString();
-
-        if (!inReasoning) {
-          final start = accumulated.indexOf(openTag);
-          if (start >= 0) {
-            final before = accumulated.substring(0, start);
-            if (before.isNotEmpty) {
-              yield StreamPartTextDelta(id: part.id, delta: before);
+        // One delta can hold several tags, so parse until no complete tag
+        // remains in the buffer.
+        while (true) {
+          final accumulated = buffer.toString();
+          final tag = inReasoning ? closeTag : openTag;
+          final index = accumulated.indexOf(tag);
+          if (index >= 0) {
+            final chunk = accumulated.substring(0, index);
+            if (chunk.isNotEmpty) {
+              yield inReasoning
+                  ? StreamPartReasoningDelta(id: reasoningId, delta: chunk)
+                  : StreamPartTextDelta(id: part.id, delta: chunk);
             }
             buffer.clear();
-            buffer.write(accumulated.substring(start + openTag.length));
-            inReasoning = true;
-            yield const StreamPartReasoningStart(id: reasoningId);
-          } else {
-            // No tag found yet — safe to emit everything except the last
-            // openTag.length-1 chars which might be a partial tag.
-            final safeEnd = accumulated.length - (openTag.length - 1);
-            if (safeEnd > 0) {
-              final safe = accumulated.substring(0, safeEnd);
-              yield StreamPartTextDelta(id: part.id, delta: safe);
-              buffer.clear();
-              buffer.write(accumulated.substring(safeEnd));
-            }
+            buffer.write(accumulated.substring(index + tag.length));
+            inReasoning = !inReasoning;
+            yield inReasoning
+                ? const StreamPartReasoningStart(id: reasoningId)
+                : const StreamPartReasoningEnd(id: reasoningId);
+            continue;
           }
-        } else {
-          final end = accumulated.indexOf(closeTag);
-          if (end >= 0) {
-            final reasoningChunk = accumulated.substring(0, end);
-            if (reasoningChunk.isNotEmpty) {
-              yield StreamPartReasoningDelta(
-                id: reasoningId,
-                delta: reasoningChunk,
-              );
-            }
+          // No complete tag — safe to emit everything except the last
+          // tag.length-1 chars which might be a partial tag.
+          final safeEnd = accumulated.length - (tag.length - 1);
+          if (safeEnd > 0) {
+            final safe = accumulated.substring(0, safeEnd);
+            yield inReasoning
+                ? StreamPartReasoningDelta(id: reasoningId, delta: safe)
+                : StreamPartTextDelta(id: part.id, delta: safe);
             buffer.clear();
-            buffer.write(accumulated.substring(end + closeTag.length));
-            inReasoning = false;
-            yield const StreamPartReasoningEnd(id: reasoningId);
-          } else {
-            final safeEnd = accumulated.length - (closeTag.length - 1);
-            if (safeEnd > 0) {
-              final safe = accumulated.substring(0, safeEnd);
-              yield StreamPartReasoningDelta(id: reasoningId, delta: safe);
-              buffer.clear();
-              buffer.write(accumulated.substring(safeEnd));
-            }
+            buffer.write(accumulated.substring(safeEnd));
           }
+          break;
         }
       } else {
         // Flush any buffered text before non-text parts.

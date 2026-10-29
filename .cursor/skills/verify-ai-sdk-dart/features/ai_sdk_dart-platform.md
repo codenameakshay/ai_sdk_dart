@@ -36,7 +36,7 @@ Preconditions:
 - `V=.cursor/skills/verify-ai-sdk-dart/scripts/verify` and `$V doctor` prints no `FAIL` line.
 - No key is necessary. Network checks use an in-process fixture server that answers in the OpenAI, Cohere or Chat Completions wire format. Math and testing helpers also run in memory.
 
-- **All checks.** Run `$V run ai_sdk_dart`. This runs the text checks too. For the platform checks alone, the expected result is 29 passed and 2 failed (see Gotchas for the two known failures).
+- **All checks.** Run `$V run ai_sdk_dart`. This runs the text checks too. For the platform checks alone, the expected result is 31 passed.
 - **Embeddings.** Run `$V run ai_sdk_dart --check embed-many-chunking`. In `ai_sdk_dart/embed-many-chunking.json`, `observed.requestInputs` is `[[a, bb], [ccc, dddd], [eeeee]]` and `observed.usage` is `15`.
 - **Parallel calls.** Run `$V run ai_sdk_dart --check embed-many-parallel`. `observed.serialPeak` is `1` and `observed.parallelPeak` is at least `2`.
 - **Media.** Run `$V run ai_sdk_dart --check transcribe-openai`. `exchanges[0].requestHeaders` has a `multipart/form-data` content type. `observed.text` is `hello from the audio`.
@@ -50,7 +50,7 @@ Preconditions:
 
 ## Gotchas
 
-- The known package bugs are in the streaming `extractReasoningMiddleware`. `middleware-extract-reasoning-stream` fails because the text after `</think>` is emitted under the placeholder id `mw-text`, so `textStream` shows it but the final `text` future is empty. `middleware-extract-reasoning-stream-one-delta` fails because a whole `<think>...</think>` block inside one delta is never closed. Leave both failing until the package is fixed.
+- Regression guards for two fixed streaming `extractReasoningMiddleware` bugs. `middleware-extract-reasoning-stream` failed when the text after `</think>` was emitted under a placeholder id, so `textStream` showed it but the final `text` future was empty (fixed in PR #29). `middleware-extract-reasoning-stream-one-delta` failed when a whole `<think>...</think>` block inside one delta was never closed (fixed in PR #31).
 - Only `generateText` and `streamText` retry. `embed`, `embedMany`, `generateImage`, `generateSpeech`, `transcribe` and `rerank` have no `maxRetries` and throw the first `AiApiCallError`.
 - `maxRetries: 0` with a retryable status still throws `AiRetryError` with `attempts: 1`, not the bare `AiApiCallError`.
 - `Retry-After` support covers numeric delta-seconds only. The check uses a 1-second value, so `retry-after-header` takes about one second.

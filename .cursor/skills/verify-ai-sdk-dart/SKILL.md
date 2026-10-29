@@ -82,7 +82,7 @@ Proof standards:
 
 - A pass means that the check's assertions succeeded. For network checks, inspect the asserted request fields and caller-visible result. For in-memory checks, inspect the asserted values or errors. Do not trust the PASS line alone or infer coverage of unasserted fields.
 - Fixtures prove the adapter's mapping against the documented wire format. Only `--live` proves current vendor behavior, and it exists for OpenAI and Anthropic only. Say which one you ran.
-- A failing check is a finding. Fix the package or report the failure. Do not weaken the check. On 2026-10-29 three checks fail on real package defects. Two are `extractReasoningMiddleware` streaming bugs (see `features/ai_sdk_dart-platform.md`). One is live `ai_sdk_anthropic/live-reasoning`: the adapter drops signed thinking blocks that have empty text (see `features/ai_sdk_anthropic.md`).
+- A failing check is a finding. Fix the package or report the failure. Do not weaken the check. The first runs found three package defects: two `extractReasoningMiddleware` streaming bugs (fixed in PRs #29 and #31) and dropped signed empty-text Anthropic thinking blocks (fixed in PR #30). On `main` after those fixes, every check passes.
 - Report the "Not covered" lines of the feature file for any area that you claim to have verified.
 - For UI changes, `ai_sdk_flutter_ui` needs the verify-flutter-chat runs listed in its feature file. The driver does not touch Flutter.
 

@@ -241,15 +241,13 @@ class _ExtractReasoningMiddleware extends LanguageModelMiddlewareBase {
     const reasoningId = 'mw-reasoning';
     final buffer = StringBuffer();
     var inReasoning = false;
-    // The upstream text part whose deltas are buffered, so flushed text keeps
-    // its id and lands in the same text part.
     String? textId;
-    var textOpen = false;
+    final openTextIds = <String>{};
 
     await for (final part in source) {
       if (part is StreamPartTextDelta) {
         textId = part.id;
-        textOpen = true;
+        openTextIds.add(part.id);
         buffer.write(part.delta);
         final accumulated = buffer.toString();
 
@@ -310,12 +308,15 @@ class _ExtractReasoningMiddleware extends LanguageModelMiddlewareBase {
             yield StreamPartTextDelta(id: textId!, delta: remaining);
           }
         }
-        if (part is StreamPartTextEnd && part.id == textId) {
-          textOpen = false;
-        } else if (part is StreamPartFinish && textOpen) {
-          // Close a text part the source left open before the stream finishes.
-          textOpen = false;
-          yield StreamPartTextEnd(id: textId!);
+        if (part is StreamPartTextStart) {
+          openTextIds.add(part.id);
+        } else if (part is StreamPartTextEnd) {
+          openTextIds.remove(part.id);
+        } else if (part is StreamPartFinish) {
+          for (final id in openTextIds) {
+            yield StreamPartTextEnd(id: id);
+          }
+          openTextIds.clear();
         }
         yield part;
       }
@@ -330,9 +331,8 @@ class _ExtractReasoningMiddleware extends LanguageModelMiddlewareBase {
         yield StreamPartTextDelta(id: textId!, delta: remaining);
       }
     }
-    // Close a text part the source left open when the stream has no finish.
-    if (textOpen) {
-      yield StreamPartTextEnd(id: textId!);
+    for (final id in openTextIds) {
+      yield StreamPartTextEnd(id: id);
     }
   }
 }

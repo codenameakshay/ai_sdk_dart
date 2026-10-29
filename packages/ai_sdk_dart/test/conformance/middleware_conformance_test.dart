@@ -384,6 +384,7 @@ void main() {
               ('reasoning-start', 'mw-reasoning'),
               ('reasoning-delta', 'mw-reasoning', 'x'),
               ('reasoning-end', 'mw-reasoning'),
+              ('text-end', 'source-text'),
             ]);
           },
         );
@@ -401,6 +402,7 @@ void main() {
             expected: <Object>[
               ('reasoning-start', 'mw-reasoning'),
               ('reasoning-end', 'mw-reasoning'),
+              ('text-end', 'source-text'),
             ],
           ),
           (
@@ -414,6 +416,7 @@ void main() {
               ('reasoning-delta', 'mw-reasoning', 'x'),
               ('source', 'source-1'),
               ('reasoning-end', 'mw-reasoning'),
+              ('text-end', 'source-text'),
             ],
           ),
         ]) {
@@ -432,6 +435,7 @@ void main() {
             ('reasoning-start', 'mw-reasoning'),
             ('reasoning-delta', 'mw-reasoning', 'x'),
             ('reasoning-end', 'mw-reasoning'),
+            ('text-end', 'source-text'),
             ('finish',),
           ]);
         });
@@ -453,6 +457,7 @@ void main() {
               ('reasoning-delta', 'mw-reasoning', 'x'),
               ('source', 'source-1'),
               ('reasoning-end', 'mw-reasoning'),
+              ('text-end', 'source-text'),
             ]);
           },
         );
@@ -470,7 +475,8 @@ void main() {
               ('reasoning-delta', 'mw-reasoning', 'x'),
               ('reasoning-end', 'mw-reasoning'),
               ('text-delta', 'source-text', 'o'),
-              ('text-delta', 'mw-text', 'k'),
+              ('text-delta', 'source-text', 'k'),
+              ('text-end', 'source-text'),
             ]);
           },
         );
@@ -493,6 +499,7 @@ void main() {
             expect(parts.map(event), [
               ('reasoning-start', 'mw-reasoning'),
               ('reasoning-end', 'mw-reasoning'),
+              ('text-end', 'text-custom'),
             ]);
           },
         );

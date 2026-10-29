@@ -241,9 +241,13 @@ class _ExtractReasoningMiddleware extends LanguageModelMiddlewareBase {
     const reasoningId = 'mw-reasoning';
     final buffer = StringBuffer();
     var inReasoning = false;
+    String? textId;
+    final openTextIds = <String>{};
 
     await for (final part in source) {
       if (part is StreamPartTextDelta) {
+        textId = part.id;
+        openTextIds.add(part.id);
         buffer.write(part.delta);
         // One delta can hold several tags, so parse until no complete tag
         // remains in the buffer.
@@ -287,13 +291,22 @@ class _ExtractReasoningMiddleware extends LanguageModelMiddlewareBase {
           if (inReasoning) {
             yield StreamPartReasoningDelta(id: reasoningId, delta: remaining);
           } else {
-            // Use a placeholder id since we may not have one here.
-            yield StreamPartTextDelta(id: 'mw-text', delta: remaining);
+            yield StreamPartTextDelta(id: textId!, delta: remaining);
           }
         }
-        if (part is StreamPartFinish && inReasoning) {
-          yield const StreamPartReasoningEnd(id: reasoningId);
-          inReasoning = false;
+        if (part is StreamPartTextStart) {
+          openTextIds.add(part.id);
+        } else if (part is StreamPartTextEnd) {
+          openTextIds.remove(part.id);
+        } else if (part is StreamPartFinish) {
+          if (inReasoning) {
+            yield const StreamPartReasoningEnd(id: reasoningId);
+            inReasoning = false;
+          }
+          for (final id in openTextIds) {
+            yield StreamPartTextEnd(id: id);
+          }
+          openTextIds.clear();
         }
         yield part;
       }
@@ -304,11 +317,14 @@ class _ExtractReasoningMiddleware extends LanguageModelMiddlewareBase {
       if (inReasoning) {
         yield StreamPartReasoningDelta(id: reasoningId, delta: remaining);
       } else {
-        yield StreamPartTextDelta(id: 'mw-text', delta: remaining);
+        yield StreamPartTextDelta(id: textId!, delta: remaining);
       }
     }
     if (inReasoning) {
       yield const StreamPartReasoningEnd(id: reasoningId);
+    }
+    for (final id in openTextIds) {
+      yield StreamPartTextEnd(id: id);
     }
   }
 }

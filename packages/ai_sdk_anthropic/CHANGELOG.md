@@ -5,8 +5,12 @@
   their signature and are sent back in tool-use continuations.
 - Streamed `redacted_thinking` blocks are now sent back in tool-use
   continuations, the same as generated ones.
-- Replay only signed thinking blocks (or empty-text redacted blocks with
-  Anthropic metadata), and suppress empty unsigned thinking from streams.
+- A signed thinking block is always sent back as `thinking`, even when its
+  reasoning part also carries `redactedData` metadata. Unsigned reasoning with
+  text is not sent back.
+- Streams no longer emit an empty reasoning part for a thinking block that has
+  no text and no signature, or a redacted block with no data. This matches
+  generate.
 
 ## 3.0.0
 

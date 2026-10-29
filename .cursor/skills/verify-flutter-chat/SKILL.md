@@ -18,7 +18,7 @@ Use `scripts/vfc` for all work. Run every command from the repository root. Each
 
 ```sh
 S=.cursor/skills/verify-flutter-chat/scripts/vfc
-$S new                                   # prints an id, e.g. codex-20261029-082752-31814
+$S new                                   # prints an id, e.g. vfc-20261029-082752-31814
 VERIFY_RUN_ID=<id> $S build              # ~80 s first time; allocates this run's ports. For advanced_app: VFC_APP=advanced_app VERIFY_RUN_ID=<id> $S build
 VERIFY_RUN_ID=<id> $S up                 # backend + static server + headless Chromium
 VERIFY_RUN_ID=<id> $S doctor             # must print only OK/INFO lines

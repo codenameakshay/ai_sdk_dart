@@ -453,7 +453,7 @@ cmd_down() {
 }
 
 case "${1:-}" in
-  new) echo "codex-$(date +%Y%m%d-%H%M%S)-$RANDOM" ;;
+  new) echo "vfc-$(date +%Y%m%d-%H%M%S)-$RANDOM" ;;
   build) cmd_build ;;
   up) cmd_up ;;
   doctor) cmd_doctor ;;

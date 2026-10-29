@@ -235,8 +235,53 @@ void main() {
       );
 
       group('stream tag parsing', () {
-        // Streams [deltas] through the middleware and returns each reasoning
-        // block (start..end) and the joined text deltas.
+        Future<List<LanguageModelV4StreamPart>> transformParts(
+          List<LanguageModelV4StreamPart> sourceParts, {
+          String tagName = 'think',
+        }) async {
+          final wrapped = wrapLanguageModel(
+            model: FakeStreamModel(sourceParts),
+            middleware: extractReasoningMiddleware(tagName: tagName),
+          );
+          final result = await wrapped.doStream(
+            LanguageModelV4CallOptions(
+              prompt: const LanguageModelV4Prompt(messages: []),
+            ),
+          );
+          return result.stream.toList();
+        }
+
+        Object event(LanguageModelV4StreamPart part) => switch (part) {
+          StreamPartReasoningStart(:final id) => ('reasoning-start', id),
+          StreamPartReasoningDelta(:final id, :final delta) => (
+            'reasoning-delta',
+            id,
+            delta,
+          ),
+          StreamPartReasoningEnd(:final id) => ('reasoning-end', id),
+          StreamPartTextDelta(:final id, :final delta) => (
+            'text-delta',
+            id,
+            delta,
+          ),
+          StreamPartTextStart(:final id) => ('text-start', id),
+          StreamPartTextEnd(:final id) => ('text-end', id),
+          StreamPartSource(:final source) => ('source', source.id),
+          StreamPartFinish() => ('finish',),
+          _ => part.runtimeType,
+        };
+
+        Object streamTextEvent(StreamTextEvent part) => switch (part) {
+          StreamTextReasoningStartEvent(:final id) => ('reasoning-start', id),
+          StreamTextReasoningDeltaEvent(:final id, :final delta) => (
+            'reasoning-delta',
+            id,
+            delta,
+          ),
+          StreamTextReasoningEndEvent(:final id) => ('reasoning-end', id),
+          _ => part.runtimeType,
+        };
+
         Future<({List<String> reasoning, String text})> extract(
           List<String> deltas,
         ) async {
@@ -261,7 +306,8 @@ void main() {
                 expect(block, isNotNull, reason: 'delta outside reasoning');
                 block!.write(delta);
               case StreamPartReasoningEnd():
-                reasoning.add(block.toString());
+                expect(block, isNotNull, reason: 'end outside reasoning');
+                reasoning.add(block!.toString());
                 block = null;
               case StreamPartTextDelta(:final delta):
                 expect(block, isNull, reason: 'text inside reasoning');
@@ -324,6 +370,168 @@ void main() {
           expect(result.reasoning, ['x', 'y']);
           expect(result.text, 'abc');
         });
+
+        test(
+          'ends unmatched reasoning at raw EOF after flushing content',
+          () async {
+            final parts = await transformParts([
+              const StreamPartTextStart(id: 'source-text'),
+              const StreamPartTextDelta(id: 'source-text', delta: '<think>'),
+              const StreamPartTextDelta(id: 'source-text', delta: 'x'),
+            ]);
+            expect(parts.map(event), [
+              ('text-start', 'source-text'),
+              ('reasoning-start', 'mw-reasoning'),
+              ('reasoning-delta', 'mw-reasoning', 'x'),
+              ('reasoning-end', 'mw-reasoning'),
+            ]);
+          },
+        );
+
+        const source = LanguageModelV4SourcePart(
+          id: 'source-1',
+          url: 'https://example.com',
+        );
+        for (final testCase in [
+          (
+            name: 'empty active reasoning buffer',
+            sourceParts: <LanguageModelV4StreamPart>[
+              const StreamPartTextDelta(id: 'source-text', delta: '<think>'),
+            ],
+            expected: <Object>[
+              ('reasoning-start', 'mw-reasoning'),
+              ('reasoning-end', 'mw-reasoning'),
+            ],
+          ),
+          (
+            name: 'reasoning buffer flushed by a non-text part',
+            sourceParts: <LanguageModelV4StreamPart>[
+              const StreamPartTextDelta(id: 'source-text', delta: '<think>x'),
+              const StreamPartSource(source: source),
+            ],
+            expected: <Object>[
+              ('reasoning-start', 'mw-reasoning'),
+              ('reasoning-delta', 'mw-reasoning', 'x'),
+              ('source', 'source-1'),
+              ('reasoning-end', 'mw-reasoning'),
+            ],
+          ),
+        ]) {
+          test('closes ${testCase.name} at raw EOF', () async {
+            final parts = await transformParts(testCase.sourceParts);
+            expect(parts.map(event), testCase.expected);
+          });
+        }
+
+        test('closes unmatched reasoning before terminal finish', () async {
+          final parts = await transformParts([
+            const StreamPartTextDelta(id: 'source-text', delta: '<think>x'),
+            StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
+          ]);
+          expect(parts.map(event), [
+            ('reasoning-start', 'mw-reasoning'),
+            ('reasoning-delta', 'mw-reasoning', 'x'),
+            ('reasoning-end', 'mw-reasoning'),
+            ('finish',),
+          ]);
+        });
+
+        test(
+          'flushes reasoning before a source and continues through close tag',
+          () async {
+            const source = LanguageModelV4SourcePart(
+              id: 'source-1',
+              url: 'https://example.com',
+            );
+            final parts = await transformParts([
+              const StreamPartTextDelta(id: 'source-text', delta: '<think>x'),
+              const StreamPartSource(source: source),
+              const StreamPartTextDelta(id: 'source-text', delta: '</think>'),
+            ]);
+            expect(parts.map(event), [
+              ('reasoning-start', 'mw-reasoning'),
+              ('reasoning-delta', 'mw-reasoning', 'x'),
+              ('source', 'source-1'),
+              ('reasoning-end', 'mw-reasoning'),
+            ]);
+          },
+        );
+
+        test(
+          'empty tag name handles empty delimiters and flushes following text',
+          () async {
+            final parts = await transformParts([
+              const StreamPartTextDelta(id: 'source-text', delta: ''),
+              const StreamPartTextDelta(id: 'source-text', delta: '<>x</>ok'),
+              const StreamPartTextDelta(id: 'source-text', delta: ''),
+            ], tagName: '');
+            expect(parts.map(event), [
+              ('reasoning-start', 'mw-reasoning'),
+              ('reasoning-delta', 'mw-reasoning', 'x'),
+              ('reasoning-end', 'mw-reasoning'),
+              ('text-delta', 'source-text', 'o'),
+              ('text-delta', 'mw-text', 'k'),
+            ]);
+          },
+        );
+
+        test(
+          'empty deltas and blocks preserve start/end order with custom tags',
+          () async {
+            final parts = await transformParts([
+              const StreamPartTextDelta(id: 'text-custom', delta: ''),
+              const StreamPartTextDelta(
+                id: 'text-custom',
+                delta: '<reasoning>',
+              ),
+              const StreamPartTextDelta(id: 'text-custom', delta: ''),
+              const StreamPartTextDelta(
+                id: 'text-custom',
+                delta: '</reasoning>',
+              ),
+            ], tagName: 'reasoning');
+            expect(parts.map(event), [
+              ('reasoning-start', 'mw-reasoning'),
+              ('reasoning-end', 'mw-reasoning'),
+            ]);
+          },
+        );
+
+        test(
+          'streamText reports separate blocks sharing middleware reasoning ID',
+          () async {
+            final result = await streamText(
+              model: wrapLanguageModel(
+                model: textDeltaStream([
+                  '<think>one</think>middle<think>two</think>end',
+                ]),
+                middleware: extractReasoningMiddleware(tagName: 'think'),
+              ),
+              prompt: 'think',
+            );
+            final reasoningEvents = await result.fullStream
+                .where(
+                  (part) =>
+                      part is StreamTextReasoningStartEvent ||
+                      part is StreamTextReasoningDeltaEvent ||
+                      part is StreamTextReasoningEndEvent,
+                )
+                .toList();
+            expect(reasoningEvents.map(streamTextEvent), [
+              ('reasoning-start', 'mw-reasoning'),
+              ('reasoning-delta', 'mw-reasoning', 'one'),
+              ('reasoning-end', 'mw-reasoning'),
+              ('reasoning-start', 'mw-reasoning'),
+              ('reasoning-delta', 'mw-reasoning', 'two'),
+              ('reasoning-end', 'mw-reasoning'),
+            ]);
+            expect((await result.reasoning).map((part) => part.text), [
+              'one',
+              'two',
+            ]);
+            expect(await result.reasoningText, 'onetwo');
+          },
+        );
 
         test('streamText reports reasoning and textStream', () async {
           final result = await streamText(

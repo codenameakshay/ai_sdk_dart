@@ -291,6 +291,10 @@ class _ExtractReasoningMiddleware extends LanguageModelMiddlewareBase {
             yield StreamPartTextDelta(id: 'mw-text', delta: remaining);
           }
         }
+        if (part is StreamPartFinish && inReasoning) {
+          yield const StreamPartReasoningEnd(id: reasoningId);
+          inReasoning = false;
+        }
         yield part;
       }
     }
@@ -299,10 +303,12 @@ class _ExtractReasoningMiddleware extends LanguageModelMiddlewareBase {
     if (remaining.isNotEmpty) {
       if (inReasoning) {
         yield StreamPartReasoningDelta(id: reasoningId, delta: remaining);
-        yield const StreamPartReasoningEnd(id: reasoningId);
       } else {
         yield StreamPartTextDelta(id: 'mw-text', delta: remaining);
       }
+    }
+    if (inReasoning) {
+      yield const StreamPartReasoningEnd(id: reasoningId);
     }
   }
 }

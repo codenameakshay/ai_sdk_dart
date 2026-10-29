@@ -5,6 +5,8 @@
 - Fixed `extractReasoningMiddleware` streaming when one text delta holds a whole
   `<think>...</think>` block, several blocks, or a close tag followed by a new open tag. The
   answer text after the close tag is no longer emitted as reasoning.
+- Fixed `extractReasoningMiddleware` to close an open reasoning section at stream finish or EOF,
+  including when no reasoning text remains buffered.
 
 ---
 

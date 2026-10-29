@@ -4,9 +4,6 @@ import 'package:test/test.dart';
 
 import 'helpers/fake_models.dart';
 
-/// Text that extractReasoningMiddleware buffers and flushes later must keep
-/// the upstream text part id, so it reaches the final `text` and `content`
-/// and not only `textStream`.
 void main() {
   Future<StreamTextResult<String>> stream(
     List<LanguageModelV4StreamPart> parts,
@@ -156,4 +153,204 @@ void main() {
     expect(parts.whereType<StreamPartTextEnd>().map((p) => p.id), ['t1']);
     expect(parts.whereType<StreamPartTextDelta>().map((p) => p.id), ['t1']);
   });
+
+  test('overlapping text ids are closed independently', () async {
+    const input = [
+      StreamPartTextStart(id: 'a'),
+      StreamPartTextDelta(id: 'a', delta: 'A'),
+      StreamPartTextStart(id: 'b'),
+      StreamPartTextDelta(id: 'b', delta: 'B'),
+      StreamPartTextEnd(id: 'b'),
+      StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
+    ];
+    final parts = await transform(input);
+
+    expect(parts.whereType<StreamPartTextEnd>().map((part) => part.id), [
+      'b',
+      'a',
+    ]);
+    expect(
+      parts.whereType<StreamPartTextDelta>().map(
+        (part) => '${part.id}:${part.delta}',
+      ),
+      ['a:A', 'b:B'],
+    );
+
+    final result = await stream(input);
+    expect(await result.text, 'BA');
+    expect(
+      (await result.content).whereType<LanguageModelV4TextPart>().map(
+        (part) => part.text,
+      ),
+      ['B', 'A'],
+    );
+  });
+
+  test('all overlapping text ids are closed at EOF in opening order', () async {
+    final parts = await transform([
+      const StreamPartTextStart(id: 'a'),
+      const StreamPartTextDelta(id: 'a', delta: 'A'),
+      const StreamPartTextStart(id: 'b'),
+      const StreamPartTextDelta(id: 'b', delta: 'B'),
+    ]);
+
+    expect(parts.whereType<StreamPartTextEnd>().map((part) => part.id), [
+      'a',
+      'b',
+    ]);
+    expect(
+      parts.whereType<StreamPartTextDelta>().map(
+        (part) => '${part.id}:${part.delta}',
+      ),
+      ['a:A', 'b:B'],
+    );
+  });
+
+  for (final finish in [false, true]) {
+    test(
+      'an empty started text part closes once ${finish ? 'at finish' : 'at EOF'}',
+      () async {
+        final parts = await transform([
+          const StreamPartTextStart(id: 'empty'),
+          if (finish)
+            StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
+        ]);
+
+        expect(parts.whereType<StreamPartTextEnd>().map((part) => part.id), [
+          'empty',
+        ]);
+      },
+    );
+  }
+
+  test(
+    'explicitly ending an empty text part does not duplicate its end',
+    () async {
+      final parts = await transform([
+        const StreamPartTextStart(id: 'empty'),
+        const StreamPartTextEnd(id: 'empty'),
+      ]);
+
+      expect(parts.whereType<StreamPartTextEnd>().map((part) => part.id), [
+        'empty',
+      ]);
+    },
+  );
+
+  test(
+    'a later empty open id is closed instead of the stale delta id',
+    () async {
+      final parts = await transform([
+        const StreamPartTextStart(id: 'a'),
+        const StreamPartTextDelta(id: 'a', delta: 'A'),
+        const StreamPartTextEnd(id: 'a'),
+        const StreamPartTextStart(id: 'b'),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
+      ]);
+
+      expect(parts.whereType<StreamPartTextEnd>().map((part) => part.id), [
+        'a',
+        'b',
+      ]);
+    },
+  );
+
+  test(
+    'empty streams stay empty and delta-only streams use fallback ids',
+    () async {
+      expect(await transform([]), isEmpty);
+      expect(
+        (await transform([
+          StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
+        ])).whereType<StreamPartTextEnd>(),
+        isEmpty,
+      );
+
+      final parts = await transform([
+        const StreamPartTextDelta(id: 'delta-only', delta: 'text'),
+      ]);
+      expect(
+        parts.whereType<StreamPartTextDelta>().map(
+          (part) => '${part.id}:${part.delta}',
+        ),
+        ['delta-only:text'],
+      );
+      expect(parts.whereType<StreamPartTextEnd>().map((part) => part.id), [
+        'delta-only',
+      ]);
+    },
+  );
+
+  test('nested reasoning middleware flushes text ends before finish', () async {
+    final inner = wrapLanguageModel(
+      model: FakeStreamModel([
+        const StreamPartTextStart(id: 'text'),
+        const StreamPartTextDelta(id: 'text', delta: '<think>plan</'),
+        const StreamPartTextDelta(id: 'text', delta: 'think>answer'),
+        StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
+      ]),
+      middleware: extractReasoningMiddleware(tagName: 'think'),
+    );
+    final wrapped = wrapLanguageModel(
+      model: inner,
+      middleware: extractReasoningMiddleware(tagName: 'other'),
+    );
+    final result = await wrapped.doStream(
+      const LanguageModelV4CallOptions(
+        prompt: LanguageModelV4Prompt(messages: []),
+      ),
+    );
+    final parts = await result.stream.toList();
+    final endIndex = parts.indexWhere((part) => part is StreamPartTextEnd);
+    final finishIndex = parts.indexWhere((part) => part is StreamPartFinish);
+    expect(
+      parts.whereType<StreamPartTextDelta>().map(
+        (part) => '${part.id}:${part.delta}',
+      ),
+      ['text:answer'],
+    );
+    expect(parts.whereType<StreamPartTextEnd>().map((part) => part.id), [
+      'text',
+    ]);
+    expect(endIndex, greaterThanOrEqualTo(0));
+    expect(endIndex, lessThan(finishIndex));
+    expect(parts.last, isA<StreamPartFinish>());
+  });
+
+  for (final finish in [false, true]) {
+    test(
+      'an open text id closes ${finish ? 'at finish' : 'at EOF'} while reasoning remains open',
+      () async {
+        final parts = await transform([
+          const StreamPartTextStart(id: 'text'),
+          const StreamPartTextDelta(id: 'text', delta: '<think>plan'),
+          if (finish)
+            StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
+        ]);
+
+        expect(
+          parts.whereType<StreamPartReasoningDelta>().map((part) => part.delta),
+          ['plan'],
+        );
+        expect(parts.whereType<StreamPartTextEnd>().map((part) => part.id), [
+          'text',
+        ]);
+      },
+    );
+  }
+
+  test(
+    'explicit text end is not repeated while reasoning remains open',
+    () async {
+      final parts = await transform([
+        const StreamPartTextStart(id: 'text'),
+        const StreamPartTextDelta(id: 'text', delta: '<think>plan'),
+        const StreamPartTextEnd(id: 'text'),
+      ]);
+
+      expect(parts.whereType<StreamPartTextEnd>().map((part) => part.id), [
+        'text',
+      ]);
+    },
+  );
 }

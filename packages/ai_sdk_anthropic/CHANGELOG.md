@@ -1,3 +1,17 @@
+## Unreleased
+
+- Keep signed thinking blocks that have empty text, as adaptive thinking on
+  current Claude models returns them. They now appear as reasoning parts with
+  their signature and are sent back in tool-use continuations.
+- Streamed `redacted_thinking` blocks are now sent back in tool-use
+  continuations, the same as generated ones.
+- A signed thinking block is always sent back as `thinking`, even when its
+  reasoning part also carries `redactedData` metadata. Unsigned reasoning with
+  text is not sent back.
+- Streams no longer emit an empty reasoning part for a thinking block that has
+  no text and no signature, or a redacted block with no data. This matches
+  generate.
+
 ## 3.0.0
 
 - Honor disabled Anthropic tool choice while retaining extended-thinking request controls.

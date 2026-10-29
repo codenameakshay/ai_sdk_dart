@@ -312,6 +312,10 @@ class _ExtractReasoningMiddleware extends LanguageModelMiddlewareBase {
         }
         if (part is StreamPartTextEnd && part.id == textId) {
           textOpen = false;
+        } else if (part is StreamPartFinish && textOpen) {
+          // Close a text part the source left open before the stream finishes.
+          textOpen = false;
+          yield StreamPartTextEnd(id: textId!);
         }
         yield part;
       }
@@ -326,7 +330,7 @@ class _ExtractReasoningMiddleware extends LanguageModelMiddlewareBase {
         yield StreamPartTextDelta(id: textId!, delta: remaining);
       }
     }
-    // Close a text part the source left open, as for reasoning above.
+    // Close a text part the source left open when the stream has no finish.
     if (textOpen) {
       yield StreamPartTextEnd(id: textId!);
     }

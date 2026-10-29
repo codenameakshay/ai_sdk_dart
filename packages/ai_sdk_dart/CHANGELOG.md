@@ -4,7 +4,7 @@
   joined in order. Reasoning, tool, file, and source parts are excluded.
 - Fixed `extractReasoningMiddleware` streaming dropping text after a closing reasoning tag from
   the final `text` and `content`. Buffered text now keeps the upstream text part id, and a text
-  part the source leaves open is closed at the end of the stream.
+  part the source leaves open is closed before the stream finishes.
 
 ---
 

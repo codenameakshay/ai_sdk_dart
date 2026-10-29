@@ -85,12 +85,11 @@ void main() {
     );
   });
 
-  test('a closed text part is not closed again at end of stream', () async {
+  Future<List<LanguageModelV4StreamPart>> transform(
+    List<LanguageModelV4StreamPart> parts,
+  ) async {
     final wrapped = wrapLanguageModel(
-      model: FakeStreamModel([
-        ...thinkThenAnswer,
-        const StreamPartTextEnd(id: 't1'),
-      ]),
+      model: FakeStreamModel(parts),
       middleware: extractReasoningMiddleware(tagName: 'think'),
     );
     final transformed = await wrapped.doStream(
@@ -98,7 +97,61 @@ void main() {
         prompt: LanguageModelV4Prompt(messages: []),
       ),
     );
-    final parts = await transformed.stream.toList();
+    return transformed.stream.toList();
+  }
+
+  test('an open text part is closed before finish', () async {
+    final parts = await transform([
+      ...thinkThenAnswer,
+      StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
+    ]);
+
+    expect(parts.whereType<StreamPartTextEnd>().map((p) => p.id), ['t1']);
+    final endIndex = parts.indexWhere((p) => p is StreamPartTextEnd);
+    expect(endIndex, parts.indexWhere((p) => p is StreamPartFinish) - 1);
+    expect(parts.last, isA<StreamPartFinish>());
+
+    final result = await stream([
+      ...thinkThenAnswer,
+      StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
+    ]);
+    expect(await result.text, 'Done.');
+  });
+
+  test('each text part keeps its own id', () async {
+    final result = await stream([
+      ...thinkThenAnswer,
+      const StreamPartTextEnd(id: 't1'),
+      const StreamPartTextStart(id: 't2'),
+      const StreamPartTextDelta(id: 't2', delta: 'Bye.'),
+      StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
+    ]);
+
+    final deltaIds = <String, String>{};
+    await for (final event in result.fullStream) {
+      if (event is StreamTextTextDeltaEvent) {
+        deltaIds.update(
+          event.id,
+          (text) => text + event.delta,
+          ifAbsent: () => event.delta,
+        );
+      }
+    }
+    expect(deltaIds, {'t1': 'Done.', 't2': 'Bye.'});
+    expect(await result.text, 'Done.Bye.');
+    expect(
+      (await result.content).whereType<LanguageModelV4TextPart>().map(
+        (p) => p.text,
+      ),
+      ['Done.', 'Bye.'],
+    );
+  });
+
+  test('a closed text part is not closed again at end of stream', () async {
+    final parts = await transform([
+      ...thinkThenAnswer,
+      const StreamPartTextEnd(id: 't1'),
+    ]);
 
     expect(parts.whereType<StreamPartTextEnd>().map((p) => p.id), ['t1']);
     expect(parts.whereType<StreamPartTextDelta>().map((p) => p.id), ['t1']);

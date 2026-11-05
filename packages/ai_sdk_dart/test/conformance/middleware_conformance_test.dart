@@ -251,14 +251,28 @@ void main() {
           return result.stream.toList();
         }
 
+        // Snapshots omit the random per-stream namespace, but retain the
+        // per-text counter. Lifecycle/identity checks use the actual IDs.
+        String snapshotReasoningId(String id) {
+          expect(id, startsWith('mw-reasoning-'));
+          final counter = id.substring(id.lastIndexOf('-') + 1);
+          return counter == '0' ? 'mw-reasoning' : 'mw-reasoning-$counter';
+        }
+
         Object event(LanguageModelV4StreamPart part) => switch (part) {
-          StreamPartReasoningStart(:final id) => ('reasoning-start', id),
+          StreamPartReasoningStart(:final id) => (
+            'reasoning-start',
+            snapshotReasoningId(id),
+          ),
           StreamPartReasoningDelta(:final id, :final delta) => (
             'reasoning-delta',
-            id,
+            snapshotReasoningId(id),
             delta,
           ),
-          StreamPartReasoningEnd(:final id) => ('reasoning-end', id),
+          StreamPartReasoningEnd(:final id) => (
+            'reasoning-end',
+            snapshotReasoningId(id),
+          ),
           StreamPartTextDelta(:final id, :final delta) => (
             'text-delta',
             id,
@@ -272,13 +286,19 @@ void main() {
         };
 
         Object streamTextEvent(StreamTextEvent part) => switch (part) {
-          StreamTextReasoningStartEvent(:final id) => ('reasoning-start', id),
+          StreamTextReasoningStartEvent(:final id) => (
+            'reasoning-start',
+            snapshotReasoningId(id),
+          ),
           StreamTextReasoningDeltaEvent(:final id, :final delta) => (
             'reasoning-delta',
-            id,
+            snapshotReasoningId(id),
             delta,
           ),
-          StreamTextReasoningEndEvent(:final id) => ('reasoning-end', id),
+          StreamTextReasoningEndEvent(:final id) => (
+            'reasoning-end',
+            snapshotReasoningId(id),
+          ),
           _ => part.runtimeType,
         };
 
@@ -400,21 +420,23 @@ void main() {
               const StreamPartTextDelta(id: 'source-text', delta: '<think>'),
             ],
             expected: <Object>[
+              ('text-start', 'source-text'),
               ('reasoning-start', 'mw-reasoning'),
               ('reasoning-end', 'mw-reasoning'),
               ('text-end', 'source-text'),
             ],
           ),
           (
-            name: 'reasoning buffer flushed by a non-text part',
+            name: 'reasoning buffer retained across a non-text part',
             sourceParts: <LanguageModelV4StreamPart>[
               const StreamPartTextDelta(id: 'source-text', delta: '<think>x'),
               const StreamPartSource(source: source),
             ],
             expected: <Object>[
+              ('text-start', 'source-text'),
               ('reasoning-start', 'mw-reasoning'),
-              ('reasoning-delta', 'mw-reasoning', 'x'),
               ('source', 'source-1'),
+              ('reasoning-delta', 'mw-reasoning', 'x'),
               ('reasoning-end', 'mw-reasoning'),
               ('text-end', 'source-text'),
             ],
@@ -432,6 +454,7 @@ void main() {
             StreamPartFinish(finishReason: LanguageModelV4FinishReason.stop),
           ]);
           expect(parts.map(event), [
+            ('text-start', 'source-text'),
             ('reasoning-start', 'mw-reasoning'),
             ('reasoning-delta', 'mw-reasoning', 'x'),
             ('reasoning-end', 'mw-reasoning'),
@@ -441,7 +464,7 @@ void main() {
         });
 
         test(
-          'flushes reasoning before a source and continues through close tag',
+          'retains reasoning across a source and continues through close tag',
           () async {
             const source = LanguageModelV4SourcePart(
               id: 'source-1',
@@ -453,9 +476,10 @@ void main() {
               const StreamPartTextDelta(id: 'source-text', delta: '</think>'),
             ]);
             expect(parts.map(event), [
+              ('text-start', 'source-text'),
               ('reasoning-start', 'mw-reasoning'),
-              ('reasoning-delta', 'mw-reasoning', 'x'),
               ('source', 'source-1'),
+              ('reasoning-delta', 'mw-reasoning', 'x'),
               ('reasoning-end', 'mw-reasoning'),
               ('text-end', 'source-text'),
             ]);
@@ -471,6 +495,7 @@ void main() {
               const StreamPartTextDelta(id: 'source-text', delta: ''),
             ], tagName: '');
             expect(parts.map(event), [
+              ('text-start', 'source-text'),
               ('reasoning-start', 'mw-reasoning'),
               ('reasoning-delta', 'mw-reasoning', 'x'),
               ('reasoning-end', 'mw-reasoning'),
@@ -497,6 +522,7 @@ void main() {
               ),
             ], tagName: 'reasoning');
             expect(parts.map(event), [
+              ('text-start', 'text-custom'),
               ('reasoning-start', 'mw-reasoning'),
               ('reasoning-end', 'mw-reasoning'),
               ('text-end', 'text-custom'),

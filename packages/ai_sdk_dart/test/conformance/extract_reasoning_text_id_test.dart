@@ -173,7 +173,8 @@ void main() {
       parts.whereType<StreamPartTextDelta>().map(
         (part) => '${part.id}:${part.delta}',
       ),
-      ['a:A', 'b:B'],
+      // Starting b must not flush a's pending text. b ends first.
+      ['b:B', 'a:A'],
     );
 
     final result = await stream(input);

@@ -1,4 +1,10 @@
-## Unreleased
+## 3.1.0 (unreleased)
+
+- Raised the `ai_sdk_dart` dependency floor to `^3.1.0`: parts-based message rendering uses
+  `ModelMessage.text`, which is absent from core 3.0.0. The new floor also includes the
+  interleaved reasoning/text fixes used by streaming controllers.
+- Added a controller regression for independent reasoning IDs and tags split around raw
+  chunks, checking the visible streamed reply, completed transcript, and turn lifecycle.
 
 - Added `ChatController.chatMessages`: each message with a stable `id`, the `provider` and
   `modelId` of the agent model that generated it, its `finishReason`, and an `interrupted`

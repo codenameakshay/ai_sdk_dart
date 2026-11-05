@@ -1,6 +1,6 @@
 name: ai_sdk_flutter_ui
 description: Flutter UI controllers and prebuilt widgets for the AI SDK Dart port.
-version: 3.0.0
+version: 3.1.0
 homepage: https://github.com/codenameakshay/ai_sdk_dart
 repository: https://github.com/codenameakshay/ai_sdk_dart
 resolution: workspace
@@ -12,7 +12,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  ai_sdk_dart: ^3.0.0
+  ai_sdk_dart: ^3.1.0
   ai_sdk_provider: ^3.0.0
   ai_sdk_conversation: ^3.0.0
   ai_sdk_remote: ^3.0.0

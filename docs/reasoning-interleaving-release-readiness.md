@@ -1,5 +1,36 @@
 # Reasoning interleaving: release readiness
 
+## Merge-readiness follow-up
+
+The initial local failures below no longer represent the latest evidence.
+All five GitHub checks passed on product/report head `93e2c38`:
+
+- [CI](https://github.com/codenameakshay/ai_sdk_dart/actions/runs/41978311749)
+  passed 2,055 Dart tests and 364 Flutter UI tests. The prescribed coverage gate
+  passed at 99.02% (14,490/14,633). Core coverage is 99.38%, and UI coverage is 99.04%.
+  Formatting, analysis, protocol fixtures, tooling, catalog, and example checks passed.
+- [iOS simulator E2E](https://github.com/codenameakshay/ai_sdk_dart/actions/runs/41978311743)
+  passed the conversation integration suite twice.
+- [Toolchain compatibility](https://github.com/codenameakshay/ai_sdk_dart/actions/runs/41978311779)
+  passed minimum Flutter 3.41.3 / Dart 3.11.1, pinned Flutter 3.44.3 / Dart 3.12.2,
+  and latest stable Flutter.
+
+The gallery failures exposed a verifier race. `clickSnack` waited for click
+completion before it observed the one-second snackbar. A diagnostic run recorded
+2,231 ms for the failing approval click. The observer now runs during the click.
+The expected text, five-second observation timeout, and app behavior are unchanged.
+No SDK or example-app code changed in this follow-up.
+
+The full `widget-gallery` scenario then passed, including every snackbar,
+clipboard read-back, partial/final objects, and scroll-to-latest behavior.
+The two other scenarios that use this helper, `tools-chat-fixtures` and
+`conversation-ui`, also passed with the correction.
+Approval and partial-object screenshots received visual inspection.
+Evidence is in `/tmp/verify-flutter-chat/evidence/reasoning-merge-ready-20261105/`.
+The diagnostic failure records are `/tmp/ai-sdk-pr32-gallery-diagnostic-failure.json`
+and `/tmp/ai-sdk-pr32-snackbar-diagnostic.json`.
+Final-head CI must remain green before merge. No merge or publication is authorized.
+
 ## Scope and release proposals
 
 These are release candidates, not published versions. No tag, merge, deployment,
@@ -26,7 +57,8 @@ cannot detect a published dependency floor that is too low.
 
 The development toolchain remains Flutter 3.44.3 / Dart 3.12.2 from `.fvmrc`.
 The package SDK constraints remain Dart `^3.11.1`, with Flutter `>=3.41.3` for UI.
-This run does not qualify those minimum versions independently.
+The initial local run did not qualify those minimum versions independently.
+The CI matrix in the follow-up section supplies that qualification.
 
 ## Stream contract
 
@@ -73,7 +105,7 @@ It asserts reasoning, final text, streamed text, content text, and raw opt-in.
 The Flutter regression checks the streamed reply, completed transcript, one
 finish callback, model finish reason, and submitted/streaming/ready ordering.
 
-## Verification record
+## Initial local verification record
 
 The product change is commit `b70c731` in draft
 [PR #32](https://github.com/codenameakshay/ai_sdk_dart/pull/32).
@@ -163,7 +195,9 @@ Logs for the coverage attempts are
 `/tmp/ai-sdk-reasoning-coverage-retry.log`.
 The isolated timeout failure is in
 `/tmp/ai-sdk-reasoning-download-timeout-isolated.log`.
-The release remains a draft until the full gate and interactive gallery pass.
+At the end of the initial run, the PR remained a draft because the full gate
+and interactive gallery had no passing result. The follow-up section records
+the later passing results and the verifier correction.
 
 The separate full Flutter UI suite passed all 364 tests with coverage enabled.
 It used the same command as the coverage script's Flutter stage:
@@ -175,8 +209,9 @@ The temporary root runner configuration was removed after verification.
 ## Limitations and other repositories
 
 Fixture results prove local SDK behavior and protocol mapping, not current live
-vendor behavior. No live keys, billed requests, native-device checks, or minimum
-SDK matrix are part of this run. The verification feature files retain their
+vendor behavior. No live keys, billed requests, Android checks, or real-device
+qualification ran. CI supplies the minimum-SDK matrix and iOS simulator checks
+listed above. The verification feature files retain their
 explicit exclusions, including device audio, screen readers, live model paths,
 and unexposed provider capabilities.
 

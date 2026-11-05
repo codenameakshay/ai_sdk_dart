@@ -480,8 +480,9 @@ async function waitSnack(page, text, timeout = 5000) {
 }
 
 async function clickSnack(page, step, locator, expected) {
-  await locator.click();
-  await waitSnack(page, expected);
+  // Click completion can outlast the one-second snackbar on a busy host.
+  // Observe during the action so a real, short-lived result cannot be missed.
+  await Promise.all([waitSnack(page, expected), locator.click()]);
   step('click', { expected });
 }
 

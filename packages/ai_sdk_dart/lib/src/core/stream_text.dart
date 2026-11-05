@@ -458,13 +458,14 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
         lastWarnings = List<LanguageModelV4Warning>.from(response.warnings);
         lastResponseMetadata = response.response;
 
-        final stepTextById = <String, StringBuffer>{};
+        final stepTextBuffer = StringBuffer();
         final textProviderMetadataById = <String, ProviderMetadata?>{};
         final stepToolCalls = <LanguageModelV4ToolCallPart>[];
         final stepToolResults = <LanguageModelV4ToolResultPart>[];
         final localToolResults = <LanguageModelV4ToolResultPart>[];
         final stepApprovalRequests = <LanguageModelV4ToolApprovalRequestPart>[];
         final stepContent = <LanguageModelV4ContentPart>[];
+        final textRunsById = <String, List<({int index, StringBuffer text})>>{};
         final toolInputBuffers = <String, StringBuffer>{};
         final toolInputNames = <String, String>{};
         final reasoningBuffers = <String, ReasoningBuffer>{};
@@ -528,7 +529,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
 
             switch (part) {
               case StreamPartTextStart(:final id, :final providerMetadata):
-                stepTextById[id] = StringBuffer();
+                textRunsById[id] = [];
                 textProviderMetadataById[id] = null;
                 _mergeTextProviderMetadata(
                   textProviderMetadataById,
@@ -564,11 +565,19 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                   )) {
                     final transformedDelta = transformedIterator.current
                         .unwrap();
-                    final textBuffer = stepTextById.putIfAbsent(
-                      id,
-                      StringBuffer.new,
-                    );
-                    textBuffer.write(transformedDelta);
+                    stepTextBuffer.write(transformedDelta);
+                    // Reserve content in delta order, not text-end order.
+                    // Interleaved IDs may each occupy several contiguous runs.
+                    final runs = textRunsById.putIfAbsent(id, () => []);
+                    if (runs.isEmpty ||
+                        runs.last.index != stepContent.length - 1) {
+                      runs.add((
+                        index: stepContent.length,
+                        text: StringBuffer(),
+                      ));
+                      stepContent.add(const LanguageModelV4TextPart(text: ''));
+                    }
+                    runs.last.text.write(transformedDelta);
                     textController.add(transformedDelta);
                     fullController.add(
                       StreamTextTextDeltaEvent(
@@ -614,9 +623,7 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                       final cadence = partialJsonTracker.append(
                         transformedDelta,
                       );
-                      final fullText = stepTextById.values
-                          .map((buffer) => buffer.toString())
-                          .join();
+                      final fullText = stepTextBuffer.toString();
 
                       if (cadence.shouldAttemptValue) {
                         final partial = tryParsePartialOutput(
@@ -644,13 +651,21 @@ Future<StreamTextResult<TOutput>> streamText<TOutput>({
                   id,
                   providerMetadata,
                 );
-                final text = stepTextById[id]?.toString() ?? '';
-                stepContent.add(
-                  LanguageModelV4TextPart(
-                    text: text,
+                final runs = textRunsById.remove(id) ?? [];
+                if (runs.isEmpty) {
+                  stepContent.add(
+                    LanguageModelV4TextPart(
+                      text: '',
+                      providerOptions: textProviderMetadataById[id],
+                    ),
+                  );
+                }
+                for (final run in runs) {
+                  stepContent[run.index] = LanguageModelV4TextPart(
+                    text: run.text.toString(),
                     providerOptions: textProviderMetadataById[id],
-                  ),
-                );
+                  );
+                }
                 fullController.add(
                   StreamTextTextEndEvent(
                     id: id,

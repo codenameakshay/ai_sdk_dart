@@ -845,23 +845,40 @@ final List<Check> platformChecks = [
           _chunk({}, finish: 'stop'),
         ], done: true),
       );
-      final streamed = await streamText(
-        model: wrapLanguageModel(
-          model: _chat(ctx, server),
-          middleware: extractReasoningMiddleware(),
-        ),
-        prompt: 'think',
-      );
-      final pieces = streamed.textStream.toList();
-      final reasoning = await streamed.reasoningText;
-      final joined = (await pieces).join();
-      final text = await streamed.text;
-      ctx.observe('stream.textStream', joined);
-      ctx.observe('stream.text', text);
-      ctx.observe('stream.reasoning', reasoning);
-      ctx.expectEquals(reasoning, 'plan it carefully', 'stream reasoning');
-      ctx.expectEquals(joined, 'Done.', 'textStream pieces');
-      ctx.expectEquals(text, 'Done.', 'final text future');
+      for (final includeRaw in [false, true]) {
+        final streamed = await streamText(
+          model: wrapLanguageModel(
+            model: _chat(ctx, server),
+            middleware: extractReasoningMiddleware(),
+          ),
+          prompt: 'think',
+          includeRawChunks: includeRaw,
+        );
+        final events = streamed.stream.toList();
+        final pieces = streamed.textStream.toList();
+        final reasoning = await streamed.reasoningText;
+        final joined = (await pieces).join();
+        final text = await streamed.text;
+        final contentText = (await streamed.content)
+            .whereType<LanguageModelV4TextPart>()
+            .map((part) => part.text)
+            .join();
+        final rawCount = (await events).whereType<StreamTextRawEvent>().length;
+        final key = includeRaw ? 'streamWithRaw' : 'stream';
+        ctx.observe('$key.textStream', joined);
+        ctx.observe('$key.text', text);
+        ctx.observe('$key.contentText', contentText);
+        ctx.observe('$key.reasoning', reasoning);
+        ctx.observe('$key.rawCount', rawCount);
+        ctx.expectEquals(reasoning, 'plan it carefully', 'stream reasoning');
+        ctx.expectEquals(joined, 'Done.', 'textStream pieces');
+        ctx.expectEquals(text, 'Done.', 'final text future');
+        ctx.expectEquals(contentText, text, 'content text');
+        ctx.expect(
+          includeRaw ? rawCount > 0 : rawCount == 0,
+          'raw chunk opt-in',
+        );
+      }
     },
   ),
   Check(

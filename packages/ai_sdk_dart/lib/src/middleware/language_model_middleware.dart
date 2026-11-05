@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 
+import '../utils/utils.dart';
+
 /// A middleware function that can intercept and transform language model calls.
 ///
 /// Three hook points (all optional via [LanguageModelMiddlewareBase]):
@@ -170,6 +172,9 @@ abstract class LanguageModelMiddlewareBase implements LanguageModelMiddleware {
 /// Extracts reasoning enclosed in XML-style tags from text deltas.
 ///
 /// Routes extracted content to [StreamPartReasoningDelta] parts.
+/// Each text ID has its own parser and reasoning lifecycle. Unrelated parts
+/// (including raw chunks) pass through without resolving a partial tag. Pending
+/// text is resolved only at that ID's text-end, stream finish/error, or EOF.
 /// Mirrors `extractReasoningMiddleware` from the JS AI SDK v6.
 ///
 /// Usage: `extractReasoningMiddleware(tagName: 'think')`
@@ -238,93 +243,104 @@ class _ExtractReasoningMiddleware extends LanguageModelMiddlewareBase {
   ) async* {
     final openTag = '<$tagName>';
     final closeTag = '</$tagName>';
-    const reasoningId = 'mw-reasoning';
-    final buffer = StringBuffer();
-    var inReasoning = false;
-    String? textId;
-    final openTextIds = <String>{};
+    final states = <String, _ReasoningTextState>{};
+    // Native reasoning and nested extractors must not share our IDs.
+    final reasoningPrefix = 'mw-reasoning-${generateId(size: 16)}';
+    var nextId = 0;
+    _ReasoningTextState createState(String id) => _ReasoningTextState(
+      textId: id,
+      reasoningId: '$reasoningPrefix-${nextId++}',
+    );
 
     await for (final part in source) {
-      if (part is StreamPartTextDelta) {
-        textId = part.id;
-        openTextIds.add(part.id);
-        buffer.write(part.delta);
-        // One delta can hold several tags, so parse until no complete tag
-        // remains in the buffer.
-        while (true) {
-          final accumulated = buffer.toString();
-          final tag = inReasoning ? closeTag : openTag;
-          final index = accumulated.indexOf(tag);
-          if (index >= 0) {
-            final chunk = accumulated.substring(0, index);
-            if (chunk.isNotEmpty) {
-              yield inReasoning
-                  ? StreamPartReasoningDelta(id: reasoningId, delta: chunk)
-                  : StreamPartTextDelta(id: part.id, delta: chunk);
-            }
-            buffer.clear();
-            buffer.write(accumulated.substring(index + tag.length));
-            inReasoning = !inReasoning;
-            yield inReasoning
-                ? const StreamPartReasoningStart(id: reasoningId)
-                : const StreamPartReasoningEnd(id: reasoningId);
-            continue;
+      switch (part) {
+        case StreamPartTextStart(:final id):
+          states.putIfAbsent(id, () => createState(id));
+          yield part;
+        case StreamPartTextDelta(:final id, :final delta):
+          if (!states.containsKey(id)) {
+            states[id] = createState(id);
+            yield StreamPartTextStart(id: id);
           }
-          // No complete tag — safe to emit everything except the last
-          // tag.length-1 chars which might be a partial tag.
-          final safeEnd = accumulated.length - (tag.length - 1);
-          if (safeEnd > 0) {
-            final safe = accumulated.substring(0, safeEnd);
-            yield inReasoning
-                ? StreamPartReasoningDelta(id: reasoningId, delta: safe)
-                : StreamPartTextDelta(id: part.id, delta: safe);
-            buffer.clear();
-            buffer.write(accumulated.substring(safeEnd));
+          yield* Stream.fromIterable(
+            states[id]!.parse(delta, openTag, closeTag),
+          );
+        case StreamPartTextEnd(:final id):
+          final state = states.remove(id);
+          if (state != null) {
+            yield* Stream.fromIterable(state.flush());
           }
-          break;
-        }
-      } else {
-        // Flush any buffered text before non-text parts.
-        final remaining = buffer.toString();
-        if (remaining.isNotEmpty) {
-          buffer.clear();
-          if (inReasoning) {
-            yield StreamPartReasoningDelta(id: reasoningId, delta: remaining);
-          } else {
-            yield StreamPartTextDelta(id: textId!, delta: remaining);
+          yield part;
+        case StreamPartFinish() || StreamPartError():
+          for (final state in states.values) {
+            yield* Stream.fromIterable(state.flush());
           }
-        }
-        if (part is StreamPartTextStart) {
-          openTextIds.add(part.id);
-        } else if (part is StreamPartTextEnd) {
-          openTextIds.remove(part.id);
-        } else if (part is StreamPartFinish) {
-          if (inReasoning) {
-            yield const StreamPartReasoningEnd(id: reasoningId);
-            inReasoning = false;
+          for (final state in states.values) {
+            yield StreamPartTextEnd(id: state.textId);
           }
-          for (final id in openTextIds) {
-            yield StreamPartTextEnd(id: id);
-          }
-          openTextIds.clear();
-        }
-        yield part;
+          states.clear();
+          yield part;
+        default:
+          yield part;
       }
     }
-    // Flush remaining buffer.
-    final remaining = buffer.toString();
-    if (remaining.isNotEmpty) {
-      if (inReasoning) {
-        yield StreamPartReasoningDelta(id: reasoningId, delta: remaining);
-      } else {
-        yield StreamPartTextDelta(id: textId!, delta: remaining);
+    for (final state in states.values) {
+      yield* Stream.fromIterable(state.flush());
+    }
+    for (final state in states.values) {
+      yield StreamPartTextEnd(id: state.textId);
+    }
+  }
+}
+
+class _ReasoningTextState {
+  _ReasoningTextState({required this.textId, required this.reasoningId});
+
+  final String textId;
+  final String reasoningId;
+  String pending = '';
+  bool inReasoning = false;
+
+  LanguageModelV4StreamPart delta(String text) => inReasoning
+      ? StreamPartReasoningDelta(id: reasoningId, delta: text)
+      : StreamPartTextDelta(id: textId, delta: text);
+
+  Iterable<LanguageModelV4StreamPart> parse(
+    String text,
+    String openTag,
+    String closeTag,
+  ) sync* {
+    pending += text;
+    // A delta can contain several complete blocks, followed by a partial tag.
+    while (true) {
+      final tag = inReasoning ? closeTag : openTag;
+      final index = pending.indexOf(tag);
+      if (index >= 0) {
+        if (index > 0) yield delta(pending.substring(0, index));
+        pending = pending.substring(index + tag.length);
+        inReasoning = !inReasoning;
+        yield inReasoning
+            ? StreamPartReasoningStart(id: reasoningId)
+            : StreamPartReasoningEnd(id: reasoningId);
+        continue;
       }
+      final safeEnd = pending.length - (tag.length - 1);
+      if (safeEnd > 0) {
+        yield delta(pending.substring(0, safeEnd));
+        pending = pending.substring(safeEnd);
+      }
+      break;
+    }
+  }
+
+  Iterable<LanguageModelV4StreamPart> flush() sync* {
+    if (pending.isNotEmpty) {
+      yield delta(pending);
+      pending = '';
     }
     if (inReasoning) {
-      yield const StreamPartReasoningEnd(id: reasoningId);
-    }
-    for (final id in openTextIds) {
-      yield StreamPartTextEnd(id: id);
+      yield StreamPartReasoningEnd(id: reasoningId);
+      inReasoning = false;
     }
   }
 }

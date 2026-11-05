@@ -1,4 +1,16 @@
-## Unreleased
+## 3.1.0 (unreleased)
+
+- Isolated `extractReasoningMiddleware` parser buffers and reasoning lifecycles per text ID.
+  Interleaved IDs can no longer combine tag fragments or steal one another's text/reasoning.
+  Extracted reasoning IDs use a per-stream namespace to avoid collisions with native reasoning
+  and nested middleware.
+- Kept partial reasoning tags across unrelated stream parts, including raw chunks and sources.
+  Only the matching text-end, stream finish/error, or EOF resolves pending fragments. Delta-only
+  text streams get a matching start; open reasoning and text lifecycles close before finish.
+- Assembled streamed text content in delta-arrival order instead of text-end order. Interleaved
+  text can occupy multiple contiguous content parts so final `text`, `textStream`, and the text
+  projection of `content` agree for a single step; per-ID provider metadata is retained.
+  Structured output previews use the same delta order as final output.
 
 - Added `ModelMessage.text`, which returns a message's plain text: `content`, or its text parts
   joined in order. Reasoning, tool, file, and source parts are excluded.

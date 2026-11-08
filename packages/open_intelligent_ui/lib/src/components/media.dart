@@ -160,6 +160,7 @@ class _PhotoState extends State<Photo> {
         : 1.5;
     final radius =
         OpenUiTheme.radius(widget.radius ?? 'lg') ?? OpenUiTheme.radiusLg;
+    final reduce = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
     final Widget content;
     if (current != null) {
       content = Image.network(
@@ -167,11 +168,21 @@ class _PhotoState extends State<Photo> {
         key: ValueKey(current),
         fit: widget.fit == 'contain' ? BoxFit.contain : BoxFit.cover,
         semanticLabel: _alt,
-        frameBuilder: (context, child, frame, sync) => AnimatedOpacity(
-          opacity: sync || frame != null ? 1 : 0,
-          duration: const Duration(milliseconds: 250),
-          child: child,
-        ),
+        frameBuilder: (context, child, frame, sync) {
+          final loaded = sync || frame != null;
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              if (!loaded && !reduce)
+                const _Shimmer(key: ValueKey('iui-shimmer')),
+              AnimatedOpacity(
+                opacity: loaded ? 1 : 0,
+                duration: const Duration(milliseconds: 300),
+                child: child,
+              ),
+            ],
+          );
+        },
         errorBuilder: (context, error, stack) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) {
@@ -187,8 +198,10 @@ class _PhotoState extends State<Photo> {
         label: _alt,
         image: true,
         child: settled
-            ? Center(child: Glyph('image', size: 28, color: theme.borderStrong))
-            : const SizedBox.expand(),
+            ? Center(child: Glyph('image', size: 26, color: theme.borderStrong))
+            : reduce
+            ? const SizedBox.expand()
+            : const _Shimmer(key: ValueKey('iui-shimmer')),
       );
     }
     return AspectRatio(
@@ -202,4 +215,62 @@ class _PhotoState extends State<Photo> {
       ),
     );
   }
+}
+
+/// The sweep of light across a photo that is still loading.
+class _Shimmer extends StatefulWidget {
+  const _Shimmer({super.key});
+
+  @override
+  State<_Shimmer> createState() => _ShimmerState();
+}
+
+class _ShimmerState extends State<_Shimmer>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _sweep = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1400),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _sweep.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => CustomPaint(
+    painter: _ShimmerPainter(_sweep, OpenUiTheme.of(context).canvas),
+    size: Size.infinite,
+  );
+}
+
+class _ShimmerPainter extends CustomPainter {
+  _ShimmerPainter(this.progress, this.canvas) : super(repaint: progress);
+  final Animation<double> progress;
+  final Color canvas;
+
+  @override
+  void paint(Canvas target, Size size) {
+    final p = 1.2 - 2.4 * progress.value;
+    final band = Rect.fromLTWH(
+      -1.2 * size.width * p,
+      0,
+      2.2 * size.width,
+      size.height,
+    );
+    // Clear ends in the canvas colour so the fade does not pass through black.
+    final shader = LinearGradient(
+      colors: [
+        canvas.withValues(alpha: 0),
+        canvas.withValues(alpha: 0.55),
+        canvas.withValues(alpha: 0),
+      ],
+      stops: const [0.3, 0.5, 0.7],
+    ).createShader(band);
+    target.drawRect(band, Paint()..shader = shader);
+  }
+
+  @override
+  bool shouldRepaint(_ShimmerPainter old) => old.canvas != canvas;
 }

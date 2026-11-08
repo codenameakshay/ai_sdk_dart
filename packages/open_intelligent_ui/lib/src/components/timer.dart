@@ -99,7 +99,6 @@ class _CountdownTimerState extends State<CountdownTimer> {
     final label = widget.label;
     return Semantics(
       label: label == null || label.isEmpty ? 'Timer' : label,
-      liveRegion: true,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
@@ -191,13 +190,18 @@ class _TimerButton extends StatelessWidget {
         child: InkWell(
           onTap: onTap,
           customBorder: const StadiumBorder(),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 32),
+            alignment: Alignment.center,
+            padding: EdgeInsets.symmetric(
+              horizontal: solid ? 12 : 10,
+              vertical: 6,
+            ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Glyph(icon, size: 14, color: fg),
-                const SizedBox(width: 6),
+                const SizedBox(width: 7),
                 Text(
                   label,
                   style: TextStyle(

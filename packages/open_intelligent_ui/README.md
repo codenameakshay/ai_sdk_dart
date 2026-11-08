@@ -33,6 +33,34 @@ Nothing calls a network service unless you pass it: without `searchImages` a `Se
 shows an empty photo, without `streetRoute` a map route draws straight segments, and
 `mapTiles: null` shows no tiles. `@OpenUrl` opens only http(s) URLs.
 
+## In a chat
+
+`package:open_intelligent_ui/chat.dart` plugs answers into `ai_sdk_flutter_ui`:
+
+```dart
+import 'package:open_intelligent_ui/chat.dart';
+import 'package:open_intelligent_ui/open_intelligent_ui.dart';
+
+final agent = ToolLoopAgent(
+  model: model,
+  instructions: intelligentUi.systemPrompt(chatPrompt),
+);
+final chat = OpenUiChat(controller: controller, agent: agent, tools: myTools);
+
+AiChatScaffold(
+  controller: controller,
+  agent: agent,
+  chatMessageBuilder: chat.buildMessage,
+);
+```
+
+Each answer keeps one session from its first token to the committed message. A `@ToAssistant`
+click sends the next user turn in the reference's `]]>openui:` format, with the form values,
+and the user row shows the message with the values folded under it. Edits are saved into the
+answer's context, so the model sees them on the next turn and a restored transcript starts
+from them. An answer that is not a program shows as text. Call `chat.dispose()` with the
+controller.
+
 ## Platforms
 
 `HtmlView` and `YouTube` use a web view on Android, iOS and macOS (only the initial page loads,
@@ -41,4 +69,4 @@ titled card. Maps use `flutter_map`, math uses `flutter_math_fork`, and icons co
 bundled Lucide font with the reference's names and aliases.
 
 The [example](example) app renders the reference's 45 gallery programs offline, in light and
-dark. [`DESIGN.md`](DESIGN.md) records the architecture and its reviews.
+dark, and has a chat demo that runs on a scripted offline model. [`DESIGN.md`](DESIGN.md) records the architecture and its reviews.

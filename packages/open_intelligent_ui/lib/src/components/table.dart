@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:ai_sdk_openui/ai_sdk_openui.dart';
+import 'package:ai_sdk_openui/intelligent_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
@@ -567,12 +568,8 @@ IuiCell _cell(
 /// en-US with at most two decimals, as `toLocaleString` prints it.
 String _formatNumber(num value) {
   if (!value.isFinite) return jsString(value);
-  final parts = value.abs().toStringAsFixed(2).split('.');
-  final whole = parts[0].replaceAllMapped(
-    RegExp(r'\B(?=(\d{3})+$)'),
-    (_) => ',',
-  );
-  final fraction = parts[1].replaceFirst(RegExp(r'0+$'), '');
-  return '${value.isNegative ? '-' : ''}$whole'
-      '${fraction.isEmpty ? '' : '.$fraction'}';
+  return intelligentUi.functions.firstWhere((f) => f.name == 'Format').fn({
+        'value': value,
+      })!
+      as String;
 }

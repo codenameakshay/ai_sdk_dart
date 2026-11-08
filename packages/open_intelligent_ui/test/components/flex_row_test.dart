@@ -26,6 +26,25 @@ RenderFlexRow _render(WidgetTester tester) =>
 Offset _at(WidgetTester tester, Key key) => tester.getTopLeft(find.byKey(key));
 
 void main() {
+  testWidgets('percentage flex basis keeps natural width in an unbounded row', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: FlexRow(
+            children: [
+              FlexRowItem(grow: 1, zeroBasis: true, child: _box(_a, 120, 20)),
+            ],
+          ),
+        ),
+      ),
+    );
+    expect(tester.getSize(find.byKey(_a)), const Size(120, 20));
+  });
+
   group('FlexRowItem', () {
     testWidgets('outside a FlexRow it reports FlexRow as the expected parent', (
       tester,

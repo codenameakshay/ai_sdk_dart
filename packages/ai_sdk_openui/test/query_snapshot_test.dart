@@ -39,6 +39,33 @@ Future<Map<String, Object?>> failWith(Object error) async {
 }
 
 void main() {
+  test('large numeric arguments have distinct cache entries', () async {
+    final manager = QueryManager((_, args) async => args['value']);
+    addTearDown(manager.dispose);
+    manager.evaluateQueries([
+      node('a', args: {'value': 1e20}),
+      node('b', args: {'value': 2e20}),
+    ]);
+    await settle();
+    expect(manager.getSnapshot().data, {'a': 1e20, 'b': 2e20});
+  });
+
+  test(
+    'equal integral arguments share a cache entry beyond 2 to the 53',
+    () async {
+      var calls = 0;
+      final manager = QueryManager((_, _) async => ++calls);
+      addTearDown(manager.dispose);
+      manager.evaluateQueries([
+        node('a', args: {'value': 9007199254740992}),
+        node('b', args: {'value': 9007199254740992.0}),
+      ]);
+      await settle();
+      expect(calls, 1);
+      expect(manager.getSnapshot().data, {'a': 1, 'b': 1});
+    },
+  );
+
   test('a pending Query reports loading until it answers', () async {
     final pending = <Completer<Object?>>[];
     final manager = QueryManager((_, _) {

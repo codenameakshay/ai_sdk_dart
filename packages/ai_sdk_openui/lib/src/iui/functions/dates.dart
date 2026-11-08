@@ -6,6 +6,7 @@ import '../../spec/library.dart';
 import '../../spec/schema.dart';
 import 'js_date.dart';
 import 'shared.dart';
+import 'unicode.dart';
 
 const _dayMs = 86400000;
 
@@ -45,7 +46,7 @@ int dayOf(int year, int month, int day) {
 /// the viewer's time zone, as `new Date(value)` reads them.
 ({int day, DateTime? instant}) parseDate(Object value) {
   if (value is String) {
-    final m = _dateOnly.firstMatch(value.trim());
+    final m = _dateOnly.firstMatch(jsTrim(value));
     if (m != null) {
       final y = int.parse(m[1]!);
       final mo = int.parse(m[2]!);

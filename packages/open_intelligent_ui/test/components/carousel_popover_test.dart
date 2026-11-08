@@ -51,6 +51,26 @@ void _usePhoneSize(WidgetTester tester) {
 
 void main() {
   group('Carousel', () {
+    testWidgets('arrows update when streamed items overflow the track', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final p = await pumpProgram(
+        tester,
+        'root = Col([Carousel([Text("One")])])',
+      );
+      await tester.pumpAndSettle();
+      expect(_arrow('Next'), findsNothing);
+      p.session.update(
+        'root = Col([Carousel([Text("One"), Text("Two"), Text("Three"), Text("Four"), Text("Five")])])',
+        streaming: false,
+      );
+      await tester.pumpAndSettle();
+      expect(_arrow('Next'), findsOneWidget);
+      debugDefaultTargetPlatformOverride = null;
+    });
+
     testWidgets('cards in one carousel are equal in height', (tester) async {
       await pumpProgram(
         tester,
@@ -125,6 +145,32 @@ void main() {
   });
 
   group('Popover', () {
+    testWidgets('popping a route removes its open panel', (tester) async {
+      final p = await pumpProgram(
+        tester,
+        'root = Col([Popover(Text("Trigger"), Text("Panel"))])',
+      );
+      final navigator = tester.state<NavigatorState>(find.byType(Navigator));
+      navigator.push<void>(
+        MaterialPageRoute(
+          builder: (_) => Scaffold(
+            body: OpenUiView(
+              session: p.session,
+              builders: intelligentUiBuilders,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Trigger'));
+      await tester.pump();
+      expect(find.text('Panel'), findsOneWidget);
+      navigator.pop();
+      await tester.pumpAndSettle();
+      expect(find.text('Panel'), findsNothing);
+      expect(find.text('Trigger'), findsOneWidget);
+    });
+
     testWidgets(
       'an icon in the trigger sits 4 px after the text, centred on it',
       (tester) async {

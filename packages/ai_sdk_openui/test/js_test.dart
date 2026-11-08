@@ -18,6 +18,12 @@ void main() {
   });
 
   group('Number(string)', () {
+    test('does not treat next-line characters as numeric whitespace', () {
+      expect(Js.number('\u00851\u0085').isNaN, true);
+      expect(Js.number('\u0085').isNaN, true);
+      expect(Js.number('\u00a01\ufeff'), 1);
+    });
+
     test('parses hex, octal and binary literals', () {
       expect(Js.number('0x1f'), 31);
       expect(Js.number('0XFF'), 255);

@@ -38,6 +38,59 @@ List<fm.Polyline> _lines(WidgetTester tester) => tester
     .toList();
 
 void main() {
+  testWidgets(
+    'an expanded map updates places during flight and disposes its overlay',
+    (tester) async {
+      final p = await _pump(tester, _sf);
+      await tester.tap(find.text('Expand'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+      p.session.update(
+        'root = Col([Map([MapMarker("New place", 30, 40)])])',
+        streaming: false,
+      );
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      final controller = fm.MapController.maybeOf(
+        tester.element(find.byType(fm.MarkerLayer)),
+      )!;
+      expect(controller.camera.center, const ll.LatLng(30, 40));
+      expect(find.text('Collapse'), findsOneWidget);
+      await tester.pumpWidget(const MaterialApp(home: Text('Replacement')));
+      await tester.pump(const Duration(seconds: 2));
+      expect(find.byType(fm.FlutterMap), findsNothing);
+      expect(find.text('Replacement'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'changing places while routing is disabled drops the old street route',
+    (tester) async {
+      const first =
+          'root = Col([Map([MapMarker("A place", 10, 20), MapMarker("B place", 11, 21)], true)])';
+      const second =
+          'root = Col([Map([MapMarker("C place", 30, 40), MapMarker("D place", 31, 41)], false)])';
+      final p = await _pump(
+        tester,
+        first,
+        route: (_) async => [
+          (lat: 10, lng: 20),
+          (lat: 10.5, lng: 20.5),
+          (lat: 11, lng: 21),
+        ],
+      );
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump(const Duration(seconds: 1));
+      p.session.update(second, streaming: false);
+      await tester.pump();
+      p.session.update(second.replaceFirst('false', 'true'), streaming: true);
+      await tester.pump();
+      expect(_lines(tester).single.points.first, const ll.LatLng(30, 40));
+      expect(_lines(tester).single.points.last, const ll.LatLng(31, 41));
+    },
+  );
+
   group('partialLine', () {
     test('cuts a line at the given share of its length', () {
       expect(partialLine([(lat: 0, lng: 0), (lat: 0, lng: 10)], 0.5), [

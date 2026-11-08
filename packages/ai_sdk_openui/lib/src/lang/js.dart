@@ -23,9 +23,13 @@ abstract final class Js {
     _ => true,
   };
 
+  static final _edgeWhitespace = RegExp(r'^\s+|\s+$');
+
+  static String trim(String value) => value.replaceAll(_edgeWhitespace, '');
+
   /// `Number(value)` for a string, as JavaScript parses it.
   static double parseNumber(String text) {
-    final s = text.trim();
+    final s = trim(text);
     if (s.isEmpty) return 0;
     if (s == 'Infinity' || s == '+Infinity') return double.infinity;
     if (s == '-Infinity') return double.negativeInfinity;

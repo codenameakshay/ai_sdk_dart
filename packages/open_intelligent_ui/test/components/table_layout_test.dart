@@ -22,6 +22,17 @@ ScrollPosition _scroll(WidgetTester tester) => tester
     .position;
 
 void main() {
+  testWidgets('numeric cells round decimal ties and expand large numbers', (
+    tester,
+  ) async {
+    await pumpProgram(
+      tester,
+      'root = Col([Table(["Amount"], [[1.005], [1e21]])])',
+    );
+    expect(find.text('1.01'), findsOneWidget);
+    expect(find.text('1,000,000,000,000,000,000,000'), findsOneWidget);
+  });
+
   testWidgets('columns share spare width in proportion to their content', (
     tester,
   ) async {

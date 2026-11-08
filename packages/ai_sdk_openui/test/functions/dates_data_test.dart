@@ -1,3 +1,4 @@
+import 'package:ai_sdk_openui/src/iui/functions/dates.dart';
 import 'package:ai_sdk_openui/src/iui/functions/shared.dart';
 import 'package:test/test.dart';
 
@@ -247,6 +248,11 @@ const _cases = <String, List<(String, Object?)>>{
 };
 
 void main() {
+  test('rejects non-ECMAScript whitespace around calendar dates', () {
+    expect(() => parseDate('\u00852026-10-09\u0085'), throwsStateError);
+    expect(parseDate('\u00a02026-10-09\u00a0').day, 20735);
+  });
+
   setUp(Impure.useUtc);
   tearDown(Impure.reset);
 

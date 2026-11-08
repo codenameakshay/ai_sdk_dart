@@ -105,7 +105,11 @@ Object? _sorted(Object? value) => switch (value) {
   List() => [for (final v in value) _sorted(v)],
   num() when value.isNaN => '__NaN__',
   num() when value.isInfinite => value > 0 ? '__Inf__' : '__-Inf__',
-  double() when value == value.truncateToDouble() => value.toInt(),
+  double()
+      when value >= -9223372036854775808.0 &&
+          value < 9223372036854775808.0 &&
+          value == value.truncateToDouble() =>
+    value.toInt(),
   num() || String() || bool() || null => value,
   _ => null,
 };

@@ -150,7 +150,13 @@ final class _CarouselState extends State<_Carousel> {
     final position = _controller.hasClients ? _controller.position : null;
     return Stack(
       children: [
-        track,
+        NotificationListener<ScrollMetricsNotification>(
+          onNotification: (_) {
+            _changed();
+            return false;
+          },
+          child: track,
+        ),
         if (position != null && position.pixels >= 4)
           Positioned(
             left: 8,

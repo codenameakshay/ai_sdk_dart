@@ -115,6 +115,20 @@ void main() {
       expect(validate('mailto:a', [const ParsedRule('url')]), isNull);
     });
 
+    test('rejects network ports outside the unsigned 16-bit range', () {
+      expect(
+        validate('https://example.com:65536', [const ParsedRule('url')]),
+        'Please enter a valid URL',
+      );
+    });
+
+    test('rejects file URLs with a port', () {
+      expect(
+        validate('file://host:80/path', [const ParsedRule('url')]),
+        'Please enter a valid URL',
+      );
+    });
+
     test('rejects text that is not an absolute URL', () {
       for (final value in ['not a url', 'http://', 'https://x y.com']) {
         expect(
@@ -140,6 +154,13 @@ void main() {
   });
 
   group('numeric', () {
+    test('rejects next-line characters before a numeric value', () {
+      expect(
+        validate('\u00851', [const ParsedRule('numeric')]),
+        'Must be a number',
+      );
+    });
+
     test('accepts numbers and numeric text', () {
       expect(validate('12abc', [const ParsedRule('numeric')]), isNull);
       expect(validate(3, [const ParsedRule('numeric')]), isNull);

@@ -250,6 +250,12 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
   void _syncRoute() {
     final key = _routingKey;
     final service = OpenUiScope.servicesOf(context).streetRoute;
+    if (!widget.route || key != _routeKey) {
+      _routeDebounce?.cancel();
+      _routeKey = null;
+      _street = null;
+      _routeFailed = false;
+    }
     if (!widget.route ||
         widget.streaming ||
         key == _routeKey ||

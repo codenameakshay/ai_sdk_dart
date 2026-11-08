@@ -179,7 +179,7 @@ class RenderFlexRow extends RenderBox
     required bool dry,
   }) => [
     for (final c in children)
-      _data(c).spacer || _data(c).zeroBasis
+      _data(c).spacer || (_data(c).zeroBasis && available.isFinite)
           ? 0
           : _data(c).fixed != null && available.isFinite
           ? _data(c).fixed!(available)

@@ -99,7 +99,7 @@ bool _isEmpty(Object? value) {
 
 /// JavaScript `parseFloat`: the longest numeric prefix after leading whitespace.
 double _parseFloat(String s) {
-  final m = _floatPrefix.firstMatch(s.trimLeft());
+  final m = _floatPrefix.firstMatch(Js.trim(s));
   if (m == null) return double.nan;
   final text = m[0]!;
   if (text.endsWith('Infinity')) {
@@ -116,7 +116,8 @@ double _argNumber(Object? arg) => arg == null ? double.nan : Js.number(arg);
 // ponytail: Uri approximates WHATWG URL parsing; exotic hosts may differ.
 bool _isUrl(String s) {
   final uri = Uri.tryParse(s.trim());
-  if (uri == null || !uri.hasScheme) return false;
+  if (uri == null || !uri.hasScheme || uri.port > 65535) return false;
+  if (uri.scheme == 'file' && uri.hasPort) return false;
   return !_hostSchemes.contains(uri.scheme) ||
       (uri.host.isNotEmpty && !uri.host.contains('%'));
 }
@@ -149,7 +150,9 @@ String? _url(Object? value, Object? arg) {
 String? _numeric(Object? value, Object? arg) {
   if (_isEmpty(value)) return null;
   if (value is num && !value.isNaN) return null;
-  if (value is String && !_parseFloat(value).isNaN && value.trim().isNotEmpty) {
+  if (value is String &&
+      !_parseFloat(value).isNaN &&
+      Js.trim(value).isNotEmpty) {
     return null;
   }
   return 'Must be a number';

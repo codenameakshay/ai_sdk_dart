@@ -3,11 +3,19 @@ import 'dart:convert';
 import '../lang/message.dart';
 import 'collation.dart';
 
+/// react-lang `ResponseMetadata`: what OpenUI Cloud says about a response.
+final class ResponseMetadata {
+  const ResponseMetadata({this.name});
+
+  /// The content marker's `?name=`, when the response is framed.
+  final String? name;
+}
+
 /// react-lang's reading of an OpenUI Cloud response: the program, its scripts, and whether it may run.
 final class ResponseBundle {
   const ResponseBundle({
     required this.program,
-    this.metadata = const {},
+    this.metadata = const ResponseMetadata(),
     this.scripts = const {},
     this.complete = true,
     this.isBundle = false,
@@ -17,8 +25,7 @@ final class ResponseBundle {
 
   final String program;
 
-  /// `name` when the response is framed and its content marker has `?name=`.
-  final Map<String, String> metadata;
+  final ResponseMetadata metadata;
   final Set<String> scripts;
   final bool complete;
   final bool isBundle;
@@ -71,10 +78,9 @@ ResponseBundle parseResponseBundle(
   final error = section && scripts == null ? 'Invalid scripts bundle' : null;
   return ResponseBundle(
     program: program,
-    metadata: {
-      if (framed && message.attributes.containsKey('name'))
-        'name': message.attributes['name']!,
-    },
+    metadata: ResponseMetadata(
+      name: framed ? message.attributes['name'] : null,
+    ),
     scripts: scripts?.names ?? const {},
     complete: error == null && (message.end || !streaming || !framed),
     isBundle: true,

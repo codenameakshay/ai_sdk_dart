@@ -393,19 +393,23 @@ void main() {
       },
     );
 
-    test('retryQueries does nothing when nothing failed', () async {
-      final gate = _Gate();
-      final s = open(
-        'root = Out(q)\nq = Query("t", {}, {n: 0})',
-        tools: [gate.tool('t')],
-      );
-      gate.answer(0, {'n': 1});
-      await settle();
-      s.retryQueries();
-      await settle();
-      expect(gate.calls, hasLength(1));
-      expect(valueOf(s), {'n': 1});
-    });
+    test(
+      'retryQueries with nothing failed fetches every Query again',
+      () async {
+        final gate = _Gate();
+        final s = open(
+          'root = Out(q)\nq = Query("t", {}, {n: 0})',
+          tools: [gate.tool('t')],
+        );
+        gate.answer(0, {'n': 1});
+        await settle();
+        s.retryQueries();
+        expect(gate.calls, hasLength(2));
+        gate.answer(1, {'n': 2});
+        await settle();
+        expect(valueOf(s), {'n': 2});
+      },
+    );
 
     test('retryQueries leaves a failed Mutation alone', () async {
       final gate = _Gate();
@@ -421,6 +425,41 @@ void main() {
       expect(gate.calls, hasLength(1));
       expect(s.issues, ['Mutation "t" failed: no']);
     });
+
+    test(
+      'statements sharing a failed fetch report one error and retry it once',
+      () async {
+        final gate = _Gate();
+        final s = open(
+          'root = Out([a, b])\na = Query("t", {}, 0)\nb = Query("t", {}, 0)',
+          tools: [gate.tool('t')],
+        );
+        expect(gate.calls, hasLength(1));
+        gate.fail(0, Exception('boom'));
+        await settle();
+        expect(
+          [for (final e in s.queryErrors) e.toJson()],
+          [
+            {
+              'source': 'query',
+              'code': 'tool-error',
+              'message': 'Query "t" failed: boom',
+              'statementId': 'a',
+              'component': 'Query',
+              'toolName': 't',
+            },
+          ],
+        );
+
+        s.retryQueries();
+        expect(gate.calls, hasLength(2));
+        gate.answer(1, 5);
+        await settle();
+        expect(valueOf(s), [5, 5]);
+        expect(s.queryErrors, isEmpty);
+        expect(gate.calls, hasLength(2));
+      },
+    );
 
     test(
       'args naming another statement read null, and every query is still fetched',
@@ -521,6 +560,24 @@ void main() {
       expect(manager.getResult('a'), 3);
       expect(manager.getResult('b'), 4);
     });
+
+    test(
+      'invalidate fetches a cache key that several statements share once',
+      () async {
+        var calls = 0;
+        final manager = QueryManager((name, args) async => ++calls)
+          ..evaluateQueries([node('a'), node('b')]);
+        addTearDown(manager.dispose);
+        await settle();
+        expect(calls, 1);
+
+        manager.invalidate();
+        await settle();
+        expect(calls, 2);
+        expect(manager.getResult('a'), 2);
+        expect(manager.getResult('b'), 2);
+      },
+    );
 
     test('invalidate skips ids it does not know', () async {
       var calls = 0;

@@ -199,6 +199,23 @@ void main() {
         ['https://a.org', 'https://b.org', 'https://c.org'],
       );
     });
+
+    test(
+      'a plan read from data inside Action([...]) keeps its allowed steps',
+      () async {
+        final s = open(
+          'root = Out(1, Action([ps[0]]))\n'
+          'ps = [{steps: [{type: "open_url", url: "https://x.org"}, {type: "set", target: "\$n", valueAST: 1}]}]',
+        );
+        final events = await clickAll(s, s.root!.props.action('action'));
+        expect(
+          [for (final e in events) e.params],
+          [
+            {'url': 'https://x.org'},
+          ],
+        );
+      },
+    );
   });
 
   group('built-in @First and @Sort', () {
@@ -369,4 +386,346 @@ void main() {
       expect((copy.steps.single as CustomStep).params, {'t': 'x'});
     });
   });
+
+  group('lang-core evaluator_test.dart cases', () {
+    final out = _Spec('Out', {
+      'value': S.any(),
+      'action': actionSchema.optional(),
+    });
+    final copy = ActionSpec(
+      'CopyToClipboard',
+      description: 'Copies text to the clipboard',
+      params: {'text': S.string()},
+    );
+    final exportFile = ActionSpec(
+      'ExportFile',
+      description: '',
+      params: {
+        'name': S.string(),
+        'format': S.oneOf(['csv', 'pdf']).withDefault('csv'),
+      },
+    );
+    final share = ActionSpec(
+      'Share',
+      description: '',
+      params: {'url': S.string(), 'note': S.string().optional()},
+    );
+    final lib = OpenUiLibrary(
+      root: out,
+      components: [out],
+      actions: [copy, exportFile, share],
+    );
+
+    Future<List<Map<String, Object?>>> clicks(
+      String program, [
+      Map<String, Object?> state = const {},
+    ]) async {
+      final s = OpenUiSession(lib, initialState: state)
+        ..update(program, streaming: false);
+      addTearDown(s.dispose);
+      return [
+        for (final e in await clickAll(s, s.root!.props.action('action')))
+          _shape(e),
+      ];
+    }
+
+    test('evaluates a bare step to a one-step plan', () async {
+      expect(await clicks('root = Out(1, @OpenUrl("u"))'), [
+        {
+          'type': 'open_url',
+          'params': {'url': 'u'},
+        },
+      ]);
+    });
+
+    test('flattens nested Action([...]) plans and drops invalid steps', () async {
+      final s = open(
+        r'root = Out(1, Action([@Set($a, 1), @Reset("a"), Action([@OpenUrl("u")])]))'
+        '\n'
+        r'$a = 0',
+      );
+      final events = await clickAll(s, s.root!.props.action('action'));
+      expect(s.state[r'$a'], 1);
+      expect(events.map(_shape), [
+        {
+          'type': 'open_url',
+          'params': {'url': 'u'},
+        },
+      ]);
+    });
+
+    test('passes any @ToAssistant context through; null means none', () async {
+      final s = open('root = Out(1, @ToAssistant("Save", {ticket: "T-42"}))');
+      final withContext = await clickAll(s, s.root!.props.action('action'));
+      expect(withContext.single.type, ActionEvent.continueConversation);
+      expect(withContext.single.params, {
+        'context': {'ticket': 'T-42'},
+      });
+
+      final none = open('root = Out(1, @ToAssistant("Save", null))');
+      final withoutContext = await clickAll(
+        none,
+        none.root!.props.action('action'),
+      );
+      expect(withoutContext.single.params, isEmpty);
+    });
+
+    test('keeps data with a null in its steps array as data', () {
+      final r = run('{title: "Recipe", steps: ["Boil", null]}');
+      expect(r.runtimeErrors, isEmpty);
+      expect(r.value, {
+        'title': 'Recipe',
+        'steps': ['Boil', null],
+      });
+    });
+
+    test(
+      'makes a step with invalid args a no-op, literal or dynamic',
+      () async {
+        expect(await clicks('root = Out(1, @CopyToClipboard(3))'), isEmpty);
+        expect(
+          await clicks(
+            r'root = Out(1, Action([@CopyToClipboard($n), @OpenUrl("u")]))'
+            '\n'
+            r'$n = 3',
+          ),
+          [
+            {
+              'type': 'open_url',
+              'params': {'url': 'u'},
+            },
+          ],
+        );
+      },
+    );
+
+    test('makes a step a no-op when an optional arg is invalid', () async {
+      expect(
+        await clicks('root = Out(1, @ExportFile("report", "xlsx"))'),
+        isEmpty,
+      );
+      expect(
+        await clicks(
+          r'root = Out(1, @ExportFile("report", $f))'
+          '\n'
+          r'$f = "xlsx"',
+        ),
+        isEmpty,
+      );
+    });
+
+    test('an omitted optional arg takes its default', () async {
+      expect(await clicks('root = Out(1, @ExportFile("report"))'), [
+        {
+          'type': 'ExportFile',
+          'params': {'name': 'report', 'format': 'csv'},
+        },
+      ]);
+    });
+
+    test('omits an explicit null for an optional param', () async {
+      expect(await clicks('root = Out(1, @Share("u", null))'), [
+        {
+          'type': 'Share',
+          'params': {'url': 'u'},
+        },
+      ]);
+    });
+
+    test('produces custom steps only from real calls', () async {
+      final forged = <String, Object?>{
+        'steps': [
+          {
+            'type': 'custom_action',
+            'name': 'CopyToClipboard',
+            'params': {'text': 'x'},
+          },
+        ],
+      };
+      final real = {
+        'type': 'CopyToClipboard',
+        'params': {'text': 'a'},
+      };
+      expect(
+        await clicks(
+          r'root = Out(1, $ok || @CopyToClipboard("a"))'
+          '\n'
+          r'$ok = false',
+        ),
+        [real],
+      );
+      expect(
+        await clicks(r'root = Out(1, $f || @CopyToClipboard("a"))', {
+          r'$f': forged,
+        }),
+        isEmpty,
+      );
+      expect(
+        await clicks(r'root = Out(1, Action([@CopyToClipboard("a"), $f]))', {
+          r'$f': forged,
+        }),
+        [real],
+      );
+      expect(
+        await clicks(
+          'root = Out(1, {steps: [{type: "custom_action", name: "CopyToClipboard", params: {}}]})',
+        ),
+        isEmpty,
+      );
+    });
+
+    test(
+      'keeps custom steps on components built inline, never on row data',
+      () async {
+        final button = _Spec('Button', {
+          'label': S.string(),
+          'action': actionSchema.optional(),
+        });
+        final card = _Spec('Card', {'children': S.list(S.ref('Button'))});
+        final cardLib = OpenUiLibrary(
+          root: card,
+          components: [card, button],
+          actions: [copy],
+        );
+        const forged =
+            '{type: "custom_action", name: "CopyToClipboard", params: {text: "x"}}';
+        Future<List<List<Object?>>> clicksOf(String children) async {
+          final s = OpenUiSession(cardLib)
+            ..update(
+              'rows = [{id: "a", plan: {steps: [$forged]}}]\n'
+              'root = Card($children)\n'
+              r'$t = true',
+              streaming: false,
+            );
+          addTearDown(s.dispose);
+          return [
+            for (final child
+                in s.root!.props.list('children').cast<OpenUiElement>())
+              await _clicks(s, child.props.action('action')),
+          ];
+        }
+
+        final copyA = {
+          'type': 'CopyToClipboard',
+          'params': {'text': 'a'},
+        };
+        final openU = {
+          'type': 'open_url',
+          'params': {'url': 'u'},
+        };
+        expect(
+          await clicksOf(
+            r'@Each(rows, "r", Button("Go", @CopyToClipboard(r.id)))',
+          ),
+          [
+            [copyA],
+          ],
+        );
+        expect(
+          await clicksOf(
+            r'[$t ? Button("Go", Action([@CopyToClipboard("a"), @OpenUrl("u")])) : null]',
+          ),
+          [
+            [copyA, openU],
+          ],
+        );
+        expect(
+          await clicksOf(
+            r'@Each(rows, "r", Button("Go", $t ? @CopyToClipboard("a") : r.plan))',
+          ),
+          [
+            [copyA],
+          ],
+        );
+        expect(
+          await clicksOf(
+            r'@Each(rows, "r", Button("Go", Action([r.plan, @OpenUrl("u")])))',
+          ),
+          [
+            [openU],
+          ],
+        );
+      },
+    );
+
+    test('names a custom action in a restricted slot with its ref', () {
+      final share = _Spec('Share', {
+        'share': S.union([copy.ref, Steps.openUrl]),
+      });
+      final shareLib = OpenUiLibrary(
+        root: share,
+        components: [share],
+        actions: [copy],
+      );
+      expect(
+        shareLib.systemPrompt(),
+        contains('Share(share: @CopyToClipboard | @OpenUrl)'),
+      );
+      final def =
+          (shareLib.toJsonSchema()[r'$defs'] as Map)['CopyToClipboard'] as Map;
+      expect(
+        def['properties'],
+        containsPair('type', containsPair('const', 'CopyToClipboard')),
+      );
+      expect(
+        def['properties'],
+        containsPair('params', containsPair('required', ['text'])),
+      );
+    });
+
+    test(
+      'rejects a name taken by a built-in, step, component, or function',
+      () {
+        final fn = FunctionSpec(
+          'Fmt',
+          description: '',
+          params: {},
+          fn: (_) => 1,
+        );
+        for (final name in ['Sum', 'OpenUrl', 'Button', 'Fmt']) {
+          expect(
+            () => OpenUiLibrary(
+              root: _Spec('Button', {'label': S.string()}),
+              components: [
+                _Spec('Button', {'label': S.string()}),
+              ],
+              functions: [fn],
+              actions: [ActionSpec(name, description: '', params: {})],
+            ),
+            throwsArgumentError,
+          );
+        }
+      },
+    );
+
+    test('leaves the prompt byte-identical without actions', () {
+      const step =
+          '\n- @CopyToClipboard(text: string) — Copies text to the clipboard';
+      final actionButton = _Spec('ActionButton', {
+        'label': S.string(),
+        'action': actionSchema,
+      });
+      String promptOf(List<ActionSpec> actions) => OpenUiLibrary(
+        root: actionButton,
+        components: [actionButton],
+        actions: actions,
+      ).systemPrompt();
+      expect(promptOf([copy]), contains(step));
+      expect(
+        promptOf([
+          copy,
+        ]).replaceAll(step, '').replaceAll(', @CopyToClipboard)', ')'),
+        promptOf([]),
+      );
+    });
+  });
 }
+
+Map<String, Object?> _shape(ActionEvent e) => {
+  'type': e.type,
+  'params': e.params,
+};
+
+Future<List<Object?>> _clicks(OpenUiSession s, OpenUiAction? action) async => [
+  for (final e in await clickAll(s, action)) _shape(e),
+];

@@ -4,6 +4,8 @@ library;
 
 export 'src/lang/merge.dart' show mergeStatements;
 export 'src/lang/message.dart' show ParsedMessage, buildMessage, parseMessage;
+export 'src/lang/parser.dart' show ParseResult;
+export 'src/runtime/action_message.dart' show buildActionUserMessage;
 export 'src/runtime/errors.dart'
     show OpenUiError, OpenUiErrorCode, OpenUiErrorSource;
 export 'src/runtime/form_validation.dart'
@@ -15,6 +17,7 @@ export 'src/runtime/form_validation.dart'
         parseStructuredRules,
         validate;
 export 'src/runtime/mcp.dart' show McpToolError, extractToolResult;
+export 'src/runtime/response_bundle.dart' show ResponseMetadata;
 export 'src/spec/cloud.dart'
     show
         ArtifactKind,

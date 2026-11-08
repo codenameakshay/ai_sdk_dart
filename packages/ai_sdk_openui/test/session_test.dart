@@ -156,14 +156,7 @@ void main() {
         );
         final form = child(s.root!);
         final input = form.props.elements('children')[0];
-        s
-            .field(
-              'Name',
-              input.props['value'],
-              formName: 'f',
-              componentType: 'Input',
-            )
-            .set('Ana');
+        s.field('Name', input.props['value'], formName: 'f').set('Ana');
         final events = <ActionEvent>[];
         await s.run(
           form.props.elements('children')[1].props.action('action'),
@@ -178,7 +171,7 @@ void main() {
         expect(events.single.formName, 'f');
         expect(events.single.formState, {
           'f': {
-            'Name': {'value': 'Ana', 'componentType': 'Input'},
+            'Name': {'value': 'Ana'},
           },
         });
       },

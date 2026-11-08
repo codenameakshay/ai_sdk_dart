@@ -405,8 +405,17 @@ Object? _callFunction(
 /// a built-in step when it has a known legacy shape, and is dropped otherwise.
 ActionPlan _flatten(List<Object?> values) => ActionPlan([
   for (final v in values)
-    if (v is ActionPlan) ...v.steps else ?_legacyStep(v),
+    if (v is ActionPlan) ...v.steps else ...dataSteps(v),
 ]);
+
+/// The steps a value read from data may run: a `{steps: [...]}` plan's, or
+/// one step object's, kept only as `open_url` (with a string URL) or
+/// `continue_conversation`, so data cannot set state, fire Mutations or pose
+/// as a library action.
+List<ActionStep> dataSteps(Object? value) =>
+    value is Map && value['steps'] is List
+    ? [for (final s in value['steps'] as List) ?_legacyStep(s)]
+    : [?_legacyStep(value)];
 
 ActionStep? _legacyStep(Object? v) {
   if (v is! Map) return null;

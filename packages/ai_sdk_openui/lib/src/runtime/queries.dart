@@ -165,13 +165,17 @@ final class QueryManager {
     final loading = <String>[];
     final refetching = <String>[];
     final errors = <OpenUiError>[];
+    // Statements on one cache key share its fetch, so its error is reported once.
+    final failedKeys = <String>{};
     for (final MapEntry(:key, :value) in _queries.entries) {
       data[key] = getResult(key);
       if (value.loading) {
         loading.add(key);
         if (value.everFetched) refetching.add(key);
       }
-      if (value.error != null) errors.add(value.error!);
+      if (value.error != null && failedKeys.add(value.cacheKey)) {
+        errors.add(value.error!);
+      }
     }
     for (final MapEntry(:key, :value) in _mutations.entries) {
       data[key] = value.result;
@@ -403,8 +407,11 @@ final class QueryManager {
     final targets = statementIds.isEmpty
         ? _queries.keys.toList()
         : statementIds.where(_queries.containsKey).toList();
+    // One fetch serves every statement on a cache key.
+    final started = <String>{};
     for (final sid in targets) {
       final q = _queries[sid]!;
+      if (!started.add(q.cacheKey)) continue;
       if (_cache[q.cacheKey]?.inFlight ?? false) {
         q.needsRefetch = true;
       } else {

@@ -47,6 +47,21 @@ void main() {
     });
 
     test(
+      'validateForm unwraps a stored {value} field without a component type',
+      () {
+        final validation = OpenUiFormValidation();
+        addTearDown(validation.dispose);
+        validation.registerField(
+          'name',
+          parseRules(['minLength:3']),
+          () => {'value': 'x'},
+        );
+        expect(validation.validateForm(), isFalse);
+        expect(validation.errors['name'], 'Must be at least 3 characters');
+      },
+    );
+
+    test(
       'clearFieldError notifies once and ignores a clear of a clean field',
       () {
         final validation = OpenUiFormValidation();

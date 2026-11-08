@@ -1,3 +1,4 @@
+import '../lang/js.dart';
 import '../spec/library.dart';
 
 const _days = {
@@ -136,8 +137,8 @@ T _pick<T>(double Function() r, List<T> list, [List<num>? weights]) {
 }
 
 List<String> _lastDays(Map<String, Object?> input, DateTime now) {
-  final raw = input['days'] ?? 90;
-  final n = raw is num && raw.isFinite ? raw.round().clamp(1, 365) : 90;
+  final raw = Js.number(input['days'] ?? 90);
+  final n = raw.isFinite ? raw.round().clamp(1, 365) : 90;
   final today = now.millisecondsSinceEpoch ~/ _dayMs;
   return [
     for (var i = 0; i < n; i++)

@@ -1,0 +1,23 @@
+name: open_intelligent_ui_gallery
+description: The Open Intelligent UI component gallery, rendered offline.
+publish_to: none
+version: 1.0.0
+resolution: workspace
+
+environment:
+  sdk: ^3.11.1
+  flutter: ">=3.41.3"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  open_intelligent_ui: ^3.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/gallery_programs.json

@@ -147,12 +147,16 @@ Widget buildSvg(BuildContext context, OpenUiNode node) {
           (viewBox.width > 0 && viewBox.height > 0
               ? w * viewBox.height / viewBox.width
               : w);
-      return Semantics(
-        image: true,
-        child: SizedBox(
-          width: w,
-          height: h,
-          child: CustomPaint(painter: SvgScenePainter(viewBox, scene)),
+      return Align(
+        alignment: Alignment.topCenter,
+        heightFactor: 1,
+        child: Semantics(
+          image: true,
+          child: SizedBox(
+            width: w,
+            height: h,
+            child: CustomPaint(painter: SvgScenePainter(viewBox, scene)),
+          ),
         ),
       );
     },

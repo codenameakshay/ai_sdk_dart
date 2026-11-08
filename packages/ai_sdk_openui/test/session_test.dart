@@ -327,4 +327,18 @@ void main() {
     expect(report.errors.single, startsWith('Unknown component "Nope"'));
     expect(report.unresolved, ['missing']);
   });
+
+  test(
+    'the demo tools read a day count from a string, as JavaScript Number() does',
+    () async {
+      final tool = demoTools(
+        now: () => DateTime.utc(2026, 11, 8),
+      ).firstWhere((t) => t.name == 'get_traffic');
+      final thirty = (await tool.call({'days': '30'}) as Map)['rows'] as List;
+      final ninety = (await tool.call(const {}) as Map)['rows'] as List;
+      expect(thirty.length, 30 * 5);
+      expect(ninety.length, 90 * 5);
+      expect((thirty.last as Map)['date'], '2026-11-08');
+    },
+  );
 }

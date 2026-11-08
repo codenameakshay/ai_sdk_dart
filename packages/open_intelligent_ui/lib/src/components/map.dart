@@ -233,21 +233,27 @@ class _StreetMapState extends State<StreetMap> {
     );
   }
 
-  Future<void> _expand() => Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      fullscreenDialog: true,
-      builder: (_) => Scaffold(
-        appBar: AppBar(title: const Text('Map')),
-        body: StreetMap(
-          places: widget.places,
-          route: widget.route,
-          selection: widget.selection,
-          streaming: widget.streaming,
-          height: double.infinity,
+  Future<void> _expand() {
+    final services = OpenUiScope.servicesOf(context);
+    return Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => OpenUiScope(
+          services: services,
+          child: Scaffold(
+            appBar: AppBar(title: const Text('Map')),
+            body: StreetMap(
+              places: widget.places,
+              route: widget.route,
+              selection: widget.selection,
+              streaming: widget.streaming,
+              height: double.infinity,
+            ),
+          ),
         ),
       ),
-    ),
-  );
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -365,30 +371,36 @@ class _StreetMapState extends State<StreetMap> {
                       children: [
                         if (categories.length > 1) ...[
                           Flexible(
-                            child: _Glass(
-                              child: DropdownButtonHideUnderline(
-                                child: DropdownButton<String>(
-                                  value: _group,
-                                  isDense: true,
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: theme.ink,
-                                  ),
-                                  dropdownColor: theme.canvas,
-                                  items: [
-                                    const DropdownMenuItem(
-                                      value: 'all',
-                                      child: Text('All places'),
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 170),
+                              child: _Glass(
+                                child: DropdownButtonHideUnderline(
+                                  child: DropdownButton<String>(
+                                    value: _group,
+                                    isDense: true,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: theme.ink,
                                     ),
-                                    for (final c in categories)
-                                      DropdownMenuItem(
-                                        value: c,
-                                        child: Text(c),
+                                    dropdownColor: theme.canvas,
+                                    items: [
+                                      const DropdownMenuItem(
+                                        value: 'all',
+                                        child: Text('All places'),
                                       ),
-                                  ],
-                                  isExpanded: true,
-                                  onChanged: (v) =>
-                                      setState(() => _group = v ?? 'all'),
+                                      for (final c in categories)
+                                        DropdownMenuItem(
+                                          value: c,
+                                          child: Text(c),
+                                        ),
+                                    ],
+                                    isExpanded: true,
+                                    onChanged: (v) {
+                                      setState(() => _group = v ?? 'all');
+                                      _syncRoute();
+                                      _frame();
+                                    },
+                                  ),
                                 ),
                               ),
                             ),

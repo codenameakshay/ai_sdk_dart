@@ -39,6 +39,7 @@ workspace:
   - packages/ai_sdk_ollama
   - packages/ai_sdk_openui
   - packages/open_intelligent_ui
+  - packages/open_intelligent_ui/example
   - examples/basic
   - examples/flutter_chat
   - examples/advanced_app

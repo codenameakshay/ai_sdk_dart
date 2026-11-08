@@ -19,17 +19,15 @@ Widget buildCarousel(BuildContext context, OpenUiNode node) {
       width + gap,
       parent: ScrollConfiguration.of(context).getScrollPhysics(context),
     ),
-    child: IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          for (var i = 0; i < items.length; i++)
-            Padding(
-              padding: EdgeInsets.only(right: i == items.length - 1 ? 0 : gap),
-              child: SizedBox(width: width, child: items[i]),
-            ),
-        ],
-      ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < items.length; i++)
+          Padding(
+            padding: EdgeInsets.only(right: i == items.length - 1 ? 0 : gap),
+            child: SizedBox(width: width, child: items[i]),
+          ),
+      ],
     ),
   );
 }

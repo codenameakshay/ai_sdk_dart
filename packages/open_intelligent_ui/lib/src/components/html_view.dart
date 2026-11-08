@@ -107,25 +107,28 @@ class _Unsupported extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = OpenUiTheme.of(context);
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Glyph(icon, size: 24, color: theme.muted),
-            const SizedBox(height: 8),
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: TextStyle(fontWeight: FontWeight.w600, color: theme.ink),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              note,
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: theme.muted),
-            ),
-          ],
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Glyph(icon, size: 24, color: theme.muted),
+              const SizedBox(height: 8),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: TextStyle(fontWeight: FontWeight.w600, color: theme.ink),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                note,
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: theme.muted),
+              ),
+            ],
+          ),
         ),
       ),
     );

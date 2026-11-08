@@ -32,8 +32,9 @@ List<InlineSpan> inlineSpans(
         out.add(TextSpan(text: rest, style: current));
         break;
       }
-      if (m.start > 0)
+      if (m.start > 0) {
         out.add(TextSpan(text: rest.substring(0, m.start), style: current));
+      }
       final token = m[0]!;
       if (m[1] != null) {
         out.add(

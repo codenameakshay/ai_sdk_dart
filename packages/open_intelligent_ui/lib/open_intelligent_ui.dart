@@ -10,6 +10,7 @@ export 'src/components/glyph.dart' show Glyph;
 export 'src/services.dart'
     show LatLng, MapTiles, OpenUiScope, OpenUiServices, esriStreetTiles;
 export 'src/theme.dart' show OpenUiTheme;
+export 'src/web_services.dart' show OsrmStreetRoute, WikimediaImageSearch;
 export 'src/view.dart'
     show
         OpenUiBuilder,

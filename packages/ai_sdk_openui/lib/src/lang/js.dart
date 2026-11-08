@@ -84,9 +84,8 @@ abstract final class Js {
     if (d.isNaN) return 'NaN';
     if (d.isInfinite) return d > 0 ? 'Infinity' : '-Infinity';
     if (d == 0) return '0';
-    if (d == d.truncateToDouble() && d.abs() < 1e21) {
-      return d.toStringAsFixed(0);
-    }
+    // Dart prints the shortest round-trip digits, as JavaScript does, and
+    // writes integral doubles below 1e21 out in full with a ".0".
     final s = d.toString();
     return s.endsWith('.0') ? s.substring(0, s.length - 2) : s;
   }
@@ -141,7 +140,9 @@ abstract final class Js {
     null || String() || bool() => value,
     num() when value.isNaN || value.isInfinite => null,
     int() => value,
-    double() when value == value.truncateToDouble() && value.abs() < 1e21 =>
+    double()
+        when value == value.truncateToDouble() &&
+            value.abs() < 9007199254740992 =>
       value.toInt(),
     num() => value,
     List() => [for (final v in value) _jsonSafe(v)],

@@ -133,7 +133,8 @@ T _pick<T>(double Function() r, List<T> list, [List<num>? weights]) {
     x -= weights[i];
     if (x < 0) return list[i];
   }
-  return list.last;
+  // Reached only through floating-point rounding, as in the reference.
+  return list.last; // coverage:ignore-line
 }
 
 List<String> _lastDays(Map<String, Object?> input, DateTime now) {

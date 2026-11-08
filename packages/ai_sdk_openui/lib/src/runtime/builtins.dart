@@ -78,8 +78,7 @@ Object? _sort(Map<String, Object?> a) {
       final diff = _sign(Js.toNumber(av) - Js.toNumber(bv));
       return desc ? -diff : diff;
     }
-    // ponytail: code-unit order, not ICU localeCompare; matches for ASCII.
-    final cmp = Js.string(av ?? '').compareTo(Js.string(bv ?? ''));
+    final cmp = localeCompare(Js.string(av ?? ''), Js.string(bv ?? ''));
     return desc ? -cmp : cmp;
   });
 }
@@ -107,7 +106,21 @@ Object? _filter(Map<String, Object?> a) {
   ];
 }
 
-Object? _lazy(Map<String, Object?> args) => throw StateError('lazy built-in');
+/// `String.prototype.localeCompare` in English: letters compare without
+/// case first, and lowercase sorts before uppercase on a tie.
+// ponytail: ignores accents and ICU's punctuation weights.
+int localeCompare(String a, String b) {
+  final byLetter = a.toLowerCase().compareTo(b.toLowerCase());
+  if (byLetter != 0) return byLetter.sign;
+  for (var i = 0; i < a.length && i < b.length; i++) {
+    final x = a[i], y = b[i];
+    if (x != y) return x == x.toLowerCase() ? -1 : 1;
+  }
+  return a.length.compareTo(b.length);
+}
+
+Object? _lazy(Map<String, Object?> args) =>
+    throw StateError('lazy built-in'); // coverage:ignore-line
 
 final _anyList = S.list(S.any());
 final _numbers = {'numbers': S.list(S.number())};

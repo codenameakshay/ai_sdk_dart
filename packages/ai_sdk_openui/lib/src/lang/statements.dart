@@ -198,15 +198,6 @@ String stripFences(String input) {
     }
   }
   if (blocks.isNotEmpty) return blocks.join('\n');
-  if (input.startsWith('```')) {
-    var j = 3;
-    while (j < input.length && input[j] != '\n') {
-      j++;
-    }
-    final body = input.substring(j < input.length ? j + 1 : 3);
-    final trailing = body.lastIndexOf('```');
-    return trailing != -1 ? body.substring(0, trailing) : body;
-  }
   return input;
 }
 

@@ -878,16 +878,8 @@ final class StreamParser {
     _cleaned = next;
     final pendingStart = _scanCompleted();
     final pendingText = _cleaned.substring(pendingStart).trim();
-    if (pendingText.isEmpty) {
-      if (_completedCount == 0) return ParseResult.empty();
-      return _buildResult(
-        {..._completed},
-        false,
-        _completedCount,
-        schema,
-        rootName,
-      );
-    }
+    // A trimmed text never ends right after a completed statement.
+    if (pendingText.isEmpty) return ParseResult.empty();
     final closed = autoClose(pendingText);
     final stmts = split(tokenize(closed.text));
     if (stmts.isEmpty) {

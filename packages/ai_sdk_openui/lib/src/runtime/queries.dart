@@ -212,8 +212,6 @@ final class QueryManager {
             current.needsRefetch = false;
             unawaited(_fetch(current.cacheKey, statementId));
           }
-        } else if (_rebuild()) {
-          _notify();
         }
       }
     }

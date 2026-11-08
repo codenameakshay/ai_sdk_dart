@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import '../runtime/builtins.dart';
 import 'ast.dart';
+import 'js.dart';
 
 enum T {
   newline,
@@ -443,10 +444,4 @@ Ast parseExpression(List<Token> tokens) {
   return parseExpr(0);
 }
 
-String _numberKey(num v) {
-  if (v is int) return '$v';
-  final d = v as double;
-  if (d == d.truncateToDouble() && d.abs() < 1e21) return d.toStringAsFixed(0);
-  final s = d.toString();
-  return s.endsWith('.0') ? s.substring(0, s.length - 2) : s;
-}
+String _numberKey(num v) => Js.numberToString(v);

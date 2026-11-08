@@ -335,7 +335,8 @@ final class OpenUiSession {
               evaluateElement(node, _context, library.isReactive),
             );
     } catch (e) {
-      _runtimeIssues.add('Prop evaluation failed: $e');
+      // Defensive, as in lang-core: no known input throws past the evaluator.
+      _runtimeIssues.add('Prop evaluation failed: $e'); // coverage:ignore-line
     }
   }
 

@@ -1,7 +1,7 @@
 import '../lang/ast.dart';
 import 'builtins.dart';
 import '../lang/js.dart';
-import '../lang/parser.dart' show builtinCalls, loopVarName;
+import '../lang/parser.dart' show loopVarName;
 import '../lang/validation.dart';
 
 /// A two-way binding: writing `$value` runs [expr] and stores the result in
@@ -201,9 +201,11 @@ Object? evaluate(Ast node, EvaluationContext ctx, [IsReactiveProp? reactive]) {
       }
       if (obj is Map) return obj[Js.string(idx)];
       if (obj is String) {
-        final i = Js.toNumber(idx);
-        return i >= 0 && i < obj.length && i == i.truncateToDouble()
-            ? obj[i.toInt()]
+        final key = Js.string(idx);
+        if (key == 'length') return obj.length;
+        final i = int.tryParse(key);
+        return i != null && i >= 0 && i < obj.length && '$i' == key
+            ? obj[i]
             : null;
       }
       return null;
@@ -269,23 +271,9 @@ Object? _evaluateCall(
   return element;
 }
 
-Map<String, Object?> _evaluateArgs(
-  CompNode node,
-  EvaluationContext ctx, [
-  List<String>? params,
-]) {
-  final named =
-      node.mappedProps ??
-      {
-        for (final (i, name)
-            in (params ??
-                    builtinCalls[node.name]?.params
-                        .map((p) => p.name)
-                        .toList() ??
-                    const <String>[])
-                .indexed)
-          if (i < node.args.length) name: node.args[i],
-      };
+/// A call's args by name. The parser names every non-lazy call's args.
+Map<String, Object?> _evaluateArgs(CompNode node, EvaluationContext ctx) {
+  final named = node.mappedProps ?? const <String, Ast>{};
   return {
     for (final MapEntry(:key, :value) in named.entries)
       key: evaluate(value, ctx),
@@ -299,11 +287,8 @@ Map<String, Object?> _callArgs(
   EvaluationContext ctx,
   JsonSchema params,
 ) {
-  final names = ((params['properties'] as Map?)?.keys ?? const [])
-      .cast<String>()
-      .toList();
   final required = (params['required'] as List?) ?? const [];
-  final args = _evaluateArgs(node, ctx, names);
+  final args = _evaluateArgs(node, ctx);
   args.removeWhere((key, value) => value == null && !required.contains(key));
   return args;
 }

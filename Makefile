@@ -29,13 +29,14 @@ FLUTTER_APP  := examples/flutter_chat
 ADVANCED_APP := examples/advanced_app
 DART_APP     := examples/basic
 DART_EXAMPLES := examples/remote_backend
+GALLERY_APP  := packages/open_intelligent_ui/example
 
 # Pure-Dart packages (test/analyze order). Publish order is separate below
 # since publish order matters (dependencies before dependents).
 DART_PKGS    := ai_sdk_telemetry ai_sdk_remote ai_sdk_realtime ai_sdk_conversation ai_sdk_json_schema ai_sdk_dart ai_sdk_provider ai_sdk_openai_compatible ai_sdk_openai \
                 ai_sdk_anthropic ai_sdk_google ai_sdk_azure ai_sdk_cohere ai_sdk_groq \
-                ai_sdk_mistral ai_sdk_ollama ai_sdk_mcp
-FLUTTER_PKGS := ai_sdk_flutter_ui
+                ai_sdk_mistral ai_sdk_ollama ai_sdk_mcp ai_sdk_openui
+FLUTTER_PKGS := ai_sdk_flutter_ui open_intelligent_ui
 PUBLISH_PKGS := ai_sdk_provider ai_sdk_openai_compatible ai_sdk_openai ai_sdk_anthropic \
                 ai_sdk_google ai_sdk_azure ai_sdk_cohere ai_sdk_groq ai_sdk_mistral \
                 ai_sdk_ollama ai_sdk_dart ai_sdk_json_schema ai_sdk_conversation ai_sdk_remote ai_sdk_mcp ai_sdk_telemetry
@@ -119,14 +120,14 @@ test:
 	$(DART) test $(foreach p,$(DART_PKGS),packages/$(p)/test/)
 	$(FLUTTER) test $(foreach p,$(FLUTTER_PKGS),packages/$(p)/)
 	$(DART) --enable-asserts run $(DART_APP)/test/client_lifetime_test.dart
-	$(FLUTTER) test $(FLUTTER_APP)/test/ $(ADVANCED_APP)/test/
+	$(FLUTTER) test $(FLUTTER_APP)/test/ $(ADVANCED_APP)/test/ $(GALLERY_APP)/test/
 	$(FLUTTER) test --dart-define=OPENAI_API_KEY=fixture --dart-define=ANTHROPIC_API_KEY=fixture --dart-define=GOOGLE_API_KEY=fixture $(ADVANCED_APP)/test/provider_lifecycle_test.dart $(ADVANCED_APP)/test/media_page_lifetime_test.dart $(ADVANCED_APP)/test/media_picker_lifetime_test.dart
 	$(DART) test $(DART_EXAMPLES)/test/
 
 ## Run the example tests only (CI pairs this with coverage-check)
 test-examples:
 	$(DART) --enable-asserts run $(DART_APP)/test/client_lifetime_test.dart
-	$(FLUTTER) test $(FLUTTER_APP)/test/ $(ADVANCED_APP)/test/
+	$(FLUTTER) test $(FLUTTER_APP)/test/ $(ADVANCED_APP)/test/ $(GALLERY_APP)/test/
 	$(FLUTTER) test --dart-define=OPENAI_API_KEY=fixture --dart-define=ANTHROPIC_API_KEY=fixture --dart-define=GOOGLE_API_KEY=fixture $(ADVANCED_APP)/test/provider_lifecycle_test.dart $(ADVANCED_APP)/test/media_page_lifetime_test.dart $(ADVANCED_APP)/test/media_picker_lifetime_test.dart
 	$(DART) test $(DART_EXAMPLES)/test/
 

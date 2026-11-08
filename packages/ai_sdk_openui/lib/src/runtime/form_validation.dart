@@ -1,0 +1,200 @@
+import '../lang/js.dart';
+
+/// A validation rule: a type such as `minLength` and its optional argument.
+final class ParsedRule {
+  const ParsedRule(this.type, [this.arg]);
+
+  final String type;
+
+  /// A num for min, max, minLength and maxLength when numeric, else the raw value.
+  final Object? arg;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ParsedRule && other.type == type && other.arg == arg;
+
+  @override
+  int get hashCode => Object.hash(type, arg);
+}
+
+/// Returns an error message, or null when the value passes.
+typedef ValidatorFn = String? Function(Object? value, Object? arg);
+
+/// String rules: `["required", "minLength:3", "pattern:^[a-z]+$"]`. Non-strings are skipped; a non-list gives [].
+List<ParsedRule> parseRules(Object? rules) {
+  if (rules is! List) return const [];
+  return [
+    for (final rule in rules)
+      if (rule is String) _parseRule(rule),
+  ];
+}
+
+/// Object rules: `{required: true, minLength: 3, email: true}`. false/null values are skipped; a non-map gives [].
+List<ParsedRule> parseStructuredRules(Object? rules) {
+  if (rules is! Map) return const [];
+  return [
+    for (final MapEntry(:key, :value) in rules.entries)
+      if (value == true)
+        ParsedRule(key as String)
+      else if (value != false && value != null)
+        ParsedRule(key as String, value),
+  ];
+}
+
+/// required, email, url, numeric, min, max, minLength, maxLength, pattern.
+final Map<String, ValidatorFn> builtInValidators = {
+  'required': _required,
+  'email': _email,
+  'url': _url,
+  'numeric': _numeric,
+  'min': _min,
+  'max': _max,
+  'minLength': _minLength,
+  'maxLength': _maxLength,
+  'pattern': _pattern,
+};
+
+/// Runs [rules] in order and returns the first error. A custom validator with the same type wins
+/// over the built-in one. An unknown rule type is skipped.
+String? validate(
+  Object? value,
+  List<ParsedRule> rules, [
+  Map<String, ValidatorFn>? customValidators,
+]) {
+  for (final rule in rules) {
+    final validator =
+        customValidators?[rule.type] ?? builtInValidators[rule.type];
+    if (validator == null) continue;
+    final error = validator(value, rule.arg);
+    if (error != null && error.isNotEmpty) return error;
+  }
+  return null;
+}
+
+const _numericRules = {'min', 'max', 'minLength', 'maxLength'};
+const _hostSchemes = {'http', 'https', 'ws', 'wss', 'ftp'};
+final _emailPattern = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
+final _floatPrefix = RegExp(
+  r'^[+-]?(Infinity|(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?)',
+);
+
+ParsedRule _parseRule(String rule) {
+  final colon = rule.indexOf(':');
+  if (colon == -1) return ParsedRule(rule);
+  final type = rule.substring(0, colon);
+  final raw = rule.substring(colon + 1);
+  final n = Js.number(raw);
+  return ParsedRule(type, _numericRules.contains(type) && !n.isNaN ? n : raw);
+}
+
+bool _isEmpty(Object? value) {
+  if (value == null || value == '') return true;
+  if (value is List && value.isEmpty) return true;
+  if (value is Map && value.containsKey('value')) {
+    return _isEmpty(value['value']);
+  }
+  if (value is Map && value.isEmpty) return true;
+  return false;
+}
+
+/// JavaScript `parseFloat`: the longest numeric prefix after leading whitespace.
+double _parseFloat(String s) {
+  final m = _floatPrefix.firstMatch(Js.trim(s));
+  if (m == null) return double.nan;
+  final text = m[0]!;
+  if (text.endsWith('Infinity')) {
+    return text.startsWith('-') ? double.negativeInfinity : double.infinity;
+  }
+  return double.parse(text);
+}
+
+num _toNum(Object? value) =>
+    value is num ? value : _parseFloat(Js.string(value));
+
+double _argNumber(Object? arg) => arg == null ? double.nan : Js.number(arg);
+
+// ponytail: Uri approximates WHATWG URL parsing; exotic hosts may differ.
+bool _isUrl(String s) {
+  final uri = Uri.tryParse(s.trim());
+  if (uri == null || !uri.hasScheme || uri.port > 65535) return false;
+  if (uri.scheme == 'file' && uri.hasPort) return false;
+  return !_hostSchemes.contains(uri.scheme) ||
+      (uri.host.isNotEmpty && !uri.host.contains('%'));
+}
+
+String? _required(Object? value, Object? arg) {
+  if (_isEmpty(value)) return 'This field is required';
+  if (value is Map && value.isNotEmpty) {
+    final values = value.values;
+    if (values.every((v) => v is bool) && !values.any((v) => v == true)) {
+      return 'At least one option is required';
+    }
+  }
+  return null;
+}
+
+String? _email(Object? value, Object? arg) {
+  if (_isEmpty(value)) return null;
+  if (value is! String || !_emailPattern.hasMatch(value)) {
+    return 'Please enter a valid email';
+  }
+  return null;
+}
+
+String? _url(Object? value, Object? arg) {
+  if (_isEmpty(value)) return null;
+  if (value is! String || !_isUrl(value)) return 'Please enter a valid URL';
+  return null;
+}
+
+String? _numeric(Object? value, Object? arg) {
+  if (_isEmpty(value)) return null;
+  if (value is num && !value.isNaN) return null;
+  if (value is String &&
+      !_parseFloat(value).isNaN &&
+      Js.trim(value).isNotEmpty) {
+    return null;
+  }
+  return 'Must be a number';
+}
+
+String? _min(Object? value, Object? arg) {
+  if (_isEmpty(value)) return null;
+  final n = _toNum(value);
+  if (n.isNaN) return null;
+  final limit = _argNumber(arg);
+  return n >= limit ? null : 'Must be at least ${Js.numberToString(limit)}';
+}
+
+String? _max(Object? value, Object? arg) {
+  if (_isEmpty(value)) return null;
+  final n = _toNum(value);
+  if (n.isNaN) return null;
+  final limit = _argNumber(arg);
+  return n <= limit ? null : 'Must be no more than ${Js.numberToString(limit)}';
+}
+
+String? _minLength(Object? value, Object? arg) {
+  if (_isEmpty(value) || value is! String) return null;
+  final limit = _argNumber(arg);
+  return value.length >= limit
+      ? null
+      : 'Must be at least ${Js.numberToString(limit)} characters';
+}
+
+String? _maxLength(Object? value, Object? arg) {
+  if (_isEmpty(value) || value is! String) return null;
+  final limit = _argNumber(arg);
+  return value.length <= limit
+      ? null
+      : 'Must be no more than ${Js.numberToString(limit)} characters';
+}
+
+String? _pattern(Object? value, Object? arg) {
+  if (_isEmpty(value) || value is! String || arg is! String) return null;
+  try {
+    return RegExp(arg).hasMatch(value) ? null : 'Invalid format';
+  } on FormatException {
+    return null;
+  }
+}

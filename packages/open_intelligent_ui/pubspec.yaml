@@ -1,0 +1,43 @@
+name: open_intelligent_ui
+description: Flutter renderer for Open Intelligent UI answers written in OpenUI Lang 1.0, a port of thesysdev/open-intelligent-ui.
+version: 3.1.0
+homepage: https://github.com/codenameakshay/ai_sdk_dart
+repository: https://github.com/codenameakshay/ai_sdk_dart
+resolution: workspace
+
+environment:
+  sdk: ^3.11.1
+  flutter: ">=3.41.3"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  ai_sdk_openui: ^3.1.0
+  flutter_map: ^8.2.1
+  flutter_math_fork: ^0.7.4
+  http: ^1.6.0
+  intl: ^0.20.2
+  latlong2: ^0.9.1
+  path_parsing: ^1.1.0
+  url_launcher: ^6.3.1
+  web: ^1.1.1
+  webview_flutter: ^4.13.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  fonts:
+    - family: IuiLucide
+      fonts:
+        - asset: assets/fonts/lucide.ttf
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+        - asset: assets/fonts/Inter-Italic.ttf
+          style: italic
+        - asset: assets/fonts/Inter-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-SemiBold.ttf
+          weight: 600

@@ -71,18 +71,18 @@ final class _Gate {
 }
 
 void main() {
-  group('ToolNotFound', () {
+  group('ToolNotFoundError', () {
     test('names the tool and the tools that exist', () {
       expect(
-        const ToolNotFound('nope', ['a', 'b']).toString(),
-        'No handler for tool "nope". Available: a, b',
+        const ToolNotFoundError('nope', ['a', 'b']).toString(),
+        '[openui] No handler for tool "nope". Available: a, b',
       );
     });
 
     test('says when no tool exists', () {
       expect(
-        const ToolNotFound('nope').toString(),
-        'No handler for tool "nope". Available: (none)',
+        const ToolNotFoundError('nope').toString(),
+        '[openui] No handler for tool "nope". Available: (none)',
       );
     });
   });
@@ -129,8 +129,8 @@ void main() {
         final first = click(s, events.add);
         gate.fail(0, Exception('down'));
         await first;
-        expect(valueOf(s), {'status': 'error', 'error': 'Exception: down'});
-        expect(s.issues, ['Mutation "save" failed: Exception: down']);
+        expect(valueOf(s), {'status': 'error', 'error': 'down'});
+        expect(s.issues, ['Mutation "save" failed: down']);
         expect(events, isEmpty);
 
         final second = click(s, events.add);
@@ -151,7 +151,7 @@ void main() {
       await click(s, events.add);
       expect(valueOf(s), {
         'status': 'error',
-        'error': 'No handler for tool "save". Available: other',
+        'error': '[openui] No handler for tool "save". Available: other',
       });
       expect(s.issues, ['Mutation tool "save" not found']);
       expect(events, isEmpty);
@@ -211,8 +211,8 @@ void main() {
         final running = click(s);
         gate.fail(0, Exception('down'));
         await running;
-        expect(valueOf(s), {'status': 'error', 'error': 'Exception: down'});
-        expect(s.issues, ['Mutation "a" failed: Exception: down']);
+        expect(valueOf(s), {'status': 'error', 'error': 'down'});
+        expect(s.issues, ['Mutation "a" failed: down']);
 
         await click(s, null, 'alt');
         expect(s.state[r'$tool'], 'b');
@@ -381,7 +381,7 @@ void main() {
         gate.fail(0, Exception('boom'));
         await settle();
         expect(valueOf(s), {'n': 0});
-        expect(s.issues, ['Query "t" failed: Exception: boom']);
+        expect(s.issues, ['Query "t" failed: boom']);
 
         s.retryQueries();
         expect(s.isQueryLoading, isTrue);
@@ -419,7 +419,7 @@ void main() {
       s.retryQueries();
       await settle();
       expect(gate.calls, hasLength(1));
-      expect(s.issues, ['Mutation "t" failed: Exception: no']);
+      expect(s.issues, ['Mutation "t" failed: no']);
     });
 
     test(
@@ -508,7 +508,7 @@ void main() {
           QueryManager((name, args) async {
             calls.add('$name${args['k']}');
             return calls.length;
-          })..evaluate([
+          })..evaluateQueries([
             node('a'),
             node('b', args: {'k': 2}),
           ]);
@@ -518,14 +518,14 @@ void main() {
       manager.invalidate();
       await settle();
       expect(calls, ['t1', 't2', 't1', 't2']);
-      expect(manager.result('a'), 3);
-      expect(manager.result('b'), 4);
+      expect(manager.getResult('a'), 3);
+      expect(manager.getResult('b'), 4);
     });
 
     test('invalidate skips ids it does not know', () async {
       var calls = 0;
       final manager = QueryManager((name, args) async => ++calls)
-        ..evaluate([node('a')]);
+        ..evaluateQueries([node('a')]);
       await settle();
       manager.invalidate(['nope']);
       await settle();
@@ -535,13 +535,13 @@ void main() {
     test(
       'invalidate does nothing without a tool caller or after dispose',
       () async {
-        final bare = QueryManager(null)..evaluate([node('a')]);
+        final bare = QueryManager(null)..evaluateQueries([node('a')]);
         bare.invalidate();
-        expect(bare.result('a'), 'default');
+        expect(bare.getResult('a'), 'default');
 
         var calls = 0;
         final manager = QueryManager((name, args) async => ++calls)
-          ..evaluate([node('a')]);
+          ..evaluateQueries([node('a')]);
         await settle();
         manager
           ..dispose()
@@ -554,10 +554,10 @@ void main() {
     test('a listener hears every change until it is cancelled', () async {
       var heard = 0;
       final manager = QueryManager((name, args) async => 'data');
-      final cancel = manager.listen(() => heard++);
-      manager.evaluate([node('a')]);
+      final cancel = manager.subscribe(() => heard++);
+      manager.evaluateQueries([node('a')]);
       await settle();
-      expect(manager.result('a'), 'data');
+      expect(manager.getResult('a'), 'data');
       expect(heard, 2);
 
       cancel();

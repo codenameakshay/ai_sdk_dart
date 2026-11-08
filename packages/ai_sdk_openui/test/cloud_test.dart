@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import 'package:ai_sdk_openui/ai_sdk_openui.dart';
-import 'package:ai_sdk_openui/src/spec/cloud.dart';
 import 'package:test/test.dart';
 
 final class _C implements ComponentSpec {

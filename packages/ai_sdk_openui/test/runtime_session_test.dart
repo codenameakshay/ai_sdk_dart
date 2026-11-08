@@ -146,7 +146,9 @@ void main() {
     test('a function that throws reports it and its value is null', () {
       final s = open('root = Out(@Boom(1))');
       expect(s.root!.props['value'], isNull);
-      expect(s.issues, ['@Boom threw: Bad state: kaboom']);
+      expect(s.issues, [
+        'Evaluating prop "value" on Out failed: @Boom threw: kaboom',
+      ]);
     });
   });
 
@@ -213,7 +215,7 @@ void main() {
 
     test('action is null for a value that is not an action', () {
       expect(open('root = Out(1)').root!.props.action('value'), isNull);
-      expect(open('root = Out({a: 1})').root!.props.action('value'), isNull);
+      expect(open('root = Out([1])').root!.props.action('value'), isNull);
     });
 
     test(

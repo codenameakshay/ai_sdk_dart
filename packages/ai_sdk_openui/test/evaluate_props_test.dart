@@ -1,7 +1,6 @@
 import 'package:ai_sdk_openui/ai_sdk_openui.dart';
 import 'package:ai_sdk_openui/src/lang/ast.dart';
 import 'package:ai_sdk_openui/src/lang/parser.dart';
-import 'package:ai_sdk_openui/src/runtime/errors.dart';
 import 'package:ai_sdk_openui/src/runtime/evaluator.dart';
 import 'package:test/test.dart';
 

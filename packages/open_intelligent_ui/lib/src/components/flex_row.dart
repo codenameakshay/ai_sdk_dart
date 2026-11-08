@@ -12,6 +12,7 @@ class FlexRowItem extends ParentDataWidget<_FlexRowData> {
     this.spacer = false,
     this.shrink = true,
     this.fixed,
+    this.zeroBasis = false,
     required super.child,
   });
   final double grow;
@@ -24,17 +25,22 @@ class FlexRowItem extends ParentDataWidget<_FlexRowData> {
   /// (`flex: none`), like the media-row photo.
   final double Function(double available)? fixed;
 
+  /// Starts from a zero basis, so [grow] alone sets the width (`flex: N 1 0%`).
+  final bool zeroBasis;
+
   @override
   void applyParentData(RenderObject renderObject) {
     final data = renderObject.parentData! as _FlexRowData;
     if (data.grow != grow ||
         data.spacer != spacer ||
         data.fixed != fixed ||
-        data.shrink != shrink) {
+        data.shrink != shrink ||
+        data.zeroBasis != zeroBasis) {
       data
         ..grow = grow
         ..spacer = spacer
         ..shrink = shrink
+        ..zeroBasis = zeroBasis
         ..fixed = fixed;
       renderObject.parent?.markNeedsLayout();
     }
@@ -80,6 +86,7 @@ class _FlexRowData extends ContainerBoxParentData<RenderBox> {
   double grow = 0;
   bool spacer = false;
   bool shrink = true;
+  bool zeroBasis = false;
   double Function(double available)? fixed;
 }
 
@@ -172,7 +179,7 @@ class RenderFlexRow extends RenderBox
     required bool dry,
   }) => [
     for (final c in children)
-      _data(c).spacer
+      _data(c).spacer || _data(c).zeroBasis
           ? 0
           : _data(c).fixed != null && available.isFinite
           ? _data(c).fixed!(available)

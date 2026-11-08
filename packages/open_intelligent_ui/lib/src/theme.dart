@@ -234,7 +234,7 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
   }
 
   /// A background color: as [fg], but statuses are soft tints, and
-  /// `surface-strong` and `border` are allowed.
+  /// `surface-strong` and `border` are allowed. A gradient is [bgGradient].
   Color? bg(Object? value) {
     if (value is! String) return null;
     if (_statusNames.contains(value)) return statusSoft[value];
@@ -244,6 +244,11 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
       _ => _token(value) ?? parseCssColor(value),
     };
   }
+
+  /// A background gradient: a CSS `linear-gradient()` or `radial-gradient()`,
+  /// plain or `repeating-`, which the reference's `bg` passes to CSS as is.
+  Gradient? bgGradient(Object? value) =>
+      value is String ? parseCssGradient(value) : null;
 
   Color? _token(String value) {
     if (status[value] case final c?) return c;
@@ -259,18 +264,46 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
     };
   }
 
-  /// Ink for content on a raw-color background, or null for a token (theme
-  /// backgrounds keep the theme ink). Mirrors the reference's `contrastOn`.
+  /// Ink for content on a model-written hex or `rgb()` background, or null.
+  /// The reference's `contrastOn` reads only `#rgb`, `#rrggbb` and an
+  /// `rgb()`/`rgba()` that starts with three integers; other colours keep the
+  /// theme ink.
   Color? inkOn(Object? background) {
-    if (background is! String || bg(background) == null) return null;
-    if (_isToken(background)) return null;
-    final c = parseCssColor(background);
-    if (c == null) return null;
-    double channel(double v) => v <= 0.03928
-        ? v / 12.92
-        : math.pow((v + 0.055) / 1.055, 2.4).toDouble();
+    if (background is! String || _isToken(background)) return null;
+    final s = background.trim();
+    List<double>? rgb;
+    final hex = RegExp(
+      r'^#([\da-f]{3}|[\da-f]{6})$',
+      caseSensitive: false,
+    ).firstMatch(s);
+    if (hex != null) {
+      var h = hex.group(1)!;
+      if (h.length == 3) h = h.split('').map((c) => '$c$c').join();
+      rgb = [
+        for (final i in [0, 2, 4])
+          int.parse(h.substring(i, i + 2), radix: 16).toDouble(),
+      ];
+    } else {
+      final m = RegExp(
+        r'^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)',
+        caseSensitive: false,
+      ).firstMatch(s);
+      if (m != null) {
+        rgb = [for (var i = 1; i <= 3; i++) double.parse(m.group(i)!)];
+      }
+    }
+    if (rgb == null) return null;
+    double channel(double c) {
+      final v = c / 255;
+      return v <= 0.03928
+          ? v / 12.92
+          : math.pow((v + 0.055) / 1.055, 2.4).toDouble();
+    }
+
     final luminance =
-        0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b);
+        0.2126 * channel(rgb[0]) +
+        0.7152 * channel(rgb[1]) +
+        0.0722 * channel(rgb[2]);
     return luminance > 0.36 ? const Color(0xFF0D0D0D) : const Color(0xFFFFFFFF);
   }
 

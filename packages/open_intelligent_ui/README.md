@@ -37,8 +37,10 @@ shows an empty photo, without `streetRoute` a map route draws straight segments,
 
 `HtmlView` and `YouTube` use a web view on Android, iOS and macOS (only the initial page loads,
 no bridge except a height report) and a sandboxed `<iframe>` on the web; elsewhere they show a
-titled card. Maps use `flutter_map`, math uses `flutter_math_fork`, and icons come from a
-bundled Lucide font with the reference's names and aliases.
+titled card. Maps use `flutter_map`, math uses `flutter_math_fork`, text uses the bundled
+Inter (OFL), and icons come from a bundled Lucide font with the reference's names and
+aliases. An `OpenUiTheme` built with `fontFamily: null` uses the platform font.
 
 The [example](example) app renders the reference's 45 gallery programs offline, in light and
-dark. [`DESIGN.md`](DESIGN.md) records the architecture and its reviews.
+dark. [`DESIGN.md`](DESIGN.md) records the architecture, its reviews and every known difference
+from the reference.

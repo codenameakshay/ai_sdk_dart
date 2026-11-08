@@ -36,10 +36,17 @@ class _FakeController extends PlatformWebViewController {
 
   final Map<String, void Function(JavaScriptMessage)> channels = {};
   final List<String> html = [];
+  final List<String?> baseUrls = [];
   final List<Uri> requests = [];
   JavaScriptMode? mode;
   _FakeDelegate? delegate;
   int cleared = 0;
+  void Function(PlatformWebViewPermissionRequest request)? onPermission;
+
+  @override
+  Future<void> setOnPlatformPermissionRequest(
+    void Function(PlatformWebViewPermissionRequest request) onPermissionRequest,
+  ) async => onPermission = onPermissionRequest;
 
   @override
   Future<void> setJavaScriptMode(JavaScriptMode javaScriptMode) async =>
@@ -58,8 +65,10 @@ class _FakeController extends PlatformWebViewController {
   ) async => delegate = d as _FakeDelegate;
 
   @override
-  Future<void> loadHtmlString(String document, {String? baseUrl}) async =>
-      html.add(document);
+  Future<void> loadHtmlString(String document, {String? baseUrl}) async {
+    html.add(document);
+    baseUrls.add(baseUrl);
+  }
 
   @override
   Future<void> loadRequest(LoadRequestParams params) async =>
@@ -70,6 +79,16 @@ class _FakeController extends PlatformWebViewController {
 
   @override
   Future<void> clearCache() async => cleared++;
+}
+
+// ignore: must_be_immutable
+class _FakePermission extends PlatformWebViewPermissionRequest {
+  _FakePermission() : super(types: {WebViewPermissionResourceType.camera});
+  bool granted = false, denied = false;
+  @override
+  Future<void> grant() async => granted = true;
+  @override
+  Future<void> deny() async => denied = true;
 }
 
 class _FakeWidget extends PlatformWebViewWidget {
@@ -107,6 +126,30 @@ _FakePlatform _install() {
 // this stays inside this file.
 void main() {
   group('HtmlView with a web view', () {
+    testWidgets('the page loads with no base URL, so its origin is opaque', (
+      tester,
+    ) async {
+      final platform = _install();
+      await pumpProgram(tester, 'root = Col([HtmlView("<p>hi</p>")])');
+      expect(platform.controllers.single.baseUrls, [null]);
+      expect(
+        platform.controllers.single.html.single,
+        contains('if(self.origin!=="null")'),
+      );
+    });
+
+    testWidgets('camera, microphone and other permission requests are denied', (
+      tester,
+    ) async {
+      final platform = _install();
+      await pumpProgram(tester, 'root = Col([HtmlView("<p>hi</p>")])');
+      final request = _FakePermission();
+      platform.controllers.single.onPermission!(request);
+      await tester.pump();
+      expect(request.denied, isTrue);
+      expect(request.granted, isFalse);
+    });
+
     testWidgets(
       'loads the model page inside the security policy with JavaScript on',
       (tester) async {

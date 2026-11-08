@@ -32,26 +32,28 @@ class _NativePage extends StatefulWidget {
 }
 
 class _NativePageState extends State<_NativePage> {
-  late final WebViewController _controller = WebViewController()
-    ..setJavaScriptMode(JavaScriptMode.unrestricted)
-    ..setBackgroundColor(const Color(0x00000000))
-    ..addJavaScriptChannel(
-      'IuiHeight',
-      onMessageReceived: (m) {
-        final h = clampHeight(m.message);
-        if (mounted && h != null) widget.onHeight(h);
-      },
-    )
-    ..setNavigationDelegate(
-      NavigationDelegate(
-        onNavigationRequest: (request) =>
-            !_loaded && request.url == 'about:blank'
-            ? NavigationDecision.navigate
-            : NavigationDecision.prevent,
-        onPageFinished: (_) => _loaded = true,
-      ),
-    )
-    ..loadHtmlString(widget.document);
+  late final WebViewController _controller =
+      WebViewController(onPermissionRequest: (request) => request.deny())
+        ..setJavaScriptMode(JavaScriptMode.unrestricted)
+        ..setBackgroundColor(const Color(0x00000000))
+        ..addJavaScriptChannel(
+          'IuiHeight',
+          onMessageReceived: (m) {
+            final h = clampHeight(m.message);
+            if (mounted && h != null) widget.onHeight(h);
+          },
+        )
+        ..setNavigationDelegate(
+          NavigationDelegate(
+            onNavigationRequest: (request) =>
+                !_loaded && request.url == 'about:blank'
+                ? NavigationDecision.navigate
+                : NavigationDecision.prevent,
+            onPageFinished: (_) => _loaded = true,
+          ),
+        )
+        // No base URL: the page's origin is opaque, which the page itself checks.
+        ..loadHtmlString(widget.document);
   bool _loaded = false;
 
   @override

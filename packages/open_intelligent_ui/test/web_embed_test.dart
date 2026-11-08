@@ -44,11 +44,11 @@ void main() {
           report: HeightReport.channel,
         );
         final csp = doc.indexOf('Content-Security-Policy');
-        final deny = doc.indexOf('deny("localStorage")');
+        final deny = doc.indexOf('deny(window,"localStorage")');
         expect(deny, greaterThan(csp));
         expect(deny, lessThan(doc.indexOf(model)));
-        expect(doc, contains('deny("sessionStorage")'));
-        expect(doc, contains('deny("indexedDB")'));
+        expect(doc, contains('deny(window,"sessionStorage")'));
+        expect(doc, contains('stub(window,"indexedDB",'));
       },
     );
 
@@ -58,7 +58,7 @@ void main() {
         dark: false,
         report: HeightReport.parent,
       );
-      expect(doc, isNot(contains('deny("localStorage")')));
+      expect(doc, isNot(contains('self.origin')));
       expect(doc, contains(model));
     });
   });

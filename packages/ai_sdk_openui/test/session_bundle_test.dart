@@ -293,6 +293,20 @@ void main() {
     },
   );
 
+  test('disposing from onParseResult stops initialization', () {
+    late OpenUiSession session;
+    final reports = <List<OpenUiError>>[];
+    session = OpenUiSession(
+      _library,
+      onParseResult: (_) => session.dispose(),
+      onError: reports.add,
+    );
+    addTearDown(session.dispose);
+    session.update('root = Out(1)\n\$value = 2', streaming: false);
+    expect(session.state, <String, Object?>{});
+    expect(reports, <List<OpenUiError>>[]);
+  });
+
   test(
     'swapped tools serve later calls; gaining or losing all tools refetches',
     () async {

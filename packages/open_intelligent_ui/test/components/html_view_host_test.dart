@@ -1,6 +1,8 @@
 // webview_flutter_platform_interface is what webview_flutter builds on; a fake
 // platform from it is how a test supplies a web view.
 // ignore_for_file: depend_on_referenced_packages
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
@@ -10,12 +12,13 @@ import '../support/pump.dart';
 
 class _FakePlatform extends WebViewPlatform {
   final List<_FakeController> controllers = [];
+  Completer<void>? setup;
 
   @override
   PlatformWebViewController createPlatformWebViewController(
     PlatformWebViewControllerCreationParams params,
   ) {
-    final c = _FakeController(params);
+    final c = _FakeController(params)..setup = setup;
     controllers.add(c);
     return c;
   }
@@ -34,6 +37,7 @@ class _FakePlatform extends WebViewPlatform {
 class _FakeController extends PlatformWebViewController {
   _FakeController(super.params) : super.implementation();
 
+  Completer<void>? setup;
   final Map<String, void Function(JavaScriptMessage)> channels = {};
   final List<String> html = [];
   final List<String?> baseUrls = [];
@@ -56,13 +60,18 @@ class _FakeController extends PlatformWebViewController {
   Future<void> setBackgroundColor(Color color) async {}
 
   @override
-  Future<void> addJavaScriptChannel(JavaScriptChannelParams p) async =>
-      channels[p.name] = p.onMessageReceived;
+  Future<void> addJavaScriptChannel(JavaScriptChannelParams p) async {
+    await setup?.future;
+    channels[p.name] = p.onMessageReceived;
+  }
 
   @override
   Future<void> setPlatformNavigationDelegate(
     PlatformNavigationDelegate d,
-  ) async => delegate = d as _FakeDelegate;
+  ) async {
+    await setup?.future;
+    delegate = d as _FakeDelegate;
+  }
 
   @override
   Future<void> loadHtmlString(String document, {String? baseUrl}) async {
@@ -126,6 +135,50 @@ _FakePlatform _install() {
 // this stays inside this file.
 void main() {
   group('HtmlView with a web view', () {
+    testWidgets(
+      'waits for the height bridge and navigation policy before loading',
+      (tester) async {
+        final setup = Completer<void>();
+        final platform = _install()..setup = setup;
+        final p = await pumpProgram(
+          tester,
+          'root = Col([HtmlView("<p>one</p>")])',
+        );
+        final controller = platform.controllers.single;
+        expect(controller.html, <String>[]);
+        p.session.update(
+          'root = Col([HtmlView("<p>two</p>")])',
+          streaming: false,
+        );
+        await tester.pump();
+        expect(controller.html, <String>[]);
+        setup.complete();
+        await tester.pump();
+        expect(controller.channels.keys, ['IuiHeight']);
+        expect(controller.delegate, isNotNull);
+        expect(controller.html.length, 1);
+        expect(controller.html.single, contains('<p>two</p>'));
+      },
+    );
+
+    testWidgets('does not load a page removed before setup finishes', (
+      tester,
+    ) async {
+      final setup = Completer<void>();
+      final platform = _install()..setup = setup;
+      final p = await pumpProgram(
+        tester,
+        'root = Col([HtmlView("<p>hi</p>")])',
+      );
+      final controller = platform.controllers.single;
+      p.session.update('root = Col([Text("gone")])', streaming: false);
+      await tester.pump();
+      setup.complete();
+      await tester.pump();
+      expect(controller.html, <String>[]);
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('the page loads with no base URL, so its origin is opaque', (
       tester,
     ) async {

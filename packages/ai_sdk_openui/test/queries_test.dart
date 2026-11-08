@@ -198,6 +198,29 @@ void main() {
       },
     );
 
+    test('disposing on mutation loading prevents its tool call', () async {
+      final calls = <String>[];
+      final events = <ActionEvent>[];
+      final s = open(
+        program,
+        tools: [
+          OpenUiTool(
+            name: 'save',
+            call: (_) async {
+              calls.add('save');
+              return 'saved';
+            },
+          ),
+        ],
+      );
+      s.listen(() {
+        if ((valueOf(s) as Map)['status'] == 'loading') s.dispose();
+      });
+      await click(s, events.add);
+      expect(calls, <String>[]);
+      expect(events, <ActionEvent>[]);
+    });
+
     test(
       'a new tool name resets the result to idle and clears the error',
       () async {
@@ -239,6 +262,32 @@ void main() {
   });
 
   group('Query', () {
+    test('disposing on query loading prevents its tool call', () async {
+      final calls = <String>[];
+      final reports = <List<OpenUiError>>[];
+      final s = OpenUiSession(
+        _library,
+        tools: [
+          OpenUiTool(
+            name: 't',
+            call: (_) async {
+              calls.add('t');
+              return 1;
+            },
+          ),
+        ],
+        onError: reports.add,
+      );
+      addTearDown(s.dispose);
+      s.listen(() {
+        if (s.isQueryLoading) s.dispose();
+      });
+      s.update('root = Out(q)\nq = Query("t", {}, 0)', streaming: false);
+      await settle();
+      expect(calls, <String>[]);
+      expect(reports, <List<OpenUiError>>[]);
+    });
+
     test(
       'does not fetch again while its data is settled or its fetch is in flight',
       () async {

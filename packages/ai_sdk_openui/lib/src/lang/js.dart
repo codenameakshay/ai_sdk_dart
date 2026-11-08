@@ -172,11 +172,17 @@ abstract final class Js {
       case Map():
         out.write('{');
         var first = true;
-        for (final MapEntry(:key, value: v) in value.entries) {
+        final map = value is Map<String, Object?>
+            ? ordered(value)
+            : object([
+                for (final MapEntry(:key, value: v) in value.entries)
+                  MapEntry('$key', v),
+              ]);
+        for (final MapEntry(:key, value: v) in map.entries) {
           if (!first) out.write(',');
           first = false;
           out
-            ..write(jsonEncode('$key'))
+            ..write(jsonEncode(key))
             ..write(':');
           _writeJson(v, out);
         }

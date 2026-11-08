@@ -30,6 +30,7 @@ export 'src/lang/ast.dart'
         ValueNode,
         walkAst;
 export 'src/lang/lexer.dart' show T, Token, parseExpression, tokenize;
+export 'src/lang/merge.dart' show mergeStatements;
 export 'src/lang/parser.dart'
     show
         CompiledSchema,

@@ -155,11 +155,21 @@ _Scripts? _readScripts(String header, String payload) {
       if (name is! String || name.isEmpty || code is! String) return null;
       if (!names.add(name)) return null;
     }
-    final sorted = [
-      for (final script in values)
-        {'name': script['name'], 'code': script['code']},
-    ]..sort((a, b) => localeCompare(a['name'] as String, b['name'] as String));
-    return _Scripts(names, jsonEncode(sorted));
+    final sorted =
+        [
+          for (final (index, script) in values.indexed)
+            (index, {'name': script['name'], 'code': script['code']}),
+        ]..sort((a, b) {
+          final order = localeCompare(
+            a.$2['name'] as String,
+            b.$2['name'] as String,
+          );
+          return order != 0 ? order : a.$1 - b.$1;
+        });
+    return _Scripts(
+      names,
+      jsonEncode([for (final (_, script) in sorted) script]),
+    );
   } on FormatException {
     return null;
   }

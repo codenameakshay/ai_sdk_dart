@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:ai_sdk_openui/ai_sdk_openui.dart';
+import 'package:ai_sdk_openui/intelligent_ui.dart' show formatDecimal;
 import 'package:flutter/cupertino.dart'
     show
         CupertinoButton,
@@ -87,17 +88,8 @@ List<_Choice> _choices(List<Object?> raw) {
 String _plain(Object? value) => value == null ? '' : jsString(value);
 
 /// `toLocaleString("en-US", {maximumFractionDigits: 2})`.
-String _numberText(double value) {
-  final fixed = value.toStringAsFixed(2);
-  final negative = fixed.startsWith('-');
-  final parts = (negative ? fixed.substring(1) : fixed).split('.');
-  final grouped = parts[0].replaceAllMapped(
-    RegExp(r'\B(?=(\d{3})+$)'),
-    (_) => ',',
-  );
-  final fraction = parts[1].replaceFirst(RegExp(r'0+$'), '');
-  return '${negative ? '-' : ''}$grouped${fraction.isEmpty ? '' : '.$fraction'}';
-}
+String _numberText(double value) =>
+    formatDecimal(value, minFraction: 0, maxFraction: 2);
 
 String _textOf(BuildContext context) {
   final parts = <String>[];

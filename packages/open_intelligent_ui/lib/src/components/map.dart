@@ -290,6 +290,8 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
   bool _routeVisible = false;
   String _framed = '';
   String? _routeKey;
+  int _routeGeneration = 0;
+  Future<List<LatLng>?> Function(List<LatLng>)? _routeService;
   List<LatLng>? _street;
   bool _routeFailed = false;
   String? _failedTiles;
@@ -394,7 +396,9 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
   void _syncRoute() {
     final key = _routingKey;
     final service = OpenUiScope.servicesOf(context).streetRoute;
-    if (!widget.route || key != _routeKey) {
+    if (!widget.route || key != _routeKey || service != _routeService) {
+      _routeService = service;
+      _routeGeneration++;
       _routeDebounce?.cancel();
       _routeKey = null;
       _street = null;
@@ -412,6 +416,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
     if (service == null) return;
     _routeDebounce?.cancel();
     final stops = [for (final p in _visible) (lat: p.lat, lng: p.lng)];
+    final generation = _routeGeneration;
     _routeDebounce = Timer(const Duration(milliseconds: 700), () async {
       List<LatLng>? points;
       try {
@@ -419,7 +424,9 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
       } on Object {
         points = null;
       }
-      if (!mounted || _routeKey != key) return;
+      if (!mounted || _routeGeneration != generation || _routeKey != key) {
+        return;
+      }
       setState(() {
         _street = points != null && points.length >= 2 ? points : null;
         _routeFailed = _street == null;

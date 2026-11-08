@@ -274,6 +274,7 @@ final class OpenUiSession {
       }
       _result = result;
       onParseResult?.call(result);
+      if (_disposed) return;
     }
     final declarations = _result?.stateDeclarations ?? const {};
     final key = '${Js.stringify(declarations)}::${Js.stringify(_initialState)}';
@@ -404,9 +405,11 @@ final class OpenUiSession {
   }
 
   void _onChange() {
+    if (_disposed) return;
     _dirty = true;
     for (final l in [..._listeners]) {
       l();
+      if (_disposed) return;
     }
     _reportErrors();
   }
@@ -654,6 +657,7 @@ final class OpenUiSession {
         case ResetStep(:final targets):
           final decls = _result?.stateDeclarations ?? const {};
           for (final t in targets) {
+            if (_disposed) return;
             _store.set(t, decls[t], pristine: true);
           }
       }

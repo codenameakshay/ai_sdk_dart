@@ -242,6 +242,22 @@ void main() {
     );
   });
 
+  test('JSON.stringify orders index keys in raw nested maps', () {
+    expect(
+      Js.stringify({
+        'z': {'2': 'two', '1': 'one', 'a': true},
+        '2': 2,
+        '1': 1,
+        '01': 'kept',
+        '4294967295': 'not an index',
+        '4294967294': 'last index',
+      }),
+      '{"1":1,"2":2,"4294967294":"last index",'
+      '"z":{"1":"one","2":"two","a":true},'
+      '"01":"kept","4294967295":"not an index"}',
+    );
+  });
+
   test('String(number) of an int past 2^53 prints the nearest double', () {
     expect(
       Js.numberToString(int.parse('9007199254740993')),

@@ -92,6 +92,75 @@ void main() {
     expect(manager.isLoading('nope'), isFalse);
   });
 
+  test('refetch marks every statement sharing its cache key loading', () async {
+    final pending = <Completer<Object?>>[];
+    final manager = QueryManager((_, _) {
+      final result = Completer<Object?>();
+      pending.add(result);
+      return result.future;
+    });
+    addTearDown(manager.dispose);
+    manager.evaluateQueries([node('a'), node('b')]);
+    pending[0].complete(1);
+    await settle();
+
+    manager.invalidate(['a']);
+    expect(manager.getSnapshot().loading, ['a', 'b']);
+    expect(manager.getSnapshot().refetching, ['a', 'b']);
+    expect(pending.length, 2);
+    pending[1].complete(2);
+    await settle();
+    expect(manager.getSnapshot().data, {'a': 2, 'b': 2});
+    expect(manager.getSnapshot().loading, <String>[]);
+  });
+
+  test(
+    'reactivating starts a new fetch and ignores the disposed fetch',
+    () async {
+      final pending = <Completer<Object?>>[];
+      final manager = QueryManager((_, _) {
+        final result = Completer<Object?>();
+        pending.add(result);
+        return result.future;
+      });
+      addTearDown(manager.dispose);
+      manager.evaluateQueries([node('a')]);
+      manager.dispose();
+      manager.activate();
+      manager.evaluateQueries([node('a')]);
+      expect(pending.length, 2);
+      pending[0].complete('stale');
+      await settle();
+      expect(manager.getSnapshot().data, {'a': null});
+      expect(manager.getSnapshot().loading, ['a']);
+      pending[1].complete('current');
+      await settle();
+      expect(manager.getSnapshot().data, {'a': 'current'});
+      expect(manager.getSnapshot().loading, <String>[]);
+    },
+  );
+
+  test('a disposed fetch failure cannot fail a reactivated query', () async {
+    final pending = <Completer<Object?>>[];
+    final manager = QueryManager((_, _) {
+      final result = Completer<Object?>();
+      pending.add(result);
+      return result.future;
+    });
+    addTearDown(manager.dispose);
+    manager.evaluateQueries([node('a')]);
+    manager.dispose();
+    manager.activate();
+    manager.evaluateQueries([node('a')]);
+    pending[0].completeError(StateError('stale'));
+    await settle();
+    expect(manager.getSnapshot().errors, <OpenUiError>[]);
+    expect(manager.getSnapshot().loading, ['a']);
+    pending[1].complete('current');
+    await settle();
+    expect(manager.getSnapshot().data, {'a': 'current'});
+  });
+
   test('a string refresh interval refetches the Query', () async {
     var calls = 0;
     final manager = QueryManager((_, _) async => ++calls);

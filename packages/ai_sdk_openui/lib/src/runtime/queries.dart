@@ -271,11 +271,17 @@ final class QueryManager {
     if (call == null || q == null) return;
     final toolName = q.node.toolName;
     final args = q.node.args;
+    final gen = _generation;
     final entry = _cache.putIfAbsent(cacheKey, _CacheEntry.new)
       ..inFlight = true;
-    q.loading = true;
+    for (final current in _queries.values.where(
+      (q) => q.cacheKey == cacheKey,
+    )) {
+      current.loading = true;
+    }
     _rebuild();
     _notify();
+    if (_disposed || gen != _generation) return;
     try {
       final data = Js.normalize(
         await call(
@@ -285,7 +291,7 @@ final class QueryManager {
               : const {},
         ),
       );
-      if (_disposed) return;
+      if (_disposed || gen != _generation) return;
       if (!identical(_cache[cacheKey], entry) ||
           !_queries.values.any((q) => q.cacheKey == cacheKey)) {
         return;
@@ -305,7 +311,9 @@ final class QueryManager {
         }
       }
     } catch (err) {
-      if (!_disposed && identical(_cache[cacheKey], entry)) {
+      if (!_disposed &&
+          gen == _generation &&
+          identical(_cache[cacheKey], entry)) {
         for (final current in _queries.values.where(
           (q) => q.cacheKey == cacheKey,
         )) {
@@ -318,8 +326,10 @@ final class QueryManager {
         }
       }
     } finally {
-      entry.inFlight = false;
-      if (!_disposed && identical(_cache[cacheKey], entry)) {
+      if (!_disposed &&
+          gen == _generation &&
+          identical(_cache[cacheKey], entry)) {
+        entry.inFlight = false;
         String? refetch;
         for (final current in _queries.values.where(
           (q) => q.cacheKey == cacheKey,
@@ -454,6 +464,11 @@ final class QueryManager {
     m.result = {'status': 'loading'};
     _rebuild();
     _notify();
+    if (_disposed ||
+        gen != _generation ||
+        !identical(_mutations[statementId], m)) {
+      return false;
+    }
     var ok = false;
     try {
       final data = Js.normalize(
@@ -503,6 +518,9 @@ final class QueryManager {
         ..refreshInterval = 0
         ..loading = false
         ..needsRefetch = false;
+    }
+    for (final entry in _cache.values) {
+      entry.inFlight = false;
     }
     _mutations.clear();
   }

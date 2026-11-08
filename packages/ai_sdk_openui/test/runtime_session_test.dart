@@ -386,6 +386,32 @@ void main() {
       expect(events, isEmpty);
     });
 
+    test('dispose during Reset stops its remaining targets', () async {
+      var resetting = false;
+      late OpenUiSession session;
+      session =
+          OpenUiSession(
+            _library,
+            onStateUpdate: (_) {
+              if (resetting) session.dispose();
+            },
+          )..update(
+            r'root = Out(1, Action([@Reset($a, $b), @ToAssistant("done")]))'
+            '\n'
+            r'$a = 1'
+            '\n'
+            r'$b = 2',
+            streaming: false,
+          );
+      addTearDown(session.dispose);
+      session.field(r'$a', null).set(10);
+      session.field(r'$b', null).set(20);
+      resetting = true;
+      final events = await click(session);
+      expect(session.state, <String, Object?>{});
+      expect(events, <ActionEvent>[]);
+    });
+
     test(
       'an earlier @Set in the same plan shows in the event form state',
       () async {

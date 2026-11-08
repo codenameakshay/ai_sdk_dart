@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:ai_sdk_openui/src/runtime/collation.dart';
 import 'package:ai_sdk_openui/src/runtime/response_bundle.dart';
 import 'package:test/test.dart';
@@ -41,6 +43,65 @@ void main() {
         '가',
         '丽',
         '中',
+      ],
+    );
+  });
+
+  test('a scripts revision keeps the order of locale-equivalent names', () {
+    final scripts = [
+      for (var i = 0; i < 40; i++) {'name': 'a${'\u0000' * i}', 'code': '$i'},
+    ];
+    final bundle = parseResponseBundle(
+      ']]>openui:content\nroot = A()\n'
+      ']]>openui:scripts{"count":40}\n'
+      '${jsonEncode(scripts)}\n'
+      ']]>openui:end',
+      streaming: false,
+    );
+    final revision = jsonDecode(bundle.scriptRevision!) as List;
+    expect(
+      [for (final script in revision) script['code']],
+      [
+        '0',
+        '1',
+        '2',
+        '3',
+        '4',
+        '5',
+        '6',
+        '7',
+        '8',
+        '9',
+        '10',
+        '11',
+        '12',
+        '13',
+        '14',
+        '15',
+        '16',
+        '17',
+        '18',
+        '19',
+        '20',
+        '21',
+        '22',
+        '23',
+        '24',
+        '25',
+        '26',
+        '27',
+        '28',
+        '29',
+        '30',
+        '31',
+        '32',
+        '33',
+        '34',
+        '35',
+        '36',
+        '37',
+        '38',
+        '39',
       ],
     );
   });

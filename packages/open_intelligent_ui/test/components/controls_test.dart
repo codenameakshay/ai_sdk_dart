@@ -865,6 +865,28 @@ void main() {
       expect(find.text('€-200'), findsOneWidget);
     });
 
+    testWidgets('readout expands finite values at the exponential boundary', (
+      tester,
+    ) async {
+      await pumpProgram(tester, 'root = Slider(1e21, 0, 2e21, 1e20, "L")');
+      expect(find.text('1,000,000,000,000,000,000,000'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('readout rounds decimal ties like Intl', (tester) async {
+      await pumpProgram(
+        tester,
+        'root = Col([Slider(1.005, 0, 2, 0.001, "A"), Slider(-1.005, -2, 0, 0.001, "B")])',
+      );
+      expect(find.text('1.01'), findsOneWidget);
+      expect(find.text('-1.01'), findsOneWidget);
+    });
+
+    testWidgets('readout preserves negative zero', (tester) async {
+      await pumpProgram(tester, 'root = Slider(-0, -1, 1, 0.01, "L")');
+      expect(find.text('-0'), findsOneWidget);
+    });
+
     testWidgets('values clamp into the range, bad ones fall back to min', (
       tester,
     ) async {

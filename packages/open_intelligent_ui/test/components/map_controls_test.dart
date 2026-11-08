@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
@@ -39,6 +41,117 @@ List<fm.Polyline> _lines(WidgetTester tester) => tester
     .toList();
 
 void main() {
+  testWidgets(
+    'an expanded map replaces the routing service for unchanged places',
+    (tester) async {
+      final stale = Completer<List<LatLng>?>();
+      final services = ValueNotifier(
+        OpenUiServices(mapTiles: null, streetRoute: (_) => stale.future),
+      );
+      addTearDown(services.dispose);
+      final session = OpenUiSession(intelligentUi)
+        ..update(
+          'root = Col([Map([MapMarker("A", 10, 20), MapMarker("B", 11, 21)], true)])',
+          streaming: false,
+        );
+      addTearDown(session.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ValueListenableBuilder(
+            valueListenable: services,
+            builder: (context, value, _) => OpenUiScope(
+              services: value,
+              child: Scaffold(
+                body: OpenUiView(
+                  session: session,
+                  builders: intelligentUiBuilders,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 700));
+      await tester.tap(find.text('Expand'));
+      await tester.pump();
+      var calls = 0;
+      services.value = OpenUiServices(
+        mapTiles: null,
+        streetRoute: (_) async {
+          calls++;
+          return [
+            (lat: 10, lng: 20),
+            (lat: 10.5, lng: 20.5),
+            (lat: 11, lng: 21),
+          ];
+        },
+      );
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump(const Duration(seconds: 1));
+      expect(calls, 1);
+      stale.complete([(lat: 0, lng: 0), (lat: 1, lng: 1)]);
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Collapse'), findsOneWidget);
+      expect(_lines(tester).single.points, [
+        const ll.LatLng(10, 20),
+        const ll.LatLng(10.5, 20.5),
+        const ll.LatLng(11, 21),
+      ]);
+    },
+  );
+
+  testWidgets(
+    'an obsolete route cannot overwrite a new request for the same places',
+    (tester) async {
+      const first =
+          'root = Col([Map([MapMarker("A", 10, 20), MapMarker("B", 11, 21)], true)])';
+      const other =
+          'root = Col([Map([MapMarker("C", 30, 40), MapMarker("D", 31, 41)], true)])';
+      final stale = Completer<List<LatLng>?>();
+      var calls = 0;
+      final p = await _pump(
+        tester,
+        first,
+        route: (_) {
+          calls++;
+          return calls == 1
+              ? stale.future
+              : Future.value([
+                  (lat: 10, lng: 20),
+                  (lat: 10.5, lng: 20.5),
+                  (lat: 11, lng: 21),
+                ]);
+        },
+      );
+      await tester.pump(const Duration(milliseconds: 700));
+      p.session.update(other, streaming: false);
+      await tester.pump();
+      p.session.update(first, streaming: false);
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump(const Duration(seconds: 1));
+      expect(calls, 2);
+      expect(_lines(tester).single.points, [
+        const ll.LatLng(10, 20),
+        const ll.LatLng(10.5, 20.5),
+        const ll.LatLng(11, 21),
+      ]);
+      stale.complete([(lat: 0, lng: 0), (lat: 1, lng: 1)]);
+      await tester.pump();
+      await tester.pump();
+      expect(_lines(tester).single.points, [
+        const ll.LatLng(10, 20),
+        const ll.LatLng(10.5, 20.5),
+        const ll.LatLng(11, 21),
+      ]);
+    },
+  );
+
   testWidgets(
     'an expanded map updates places during flight and disposes its overlay',
     (tester) async {

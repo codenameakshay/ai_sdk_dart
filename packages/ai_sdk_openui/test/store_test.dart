@@ -104,6 +104,35 @@ void main() {
       expect(store.get('xs'), [1, 2, 3]);
     });
 
+    test(
+      'nested defaults compare with JavaScript key and number semantics',
+      () {
+        final store = Store()
+          ..initialize({
+            'value': [
+              {2.0: 9007199254740993},
+            ],
+          }, {});
+        var notified = 0;
+        store.listen(() => notified++);
+        store.initialize({
+          'value': [
+            {'2': 9007199254740992.0},
+          ],
+        }, {});
+        expect(notified, 0);
+        store.initialize({
+          'value': [
+            {'2': 3},
+          ],
+        }, {});
+        expect(notified, 1);
+        expect(store.get('value'), [
+          {'2': 3},
+        ]);
+      },
+    );
+
     test('a new default key is added and notifies once', () {
       final store = Store();
       var notified = 0;

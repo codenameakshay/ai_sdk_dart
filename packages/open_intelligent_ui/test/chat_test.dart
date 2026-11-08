@@ -335,6 +335,123 @@ void main() {
     expect(h.controller.status, ChatStatus.ready);
   });
 
+  testWidgets('a plain streaming action edit is saved at commit', (
+    tester,
+  ) async {
+    const program =
+        r'root = Col([Button("Change", @Set($name, "Cy")), Text($name)])'
+        '\n'
+        r'$name = "Ana"';
+    final h = await _pump(tester);
+    await _real(tester, () {
+      unawaited(h.controller.sendMessage(agent: h.chat.agent, text: 'hello'));
+    });
+    await _real(tester, () => h.model.say(program));
+    final session = h.chat.sessionOf(h.controller.streamingMessageId!)!;
+    final button = session.root!.props.elements('children').first;
+    await session.run(
+      button.props.action('action'),
+      label: 'Change',
+      emit: (_) {},
+    );
+    await tester.pump();
+    expect(find.text('Cy'), findsOneWidget);
+    await _real(tester, h.model.finish);
+    expect(
+      h.controller.messages.last.content,
+      ']]>openui:content\n$program\n]]>openui:context\n[{"\$name":"Cy"}]',
+    );
+  });
+
+  testWidgets('saved edits preserve Cloud sections and replace only context', (
+    tester,
+  ) async {
+    const raw =
+        ']]>openui:content?name=Form\n$_greeting\n'
+        ']]>openui:scripts{"count":0}\n[]\n]]>openui:end';
+    final h = await _pump(
+      tester,
+      initial: const [
+        ModelMessage(
+          role: ModelMessageRole.assistant,
+          content: '$raw\n]]>openui:context\n[{"\$name":"Zed"}]',
+        ),
+      ],
+    );
+    var writes = 0;
+    h.controller.addListener(() => writes++);
+    expect(find.text('Hi Zed'), findsOneWidget);
+    for (final name in ['Bo', 'Cy']) {
+      await tester.enterText(find.byType(TextField).first, name);
+      await tester.pump();
+      expect(
+        h.controller.messages.single.content,
+        '$raw\n]]>openui:context\n[{"\$name":"$name"}]',
+      );
+    }
+    await tester.pump();
+    expect(writes, 2);
+    expect(
+      h.chat.sessionOf(h.controller.chatMessages.single.id)!.isStreaming,
+      isFalse,
+    );
+  });
+
+  testWidgets('Cloud framing blocks actions until the answer commits', (
+    tester,
+  ) async {
+    final h = await _pump(tester);
+    await _real(tester, () {
+      unawaited(h.controller.sendMessage(agent: h.chat.agent, text: 'hello'));
+    });
+    await _real(
+      tester,
+      () => h.model.say(
+        ']]>openui:content\nroot = Button("Go", @ToAssistant("go"))',
+      ),
+    );
+    final session = h.chat.sessionOf(h.controller.streamingMessageId!)!;
+    final events = <ActionEvent>[];
+    await session.run(
+      session.root!.props.action('action'),
+      label: 'Go',
+      emit: events.add,
+    );
+    expect(events, isEmpty);
+    await _real(tester, h.model.finish);
+    await session.run(
+      session.root!.props.action('action'),
+      label: 'Go',
+      emit: events.add,
+    );
+    expect(events.single.humanFriendlyMessage, 'go');
+  });
+
+  testWidgets('invalid scripts remain blocked and survive saved edits', (
+    tester,
+  ) async {
+    const raw =
+        ']]>openui:content?name=Form\n$_greeting\n'
+        ']]>openui:scripts\n[]\n]]>openui:end';
+    final h = await _pump(
+      tester,
+      initial: const [
+        ModelMessage(role: ModelMessageRole.assistant, content: raw),
+      ],
+    );
+    final session = h.chat.sessionOf(h.controller.chatMessages.single.id)!;
+    expect(session.isStreaming, isTrue);
+    expect(session.errors.single.message, 'Invalid scripts bundle');
+    await tester.enterText(find.byType(TextField).first, 'Bo');
+    await tester.pump();
+    expect(
+      h.controller.messages.single.content,
+      '$raw\n]]>openui:context\n[{"\$name":"Bo"}]',
+    );
+    expect(session.isStreaming, isTrue);
+    expect(session.errors.single.message, 'Invalid scripts bundle');
+  });
+
   testWidgets('an answer that is not a program renders as prose', (
     tester,
   ) async {

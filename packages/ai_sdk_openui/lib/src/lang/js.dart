@@ -82,8 +82,7 @@ abstract final class Js {
 
   /// JavaScript `Number.prototype.toString()`.
   static String numberToString(num value) {
-    if (value is int) return '$value';
-    final d = value as double;
+    final d = value.toDouble();
     if (d.isNaN) return 'NaN';
     if (d.isInfinite) return d > 0 ? 'Infinity' : '-Infinity';
     if (d == 0) return '0';
@@ -144,31 +143,30 @@ abstract final class Js {
     num() => _jsonNumber(value),
     List() => '[${value.map(stringify).join(',')}]',
     Map() =>
-      '{${_jsKeyOrder(value).map((e) => '${jsonEncode('${e.key}')}:${stringify(e.value)}').join(',')}}',
+      '{${_jsKeyOrder(value).map((e) => '${jsonEncode(e.key)}:${stringify(e.value)}').join(',')}}',
     _ => 'null',
   };
 
   static String _jsonNumber(num value) {
-    if (value is int) return '$value';
+    value = value.toDouble();
     if (!value.isFinite) return 'null';
     if (value == 0) return '0';
     final text = value.toString();
     return text.endsWith('.0') ? text.substring(0, text.length - 2) : text;
   }
 
-  static Iterable<MapEntry<Object?, Object?>> _jsKeyOrder(Map value) {
-    final indexed =
-        [
-          for (final e in value.entries)
-            if (_arrayIndex('${e.key}') != null) e,
-        ]..sort(
-          (a, b) =>
-              _arrayIndex('${a.key}')!.compareTo(_arrayIndex('${b.key}')!),
-        );
+  static Iterable<MapEntry<String, Object?>> _jsKeyOrder(Map value) {
+    final properties = <String, Object?>{
+      for (final e in value.entries) string(e.key): e.value,
+    };
+    final indexed = [
+      for (final e in properties.entries)
+        if (_arrayIndex(e.key) != null) e,
+    ]..sort((a, b) => _arrayIndex(a.key)!.compareTo(_arrayIndex(b.key)!));
     return [
       ...indexed,
-      for (final e in value.entries)
-        if (_arrayIndex('${e.key}') == null) e,
+      for (final e in properties.entries)
+        if (_arrayIndex(e.key) == null) e,
     ];
   }
 

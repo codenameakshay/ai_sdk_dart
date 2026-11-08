@@ -110,17 +110,15 @@ final class OpenUiChat {
   /// still streaming has no committed message yet; it is written on commit.
   void _write(String id) {
     final session = _sessions[id];
-    if (_disposed ||
-        !_unsaved.contains(id) ||
-        session == null ||
-        session.isStreaming) {
+    if (_disposed || !_unsaved.contains(id) || session == null) {
       return;
     }
     final entry = controller.chatMessages.where((m) => m.id == id).firstOrNull;
     final raw = entry?.message.content;
-    if (raw == null) return;
+    if (raw == null || entry!.status == ConversationMessageStatus.streaming) {
+      return;
+    }
     _unsaved.remove(id);
-    final parsed = parseMessage(raw);
     final state = session.state;
     _writing = id;
     try {
@@ -128,7 +126,7 @@ final class OpenUiChat {
         id,
         ModelMessage(
           role: ModelMessageRole.assistant,
-          content: _withState(parsed, state),
+          content: _withState(raw, state),
         ),
       );
     } finally {
@@ -170,7 +168,7 @@ final class OpenUiChat {
               entry.status != ConversationMessageStatus.streaming) {
             final raw = entry.message.content;
             if (raw != null) {
-              session.update(parseMessage(raw).content, streaming: false);
+              session.update(raw, streaming: false);
               _committed(id);
             }
           }
@@ -205,13 +203,33 @@ String actionUserMessage(ActionEvent event) {
   return message.isNotEmpty ? built : built.substring(built.indexOf('\n') + 1);
 }
 
-/// [message] stored again with [state] as its context, as react-ui saves it.
-String _withState(ParsedMessage message, Map<String, Object?> state) =>
-    buildMessage(
-      content: message.content,
-      attributes: message.attributes,
-      context: state.isEmpty ? null : [state],
-    );
+/// Replaces the saved context without dropping Cloud scripts or framing.
+String _withState(String raw, Map<String, Object?> state) {
+  final markers = RegExp(
+    r'^\]\]>openui:([a-z]+)([^\n]*)$',
+    multiLine: true,
+  ).allMatches(raw).toList();
+  bool section(RegExpMatch marker, String kind) =>
+      marker[1] == kind &&
+      (marker[2]!.trim().isEmpty || marker[2]!.startsWith('?'));
+  final content = markers.where((m) => section(m, 'content')).lastOrNull;
+  final context = markers
+      .where((m) => section(m, 'context') && m.start > (content?.start ?? -1))
+      .lastOrNull;
+  final built = buildMessage(
+    content: '',
+    context: state.isEmpty ? null : [state],
+  );
+  final saved = state.isEmpty ? '' : built.substring(built.indexOf('\n') + 2);
+  if (context != null) {
+    final next = markers.where((m) => m.start > context.start).firstOrNull;
+    return raw.substring(0, context.start) +
+        saved +
+        (next == null ? '' : '\n${raw.substring(next.start)}');
+  }
+  final framed = content == null ? buildMessage(content: raw) : raw;
+  return saved.isEmpty ? framed : '$framed\n$saved';
+}
 
 /// react-ui keeps an answer's state as the first item of its context.
 Map<String, Object?> _stateOf(Object? context) => switch (context) {
@@ -257,7 +275,7 @@ class _AnswerState extends State<_Answer> {
   void _sync() {
     _message = parseMessage(widget.raw, streaming: widget.streaming);
     _session = widget.chat._session(widget.id, _message)
-      ..update(_message.content, streaming: widget.streaming);
+      ..update(widget.raw, streaming: widget.streaming);
     if (!widget.streaming) widget.chat._committed(widget.id);
   }
 

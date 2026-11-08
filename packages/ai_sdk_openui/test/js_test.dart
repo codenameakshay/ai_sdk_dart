@@ -230,6 +230,50 @@ void main() {
     );
   });
 
+  test('JSON.stringify rounds integers to JavaScript Number precision', () {
+    expect(
+      Js.stringify([9007199254740993, 9223372036854775807]),
+      '[9007199254740992,9223372036854776000]',
+    );
+  });
+
+  test('JSON.stringify coerces map keys before ordering and overwriting', () {
+    expect(
+      Js.stringify({
+        'tail': true,
+        2.0: 'old',
+        '2': 'new',
+        -0.0: 'zero',
+        [1, 2]: {
+          null: ['nested'],
+        },
+        [
+          [9007199254740993],
+        ]: 'rounded',
+      }),
+      '{"0":"zero","2":"new","tail":true,"1,2":{"null":["nested"]},"9007199254740992":"rounded"}',
+    );
+  });
+
+  test(
+    'JSON.stringify escapes strings and keys, including lone surrogates',
+    () {
+      expect(
+        Js.stringify({
+          'quote"\\': [
+            '\b\t\n\f\r/\u2028\u2029',
+            String.fromCharCode(0xd800),
+            String.fromCharCode(0xdc00),
+            String.fromCharCodes([0xd83d, 0xde00]),
+          ],
+        }),
+        r'{"quote\"\\":["\b\t\n\f\r/'
+        '\u2028\u2029'
+        r'","\ud800","\udc00","😀"]}',
+      );
+    },
+  );
+
   test('JSON.stringify puts array-index keys first, in order', () {
     expect(
       Js.stringify({

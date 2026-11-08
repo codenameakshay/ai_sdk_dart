@@ -1,8 +1,11 @@
+import 'package:flutter/cupertino.dart' show CupertinoDatePicker;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
+import 'package:open_intelligent_ui/src/css_color.dart' show CssGradient;
 
 import '../support/pump.dart';
 
@@ -11,11 +14,11 @@ Color? _color(WidgetTester tester, String text) =>
 
 BoxDecoration _decoration(WidgetTester tester, String text) =>
     tester
-            .widget<Container>(
+            .widget<AnimatedContainer>(
               find
                   .ancestor(
                     of: find.text(text),
-                    matching: find.byType(Container),
+                    matching: find.byType(AnimatedContainer),
                   )
                   .first,
             )
@@ -89,7 +92,7 @@ void main() {
       expect(event.formName, 'f');
       expect(event.formState, {
         'f': {
-          'Name': {'value': 'Ana', 'componentType': 'Input'},
+          'Name': {'value': 'Ana'},
         },
       });
     });
@@ -107,7 +110,7 @@ void main() {
                 find
                     .ancestor(
                       of: find.text(t),
-                      matching: find.byType(Container),
+                      matching: find.byType(AnimatedContainer),
                     )
                     .first,
               )
@@ -198,19 +201,19 @@ void main() {
       await mouse.addPointer(location: Offset.zero);
       addTearDown(mouse.removePointer);
       await mouse.moveTo(tester.getCenter(find.text('Go')));
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
       expect(_decoration(tester, 'Go').color, OpenUiTheme.light.inkHover);
       await mouse.moveTo(tester.getCenter(find.text('Soft')));
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
       expect(_decoration(tester, 'Soft').color, OpenUiTheme.light.pressed);
       await mouse.moveTo(tester.getCenter(find.text('Out')));
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
       expect(_decoration(tester, 'Out').color, isNot(OpenUiTheme.light.canvas));
       await mouse.moveTo(tester.getCenter(find.text('Ghost')));
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
       expect(_decoration(tester, 'Ghost').color, OpenUiTheme.light.hover);
       await mouse.moveTo(tester.getCenter(find.text('Red')));
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
       expect(
         _decoration(tester, 'Red').color,
         isNot(OpenUiTheme.light.status['danger']),
@@ -229,9 +232,46 @@ void main() {
       final gesture = await tester.startGesture(
         tester.getCenter(find.text('Go')),
       );
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
       expect(_decoration(tester, 'Go').color, isNot(OpenUiTheme.light.canvas));
       await gesture.up();
+    });
+
+    testWidgets('a button fades its background over 150ms', (tester) async {
+      await pumpProgram(tester, 'root = Col([Button("Go")])');
+      final box = tester.widget<AnimatedContainer>(
+        find
+            .ancestor(
+              of: find.text('Go'),
+              matching: find.byType(AnimatedContainer),
+            )
+            .first,
+      );
+      expect(box.duration, const Duration(milliseconds: 150));
+      expect(box.curve, Curves.ease);
+    });
+
+    testWidgets('a button with an unknown icon has no icon gap', (
+      tester,
+    ) async {
+      await pumpProgram(
+        tester,
+        'root = Col([Button("Go", null, "solid", null, "md", "nope"), Button("Ok")])',
+      );
+      expect(
+        tester
+            .getSize(
+              find
+                  .ancestor(
+                    of: find.text('Go'),
+                    matching: find.byType(AnimatedContainer),
+                  )
+                  .first,
+            )
+            .width,
+        // "Go" at weight 560 is 28.5px in the test font.
+        62.5,
+      );
     });
   });
 
@@ -296,7 +336,7 @@ void main() {
       addTearDown(mouse.removePointer);
       for (final label in ['a', 'b', 'c']) {
         await mouse.moveTo(tester.getCenter(find.byTooltip(label)));
-        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 200));
       }
       final pumped = await pumpProgram(
         tester,
@@ -318,7 +358,9 @@ void main() {
         'root = Col([Text("n=" + \$n), Pressable([Text("Tile")], @Set(\$n, \$n + 1), \$n == 1, 2)])\n\$n = 0',
       );
       expect(
-        find.byWidgetPredicate((w) => w is Glyph && w.name == 'check'),
+        find.byWidgetPredicate(
+          (w) => w is CustomPaint && w.size == const Size.square(12),
+        ),
         findsNothing,
       );
       await tester.tap(find.text('Tile'));
@@ -326,7 +368,9 @@ void main() {
       expect(pumped.session.state[r'$n'], 1);
       expect(find.text('n=1'), findsOneWidget);
       expect(
-        find.byWidgetPredicate((w) => w is Glyph && w.name == 'check'),
+        find.byWidgetPredicate(
+          (w) => w is CustomPaint && w.size == const Size.square(12),
+        ),
         findsOneWidget,
       );
     });
@@ -434,6 +478,85 @@ void main() {
         1,
       );
     });
+
+    testWidgets('selected is announced as pressed, only when given', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await pumpProgram(
+        tester,
+        'root = Col([Pressable([Text("On")], null, true), Pressable([Text("Plain")])])',
+      );
+      expect(
+        tester.getSemantics(find.text('On')),
+        isSemantics(isButton: true, hasToggledState: true, isToggled: true),
+      );
+      expect(
+        tester.getSemantics(find.text('Plain')),
+        isSemantics(isButton: true, hasToggledState: false),
+      );
+      handle.dispose();
+    });
+
+    testWidgets('a row Box inside counts as a row: no check, no scale', (
+      tester,
+    ) async {
+      await pumpProgram(
+        tester,
+        'root = Pressable([Box([Text("a")], "row")], null, true)',
+      );
+      expect(
+        find.byWidgetPredicate(
+          (w) => w is CustomPaint && w.size == const Size.square(12),
+        ),
+        findsNothing,
+      );
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      addTearDown(mouse.removePointer);
+      await mouse.moveTo(tester.getCenter(find.text('a')));
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(tester.widget<AnimatedScale>(find.byType(AnimatedScale)).scale, 1);
+    });
+
+    testWidgets('struck-through text inside is muted unless it has a color', (
+      tester,
+    ) async {
+      await pumpProgram(
+        tester,
+        'root = Col([Pressable([Text("Done", null, null, null, null, true), Text("Red", null, "danger", null, null, true)]), Text("Free", null, null, null, null, true)])',
+      );
+      Color? ink(String t) =>
+          tester.renderObject<RenderParagraph>(find.text(t)).text.style?.color;
+      expect(ink('Done'), OpenUiTheme.light.muted);
+      expect(ink('Red'), OpenUiTheme.light.status['danger']);
+      expect(ink('Free'), OpenUiTheme.light.ink);
+    });
+
+    testWidgets('a gradient background paints the tile', (tester) async {
+      await pumpProgram(
+        tester,
+        'root = Pressable([Text("G")], null, false, 2, "linear-gradient(90deg, #000000, #ffffff)")',
+      );
+      expect(_decoration(tester, 'G').gradient, isA<CssGradient>());
+    });
+
+    testWidgets('reduced motion keeps the tile still', (tester) async {
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(disableAnimations: true);
+      addTearDown(
+        tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+      );
+      await pumpProgram(tester, 'root = Pressable([Text("Tile")])');
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      addTearDown(mouse.removePointer);
+      await mouse.moveTo(tester.getCenter(find.text('Tile')));
+      await tester.pump();
+      final scale = tester.widget<AnimatedScale>(find.byType(AnimatedScale));
+      expect(scale.scale, 1);
+      expect(scale.duration, Duration.zero);
+    });
   });
 
   group('Input', () {
@@ -513,10 +636,7 @@ void main() {
         expect(find.text('start'), findsOneWidget);
         await tester.enterText(find.byType(TextField).last, 'hello');
         await tester.pump();
-        expect(pumped.session.state['field'], {
-          'value': 'hello',
-          'componentType': 'Input',
-        });
+        expect(pumped.session.state['field'], {'value': 'hello'});
         expect(find.text('hello'), findsOneWidget);
         await tester.enterText(find.byType(TextField).first, 'again');
         await tester.pump();
@@ -545,6 +665,28 @@ void main() {
       expect(decoration.color, OpenUiTheme.dark.canvas);
       expect((decoration.border! as Border).top.color, OpenUiTheme.dark.ink);
       expect(decoration.boxShadow, isNotNull);
+    });
+
+    testWidgets('a field label names the field for assistive technology', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await pumpProgram(
+        tester,
+        'root = Col([Input("", "Name"), DatePicker("2026-03-10", "Due"), DatePicker("2026-03-11")])',
+      );
+      final input = tester.getSemantics(find.byType(TextField));
+      expect(input, isSemantics(isTextField: true));
+      expect(input.label, startsWith('Name'));
+      expect(
+        tester.getSemantics(find.text('03/10/2026')).label,
+        startsWith('Due'),
+      );
+      expect(
+        tester.getSemantics(find.text('03/11/2026')).label,
+        startsWith('Date'),
+      );
+      handle.dispose();
     });
   });
 
@@ -598,6 +740,17 @@ void main() {
       expect(find.text('Blue'), findsOneWidget);
     });
 
+    testWidgets('the select chevron is the reference grey at stroke 1.6px', (
+      tester,
+    ) async {
+      await pumpProgram(tester, 'root = Select("a", ["a", "b"])');
+      final chevron = tester.widget<Glyph>(
+        find.byWidgetPredicate((w) => w is Glyph && w.name == 'chevron-down'),
+      );
+      expect(chevron.strokeWidth, 2.4);
+      expect(chevron.color, const Color(0xFF676767));
+    });
+
     testWidgets('an unknown value shows the default prompt', (tester) async {
       await pumpProgram(
         tester,
@@ -623,7 +776,7 @@ void main() {
       expect(pumped.session.state[r'$m'], 'Day');
       expect(
         tester.widget<Text>(find.text('Day')).style?.fontWeight,
-        FontWeight.w500,
+        OpenUiTheme.weightMedium,
       );
     });
 
@@ -641,11 +794,11 @@ void main() {
         );
         expect(tester.getSize(bars.first).width, view);
         expect(tester.getSize(bars.last).width, lessThan(view / 2));
-        final selected = tester.widget<Container>(
+        final selected = tester.widget<AnimatedContainer>(
           find
               .ancestor(
                 of: find.text('A').first,
-                matching: find.byType(Container),
+                matching: find.byType(AnimatedContainer),
               )
               .first,
         );
@@ -655,6 +808,16 @@ void main() {
         );
       },
     );
+
+    testWidgets('a segmented control is a radio group', (tester) async {
+      final handle = tester.ensureSemantics();
+      await pumpProgram(tester, 'root = SegmentedControl("A", ["A", "B"])');
+      bool inGroup(SemanticsNode n) =>
+          n.parent != null &&
+          (n.parent!.role == SemanticsRole.radioGroup || inGroup(n.parent!));
+      expect(inGroup(tester.getSemantics(find.text('B'))), isTrue);
+      handle.dispose();
+    });
   });
 
   group('Slider', () {
@@ -736,8 +899,43 @@ void main() {
       );
       expect(
         tester.getTopLeft(find.text('Mid')).dy,
-        greaterThan(slider.bottom - 1),
+        closeTo(slider.bottom - 2, 0.01),
       );
+    });
+
+    testWidgets('a bound value is read as Number() reads it', (tester) async {
+      for (final (raw, shown) in [
+        ('"42"', '42'),
+        ('true', '1'),
+        ('" 0x10 "', '16'),
+      ]) {
+        await pumpProgram(
+          tester,
+          'root = Slider(\$v, 0, 100, 1, "L")\n\$v = $raw',
+        );
+        expect(find.text(shown), findsOneWidget, reason: raw);
+      }
+    });
+
+    testWidgets('the track spans the width and the thumb stops 12px in', (
+      tester,
+    ) async {
+      for (final (value, fromLeft) in [(0, true), (100, false)]) {
+        await tester.pumpWidget(const SizedBox());
+        await pumpProgram(tester, 'root = Slider($value, 0, 100, 1, "L")');
+        final width = tester.getSize(find.byType(Slider)).width;
+        expect(
+          tester.renderObject(find.byType(Slider)),
+          paints
+            ..rrect(
+              rrect: RRect.fromRectAndRadius(
+                Rect.fromLTWH(0, 8, width, 24),
+                const Radius.circular(12),
+              ),
+            )
+            ..circle(x: fromLeft ? 12 : width - 12, y: 20, radius: 9),
+        );
+      }
     });
 
     testWidgets('no label or unit shows no readout', (tester) async {
@@ -778,9 +976,25 @@ void main() {
       expect(decoration('Struck'), TextDecoration.none);
       await tester.tap(find.text('Struck'));
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
       expect(decoration('Struck'), TextDecoration.lineThrough);
       expect(_color(tester, 'Struck'), OpenUiTheme.light.muted);
       expect(decoration('Plain'), TextDecoration.none);
+    });
+
+    testWidgets('a checkbox label takes the surrounding text size', (
+      tester,
+    ) async {
+      await pumpProgram(tester, 'root = Col([Checkbox(false, "Milk")])');
+      expect(tester.widget<Text>(find.text('Milk')).style!.fontSize, isNull);
+      expect(
+        tester
+            .renderObject<RenderParagraph>(find.text('Milk'))
+            .text
+            .style!
+            .fontSize,
+        14,
+      );
     });
 
     testWidgets('a plain checkbox is a form field', (tester) async {
@@ -791,10 +1005,7 @@ void main() {
       expect(find.byType(Glyph), findsOneWidget);
       await tester.tap(find.text('Agree'));
       await tester.pump();
-      expect(pumped.session.state['Agree'], {
-        'value': false,
-        'componentType': 'Checkbox',
-      });
+      expect(pumped.session.state['Agree'], {'value': false});
       expect(find.byType(Glyph), findsNothing);
     });
   });
@@ -824,7 +1035,7 @@ void main() {
       expect(_decoration(tester, 'A').color, OpenUiTheme.light.ink);
       expect(_color(tester, 'A'), OpenUiTheme.light.onInk);
       await tester.tap(find.text('B'));
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
       expect(pumped.session.state[r'$s'], 'B');
       expect(_decoration(tester, 'B').color, OpenUiTheme.light.ink);
       expect(_decoration(tester, 'A').color, isNot(OpenUiTheme.light.ink));
@@ -832,7 +1043,7 @@ void main() {
       await mouse.addPointer(location: Offset.zero);
       addTearDown(mouse.removePointer);
       await mouse.moveTo(tester.getCenter(find.text('A')));
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
       expect(_decoration(tester, 'A').color, OpenUiTheme.light.hover);
     });
 
@@ -854,13 +1065,13 @@ void main() {
       );
       expect(
         tester.widget<Text>(find.text('Basic')).style?.fontWeight,
-        FontWeight.w500,
+        OpenUiTheme.weightMedium,
       );
       final ring = (_decoration(tester, 'Basic').border! as Border).top;
       expect(ring.width, 2);
       expect(ring.color, OpenUiTheme.dark.ink);
       await tester.tap(find.text('Pro'));
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
       expect(pumped.session.state[r'$p'], 'b');
       expect((_decoration(tester, 'Pro').border! as Border).top.width, 2);
       expect((_decoration(tester, 'Basic').border! as Border).top.width, 1);
@@ -878,6 +1089,41 @@ void main() {
         tester.getTopLeft(find.text('b')).dy,
         greaterThan(tester.getTopLeft(find.text('a')).dy + 20),
       );
+    });
+
+    testWidgets(
+      'arrow keys move the choice and wrap; Tab stops at the checked one',
+      (tester) async {
+        final pumped = await pumpProgram(
+          tester,
+          'root = RadioGroup(\$v, ["a", "b", "c"], "Pick")\n\$v = "b"',
+        );
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+        for (final (key, expected) in [
+          (LogicalKeyboardKey.arrowDown, 'c'),
+          (LogicalKeyboardKey.arrowRight, 'a'),
+          (LogicalKeyboardKey.arrowUp, 'c'),
+        ]) {
+          await tester.sendKeyEvent(key);
+          await tester.pump();
+          expect(pumped.session.state[r'$v'], expected);
+        }
+      },
+    );
+
+    testWidgets('a radio group is a radio group for assistive technology', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await pumpProgram(tester, 'root = RadioGroup("a", ["a", "b"], "Pick")');
+      final b = tester.getSemantics(find.text('b'));
+      expect(
+        b,
+        isSemantics(isInMutuallyExclusiveGroup: true, isChecked: false),
+      );
+      expect(b.parent!.role, SemanticsRole.radioGroup);
+      handle.dispose();
     });
   });
 
@@ -941,16 +1187,33 @@ void main() {
         await tester.tap(find.text('5'));
         await tester.tap(find.text('OK'));
         await tester.pumpAndSettle();
-        expect(pumped.session.state['A'], {
-          'value': '2029-06-05',
-          'componentType': 'DatePicker',
-        });
+        expect(pumped.session.state['A'], {'value': '2029-06-05'});
         await tester.tap(find.text('mm/dd/yyyy'));
         await tester.pumpAndSettle();
         await tester.tap(find.text('OK'));
         await tester.pumpAndSettle();
         expect((pumped.session.state['B'] as Map)['value'], '2030-01-01');
       },
+    );
+
+    testWidgets(
+      'on iOS the date opens a Cupertino wheel that writes as it turns',
+      (tester) async {
+        final pumped = await pumpProgram(
+          tester,
+          'root = DatePicker(\$d, "Due")\n\$d = "2026-03-10"',
+        );
+        await tester.tap(find.text('03/10/2026'));
+        await tester.pumpAndSettle();
+        tester
+            .widget<CupertinoDatePicker>(find.byType(CupertinoDatePicker))
+            .onDateTimeChanged(DateTime(2026, 3, 15));
+        await tester.tap(find.text('Done'));
+        await tester.pumpAndSettle();
+        expect(pumped.session.state[r'$d'], '2026-03-15');
+        expect(find.byType(CupertinoDatePicker), findsNothing);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.iOS),
     );
   });
 
@@ -1003,11 +1266,11 @@ void main() {
       await tester.pump(const Duration(milliseconds: 200));
       final box =
           tester
-                  .widget<Container>(
+                  .widget<AnimatedContainer>(
                     find
                         .descendant(
                           of: find.byTooltip('More'),
-                          matching: find.byType(Container),
+                          matching: find.byType(AnimatedContainer),
                         )
                         .first,
                   )

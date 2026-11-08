@@ -167,4 +167,16 @@ void main() {
       expect(icon.size, 26);
     },
   );
+
+  testWidgets('a slider is named by its label, or "Value"', (tester) async {
+    final handle = tester.ensureSemantics();
+    await pumpProgram(
+      tester,
+      'root = Col([Slider(5, 0, 10, 1, "Budget"), Slider(5, 0, 10)])',
+    );
+    final sliders = find.byType(Slider);
+    expect(tester.getSemantics(sliders.first).label, 'Budget');
+    expect(tester.getSemantics(sliders.last).label, 'Value');
+    handle.dispose();
+  });
 }

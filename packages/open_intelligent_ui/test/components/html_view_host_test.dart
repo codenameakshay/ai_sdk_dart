@@ -263,7 +263,7 @@ void main() {
       expect(c.html, hasLength(2), reason: 'same page is not reloaded');
     });
 
-    testWidgets('removing the view clears its storage and cache', (
+    testWidgets('removing the view leaves the app web storage alone', (
       tester,
     ) async {
       final platform = _install();
@@ -273,7 +273,7 @@ void main() {
       );
       p.session.update('root = Col([Text("gone")])', streaming: false);
       await tester.pump();
-      expect(platform.controllers.single.cleared, 2);
+      expect(platform.controllers.single.cleared, 0);
     });
 
     testWidgets('while streaming the page is not loaded at all', (

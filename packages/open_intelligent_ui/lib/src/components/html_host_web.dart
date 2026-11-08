@@ -22,6 +22,7 @@ Widget htmlPageHost({
 Widget youTubeHost({
   required String id,
   required String title,
+  String? referrer,
 }) => HtmlElementView.fromTagName(
   tagName: 'iframe',
   onElementCreated: (element) {

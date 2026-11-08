@@ -24,6 +24,11 @@ const htmlViewStartHeight = 360.0;
 /// native web views, or to the parent window on the web.
 enum HeightReport { channel, parent }
 
+// Native pages get no storage: the sandboxed reference frame has an opaque
+// origin, and a native web view would otherwise share the app's stores.
+const _denyStorage =
+    '<script>(function(){function deny(n){try{Object.defineProperty(window,n,{configurable:false,get:function(){throw new DOMException("The document is sandboxed","SecurityError")}})}catch(e){}}deny("localStorage");deny("sessionStorage");deny("indexedDB");try{Object.defineProperty(document,"cookie",{get:function(){return""},set:function(){}})}catch(e){}})()</script>';
+
 String _reporter(HeightReport to) {
   final post = switch (to) {
     HeightReport.channel =>
@@ -48,6 +53,7 @@ String htmlViewDocument(
     '<meta name="viewport" content="width=device-width,initial-scale=1">'
     '<style>:root{color-scheme:${dark ? 'dark' : 'light'}}html,body{margin:0}'
     'body{font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}</style>'
+    '${report == HeightReport.channel ? _denyStorage : ''}'
     '${_reporter(report)}$html';
 
 /// A reported height, clamped; null when it is not a finite number.

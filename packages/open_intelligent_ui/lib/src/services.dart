@@ -15,8 +15,12 @@ final class OpenUiServices {
     this.searchImages,
     this.streetRoute,
     this.mapTiles = esriStreetTiles,
+    this.embedReferrer,
   }) : _openUrl = openUrl,
        _copyText = copyText;
+
+  /// The Referer native YouTube embeds send, such as https://com.example.app.
+  final String? embedReferrer;
 
   final Future<void> Function(Uri url)? _openUrl;
   final Future<void> Function(String text)? _copyText;

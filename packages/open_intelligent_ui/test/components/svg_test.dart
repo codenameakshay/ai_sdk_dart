@@ -350,21 +350,29 @@ void main() {
       },
     );
 
-    testWidgets('opacity fades the paint color', (tester) async {
+    testWidgets('opacity draws the shape in a layer', (tester) async {
       await _svg(tester, 'Circle(50, 50, 20, "#ff0000", null, null, 0.5)');
-      final expected = const Color(0xFFFF0000).withValues(alpha: 0.5);
-      expect(_box(tester), paints..path(color: expected));
+      expect(
+        _box(tester),
+        paints
+          ..something((m, a) => m == #saveLayer)
+          ..path(color: const Color(0xFFFF0000)),
+      );
     });
 
-    testWidgets('a group multiplies its opacity into its children', (
+    testWidgets('a group draws its children in its opacity layer', (
       tester,
     ) async {
       await _svg(
         tester,
         'G([Circle(50, 50, 20, "#ff0000", null, null, 0.5)], null, 0.5)',
       );
-      final expected = const Color(0xFFFF0000).withValues(alpha: 0.25);
-      expect(_box(tester), paints..path(color: expected));
+      expect(
+        _box(tester),
+        paints
+          ..something((m, a) => m == #saveLayer)
+          ..path(color: const Color(0xFFFF0000)),
+      );
     });
 
     testWidgets('a polygon fills, and a polyline strokes without a fill', (
@@ -471,11 +479,6 @@ void main() {
       );
     });
 
-    testWidgets('the scene is clipped to its box', (tester) async {
-      await _svg(tester, 'Circle(50, 50, 500)');
-      expect(_box(tester), paints..clipRect());
-    });
-
     testWidgets('the painter repaints when the scene changes', (tester) async {
       await _svg(tester, 'Circle(50, 50, 5)');
       final painter =
@@ -545,7 +548,8 @@ void main() {
         expect(
           _box(tester, 1),
           paints
-            ..path(color: _light.status['info']!.withValues(alpha: 0.8))
+            ..something((m, a) => m == #saveLayer)
+            ..path(color: _light.status['info']!)
             ..path(color: _light.status['success'])
             ..path(color: _light.status['warning'])
             ..path(

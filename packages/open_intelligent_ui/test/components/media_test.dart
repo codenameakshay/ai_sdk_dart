@@ -1,10 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
+import 'package:open_intelligent_ui/src/components/media.dart' show Photo;
 
 import '../support/pump.dart';
 
@@ -130,19 +133,73 @@ void main() {
         expect(
           find.descendant(
             of: find.byWidget(glyphs[2]),
-            matching: find.byType(Text),
+            matching: find.byType(CustomPaint),
           ),
           findsNothing,
         );
         expect(
           find.descendant(
             of: find.byWidget(glyphs[0]),
-            matching: find.byType(Text),
+            matching: find.byType(CustomPaint),
           ),
           findsOneWidget,
         );
       },
     );
+
+    testWidgets('names resolve in any case or spacing, and aliases too', (
+      tester,
+    ) async {
+      await pumpProgram(
+        tester,
+        'root = Row([Icon("MapPin"), Icon("map_pin"), Icon(" map pin "), Icon("alarm-check")], 2)',
+      );
+      expect(
+        find.descendant(
+          of: find.byType(Glyph),
+          matching: find.byType(CustomPaint),
+        ),
+        findsNWidgets(4),
+      );
+    });
+
+    testWidgets('strokes are 1.8 grid units wide, scaled with the size', (
+      tester,
+    ) async {
+      Future<int Function(int y)> alphaDownTheMiddle(double strokeWidth) async {
+        const key = Key('glyph');
+        await tester.pumpWidget(
+          Center(
+            child: RepaintBoundary(
+              key: key,
+              child: Glyph(
+                'minus',
+                size: 240,
+                color: const Color(0xFF000000),
+                strokeWidth: strokeWidth,
+              ),
+            ),
+          ),
+        );
+        final boundary = tester.renderObject<RenderRepaintBoundary>(
+          find.byKey(key),
+        );
+        final image = (await tester.runAsync(() => boundary.toImage()))!;
+        final bytes = (await tester.runAsync(
+          () => image.toByteData(format: ui.ImageByteFormat.rawStraightRgba),
+        ))!;
+        return (y) => bytes.getUint8((y * image.width + 120) * 4 + 3);
+      }
+
+      // "minus" is M5 12h14: at size 240 its centre line is y = 120.
+      final thin = await alphaDownTheMiddle(1.8);
+      expect([thin(110), thin(111), thin(128), thin(129)], [0, 255, 255, 0]);
+      final lucide = await alphaDownTheMiddle(2);
+      expect(
+        [lucide(109), lucide(110), lucide(129), lucide(130)],
+        [0, 255, 255, 0],
+      );
+    });
   });
 
   group('Photo without a search service', () {
@@ -257,6 +314,60 @@ void main() {
         expect(box.color, OpenUiTheme.dark.surface);
       },
     );
+
+    testWidgets('a photo in a row is 4:3 whatever its aspect ratio', (
+      tester,
+    ) async {
+      await pumpProgram(
+        tester,
+        'root = Col([r, b])\n'
+        'r = Row([Image("https://example.com/a.jpg", "Tram", 1), Text("Tram 28")])\n'
+        'b = Row([Box([SearchImage("Alcatraz", 2)]), Text("Island")])',
+      );
+      final sizes = tester
+          .widgetList<AspectRatio>(find.byType(AspectRatio))
+          .map((a) => a.aspectRatio)
+          .toList();
+      expect(sizes, [4 / 3, 4 / 3]);
+      expect(
+        tester.getSize(find.byType(AspectRatio).first),
+        const Size(200, 150),
+      );
+    });
+
+    testWidgets(
+      'a loaded photo fades in over 300ms, or at once with reduced motion',
+      (tester) async {
+        Finder fade() => find.descendant(
+          of: find.byType(Photo),
+          matching: find.byType(AnimatedOpacity),
+        );
+        await pumpProgram(
+          tester,
+          'root = Col([Image("https://example.com/a.jpg", "Tram")])',
+        );
+        expect(
+          tester.widget<AnimatedOpacity>(fade()).duration,
+          const Duration(milliseconds: 300),
+        );
+        expect(tester.widget<AnimatedOpacity>(fade()).curve, Curves.ease);
+        tester.platformDispatcher.accessibilityFeaturesTestValue =
+            const FakeAccessibilityFeatures(disableAnimations: true);
+        addTearDown(
+          tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+        );
+        await pumpProgram(
+          tester,
+          'root = Col([Image("https://example.com/b.jpg", "Bus")])',
+        );
+        expect(tester.widget<AnimatedOpacity>(fade()).duration, Duration.zero);
+      },
+    );
+
+    testWidgets('the empty photo icon is drawn at stroke 1.5', (tester) async {
+      await pumpProgram(tester, 'root = Col([SearchImage("Alcatraz")])');
+      expect(tester.widget<Glyph>(find.byType(Glyph)).strokeWidth, 1.5);
+    });
   });
 
   group('Photo with a search service', () {

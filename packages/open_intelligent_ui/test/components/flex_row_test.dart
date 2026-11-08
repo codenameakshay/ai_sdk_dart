@@ -133,7 +133,7 @@ void main() {
         FlexRow(gap: 10, children: [_box(_a, 100, 20), _box(_b, 50, 40)]),
       );
       final row = _render(tester);
-      expect(row.getMinIntrinsicWidth(double.infinity), 0);
+      expect(row.getMinIntrinsicWidth(double.infinity), 160);
       expect(row.getMaxIntrinsicWidth(double.infinity), 160);
     });
 
@@ -229,6 +229,103 @@ void main() {
         const Size(200, 100),
       );
       expect(tester.getSize(find.byKey(_a)), const Size(200, 200));
+    });
+  });
+
+  group('FlexRow wrapping and align-self', () {
+    testWidgets('a child that does not fit starts the next line, a gap below', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        FlexRow(
+          wrap: true,
+          gap: 10,
+          children: [_box(_a, 300, 20), _box(_b, 200, 40)],
+        ),
+      );
+      expect(_at(tester, _b), const Offset(0, 30));
+      expect(tester.getSize(find.byType(FlexRow)), const Size(400, 70));
+      final row = _render(tester);
+      expect(
+        row.getDryLayout(const BoxConstraints(maxWidth: 400)),
+        const Size(400, 70),
+      );
+      expect(row.getMinIntrinsicWidth(double.infinity), 300);
+    });
+
+    testWidgets('a Spacer and a grower take the free space of their own line', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        FlexRow(
+          wrap: true,
+          children: [
+            _box(_a, 100, 20),
+            const FlexRowItem(spacer: true, child: SizedBox.shrink()),
+            _box(_b, 100, 20),
+          ],
+        ),
+      );
+      expect(_at(tester, _b), const Offset(300, 0));
+      await _pump(
+        tester,
+        FlexRow(
+          wrap: true,
+          gap: 10,
+          children: [
+            _box(_a, 300, 20),
+            FlexRowItem(
+              grow: 1,
+              zeroBasis: true,
+              child: SizedBox(key: _b, height: 20),
+            ),
+          ],
+        ),
+      );
+      expect(tester.getSize(find.byKey(_b)), const Size(90, 20));
+    });
+
+    testWidgets('each line justifies on its own', (tester) async {
+      await _pump(
+        tester,
+        FlexRow(
+          wrap: true,
+          justify: FlexJustify.end,
+          gap: 10,
+          children: [_box(_a, 300, 20), _box(_b, 200, 40)],
+        ),
+      );
+      expect(_at(tester, _a), const Offset(100, 0));
+      expect(_at(tester, _b), const Offset(200, 30));
+    });
+
+    testWidgets('alignSelf overrides the row align', (tester) async {
+      await _pump(
+        tester,
+        FlexRow(
+          align: FlexAlign.start,
+          children: [
+            FlexRowItem(alignSelf: FlexAlign.center, child: _box(_a, 50, 20)),
+            _box(_b, 50, 60),
+          ],
+        ),
+      );
+      expect(_at(tester, _a), const Offset(0, 20));
+      await _pump(
+        tester,
+        FlexRow(
+          children: [
+            FlexRowItem(
+              alignSelf: FlexAlign.stretch,
+              child: SizedBox(key: _a, width: 50),
+            ),
+            _box(_b, 50, 60),
+          ],
+        ),
+      );
+      expect(tester.getSize(find.byKey(_a)), const Size(50, 60));
     });
   });
 }

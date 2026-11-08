@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:ai_sdk_openui/ai_sdk_openui.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:latlong2/latlong.dart' as ll;
@@ -10,7 +12,6 @@ import 'package:latlong2/latlong.dart' as ll;
 import '../services.dart';
 import '../theme.dart';
 import '../view.dart';
-import 'flex_row.dart';
 import 'glyph.dart';
 
 /// Shapes and pins live inside a Map, which draws them; alone they are nothing.
@@ -106,6 +107,34 @@ List<Place> placesOf(List<OpenUiElement> markers, {required bool streaming}) {
   return out;
 }
 
+/// The first points of [points], cut at [progress] (0 to 1) of its length.
+List<LatLng> partialLine(List<LatLng> points, double progress) {
+  final lengths = [
+    for (var i = 1; i < points.length; i++)
+      math.sqrt(
+        math.pow(points[i].lat - points[i - 1].lat, 2).toDouble() +
+            math.pow(points[i].lng - points[i - 1].lng, 2).toDouble(),
+      ),
+  ];
+  var remaining = lengths.fold(0.0, (a, b) => a + b) * progress;
+  final out = <LatLng>[points.first];
+  for (var i = 0; i < lengths.length; i++) {
+    final a = points[i], b = points[i + 1];
+    if (remaining >= lengths[i]) {
+      out.add(b);
+      remaining -= lengths[i];
+      continue;
+    }
+    final t = lengths[i] > 0 ? remaining / lengths[i] : 0.0;
+    out.add((
+      lat: a.lat + (b.lat - a.lat) * t,
+      lng: a.lng + (b.lng - a.lng) * t,
+    ));
+    break;
+  }
+  return out;
+}
+
 /// `Map(markers, route?, selected?, height?)`.
 Widget buildMap(BuildContext context, OpenUiNode node) => StreetMap(
   places: placesOf(node.props.elements('markers'), streaming: node.isStreaming),
@@ -134,16 +163,27 @@ class StreetMap extends StatefulWidget {
   State<StreetMap> createState() => _StreetMapState();
 }
 
-class _StreetMapState extends State<StreetMap> {
+const _glassShadow = [
+  BoxShadow(color: Color(0x14000000), offset: Offset(0, 2), blurRadius: 12),
+];
+
+class _StreetMapState extends State<StreetMap>
+    with SingleTickerProviderStateMixin {
   final fm.MapController _controller = fm.MapController();
+  late final AnimationController _line;
+  final Map<int, Offset> _touches = {};
   String _group = 'all';
   bool _info = false;
   bool _ready = false;
+  bool _hint = false;
+  bool _lineDrawn = false;
   String _framed = '';
   String? _routeKey;
   List<LatLng>? _street;
   bool _routeFailed = false;
+  String? _failedTiles;
   Timer? _routeDebounce;
+  Timer? _hintTimer;
 
   List<Place> get _visible => [
     for (final p in widget.places)
@@ -155,6 +195,21 @@ class _StreetMapState extends State<StreetMap> {
   ];
 
   String get _routingKey => _visible.map((p) => '${p.lng},${p.lat}').join(';');
+
+  List<LatLng> get _routePositions {
+    if (!widget.route || _visible.length < 2) return const [];
+    return _street ?? [for (final p in _visible) (lat: p.lat, lng: p.lng)];
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _line = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 760),
+      value: 1,
+    );
+  }
 
   @override
   void didChangeDependencies() {
@@ -173,6 +228,8 @@ class _StreetMapState extends State<StreetMap> {
   @override
   void dispose() {
     _routeDebounce?.cancel();
+    _hintTimer?.cancel();
+    _line.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -214,7 +271,22 @@ class _StreetMapState extends State<StreetMap> {
     if (signature == _framed) return;
     _framed = signature;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _fit(const EdgeInsets.fromLTRB(72, 70, 72, 50), maxZoom: 13);
+      if (!mounted) return;
+      _fit(const EdgeInsets.fromLTRB(72, 70, 72, 50), maxZoom: 13);
+      _drawLine();
+    });
+  }
+
+  /// Draws the route once, after framing; later changes update it in place.
+  void _drawLine() {
+    if (_lineDrawn || _routePositions.length < 2) return;
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _line.value = 1;
+      _lineDrawn = true;
+      return;
+    }
+    _line.forward(from: 0).then((_) {
+      _lineDrawn = true;
     });
   }
 
@@ -232,6 +304,46 @@ class _StreetMapState extends State<StreetMap> {
         maxZoom: maxZoom,
       ),
     );
+  }
+
+  void _zoom(double by) {
+    final camera = _controller.camera;
+    _controller.move(camera.center, camera.zoom + by);
+  }
+
+  void _tilesFailed(String url) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _failedTiles != url) setState(() => _failedTiles = url);
+    });
+  }
+
+  void _touchDown(PointerDownEvent event) {
+    if (event.kind != PointerDeviceKind.touch) return;
+    _touches[event.pointer] = event.position;
+    _hintTimer?.cancel();
+  }
+
+  void _touchMove(PointerMoveEvent event) {
+    final start = _touches[event.pointer];
+    if (event.kind != PointerDeviceKind.touch ||
+        start == null ||
+        _hint ||
+        _touches.length != 1 ||
+        (event.position - start).distance <= 18) {
+      return;
+    }
+    setState(() => _hint = true);
+  }
+
+  void _touchUp(PointerEvent event) {
+    if (_touches.remove(event.pointer) == null ||
+        _touches.isNotEmpty ||
+        !_hint) {
+      return;
+    }
+    _hintTimer = Timer(const Duration(seconds: 1), () {
+      if (mounted) setState(() => _hint = false);
+    });
   }
 
   Future<void> _expand() {
@@ -256,21 +368,98 @@ class _StreetMapState extends State<StreetMap> {
     );
   }
 
+  Widget _filter(OpenUiTheme theme, List<String> categories) => Semantics(
+    label: 'Filter places',
+    container: true,
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 180),
+      child: _Glass(
+        child: Stack(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 30, 8),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: _group,
+                  isDense: true,
+                  icon: const SizedBox.shrink(),
+                  style: TextStyle(fontSize: 12, height: 1.5, color: theme.ink),
+                  dropdownColor: theme.canvas,
+                  items: [
+                    const DropdownMenuItem(
+                      value: 'all',
+                      child: Text(
+                        'All places',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    for (final c in categories)
+                      DropdownMenuItem(
+                        value: c,
+                        child: Text(
+                          c,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                  ],
+                  onChanged: (v) {
+                    setState(() => _group = v ?? 'all');
+                    _syncRoute();
+                    _frame();
+                  },
+                ),
+              ),
+            ),
+            Positioned(
+              right: 10,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: Glyph('chevron-down', size: 14, color: theme.ink),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+
+  Widget _zoomButton(OpenUiTheme theme, String label, String icon, double by) {
+    return Tooltip(
+      message: label,
+      child: Semantics(
+        button: true,
+        label: label,
+        child: InkWell(
+          onTap: () => _zoom(by),
+          child: SizedBox.square(
+            dimension: 28,
+            child: Center(child: Glyph(icon, size: 16, color: theme.ink)),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = OpenUiTheme.of(context);
     final services = OpenUiScope.servicesOf(context);
     final tiles = services.mapTiles;
+    final tileUrl = tiles == null
+        ? null
+        : theme.brightness == Brightness.dark
+        ? tiles.dark
+        : tiles.light;
+    final tilesFailed = tileUrl != null && _failedTiles == tileUrl;
     final selected = widget.selection.value is String
         ? widget.selection.value as String
         : null;
     final visible = _visible;
     final categories = _categories;
-    final linePoints = !widget.route || visible.length < 2
-        ? const <ll.LatLng>[]
-        : _street != null
-        ? [for (final p in _street!) ll.LatLng(p.lat, p.lng)]
-        : [for (final p in visible) p.point];
+    final positions = _routePositions;
     final routeKind = !widget.route
         ? 'none'
         : _street != null
@@ -283,6 +472,33 @@ class _StreetMapState extends State<StreetMap> {
       _ =>
         ' The line joins the places in order. Street routing is loading or unavailable.',
     };
+    final routeStatus = switch (routeKind) {
+      'street' => 'Street route loaded.',
+      'overview' => 'Street routing unavailable. Showing direct connections.',
+      'loading' => 'Street route loading.',
+      _ => '',
+    };
+    final touch = switch (defaultTargetPlatform) {
+      TargetPlatform.android ||
+      TargetPlatform.iOS ||
+      TargetPlatform.fuchsia => true,
+      _ => false,
+    };
+    // Touch platforms scroll the page with one finger; two fingers move the map.
+    final flags = touch
+        ? fm.InteractiveFlag.all &
+              ~fm.InteractiveFlag.drag &
+              ~fm.InteractiveFlag.flingAnimation &
+              ~fm.InteractiveFlag.rotate &
+              ~fm.InteractiveFlag.scrollWheelZoom
+        : fm.InteractiveFlag.all &
+              ~fm.InteractiveFlag.rotate &
+              ~fm.InteractiveFlag.scrollWheelZoom;
+    // Pins with the selected one last, so it paints over its neighbours.
+    final ordered = [
+      ...visible.where((p) => p.label != selected),
+      ...visible.where((p) => p.label == selected),
+    ];
     final map = fm.FlutterMap(
       mapController: _controller,
       options: fm.MapOptions(
@@ -291,45 +507,43 @@ class _StreetMapState extends State<StreetMap> {
             : visible.first.point,
         initialZoom: visible.isEmpty ? 1 : 10.5,
         backgroundColor: theme.mapWater,
-        interactionOptions: const fm.InteractionOptions(
-          flags:
-              fm.InteractiveFlag.all &
-              ~fm.InteractiveFlag.rotate &
-              ~fm.InteractiveFlag.scrollWheelZoom,
-        ),
+        interactionOptions: fm.InteractionOptions(flags: flags),
         onMapReady: () {
           _ready = true;
           _frame();
         },
       ),
       children: [
-        if (tiles != null)
+        if (tileUrl != null)
           fm.TileLayer(
-            urlTemplate: theme.brightness == Brightness.dark
-                ? tiles.dark
-                : tiles.light,
+            urlTemplate: tileUrl,
             userAgentPackageName: 'dev.ai_sdk_dart.open_intelligent_ui',
+            errorTileCallback: (tile, error, stackTrace) =>
+                _tilesFailed(tileUrl),
           ),
-        if (linePoints.length > 1)
-          fm.PolylineLayer(
-            polylines: [
-              fm.Polyline(
-                points: linePoints,
-                color: theme.ink,
-                strokeWidth: 3.2,
-                strokeCap: StrokeCap.round,
-              ),
-            ],
+        if (positions.length > 1)
+          ListenableBuilder(
+            listenable: _line,
+            builder: (context, _) => fm.PolylineLayer(
+              polylines: [
+                fm.Polyline(
+                  points: _drawn(positions),
+                  color: theme.ink,
+                  strokeWidth: 3.2,
+                  strokeCap: StrokeCap.round,
+                ),
+              ],
+            ),
           ),
         fm.MarkerLayer(
           markers: [
-            for (final p in visible)
+            for (final p in ordered)
               fm.Marker(
-                key: ValueKey(p.key),
+                key: ValueKey('pin:${p.key}'),
                 point: p.point,
-                width: 120,
-                height: 64,
-                alignment: const Alignment(0, 0.45),
+                width: 160,
+                height: 52,
+                alignment: Alignment(0, 1 - 34 / 52),
                 child: _Pin(
                   place: p,
                   selected: selected == p.label,
@@ -347,13 +561,14 @@ class _StreetMapState extends State<StreetMap> {
     );
     return LayoutBuilder(
       builder: (context, constraints) {
-        final width = constraints.maxWidth.isFinite
-            ? constraints.maxWidth
-            : 360.0;
         final requested = (widget.height ?? 400).clamp(200.0, 720.0);
+        // Phones get a shorter map so it never fills the whole screen.
         final height = widget.height == double.infinity
             ? constraints.maxHeight
-            : math.min(requested, math.max(280.0, width * 0.82));
+            : math.min(
+                requested,
+                math.max(280.0, MediaQuery.sizeOf(context).width * 0.82),
+              );
         return Semantics(
           container: true,
           label: 'Map',
@@ -363,60 +578,45 @@ class _StreetMapState extends State<StreetMap> {
               borderRadius: BorderRadius.circular(OpenUiTheme.radius2xl),
               child: Stack(
                 children: [
-                  Positioned.fill(child: map),
-                  Positioned(
-                    top: 12,
-                    left: 12,
-                    right: 12,
-                    child: FlexRow(
-                      gap: 6,
-                      children: [
-                        if (categories.length > 1) ...[
-                          ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 170),
-                            child: _Glass(
-                              child: DropdownButtonHideUnderline(
-                                child: DropdownButton<String>(
-                                  value: _group,
-                                  isDense: true,
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: theme.ink,
-                                  ),
-                                  dropdownColor: theme.canvas,
-                                  items: [
-                                    const DropdownMenuItem(
-                                      value: 'all',
-                                      child: Text(
-                                        'All places',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                    for (final c in categories)
-                                      DropdownMenuItem(
-                                        value: c,
-                                        child: Text(
-                                          c,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                  ],
-                                  isExpanded: true,
-                                  onChanged: (v) {
-                                    setState(() => _group = v ?? 'all');
-                                    _syncRoute();
-                                    _frame();
-                                  },
-                                ),
+                  Positioned.fill(
+                    child: Listener(
+                      onPointerDown: _touchDown,
+                      onPointerMove: _touchMove,
+                      onPointerUp: _touchUp,
+                      onPointerCancel: _touchUp,
+                      child: map,
+                    ),
+                  ),
+                  if (_hint)
+                    const Positioned.fill(
+                      child: IgnorePointer(
+                        child: ColoredBox(
+                          color: Color(0x66000000),
+                          child: Center(
+                            child: Text(
+                              'Use two fingers to move the map',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 20,
                               ),
                             ),
                           ),
-                        ],
-                        FlexRowItem(
-                          shrink: false,
+                        ),
+                      ),
+                    ),
+                  Positioned(
+                    top: 12,
+                    left: 12,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      spacing: 8,
+                      children: [
+                        if (categories.length > 1) _filter(theme, categories),
+                        SizedBox.square(
+                          dimension: 34,
                           child: _Glass(
+                            circle: true,
                             tooltip: 'Show every place',
                             onTap: () => _fit(
                               const EdgeInsets.fromLTRB(34, 55, 40, 35),
@@ -424,69 +624,153 @@ class _StreetMapState extends State<StreetMap> {
                             ),
                             child: Glyph(
                               'navigation',
-                              size: 16,
+                              size: 22,
                               color: theme.ink,
                             ),
                           ),
                         ),
-                        FlexRowItem(
-                          shrink: false,
+                        SizedBox.square(
+                          dimension: 34,
                           child: _Glass(
+                            circle: true,
                             tooltip: 'About this map',
                             onTap: () => setState(() => _info = !_info),
-                            child: Glyph('info', size: 16, color: theme.ink),
+                            child: Glyph('info', size: 18, color: theme.ink),
                           ),
                         ),
-                        const FlexRowItem(
-                          spacer: true,
-                          child: SizedBox.shrink(),
-                        ),
-                        if (widget.height != double.infinity)
-                          FlexRowItem(
-                            shrink: false,
-                            child: _Glass(
-                              onTap: _expand,
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    'Expand',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      color: theme.ink,
-                                    ),
-                                  ),
-                                  Glyph('expand', size: 14, color: theme.ink),
-                                ],
-                              ),
-                            ),
-                          ),
                       ],
+                    ),
+                  ),
+                  if (widget.height != double.infinity)
+                    Positioned(
+                      top: 12,
+                      right: 12,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(minHeight: 28),
+                        child: _Glass(
+                          onTap: _expand,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            spacing: 6,
+                            children: [
+                              Text(
+                                'Expand',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  height: 1.5,
+                                  fontWeight: FontWeight.w500,
+                                  color: theme.ink,
+                                ),
+                              ),
+                              Glyph('expand', size: 14, color: theme.ink),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  Positioned(
+                    right: 10,
+                    bottom: 10,
+                    child: DecoratedBox(
+                      decoration: const BoxDecoration(
+                        borderRadius: BorderRadius.all(Radius.circular(10)),
+                        boxShadow: _glassShadow,
+                      ),
+                      child: Material(
+                        color: theme.glass,
+                        clipBehavior: Clip.antiAlias,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          side: BorderSide(color: theme.glassRing),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _zoomButton(theme, 'Zoom in', 'plus', 1),
+                            _zoomButton(theme, 'Zoom out', 'minus', -1),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                   if (_info)
                     Positioned(
                       top: 56,
                       left: 12,
-                      right: 12,
-                      child: _Glass(
-                        child: Text(
-                          'Drag to explore and pinch to zoom. Select a place to highlight it.$routeNote',
-                          style: TextStyle(fontSize: 12, color: theme.ink),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 275),
+                        child: _Card(
+                          child: Text(
+                            'Drag to explore and use + and − to zoom. Select a place to highlight it.$routeNote',
+                            style: TextStyle(
+                              fontSize: 12,
+                              height: 1.5,
+                              color: theme.muted,
+                            ),
+                          ),
                         ),
                       ),
                     ),
                   if (routeKind == 'overview')
                     Positioned(
-                      bottom: 12,
-                      right: 12,
-                      child: _Glass(
-                        child: Text(
-                          'Route overview',
-                          style: TextStyle(fontSize: 12, color: theme.ink),
+                      bottom: 22,
+                      left: 12,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: theme.canvas.withValues(alpha: 0.92),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 2,
+                          ),
+                          child: Text(
+                            'Route overview',
+                            style: TextStyle(
+                              fontSize: 10,
+                              height: 1.6,
+                              color: theme.muted,
+                            ),
+                          ),
                         ),
                       ),
                     ),
+                  if (tilesFailed)
+                    Positioned(
+                      bottom: 28,
+                      left: 12,
+                      child: Semantics(
+                        liveRegion: true,
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 275),
+                          child: _Card(
+                            child: Text(
+                              'Map tiles are temporarily unavailable. The places are still shown.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                height: 1.5,
+                                color: theme.muted,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  Positioned(
+                    left: 0,
+                    top: 0,
+                    child: Semantics(
+                      container: true,
+                      liveRegion: true,
+                      label: routeStatus,
+                      child: const SizedBox.shrink(),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -495,36 +779,97 @@ class _StreetMapState extends State<StreetMap> {
       },
     );
   }
+
+  List<ll.LatLng> _drawn(List<LatLng> positions) {
+    final t = _line.value;
+    final points = t >= 1
+        ? positions
+        : partialLine(
+            positions,
+            t < 0.5 ? 2 * t * t : 1 - (2 - 2 * t) * (2 - 2 * t) / 2,
+          );
+    return [for (final p in points) ll.LatLng(p.lat, p.lng)];
+  }
 }
 
-class _Glass extends StatelessWidget {
-  const _Glass({required this.child, this.onTap, this.tooltip});
+class _Glass extends StatefulWidget {
+  const _Glass({
+    required this.child,
+    this.onTap,
+    this.tooltip,
+    this.circle = false,
+    this.padding = EdgeInsets.zero,
+  });
   final Widget child;
   final VoidCallback? onTap;
   final String? tooltip;
+  final bool circle;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  State<_Glass> createState() => _GlassState();
+}
+
+class _GlassState extends State<_Glass> {
+  bool _hover = false;
 
   @override
   Widget build(BuildContext context) {
     final theme = OpenUiTheme.of(context);
-    Widget box = Material(
-      color: theme.glass,
-      shape: StadiumBorder(side: BorderSide(color: theme.glassRing)),
-      child: InkWell(
-        customBorder: const StadiumBorder(),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: child,
+    final ring = _hover ? theme.glassRingHover : theme.glassRing;
+    final OutlinedBorder shape = widget.circle
+        ? CircleBorder(side: BorderSide(color: ring))
+        : StadiumBorder(side: BorderSide(color: ring));
+    Widget box = DecoratedBox(
+      decoration: BoxDecoration(
+        shape: widget.circle ? BoxShape.circle : BoxShape.rectangle,
+        borderRadius: widget.circle ? null : BorderRadius.circular(999),
+        boxShadow: _glassShadow,
+      ),
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: Material(
+          color: _hover ? theme.glassHover : theme.glass,
+          shape: shape,
+          child: InkWell(
+            customBorder: shape,
+            onTap: widget.onTap,
+            child: Center(
+              widthFactor: 1,
+              heightFactor: 1,
+              child: Padding(padding: widget.padding, child: widget.child),
+            ),
+          ),
         ),
       ),
     );
-    if (tooltip != null) {
+    if (widget.tooltip != null) {
       box = Tooltip(
-        message: tooltip!,
-        child: Semantics(button: true, label: tooltip, child: box),
+        message: widget.tooltip!,
+        child: Semantics(button: true, label: widget.tooltip, child: box),
       );
     }
     return box;
+  }
+}
+
+class _Card extends StatelessWidget {
+  const _Card({required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = OpenUiTheme.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.canvas,
+        border: Border.all(color: theme.border),
+        borderRadius: BorderRadius.circular(OpenUiTheme.radiusLg),
+        boxShadow: theme.shadow,
+      ),
+      child: Padding(padding: const EdgeInsets.all(12), child: child),
+    );
   }
 }
 
@@ -541,6 +886,90 @@ class _Pin extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = OpenUiTheme.of(context);
+    final compact = MediaQuery.sizeOf(context).width <= 520;
+    final numbered = place.icon == null;
+    final face = numbered
+        ? SizedBox.square(
+            dimension: 26,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: theme.ink,
+                border: Border.all(color: theme.canvas, width: 2),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x24000000),
+                    offset: Offset(0, 2),
+                    blurRadius: 10,
+                  ),
+                ],
+              ),
+              child: Center(
+                child: Text(
+                  '${place.order + 1}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1,
+                    fontWeight: FontWeight.w600,
+                    color: theme.onInk,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
+            ),
+          )
+        : SizedBox.square(
+            dimension: 34,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: theme.canvas,
+                border: Border.all(color: theme.glassRing),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x24000000),
+                    offset: Offset(0, 2),
+                    blurRadius: 10,
+                  ),
+                ],
+              ),
+              child: Center(
+                child: Text(
+                  place.icon!,
+                  style: const TextStyle(fontSize: 18, height: 1),
+                ),
+              ),
+            ),
+          );
+    final pin = Stack(
+      clipBehavior: Clip.none,
+      children: [
+        face,
+        if (selected)
+          Positioned(
+            left: -4,
+            top: -4,
+            right: -4,
+            bottom: -4,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: theme.ink, width: 3),
+              ),
+            ),
+          ),
+      ],
+    );
+    final fontSize = compact ? 10.0 : 12.0;
+    final halo = [
+      for (final offset in const [
+        Offset(0, 1),
+        Offset(0, -1),
+        Offset(1, 0),
+        Offset(-1, 0),
+      ])
+        Shadow(color: theme.canvas, offset: offset, blurRadius: 2),
+    ];
     return Semantics(
       button: true,
       selected: selected,
@@ -548,52 +977,37 @@ class _Pin extends StatelessWidget {
       excludeSemantics: true,
       child: GestureDetector(
         onTap: onTap,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              width: selected ? 34 : 30,
-              height: selected ? 34 : 30,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: selected || place.icon == null
-                    ? theme.ink
-                    : theme.canvas,
-                border: Border.all(color: theme.canvas, width: 2),
-                boxShadow: theme.shadowSmall,
-              ),
-              child: Text(
-                place.icon ?? '${place.order + 1}',
-                style: TextStyle(
-                  fontSize: place.icon != null ? 16 : 13,
-                  fontWeight: FontWeight.w600,
-                  color: selected || place.icon == null
-                      ? theme.onInk
-                      : theme.ink,
+        child: SizedBox(
+          width: 160,
+          height: 52,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              numbered
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: pin,
+                    )
+                  : pin,
+              const SizedBox(height: 3),
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: compact ? 120 : 160),
+                child: Text(
+                  place.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: fontSize,
+                    height: 15 / fontSize,
+                    fontWeight: FontWeight.w600,
+                    color: theme.ink,
+                    shadows: halo,
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 4),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: theme.glass,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                place.label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500,
-                  color: theme.ink,
-                ),
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

@@ -258,29 +258,27 @@ void main() {
       expect(p.session.state[r'$stop'], 'Golden Gate Bridge');
     });
 
-    testWidgets('the selected pin grows', (tester) async {
+    testWidgets('the selected emoji pin is 34 wide with a 3px ink ring', (
+      tester,
+    ) async {
       await _pump(tester, _sf);
-      double pinSize(String label) {
-        final pin = find
-            .ancestor(of: find.text(label), matching: find.byType(Column))
-            .first;
-        return tester
-            .getSize(
-              find
-                  .descendant(of: pin, matching: find.byType(AnimatedContainer))
-                  .first,
-            )
-            .width;
-      }
-
-      await tester.pump(const Duration(milliseconds: 200));
-      expect(pinSize('Ferry Building'), 34);
-      expect(pinSize('Coit Tower'), 30);
-      await tester.tap(find.text('Coit Tower'));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 200));
-      expect(pinSize('Coit Tower'), 34);
-      expect(pinSize('Ferry Building'), 30);
+      final face = find.ancestor(
+        of: find.text('☕'),
+        matching: find.byType(DecoratedBox),
+      );
+      expect(tester.getSize(face.first), const Size(34, 34));
+      final rings = find.byWidgetPredicate(
+        (w) =>
+            w is DecoratedBox &&
+            w.decoration is BoxDecoration &&
+            (w.decoration as BoxDecoration).border?.top.width == 3,
+      );
+      expect(rings, findsOneWidget);
+      final border =
+          (tester.widget<DecoratedBox>(rings).decoration as BoxDecoration)
+                  .border!
+              as Border;
+      expect(border.top.color, OpenUiTheme.light.ink);
     });
 
     testWidgets('pins are announced as selectable buttons', (tester) async {
@@ -346,7 +344,7 @@ void main() {
       expect(await heightFor('null'), 400);
       expect(await heightFor('250'), 250);
       expect(await heightFor('100'), 200);
-      expect(await heightFor('5000'), 629.76);
+      expect(await heightFor('5000'), 656);
     });
   });
 
@@ -409,24 +407,23 @@ void main() {
   });
 
   group('Map toolbar', () {
-    testWidgets(
-      'the info button toggles the help text, with a note on the route',
-      (tester) async {
-        await _pump(
-          tester,
-          'root = Col([Map([MapMarker("A place", 1, 1), MapMarker("B place", 1.1, 1.1)])])',
-        );
-        const help =
-            'Drag to explore and pinch to zoom. Select a place to highlight it.';
-        expect(find.text(help), findsNothing);
-        await tester.tap(_button('About this map'));
-        await tester.pump();
-        expect(find.text(help), findsOneWidget);
-        await tester.tap(_button('About this map'));
-        await tester.pump();
-        expect(find.text(help), findsNothing);
-      },
-    );
+    testWidgets('the info button toggles the help text, with a note on the route', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        'root = Col([Map([MapMarker("A place", 1, 1), MapMarker("B place", 1.1, 1.1)])])',
+      );
+      const help =
+          'Drag to explore and use + and − to zoom. Select a place to highlight it.';
+      expect(find.text(help), findsNothing);
+      await tester.tap(_button('About this map'));
+      await tester.pump();
+      expect(find.text(help), findsOneWidget);
+      await tester.tap(_button('About this map'));
+      await tester.pump();
+      expect(find.text(help), findsNothing);
+    });
 
     testWidgets(
       'the help notes that the route is only an overview when streets are unavailable',

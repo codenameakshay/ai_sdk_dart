@@ -3,6 +3,7 @@ import 'dart:async';
 import '../lang/ast.dart';
 import '../lang/js.dart';
 import '../lang/parser.dart';
+import '../spec/bound.dart';
 import '../spec/library.dart';
 import 'errors.dart';
 import 'evaluator.dart';
@@ -159,9 +160,15 @@ final class OpenUiSession {
     this.onError,
     this.onStateUpdate,
     this.onParseResult,
+    List<BoundRecord> records = const [],
   }) : _tools = {for (final t in tools) t.name: t},
        _initialState = initialState,
-       _parser = StreamParser(library.compiled, rootName: library.rootName) {
+       _bound = {for (final r in records) r.variable: Js.normalize(r.value)},
+       _parser = StreamParser(
+         library.compiled,
+         rootName: library.rootName,
+         boundNames: {for (final r in records) r.variable},
+       ) {
     _queries = QueryManager(_tools.isEmpty ? null : _callTool);
     _cancelStore = _store.listen(_onStoreChange);
     _cancelQueries = _queries.subscribe(_onChange);
@@ -169,7 +176,9 @@ final class OpenUiSession {
     final fnSchemas =
         (schema['functions'] as Map?)?.cast<String, Map>() ?? const {};
     _context = EvaluationContext(
-      getState: (name) => _unwrapField(_store.get(name)),
+      getState: (name) => _bound.containsKey(name)
+          ? _bound[name]
+          : _unwrapField(_store.get(name)),
       resolveRef: (name) =>
           _queries.getMutationResult(name) ?? _queries.getResult(name),
       functions: {
@@ -201,6 +210,9 @@ final class OpenUiSession {
   final void Function(ParseResult? result)? onParseResult;
   Map<String, OpenUiTool> _tools;
   final Map<String, Object?> _initialState;
+
+  /// Host-bound records by `$name`: read-only, never in [state].
+  final Map<String, Object?> _bound;
   final StreamParser _parser;
   final Store _store = Store();
   late QueryManager _queries;
@@ -276,7 +288,8 @@ final class OpenUiSession {
       onParseResult?.call(result);
       if (_disposed) return;
     }
-    final declarations = _result?.stateDeclarations ?? const {};
+    final declarations = {...?_result?.stateDeclarations}
+      ..removeWhere((k, _) => _bound.containsKey(k));
     final key = '${Js.stringify(declarations)}::${Js.stringify(_initialState)}';
     if (key != _storeKey) {
       _storeKey = key;
@@ -284,6 +297,7 @@ final class OpenUiSession {
       _initializing = true;
       // initialState only fills keys the store lacks, so a re-parse never undoes user edits.
       for (final MapEntry(:key, value: raw) in _initialState.entries) {
+        if (_bound.containsKey(key)) continue;
         final value = Js.normalize(raw);
         if (key.startsWith(r'$')) {
           if (!_store.has(key)) persisted[key] = value;
@@ -508,12 +522,16 @@ final class OpenUiSession {
   FieldState field(String name, Object? bound, {String? formName}) {
     final p = bound is OpenUiBinding ? bound._assign : null;
     if (p != null) {
-      return FieldState._(_store.get(p.target), (value) {
-        _store.set(
-          p.target,
-          evaluate(p.expr, _context.copyWith(extraScope: {r'$value': value})),
-        );
-      });
+      return FieldState._(
+        _bound.containsKey(p.target) ? _bound[p.target] : _store.get(p.target),
+        (value) {
+          if (_bound.containsKey(p.target)) return;
+          _store.set(
+            p.target,
+            evaluate(p.expr, _context.copyWith(extraScope: {r'$value': value})),
+          );
+        },
+      );
     }
     final raw = formName == null ? null : _store.get(formName);
     final hasValue = formName == null
@@ -547,6 +565,7 @@ final class OpenUiSession {
     String? componentType,
     Object? value,
   ) {
+    if (_bound.containsKey(formName ?? name)) return;
     final wrapped = {'value': value, 'componentType': ?componentType};
     if (formName == null) {
       _store.set(name, wrapped);
@@ -653,11 +672,14 @@ final class OpenUiSession {
         case CustomStep(:final name, :final params):
           emit(event(name, params));
         case SetStep(:final target, :final valueAst):
-          _store.set(target, evaluate(valueAst, _context));
+          if (!_bound.containsKey(target)) {
+            _store.set(target, evaluate(valueAst, _context));
+          }
         case ResetStep(:final targets):
           final decls = _result?.stateDeclarations ?? const {};
           for (final t in targets) {
             if (_disposed) return;
+            if (_bound.containsKey(t)) continue;
             _store.set(t, decls[t], pristine: true);
           }
       }

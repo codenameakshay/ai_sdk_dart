@@ -39,6 +39,7 @@ void main() {
       'type-mismatch',
       'unknown-function',
       'no-root',
+      'bound-only',
       'runtime-error',
       'render-error',
       'parse-exception',

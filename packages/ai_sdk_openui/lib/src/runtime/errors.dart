@@ -14,6 +14,7 @@ enum OpenUiErrorCode {
   typeMismatch('type-mismatch'),
   unknownFunction('unknown-function'),
   noRoot('no-root'),
+  boundOnly('bound-only'),
   runtimeError('runtime-error'),
   renderError('render-error'),
   parseException('parse-exception'),

@@ -1,6 +1,8 @@
 import 'dart:convert';
 
+import '../lang/js.dart';
 import '../runtime/builtins.dart';
+import 'bound.dart';
 import 'schema.dart';
 
 /// One line of the prompt: a component, function or action signature.
@@ -52,6 +54,8 @@ final class PromptSpec {
     this.additionalRules = const [],
     this.editMode = false,
     this.inlineMode = false,
+    this.records = const [],
+    this.state = const {},
   });
 
   final String root;
@@ -81,6 +85,13 @@ final class PromptSpec {
   final List<String> additionalRules;
   final bool editMode;
   final bool inlineMode;
+
+  /// Host-bound read-only `$variables`, listed in a "Bound Data" section.
+  final List<BoundRecord> records;
+
+  /// Seeded `$variables` with their values, listed in a "Current State" section.
+  /// Other keys are ignored.
+  final Map<String, Object?> state;
 }
 
 const _preamble =
@@ -134,6 +145,40 @@ Object? _defaultFor(Map<String, Object?> schema) {
   }
   return null;
 }
+
+String _valueType(Object? v) => switch (v) {
+  null => 'null',
+  bool() => 'boolean',
+  num() => 'number',
+  String() => 'string',
+  List() => v.isEmpty ? 'any[]' : '${_valueType(v.first)}[]',
+  Map() =>
+    v.isEmpty
+        ? 'object'
+        : '{${v.entries.map((e) => '${e.key}: ${_valueType(e.value)}').join(', ')}}',
+  _ => 'any',
+};
+
+/// The prompt's "Bound Data" section for [records].
+String describeBoundRecords(List<BoundRecord> records) => [
+  '## Bound Data',
+  '',
+  'The host provides these read-only \$variables. Read them with dot and index access (`\$name.field`, `\$name[0]`). Never copy their values into literals, and never @Set, @Reset or bind them to an input.',
+  '',
+  for (final r in records)
+    '- ${r.variable}: ${r.schema != null ? _jsonSchemaType(r.schema!) : _valueType(r.value)}'
+        '${r.description.isNotEmpty ? ' — ${r.description}' : ''}',
+].join('\n');
+
+bool _isStateKey(String key) => key.startsWith(r'$');
+
+String _stateSection(Map<String, Object?> state) => [
+  '## Current State',
+  '',
+  'These \$variables already hold values. Read them; do not declare them again:',
+  for (final MapEntry(:key, :value) in state.entries)
+    if (_isStateKey(key)) '- $key = ${Js.stringify(value)}',
+].join('\n');
 
 String _syntaxRules(
   String root, {
@@ -549,6 +594,16 @@ String _componentSignatures(
       'Props marked `\$binding<type>` accept a `\$variable` reference for two-way binding.',
     );
   }
+  final entries = [
+    ...spec.components.values,
+    ...spec.functions.values,
+    ...spec.actions.values,
+  ];
+  if (entries.any((e) => e.signature.contains(r'$bound<'))) {
+    lines.add(
+      'Props marked `\$bound<type>` take only a path into a host \$variable from Bound Data, such as `\$name.field`. A literal or computed value there is rejected.',
+    );
+  }
   String format(PromptEntry c) => (c.description ?? '').isNotEmpty
       ? '${c.signature} — ${c.description}'
       : c.signature;
@@ -596,7 +651,9 @@ String generatePrompt(PromptSpec spec) {
   final root = spec.root;
   final hasTools = spec.tools.isNotEmpty || spec.toolNames.isNotEmpty;
   final toolCalls = spec.toolCalls ?? hasTools;
-  final bindings = spec.bindings ?? toolCalls;
+  final hasState = spec.state.keys.any(_isStateKey);
+  final bindings =
+      spec.bindings ?? (toolCalls || spec.records.isNotEmpty || hasState);
   final supportsExpressions = toolCalls || bindings;
   final usesActionExpression = spec.components.values.any(
     (c) =>
@@ -657,6 +714,10 @@ String generatePrompt(PromptSpec spec) {
   if (hasTools) {
     parts.addAll(['', _toolsSection(spec.toolNames, spec.tools)]);
   }
+  if (spec.records.isNotEmpty) {
+    parts.addAll(['', describeBoundRecords(spec.records)]);
+  }
+  if (hasState) parts.addAll(['', _stateSection(spec.state)]);
   parts.addAll([
     '',
     _streamingRules(

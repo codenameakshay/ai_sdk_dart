@@ -18,6 +18,8 @@ export 'src/runtime/form_validation.dart'
         validate;
 export 'src/runtime/mcp.dart' show McpToolError, extractToolResult;
 export 'src/runtime/response_bundle.dart' show ResponseMetadata;
+export 'src/spec/bound.dart' show BoundRecord;
+export 'src/spec/prompt.dart' show describeBoundRecords;
 export 'src/spec/cloud.dart'
     show
         ArtifactKind,

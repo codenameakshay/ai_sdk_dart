@@ -435,7 +435,8 @@ void main() {
           const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
         );
         // FlutterTest glyphs are 1em squares: 7 glyphs of 14.08 plus padding.
-        expect(tester.getSize(box).width, closeTo(7 * 14.08 + 10, 0.01));
+        // Newer engines round the advance in float32 (108.547 on 3.47).
+        expect(tester.getSize(box).width, closeTo(7 * 14.08 + 10, 0.05));
         expect(tester.getSize(box).height, closeTo(16, 0.01));
       },
     );

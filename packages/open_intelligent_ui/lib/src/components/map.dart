@@ -188,6 +188,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
   bool _ready = false;
   bool _hint = false;
   bool _lineDrawn = false;
+  bool _routeVisible = false;
   String _framed = '';
   String? _routeKey;
   List<LatLng>? _street;
@@ -285,25 +286,45 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
 
   /// Once streaming ends (or the filter changes), fit the markers.
   void _frame() {
-    if (!_ready || widget.streaming || _visible.isEmpty) return;
+    if (!_ready) return;
+    if (widget.streaming || _visible.isEmpty) {
+      _flyDone?.cancel();
+      _flyDone = null;
+      return;
+    }
     final signature = jsonEncode([_group, _routingKey]);
     if (signature == _framed) return;
     _framed = signature;
+    _flyDone?.cancel();
+    _flyDone = null;
+    _routeVisible = false;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
+      if (!mounted ||
+          widget.streaming ||
+          _visible.isEmpty ||
+          _framed != signature ||
+          jsonEncode([_group, _routingKey]) != signature) {
+        return;
+      }
       if (_userMoved || MediaQuery.disableAnimationsOf(context)) {
         if (!_userMoved) {
           _fit(const EdgeInsets.fromLTRB(72, 70, 72, 50), maxZoom: 13);
         }
+        if (!_routeVisible) setState(() => _routeVisible = true);
         _drawLine();
         return;
       }
-      // As the reference clears the line, no route shows until framing ends.
-      if (!_lineDrawn) _line.value = 0;
       _flyTo(const EdgeInsets.fromLTRB(72, 70, 72, 50), maxZoom: 13);
-      _flyDone?.cancel();
       _flyDone = Timer(_flyDuration + const Duration(milliseconds: 40), () {
-        if (mounted) _drawLine();
+        if (!mounted ||
+            widget.streaming ||
+            _visible.isEmpty ||
+            _framed != signature ||
+            jsonEncode([_group, _routingKey]) != signature) {
+          return;
+        }
+        if (!_routeVisible) setState(() => _routeVisible = true);
+        _drawLine();
       });
     });
   }
@@ -582,7 +603,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
             errorTileCallback: (tile, error, stackTrace) =>
                 _tilesFailed(tileUrl),
           ),
-        if (positions.length > 1)
+        if (positions.length > 1 && _routeVisible)
           ListenableBuilder(
             listenable: _line,
             builder: (context, _) => fm.PolylineLayer(

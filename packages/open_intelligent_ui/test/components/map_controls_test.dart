@@ -84,12 +84,74 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
       p.session.update(second, streaming: false);
       await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
       p.session.update(second.replaceFirst('false', 'true'), streaming: true);
       await tester.pump();
       expect(_lines(tester).single.points.first, const ll.LatLng(30, 40));
       expect(_lines(tester).single.points.last, const ll.LatLng(31, 41));
     },
   );
+
+  testWidgets('a route stays hidden until changed places finish framing', (
+    tester,
+  ) async {
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: false);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+    final p = await _pump(tester, _sf);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(milliseconds: 800));
+    expect(_lines(tester).single.points, [
+      const ll.LatLng(37.7955, -122.3937),
+      const ll.LatLng(37.8024, -122.4058),
+      const ll.LatLng(37.8029, -122.4484),
+      const ll.LatLng(37.8199, -122.4783),
+    ]);
+
+    p.session.update(
+      'root = Col([map])\n'
+      'map = Map([MapMarker("New A", 30, 40), MapMarker("New B", 31, 41)], true)',
+      streaming: false,
+    );
+    await tester.pump();
+    expect(_lines(tester), isEmpty);
+    await tester.pump(const Duration(seconds: 1));
+    expect(_lines(tester).single.points, [
+      const ll.LatLng(30, 40),
+      const ll.LatLng(31, 41),
+    ]);
+  });
+
+  testWidgets('an interrupted first frame waits for changed places to recover', (
+    tester,
+  ) async {
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: false);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+    const program =
+        'root = Col([map])\nmap = Map([MapMarker("A", 30, 40), MapMarker("B", 31, 41)], true)';
+    final p = await _pump(tester, program);
+    p.session.update(program, streaming: true);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    p.session.update(program, streaming: false);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(_lines(tester), isEmpty);
+
+    p.session.update(
+      'root = Col([map])\nmap = Map([MapMarker("C", 32, 42), MapMarker("D", 33, 43)], true)',
+      streaming: false,
+    );
+    await tester.pump();
+    expect(_lines(tester), isEmpty);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(milliseconds: 800));
+    expect(_lines(tester).single.points, [
+      const ll.LatLng(32, 42),
+      const ll.LatLng(33, 43),
+    ]);
+  });
 
   group('partialLine', () {
     test('cuts a line at the given share of its length', () {
@@ -210,18 +272,26 @@ void main() {
     testWidgets(
       'the direct line draws out after framing and ends at the last place',
       (tester) async {
+        tester.platformDispatcher.accessibilityFeaturesTestValue =
+            const FakeAccessibilityFeatures(disableAnimations: false);
+        addTearDown(
+          tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+        );
         await _pump(
           tester,
           'root = Col([Map([MapMarker("A place", 10, 20), MapMarker("B place", 11, 21)], true)])',
         );
+        expect(_lines(tester), isEmpty);
+        await tester.pump(const Duration(milliseconds: 1000));
         expect(
           _lines(tester).single.points.last,
           isNot(const ll.LatLng(11, 21)),
         );
-        await tester.pump(const Duration(milliseconds: 1000));
         await tester.pump(const Duration(milliseconds: 800));
-        final drawn = _lines(tester).single.points.last;
-        expect(drawn, const ll.LatLng(11, 21));
+        expect(_lines(tester).single.points, [
+          const ll.LatLng(10, 20),
+          const ll.LatLng(11, 21),
+        ]);
       },
     );
   });

@@ -530,11 +530,7 @@ void main() {
             ];
           },
         );
-        expect(
-          _lines(tester).single.points,
-          hasLength(2),
-          reason: 'straight segments while loading',
-        );
+        expect(_lines(tester), isEmpty, reason: 'frame before route line');
         expect(find.text('Route overview'), findsNothing);
         await tester.pump(const Duration(milliseconds: 699));
         expect(asked, isEmpty);
@@ -564,6 +560,7 @@ void main() {
           await _pump(tester, _twoStops, route: route);
           await tester.pump(const Duration(milliseconds: 700));
           await tester.pump();
+          await _settle(tester);
           expect(find.text('Route overview'), findsOneWidget);
           expect(_lines(tester).single.points, hasLength(2));
           await tester.pumpWidget(const SizedBox());
@@ -576,6 +573,8 @@ void main() {
     ) async {
       await _pump(tester, _twoStops);
       expect(find.text('Route overview'), findsOneWidget);
+      expect(_lines(tester), isEmpty);
+      await _settle(tester);
       expect(_lines(tester).single.points, hasLength(2));
     });
 

@@ -100,8 +100,7 @@ final class OpenUiMessage {
     var out = '${_prefix}content${query.isEmpty ? '' : '?$query'}\n$content';
     final value = context;
     if (value != null) {
-      out +=
-          '\n${_prefix}context\n${value is String ? value : Js.stringify(value)}';
+      out += '\n${_prefix}context\n${_stringify(value)}';
     }
     return end ? '$out\n${_prefix}end' : out;
   }
@@ -116,7 +115,7 @@ final class OpenUiMessage {
       context: [
         'User clicked: ${event.humanFriendlyMessage}',
         event.formState,
-        ?context,
+        if (event.params.containsKey('context')) context,
       ],
     ).build();
     return event.humanFriendlyMessage.isNotEmpty
@@ -156,4 +155,42 @@ String _decode(String s) {
   } on Object {
     return s;
   }
+}
+
+// Dart's JSON encoder retains .0 on large integral doubles. JavaScript uses
+// the shortest number spelling for every JSON number, including those values.
+String _stringify(Object? value) => switch (value) {
+  num() => _number(value),
+  List() => '[${value.map(_stringify).join(',')}]',
+  Map() =>
+    '{${_entries(value).map((e) => '${Js.stringify('${e.key}')}:${_stringify(e.value)}').join(',')}}',
+  _ => Js.stringify(value),
+};
+
+String _number(num value) {
+  final number = value.toDouble();
+  if (!number.isFinite) return 'null';
+  if (number == 0) return '0';
+  final text = number.toString();
+  return text.endsWith('.0') ? text.substring(0, text.length - 2) : text;
+}
+
+Iterable<MapEntry<Object?, Object?>> _entries(Map<Object?, Object?> value) {
+  final indexed =
+      value.entries.where((e) => _arrayIndex('${e.key}') != null).toList()
+        ..sort(
+          (a, b) =>
+              _arrayIndex('${a.key}')!.compareTo(_arrayIndex('${b.key}')!),
+        );
+  return [
+    ...indexed,
+    ...value.entries.where((e) => _arrayIndex('${e.key}') == null),
+  ];
+}
+
+int? _arrayIndex(String key) {
+  final index = int.tryParse(key);
+  return index != null && index >= 0 && index < 4294967295 && '$index' == key
+      ? index
+      : null;
 }

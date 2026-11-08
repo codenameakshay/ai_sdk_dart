@@ -244,6 +244,15 @@ class _ChatMessageListState extends State<ChatMessageList> {
                       entries[index].status ==
                           ConversationMessageStatus.streaming,
                     );
+              if (entries != null) {
+                return KeyedSubtree(
+                  key: ValueKey(entries[index].id),
+                  child: AiEntrance(
+                    duration: isNew ? AiMotion.entrance : Duration.zero,
+                    child: row,
+                  ),
+                );
+              }
               return isNew ? AiEntrance(child: row) : row;
             },
           ),
@@ -263,7 +272,10 @@ class _ChatMessageListState extends State<ChatMessageList> {
         ),
         status: ConversationMessageStatus.streaming,
       );
-      return entryBuilder(context, entry, true);
+      return KeyedSubtree(
+        key: ValueKey(entry.id),
+        child: AiEntrance(child: entryBuilder(context, entry, true)),
+      );
     }
     final builder = widget.messageBuilder;
     if (builder != null) {

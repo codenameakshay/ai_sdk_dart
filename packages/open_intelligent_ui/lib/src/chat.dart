@@ -46,6 +46,8 @@ final class OpenUiChat {
 
   final Map<String, OpenUiSession> _sessions = {};
   final Set<String> _unsaved = {};
+  final Map<String, ChatMessage> _committedEntries = {};
+  String? _writing;
   bool _disposed = false;
 
   /// A `chatMessageBuilder` for `AiChatScaffold` and `ChatMessageList`.
@@ -81,15 +83,24 @@ final class OpenUiChat {
       session.dispose();
     }
     _sessions.clear();
+    _committedEntries.clear();
+    _unsaved.clear();
   }
 
-  OpenUiSession _session(String id, OpenUiMessage message) =>
-      _sessions[id] ??= OpenUiSession(
+  OpenUiSession _session(String id, OpenUiMessage message) {
+    return _sessions.putIfAbsent(id, () {
+      final entry = controller.chatMessages
+          .where((m) => m.id == id)
+          .firstOrNull;
+      if (entry != null) _committedEntries[id] = entry;
+      return OpenUiSession(
         library,
         tools: tools,
         initialState: _stateOf(message.context),
         onStateUpdate: (_) => _save(id),
       );
+    });
+  }
 
   void _save(String id) {
     if (_unsaved.add(id)) scheduleMicrotask(() => _write(id));
@@ -99,24 +110,38 @@ final class OpenUiChat {
   /// still streaming has no committed message yet; it is written on commit.
   void _write(String id) {
     final session = _sessions[id];
-    if (_disposed || session == null || session.isStreaming) return;
+    if (_disposed ||
+        !_unsaved.contains(id) ||
+        session == null ||
+        session.isStreaming) {
+      return;
+    }
     final entry = controller.chatMessages.where((m) => m.id == id).firstOrNull;
     final raw = entry?.message.content;
     if (raw == null) return;
     _unsaved.remove(id);
     final parsed = OpenUiMessage.parse(raw);
     final state = session.state;
-    controller.updateMessage(
-      id,
-      ModelMessage(
-        role: ModelMessageRole.assistant,
-        content: OpenUiMessage(
-          content: parsed.content,
-          attributes: parsed.attributes,
-          context: state.isEmpty ? null : [state],
-        ).build(),
-      ),
-    );
+    _writing = id;
+    try {
+      controller.updateMessage(
+        id,
+        ModelMessage(
+          role: ModelMessageRole.assistant,
+          content: OpenUiMessage(
+            content: parsed.content,
+            attributes: parsed.attributes,
+            context: state.isEmpty ? null : [state],
+          ).build(),
+        ),
+      );
+    } finally {
+      _writing = null;
+      final saved = controller.chatMessages
+          .where((m) => m.id == id)
+          .firstOrNull;
+      if (saved != null) _committedEntries[id] = saved;
+    }
   }
 
   void _committed(String id) {
@@ -136,12 +161,39 @@ final class OpenUiChat {
   /// Drops the sessions of answers that left the transcript (reload, clear),
   /// so their Query timers stop.
   void _prune() {
-    final kept = {for (final m in controller.chatMessages) m.id};
-    final loading = controller.isLoading;
+    final entries = {for (final m in controller.chatMessages) m.id: m};
     _sessions.removeWhere((id, session) {
-      if (kept.contains(id) || (loading && session.isStreaming)) return false;
+      final entry = entries[id];
+      if (entry != null) {
+        final previous = _committedEntries[id];
+        final replaced =
+            previous != null &&
+            !identical(previous, entry) &&
+            _writing != id &&
+            controller is! ConversationChatController;
+        if (!replaced) {
+          _committedEntries[id] = entry;
+          if (session.isStreaming &&
+              entry.status != ConversationMessageStatus.streaming) {
+            final raw = entry.message.content;
+            if (raw != null) {
+              session.update(
+                OpenUiMessage.parse(raw).content,
+                streaming: false,
+              );
+              _committed(id);
+            }
+          }
+          return false;
+        }
+      } else if (controller.isLoading &&
+          session.isStreaming &&
+          controller.streamingMessageId == id) {
+        return false;
+      }
       session.dispose();
       _unsaved.remove(id);
+      _committedEntries.remove(id);
       return true;
     });
   }

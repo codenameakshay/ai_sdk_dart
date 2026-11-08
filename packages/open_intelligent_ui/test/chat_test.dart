@@ -155,6 +155,93 @@ void main() {
     expect(h.controller.chatMessages[1].id, 'm2');
   });
 
+  testWidgets('clear restores the initial answer state', (tester) async {
+    final h = await _pump(
+      tester,
+      initial: const [
+        ModelMessage(role: ModelMessageRole.assistant, content: _greeting),
+      ],
+    );
+    await tester.enterText(find.byType(TextField).first, 'Bo');
+    await tester.pump();
+    expect(find.text('Hi Bo'), findsOneWidget);
+
+    h.controller.clear();
+    await tester.pump();
+    expect(find.text('Hi Ana'), findsOneWidget);
+    expect(h.controller.messages.single.content, _greeting);
+  });
+
+  testWidgets('clear cancels an edit waiting to be saved', (tester) async {
+    final h = await _pump(
+      tester,
+      initial: const [
+        ModelMessage(role: ModelMessageRole.assistant, content: _greeting),
+      ],
+    );
+    final session = h.chat.sessionOf(h.controller.chatMessages.single.id)!;
+    final input = session.root!.props.elements('children').first;
+    session.field('name', input.props['value']).set('Bo');
+    h.controller.clear();
+    await tester.pump();
+
+    expect(find.text('Hi Ana'), findsOneWidget);
+    expect(h.controller.messages.single.content, _greeting);
+    expect(h.chat.sessionOf(h.controller.chatMessages.single.id)!.state, {
+      r'$name': 'Ana',
+    });
+  });
+
+  testWidgets('a replaced answer restores its new state and accepts edits', (
+    tester,
+  ) async {
+    final h = await _pump(
+      tester,
+      initial: const [
+        ModelMessage(role: ModelMessageRole.assistant, content: _greeting),
+      ],
+    );
+    final id = h.controller.chatMessages.single.id;
+    h.controller.updateMessage(
+      id,
+      const ModelMessage(
+        role: ModelMessageRole.assistant,
+        content:
+            ']]>openui:content\n$_greeting\n]]>openui:context\n'
+            '[{"\$name":"Zed"}]',
+      ),
+    );
+    await tester.pump();
+    expect(find.text('Hi Zed'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).first, 'Cy');
+    await tester.pump();
+    expect(find.text('Hi Cy'), findsOneWidget);
+    expect(
+      h.controller.messages.single.content,
+      ']]>openui:content\n$_greeting\n]]>openui:context\n'
+      '[{"\$name":"Cy"}]',
+    );
+  });
+
+  testWidgets('a superseded streaming answer drops its session immediately', (
+    tester,
+  ) async {
+    final h = await _pump(tester);
+    await _real(tester, () {
+      unawaited(h.controller.sendMessage(agent: h.chat.agent, text: 'first'));
+    });
+    await _real(tester, () => h.model.say(_greeting));
+    final firstId = h.controller.streamingMessageId!;
+    expect(h.chat.sessionOf(firstId), isNotNull);
+
+    await _real(tester, () {
+      unawaited(h.controller.sendMessage(agent: h.chat.agent, text: 'second'));
+    });
+    expect(h.controller.isLoading, isTrue);
+    expect(h.chat.sessionOf(firstId), isNull);
+    await _real(tester, h.model.finish);
+  });
+
   testWidgets('a restored answer starts from its saved state', (tester) async {
     await _pump(
       tester,
@@ -184,6 +271,26 @@ void main() {
 
     await _real(tester, h.model.finish);
     await _real(tester, () {});
+    expect(
+      h.controller.messages.last.content,
+      ']]>openui:content\n$_greeting\n]]>openui:context\n[{"\$name":"Cy"}]',
+    );
+  });
+
+  testWidgets('a streaming edit is saved when its row is no longer mounted', (
+    tester,
+  ) async {
+    final h = await _pump(tester);
+    await _real(tester, () {
+      unawaited(h.controller.sendMessage(agent: h.chat.agent, text: 'hello'));
+    });
+    await _real(tester, () => h.model.say(_greeting));
+    await tester.enterText(find.byType(TextField).first, 'Cy');
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox());
+
+    await _real(tester, h.model.finish);
+    expect(h.controller.status, ChatStatus.ready);
     expect(
       h.controller.messages.last.content,
       ']]>openui:content\n$_greeting\n]]>openui:context\n[{"\$name":"Cy"}]',

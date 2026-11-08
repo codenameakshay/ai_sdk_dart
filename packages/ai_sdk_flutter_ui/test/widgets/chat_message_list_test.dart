@@ -70,6 +70,53 @@ Widget _scrollHarness({
 
 void main() {
   group('ChatMessageList', () {
+    testWidgets('keeps row state across streaming, commit, and updates', (
+      tester,
+    ) async {
+      var nextId = 0;
+      final controller = ChatController(generateId: () => 'm${++nextId}');
+      addTearDown(controller.dispose);
+      final model = HoldingTextModel('answer');
+      addTearDown(model.finish);
+      await tester.pumpWidget(
+        _wrap(
+          ChatMessageList(
+            controller: controller,
+            chatMessageBuilder: (context, entry, streaming) =>
+                entry.message.role == ModelMessageRole.user
+                ? Text(entry.message.content!)
+                : TextField(key: ValueKey(entry.id)),
+          ),
+        ),
+      );
+      await tester.runAsync(() async {
+        await controller.sendMessage(
+          agent: ToolLoopAgent(model: model),
+          text: 'q',
+        );
+        await pumpUntil(() => controller.streamingContent.isNotEmpty);
+      });
+      await tester.pump();
+      await tester.enterText(find.byType(TextField), 'edited while streaming');
+      await tester.runAsync(() async {
+        model.finish();
+        await pumpUntil(() => controller.status == ChatStatus.ready);
+      });
+      await tester.pump();
+      expect(find.text('edited while streaming'), findsOneWidget);
+      await tester.pump();
+      expect(find.text('edited while streaming'), findsOneWidget);
+      controller.updateMessage(
+        'm2',
+        const ModelMessage(
+          role: ModelMessageRole.assistant,
+          content: 'answer with saved state',
+        ),
+      );
+      await tester.pump();
+      expect(find.text('edited while streaming'), findsOneWidget);
+    });
+
     testWidgets('renders existing messages', (tester) async {
       final controller = ChatController(
         initialMessages: const [

@@ -95,10 +95,32 @@ void main() {
       expect(back.attributes, m.attributes);
     });
 
-    test('adds the end marker and passes string context through', () {
+    test('orders array-index object keys before other keys', () {
+      expect(
+        const OpenUiMessage(
+          content: 'x',
+          context: {'2': 'b', '1': 'a', '01': 'c', '4294967295': 'd', '0': 'z'},
+        ).build(),
+        ']]>openui:content\nx\n]]>openui:context\n'
+        '{"0":"z","1":"a","2":"b","01":"c","4294967295":"d"}',
+      );
+    });
+
+    test('writes large integral doubles as JSON.stringify does', () {
+      expect(
+        const OpenUiMessage(
+          content: 'x',
+          context: [9007199254740992.0, 1e20, 1e21, 1e-6, 1e-7, -0.0],
+        ).build(),
+        ']]>openui:content\nx\n]]>openui:context\n'
+        '[9007199254740992,100000000000000000000,1e+21,0.000001,1e-7,0]',
+      );
+    });
+
+    test('adds the end marker and JSON encodes string context', () {
       expect(
         const OpenUiMessage(content: 'x', context: 'raw', end: true).build(),
-        ']]>openui:content\nx\n]]>openui:context\nraw\n]]>openui:end',
+        ']]>openui:content\nx\n]]>openui:context\n"raw"\n]]>openui:end',
       );
     });
   });
@@ -141,6 +163,20 @@ void main() {
         OpenUiMessage.fromAction(event),
         ']]>openui:content\nShow details\n]]>openui:context\n'
         '["User clicked: Show details",{},{"orderId":42}]',
+      );
+    });
+
+    test('includes an explicitly null action context', () {
+      const event = ActionEvent(
+        type: ActionEvent.continueConversation,
+        params: {'context': null},
+        humanFriendlyMessage: 'Continue',
+        formState: {},
+      );
+      expect(
+        OpenUiMessage.fromAction(event),
+        ']]>openui:content\nContinue\n]]>openui:context\n'
+        '["User clicked: Continue",{},null]',
       );
     });
 

@@ -756,7 +756,7 @@ class ChatController extends StreamingControllerBase {
         _initialEntries.add(entry);
       }
       used.add(entry);
-      restored.add(entry);
+      restored.add(ChatMessage(id: entry.id, message: message));
     }
     _entries
       ..clear()

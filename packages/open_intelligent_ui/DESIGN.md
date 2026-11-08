@@ -94,6 +94,32 @@ combined design then went to two independent reviewers with the same brief.
   schemas are not currently supported". The model rejects one of Codex's built-in tool schemas. No other model
   was substituted.
 
+## Code review
+
+The finished diff went to the same two reviewers.
+
+- **Sol (`gpt-6.1-sol`, high effort, on Boat):** 19 findings (4 P1, 14 P2, 1 P3), all fixed with a
+  regression test each. The P1s: HtmlView could navigate before its first load finished,
+  re-applying `initialState` overwrote user edits, a shared Query lost its answer when the
+  statement that started it went away, and a replaced Mutation accepted a stale answer.
+- **Muse Wonder Full:** did not run, for the same provider error as in the design round.
+
+## Parity
+
+Every component, function and action of the reference library is ported, with its name,
+argument order and option values unchanged (the spec golden proves it). These are the known
+differences in rendering:
+
+- Maps draw raster tiles with `flutter_map` instead of the reference's MapLibre vector style,
+  frame without the fly and line-draw animations, and expand to a full-screen route.
+- A small or medium Title that opens a Card keeps its own size (the reference's CSS reads the
+  parent's structure, which a builder cannot see).
+- Carousel items align to the top instead of sharing a height, and have no arrow buttons.
+  Popover always opens below its trigger. Table rows have no hover tint.
+- Text uses the platform font; the reference loads Inter.
+- `@Sort` on text orders like English `localeCompare` without accents or ICU punctuation
+  weights; map pins detect emoji by the main Unicode blocks.
+
 ## Follow-up work
 
 - Phase 2: `ai_sdk_flutter_ui` renders assistant messages through `OpenUiSession` and `OpenUiView`, keeps one

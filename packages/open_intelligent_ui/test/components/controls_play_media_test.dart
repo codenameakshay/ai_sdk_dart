@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
 
@@ -35,13 +36,20 @@ void main() {
   ) async {
     final semantics = tester.ensureSemantics();
     await pumpProgram(tester, 'root = Slider(0, 0, 10, 2, "Budget")');
-    String? increased;
-    tester.getSemantics(find.byType(Slider)).visitChildren((child) {
-      increased = child.increasedValue;
-      return false;
-    });
+    // The node that carries the value is the slider's own node on older
+    // Flutter releases and its child on newer ones.
+    final increased = <String>[];
+    void visit(SemanticsNode node) {
+      if (node.increasedValue.isNotEmpty) increased.add(node.increasedValue);
+      node.visitChildren((child) {
+        visit(child);
+        return true;
+      });
+    }
+
+    visit(tester.getSemantics(find.byType(Slider)));
     semantics.dispose();
-    expect(increased, '2');
+    expect(increased, ['2']);
   });
 
   testWidgets(

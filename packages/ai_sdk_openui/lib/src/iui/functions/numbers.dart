@@ -2,7 +2,9 @@ import 'dart:math' as math;
 
 import '../../spec/library.dart';
 import '../../spec/schema.dart';
+import 'js_number.dart';
 import 'shared.dart';
+import 'unicode.dart';
 
 final List<FunctionSpec> numberFunctions = [
   FunctionSpec(
@@ -10,7 +12,8 @@ final List<FunctionSpec> numberFunctions = [
     description: 'base raised to exponent',
     params: {'base': S.number(), 'exponent': S.number()},
     returns: S.number(),
-    fn: (a) => finite(math.pow(a['base'] as num, a['exponent'] as num)),
+    fn: (a) =>
+        finite(math.pow((a['base'] as num).toDouble(), a['exponent'] as num)),
   ),
   FunctionSpec(
     'Sqrt',
@@ -37,10 +40,10 @@ final List<FunctionSpec> numberFunctions = [
       if (!((a['integer'] as bool?) ?? false)) {
         return lo + Impure.random() * (hi - lo);
       }
-      final first = lo.ceil();
-      final last = hi.floor();
+      final first = lo.ceilToDouble();
+      final last = hi.floorToDouble();
       if (first > last) throw StateError('no whole number between min and max');
-      return first + (Impure.random() * (last - first + 1)).floor();
+      return first + (Impure.random() * (last - first + 1)).floorToDouble();
     },
   ),
   FunctionSpec(
@@ -74,7 +77,7 @@ final List<FunctionSpec> numberFunctions = [
     params: {'a': S.number(), 'b': S.number(), 't': S.number()},
     returns: S.number(),
     fn: (a) {
-      final from = a['a'] as num;
+      final from = (a['a'] as num).toDouble();
       return finite(from + ((a['b'] as num) - from) * (a['t'] as num));
     },
   ),
@@ -94,22 +97,23 @@ final List<FunctionSpec> numberFunctions = [
       if (weights.isEmpty || weights.any((w) => !w.isFinite || w < 0)) {
         throw StateError('weights must be zero or more');
       }
-      final sum = weights.fold<num>(0, (x, y) => x + y);
+      final sum = weights.fold<double>(0, (x, y) => x + y);
       if (sum == 0) return List<num>.filled(weights.length, 0);
-      final decimals = (a['decimals'] as num?) ?? 2;
-      // JS Math.round sends halves up; the scaled values are never negative here, so floor(x + 0.5) is exact.
-      final scale = math.pow(
-        10,
-        math.min(6, math.max(0, (decimals + 0.5).floor())),
-      );
-      final units = (total.abs() * scale + 0.5).floor();
+      // Doubles throughout, as JavaScript: ints would overflow on a large total.
+      final scale = math
+          .pow(
+            10,
+            math.min(6, math.max(0, jsRound((a['decimals'] as num?) ?? 2))),
+          )
+          .toDouble();
+      final units = jsRound(total.abs() * scale);
       final exact = [for (final w in weights) units * w / sum];
-      final parts = [for (final x in exact) x.floor()];
-      var left = units - parts.fold<int>(0, (x, y) => x + y);
+      final parts = [for (final x in exact) x.floorToDouble()];
+      var left = units - parts.fold<double>(0, (x, y) => x + y);
       final order =
           [
             for (var i = 0; i < exact.length; i++)
-              (i, exact[i] - exact[i].floor()),
+              (i, exact[i] - exact[i].floorToDouble()),
           ]..sort((p, q) {
             final c = q.$2.compareTo(p.$2);
             return c != 0 ? c : p.$1 - q.$1;
@@ -154,8 +158,8 @@ final List<FunctionSpec> numberFunctions = [
       final value = a['value'] as num;
       final from = a['from'] as String;
       final to = a['to'] as String;
-      final x = from.trim().toLowerCase();
-      final y = to.trim().toLowerCase();
+      final x = jsLowerCase(jsTrim(from));
+      final y = jsLowerCase(jsTrim(to));
       if (_temps.contains(x) && _temps.contains(y)) {
         return finite(_fromCelsius(_toCelsius(value, x), y));
       }

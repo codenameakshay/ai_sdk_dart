@@ -239,7 +239,8 @@ final List<FunctionSpec> listFunctions = [
       return [
         for (var i = 0; i < count; i++)
           if (whole)
-            start + i * step
+            // Doubles, as JavaScript: an int product could overflow.
+            start.toDouble() + i * step.toDouble()
           else
             double.parse((start + i * step).toDouble().toStringAsPrecision(12)),
       ];

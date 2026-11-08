@@ -743,6 +743,19 @@ void main() {
       expect(map.bottom, 600 - 34 - 24);
     });
 
+    testWidgets('screen readers reach the expanded map and its controls', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await _pumpAbove(tester, _sf);
+      await tester.tap(find.text('Expand'));
+      await tester.pump();
+      expect(find.semantics.byLabel('Collapse').evaluate(), hasLength(1));
+      expect(find.semantics.byLabel('Coit Tower').evaluate(), isNotEmpty);
+      expect(find.semantics.byLabel('Zoom in').evaluate(), hasLength(1));
+      handle.dispose();
+    });
+
     testWidgets('Escape and Collapse return the map to the page', (
       tester,
     ) async {

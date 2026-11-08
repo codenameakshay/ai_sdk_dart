@@ -872,9 +872,10 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
       },
       child: Stack(
         children: [
-          ModalBarrier(
-            color: theme.canvas.withValues(alpha: 0.9),
-            dismissible: false,
+          Positioned.fill(
+            child: AbsorbPointer(
+              child: ColoredBox(color: theme.canvas.withValues(alpha: 0.9)),
+            ),
           ),
           Positioned.fill(
             left: inset + safe.left,

@@ -154,6 +154,8 @@ case from the reference's four test files and checked against Node, prove the be
 - The native YouTube embed sends `https://www.youtube-nocookie.com/` as its Referer unless
   `OpenUiServices.embedReferrer` names the host app's site.
 - A Popover trigger wraps instead of overflowing when its row is narrower than its content.
+- The expanded map covers the page with a scrim but does not hide the page from screen readers, as
+  `aria-modal` does: `BlockSemantics` inside an `OverlayPortal` also hides the map itself.
 
 **Not ported:** lang-core telemetry and devtools, React rendering and hooks, the deprecated `generatePrompt`,
 MCP client auto-detection, and `console.warn` output.

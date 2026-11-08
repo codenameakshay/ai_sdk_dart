@@ -88,7 +88,7 @@ ChatController ── streamingMessageId ──► row id while streaming ═ co
       │ chatMessageBuilder(ChatMessage)         ▼
       └──────────────────────────────► OpenUiChat: one OpenUiSession per id
                                                 │ @ToAssistant
-   sendMessage(actionUserMessage(event)) ◄──────┘
+   sendMessage(buildActionUserMessage(e)) ◄─────┘
    updateMessage(id, content + ]]>openui:context [state]) ◄── session.onStateUpdate
 ```
 
@@ -97,7 +97,7 @@ ChatController ── streamingMessageId ──► row id while streaming ═ co
    transcript (reload, clear, a failed run) are disposed, which stops their Query timers.
 2. **Turns use the reference's envelope.** Messages are read and written with lang-core's
    `parseMessage` and `buildMessage`. A `@ToAssistant` turn is react-ui's
-   `buildActionUserMessage`, ported as `actionUserMessage`:
+   `buildActionUserMessage`, which the engine exports:
    `["User clicked: …", formState, context?]` after the message.
 3. **State lives in the transcript.** The chat prompt tells the model to start an edited page
    from "that answer's context and form values", so, like react-ui, user edits are written into

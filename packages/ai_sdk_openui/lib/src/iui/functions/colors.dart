@@ -1,11 +1,12 @@
 import '../../spec/library.dart';
 import '../../spec/schema.dart';
 import 'js_number.dart';
+import 'unicode.dart';
 
 final _hex = RegExp(r'^#?([\da-f]{3}|[\da-f]{6})$', caseSensitive: false);
 
 List<int> _channels(String color) {
-  final m = _hex.firstMatch(color.trim());
+  final m = _hex.firstMatch(jsTrim(color));
   if (m == null) throw StateError('not a hex color: $color');
   final digits = m.group(1)!;
   final hex = digits.length == 3

@@ -97,13 +97,7 @@ class _FlashcardState extends State<Flashcard> {
       toggled: _flipped,
       child: GestureDetector(
         onTap: () => setState(() => _flipped = !_flipped),
-        child: Stack(
-          children: [
-            _Ghost(child: side(widget.front, back: false)),
-            _Ghost(child: side(widget.back, back: true)),
-            Positioned.fill(child: _turning(side, reduce)),
-          ],
-        ),
+        child: _turning(side, reduce),
       ),
     );
   }
@@ -118,27 +112,57 @@ class _FlashcardState extends State<Flashcard> {
     builder: (context, t, _) {
       final showBack = t >= 0.5;
       final angle = t * math.pi;
-      return Transform(
-        alignment: Alignment.center,
-        transform: Matrix4.identity()
-          ..setEntry(3, 2, 1 / 900)
-          ..rotateY(showBack ? angle - math.pi : angle),
-        child: showBack
-            ? side(widget.back, back: true)
-            : side(widget.front, back: false),
+      Widget face(Widget child, {required bool back}) => _Ghost(
+        hidden: showBack != back,
+        child: Transform(
+          alignment: Alignment.center,
+          transform: Matrix4.identity()
+            ..setEntry(3, 2, 1 / 900)
+            ..rotateY(back ? angle - math.pi : angle),
+          child: side(child, back: back),
+        ),
+      );
+      return _Faces(
+        children: [
+          face(widget.front, back: false),
+          face(widget.back, back: true),
+        ],
       );
     },
   );
 }
 
-/// Takes its child's size without painting it, hit testing it, reading it
-/// to screen readers or showing it to test finders: both flashcard faces
-/// share one grid cell, so the card is as tall as the taller face.
-class _Ghost extends SingleChildRenderObjectWidget {
-  const _Ghost({required super.child});
+class _Faces extends MultiChildRenderObjectWidget {
+  const _Faces({required super.children});
 
   @override
-  RenderObject createRenderObject(BuildContext context) => _RenderGhost();
+  RenderObject createRenderObject(BuildContext context) => _RenderFaces();
+}
+
+class _RenderFaces extends RenderStack {
+  _RenderFaces() : super(alignment: Alignment.topLeft);
+
+  @override
+  void performLayout() {
+    super.performLayout();
+    for (var child = firstChild; child != null; child = childAfter(child)) {
+      child.layout(BoxConstraints.tight(size), parentUsesSize: true);
+    }
+  }
+}
+
+/// Hidden faces still set the card's height without receiving input or semantics.
+class _Ghost extends SingleChildRenderObjectWidget {
+  const _Ghost({required this.hidden, required super.child});
+  final bool hidden;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) => _RenderGhost(hidden);
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderGhost renderObject) {
+    renderObject.hidden = hidden;
+  }
 
   @override
   SingleChildRenderObjectElement createElement() => _GhostElement(this);
@@ -148,18 +172,35 @@ class _GhostElement extends SingleChildRenderObjectElement {
   _GhostElement(super.widget);
 
   @override
-  void debugVisitOnstageChildren(ElementVisitor visitor) {}
+  void debugVisitOnstageChildren(ElementVisitor visitor) {
+    if (!(widget as _Ghost).hidden) super.debugVisitOnstageChildren(visitor);
+  }
 }
 
 class _RenderGhost extends RenderProxyBox {
-  @override
-  void paint(PaintingContext context, Offset offset) {}
+  _RenderGhost(this._hidden);
+  bool _hidden;
+
+  set hidden(bool value) {
+    if (_hidden == value) return;
+    _hidden = value;
+    markNeedsPaint();
+    markNeedsSemanticsUpdate();
+  }
 
   @override
-  bool hitTest(BoxHitTestResult result, {required Offset position}) => false;
+  void paint(PaintingContext context, Offset offset) {
+    if (!_hidden) super.paint(context, offset);
+  }
 
   @override
-  void visitChildrenForSemantics(RenderObjectVisitor visitor) {}
+  bool hitTest(BoxHitTestResult result, {required Offset position}) =>
+      !_hidden && super.hitTest(result, position: position);
+
+  @override
+  void visitChildrenForSemantics(RenderObjectVisitor visitor) {
+    if (!_hidden) super.visitChildrenForSemantics(visitor);
+  }
 }
 
 /// `Celebration(when)`: confetti when `when` turns true after the program

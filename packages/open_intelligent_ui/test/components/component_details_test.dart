@@ -172,7 +172,7 @@ void main() {
       final ghost = tester.renderObject<RenderBox>(
         find
             .byWidgetPredicate((w) => w.runtimeType.toString() == '_Ghost')
-            .first,
+            .last,
       );
       final result = BoxHitTestResult();
       final hit = ghost.hitTest(

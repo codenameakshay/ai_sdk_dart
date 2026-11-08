@@ -200,6 +200,56 @@ void main() {
       expect(gap, closeTo(8, 0.5));
     });
 
+    testWidgets('scrolling an outer viewport closes a nested popover', (
+      tester,
+    ) async {
+      await pumpProgram(
+        tester,
+        'root = Col([Carousel([Popover("i", "Nested panel")]), '
+        'Box([], "col", null, null, null, null, null, null, 1200)])',
+      );
+      await tester.tap(find.text('i'));
+      await tester.pumpAndSettle();
+      expect(find.text('Nested panel'), findsOneWidget);
+      final outer = tester.state<ScrollableState>(
+        find.byWidgetPredicate(
+          (w) => w is Scrollable && w.axis == Axis.vertical,
+        ),
+      );
+      outer.position.jumpTo(100);
+      await tester.pumpAndSettle();
+      expect(find.text('Nested panel'), findsNothing);
+    });
+
+    testWidgets('removing an open nested popover detaches scroll listeners', (
+      tester,
+    ) async {
+      final program = await pumpProgram(
+        tester,
+        'root = Col([Carousel([Popover("i", "Nested panel")]), '
+        'Box([], "col", null, null, null, null, null, null, 1200)])',
+      );
+      await tester.tap(find.text('i'));
+      await tester.pumpAndSettle();
+      expect(find.text('Nested panel'), findsOneWidget);
+      final outer = tester.state<ScrollableState>(
+        find.byWidgetPredicate(
+          (w) => w is Scrollable && w.axis == Axis.vertical,
+        ),
+      );
+      program.session.update(
+        'root = Col([Text("Ready"), '
+        'Box([], "col", null, null, null, null, null, null, 1200)])',
+        streaming: false,
+      );
+      await tester.pumpAndSettle();
+      outer.position.jumpTo(100);
+      await tester.pumpAndSettle();
+      expect(find.text('Nested panel'), findsNothing);
+      expect(find.text('Ready'), findsOneWidget);
+      expect(outer.position.pixels, 100);
+    });
+
     testWidgets('Escape closes the panel', (tester) async {
       await pumpProgram(
         tester,

@@ -138,6 +138,8 @@ case from the reference's four test files and checked against Node, prove the be
 - Data shaped like an action step runs only as `open_url` (with a string URL) or `continue_conversation`, so
   tool data cannot set state or fire Mutations.
 - The store compares array and object defaults by value, so a re-parse does not notify on every chunk.
+- A prop whose expression throws evaluates to null (with its runtime error) instead of lang-core's raw
+  expression, so builders only ever see JSON values.
 
 **Known differences:**
 

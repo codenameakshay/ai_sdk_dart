@@ -332,7 +332,7 @@ final class _Popover extends StatefulWidget {
 final class _PopoverState extends State<_Popover> {
   final _controller = OverlayPortalController();
   final _triggerKey = GlobalKey();
-  ScrollPosition? _scroll;
+  final _scrolls = <ScrollPosition>[];
   bool _hovering = false;
   double _left = 0;
   double? _top;
@@ -348,15 +348,20 @@ final class _PopoverState extends State<_Popover> {
 
   void _show() {
     _place();
-    _scroll = Scrollable.maybeOf(context)?.position;
-    _scroll?.addListener(_hide);
+    context.visitAncestorElements((element) {
+      if (element is StatefulElement && element.state is ScrollableState) {
+        final position = (element.state as ScrollableState).position;
+        _scrolls.add(position);
+        position.addListener(_hide);
+      }
+      return true;
+    });
     setState(_controller.show);
   }
 
   void _hide() {
     if (!_controller.isShowing) return;
-    _scroll?.removeListener(_hide);
-    _scroll = null;
+    _stopListening();
     setState(_controller.hide);
   }
 
@@ -374,9 +379,16 @@ final class _PopoverState extends State<_Popover> {
     _bottom = up ? overlay.size.height - (rect.top - 8) : null;
   }
 
+  void _stopListening() {
+    for (final position in _scrolls) {
+      position.removeListener(_hide);
+    }
+    _scrolls.clear();
+  }
+
   @override
   void dispose() {
-    _scroll?.removeListener(_hide);
+    _stopListening();
     super.dispose();
   }
 

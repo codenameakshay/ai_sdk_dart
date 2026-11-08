@@ -1,3 +1,4 @@
+import 'package:ai_sdk_openui/src/iui/functions/lists.dart';
 import 'package:ai_sdk_openui/src/iui/functions/shared.dart';
 import 'package:test/test.dart';
 
@@ -88,6 +89,25 @@ void main() {
       }
     });
   }
+
+  test('Range keeps large integral steps positive from a fractional start', () {
+    final result =
+        value('@Range(0.5, 9241386435364256000, 9007199254740991)') as List;
+    expect(result.length, 1026);
+    expect(result.last, 9232379236110000000.0);
+  });
+
+  test('Range counts host integer bounds without overflowing', () {
+    final range = listFunctions.firstWhere((spec) => spec.name == 'Range');
+    expect(
+      range.fn({
+        'start': -9000000000000000000,
+        'end': 9000000000000000000,
+        'step': 9000000000000000000,
+      }),
+      [-9000000000000000000.0, 0.0],
+    );
+  });
 
   group('@Random', () {
     test('draws whole numbers past the int range', () {

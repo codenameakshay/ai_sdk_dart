@@ -7,6 +7,7 @@ import '../spec/bound.dart';
 import '../spec/library.dart';
 import 'errors.dart';
 import 'evaluator.dart';
+import 'host_actions.dart';
 import 'locale.dart';
 import 'queries.dart';
 import 'response_bundle.dart';
@@ -145,6 +146,9 @@ final class FieldState {
   void set(Object? value) => _set(value);
 }
 
+typedef _Run = ({ActionPhase phase, int attempt, String? message});
+typedef _ActiveAction = ({String base, ActionSpec spec});
+
 /// lang-core `unwrapFieldValue`: form fields store `{value, componentType}`.
 Object? _unwrapField(Object? v) =>
     v is Map && v.containsKey('value') ? v['value'] : v;
@@ -163,6 +167,7 @@ final class OpenUiSession {
     this.onParseResult,
     List<BoundRecord> records = const [],
     String? locale,
+    this.actionScope = '',
   }) : locale = resolveLocale(locale),
        _tools = {for (final t in tools) t.name: t},
        _initialState = initialState,
@@ -172,6 +177,22 @@ final class OpenUiSession {
          rootName: library.rootName,
          boundNames: {for (final r in records) r.variable},
        ) {
+    final saved = initialState[actionStateKey];
+    if (saved is Map) {
+      for (final MapEntry(:key, :value) in saved.entries) {
+        if (value is! Map || value['attempt'] is! num) continue;
+        final phase = ActionPhase.values.asNameMap()[value['phase']];
+        if (phase == null || phase == ActionPhase.idle) continue;
+        final cut = phase == ActionPhase.pending;
+        _actions['$key'] = (
+          phase: cut ? ActionPhase.failed : phase,
+          attempt: (value['attempt'] as num).toInt(),
+          message: cut || value['message'] is! String
+              ? null
+              : value['message'] as String,
+        );
+      }
+    }
     _queries = QueryManager(_tools.isEmpty ? null : _callTool);
     _cancelStore = _store.listen(_onStoreChange);
     _cancelQueries = _queries.subscribe(_onChange);
@@ -218,6 +239,17 @@ final class OpenUiSession {
   final void Function(ParseResult? result)? onParseResult;
   Map<String, OpenUiTool> _tools;
   final Map<String, Object?> _initialState;
+
+  /// Prefixed to every handled action's idempotency key: chat adapters pass the message id.
+  final String actionScope;
+
+  final Map<String, _Run> _actions = {};
+  final Set<String> _runningActionNodes = {};
+  final Map<String, _ActiveAction> _activeActions = {};
+  late final Map<String, ActionSpec> _handled = {
+    for (final a in library.actions)
+      if (a.handler != null) a.name: a,
+  };
 
   /// Host-bound records by `$name`: read-only, never in [state].
   final Map<String, Object?> _bound;
@@ -305,7 +337,7 @@ final class OpenUiSession {
       _initializing = true;
       // initialState only fills keys the store lacks, so a re-parse never undoes user edits.
       for (final MapEntry(:key, value: raw) in _initialState.entries) {
-        if (_bound.containsKey(key)) continue;
+        if (key == actionStateKey || _bound.containsKey(key)) continue;
         final value = Js.normalize(raw);
         if (key.startsWith(r'$')) {
           if (!_store.has(key)) persisted[key] = value;
@@ -343,7 +375,19 @@ final class OpenUiSession {
 
   /// The `$state` and form fields, as JSON to persist and pass back as
   /// `initialState`.
-  Map<String, Object?> get state => _store.snapshot;
+  Map<String, Object?> get state => _actions.isEmpty
+      ? _store.snapshot
+      : Map.unmodifiable({
+          ..._store.snapshot,
+          actionStateKey: {
+            for (final MapEntry(:key, value: r) in _actions.entries)
+              key: {
+                'phase': r.phase.name,
+                'attempt': r.attempt,
+                'message': ?r.message,
+              },
+          },
+        });
 
   /// lang-core `OpenUIError`s of the settled answer: parse, validation, runtime and tool errors. Empty while streaming.
   List<OpenUiError> get errors {
@@ -421,7 +465,7 @@ final class OpenUiSession {
       _dirty = true;
       return;
     }
-    onStateUpdate?.call(_store.snapshot);
+    onStateUpdate?.call(state);
     _syncQueries();
     _onChange();
   }
@@ -615,6 +659,8 @@ final class OpenUiSession {
     required String label,
     String? formName,
     required void Function(ActionEvent event) emit,
+    bool confirmed = false,
+    String nodeId = '',
   }) async {
     if (_disposed || _bundleBlocked) return;
     ActionEvent event(
@@ -649,49 +695,175 @@ final class OpenUiSession {
       emit(event(ActionEvent.continueConversation, const {}, label));
       return;
     }
-    for (final step in plan.steps) {
-      if (_disposed) return;
-      switch (step) {
-        case RunStep(:final statementId, :final refType):
-          if (refType == RuntimeRefType.mutation) {
-            final m = _result?.mutationStatements
-                .where((m) => m.statementId == statementId)
-                .firstOrNull;
-            final args = m?.argsAst == null
-                ? null
-                : evaluate(m!.argsAst!, _context);
-            if (!await _queries.fireMutation(
-              statementId,
-              args is Map ? args.cast() : const {},
+    if (!confirmed &&
+        plan.steps.any(
+          (s) => s is CustomStep && _handled[s.name]?.confirm != null,
+        )) {
+      return;
+    }
+    final guarded = plan.steps.any(
+      (s) => s is CustomStep && _handled.containsKey(s.name),
+    );
+    if (guarded && !_runningActionNodes.add(nodeId)) return;
+    try {
+      for (final step in plan.steps) {
+        if (_disposed) return;
+        switch (step) {
+          case RunStep(:final statementId, :final refType):
+            if (refType == RuntimeRefType.mutation) {
+              final m = _result?.mutationStatements
+                  .where((m) => m.statementId == statementId)
+                  .firstOrNull;
+              final args = m?.argsAst == null
+                  ? null
+                  : evaluate(m!.argsAst!, _context);
+              if (!await _queries.fireMutation(
+                statementId,
+                args is Map ? args.cast() : const {},
+              )) {
+                return;
+              }
+            } else {
+              _queries.invalidate([statementId]);
+            }
+          case ToAssistantStep(:final message, :final context):
+            emit(
+              event(ActionEvent.continueConversation, {
+                'context': ?context,
+              }, message),
+            );
+          case OpenUrlStep(:final url):
+            emit(event(ActionEvent.openUrl, {'url': url}));
+          case CustomStep(:final name, :final params):
+            final spec = _handled[name];
+            if (spec == null) {
+              emit(event(name, params));
+            } else if (!await _runHandled(
+              spec,
+              Js.normalize(params, json: true)! as Map<String, Object?>,
+              formName,
+              nodeId,
             )) {
               return;
             }
-          } else {
-            _queries.invalidate([statementId]);
-          }
-        case ToAssistantStep(:final message, :final context):
-          emit(
-            event(ActionEvent.continueConversation, {
-              'context': ?context,
-            }, message),
-          );
-        case OpenUrlStep(:final url):
-          emit(event(ActionEvent.openUrl, {'url': url}));
-        case CustomStep(:final name, :final params):
-          emit(event(name, params));
-        case SetStep(:final target, :final valueAst):
-          if (!_bound.containsKey(target)) {
-            _store.set(target, evaluate(valueAst, _context));
-          }
-        case ResetStep(:final targets):
-          final decls = _result?.stateDeclarations ?? const {};
-          for (final t in targets) {
-            if (_disposed) return;
-            if (_bound.containsKey(t)) continue;
-            _store.set(t, decls[t], pristine: true);
-          }
+          case SetStep(:final target, :final valueAst):
+            if (!_bound.containsKey(target)) {
+              _store.set(target, evaluate(valueAst, _context));
+            }
+          case ResetStep(:final targets):
+            final decls = _result?.stateDeclarations ?? const {};
+            for (final t in targets) {
+              if (_disposed) return;
+              if (_bound.containsKey(t)) continue;
+              _store.set(t, decls[t], pristine: true);
+            }
+        }
+      }
+    } finally {
+      if (guarded) {
+        _runningActionNodes.remove(nodeId);
+        _activeActions.remove(nodeId);
+        _onChange();
       }
     }
+  }
+
+  void _setRun(String base, _Run run) {
+    _actions[base] = run;
+    onStateUpdate?.call(state);
+    _onChange();
+  }
+
+  int _nextAttempt(_Run? r) => r == null
+      ? 1
+      : r.phase == ActionPhase.done
+      ? r.attempt + 1
+      : r.attempt;
+
+  Future<bool> _runHandled(
+    ActionSpec spec,
+    Map<String, Object?> params,
+    String? formName,
+    String nodeId,
+  ) async {
+    final base = actionBaseKey(actionScope, nodeId, spec.name, params);
+    final last = _actions[base];
+    if (last?.phase == ActionPhase.pending) return false;
+    if (last?.phase == ActionPhase.done && spec.disableAfterSuccess) {
+      return false;
+    }
+    final attempt = _nextAttempt(last);
+    _activeActions[nodeId] = (base: base, spec: spec);
+    _setRun(base, (
+      phase: ActionPhase.pending,
+      attempt: attempt,
+      message: null,
+    ));
+    ActionResult result;
+    try {
+      result = await spec.handler!(
+        ActionInvocation(
+          name: spec.name,
+          params: params,
+          idempotencyKey: '$base-$attempt',
+          attempt: attempt,
+          formState: _formPayload(formName),
+          formName: formName,
+        ),
+      );
+    } catch (e) {
+      result = ActionFailure(errorMessage(e));
+    }
+    if (_disposed) return false;
+    _setRun(base, switch (result) {
+      ActionFailure(:final message) => (
+        phase: ActionPhase.failed,
+        attempt: attempt,
+        message: message,
+      ),
+      ActionSuccess() => (
+        phase: ActionPhase.done,
+        attempt: attempt,
+        message: null,
+      ),
+    });
+    return result is ActionSuccess;
+  }
+
+  /// The active handled step's status, or the first handled step's status
+  /// when none is active; null when [action] has no handled steps.
+  /// [ActionStatus.confirm] is the first confirm of any handled step.
+  ActionStatus? actionStatus(OpenUiAction? action, {String nodeId = ''}) {
+    final steps = action?._plan?.steps ?? const <ActionStep>[];
+    final handled = [
+      for (final s in steps)
+        if (s is CustomStep && _handled.containsKey(s.name)) s,
+    ];
+    if (handled.isEmpty) return null;
+    final first = handled.first;
+    final firstSpec = _handled[first.name]!;
+    final firstBase = actionBaseKey(
+      actionScope,
+      nodeId,
+      firstSpec.name,
+      Js.normalize(first.params, json: true)! as Map<String, Object?>,
+    );
+    final active = _activeActions[nodeId];
+    final spec = active?.spec ?? firstSpec;
+    final base = active?.base ?? firstBase;
+    final r = _actions[base];
+    final phase = r?.phase ?? ActionPhase.idle;
+    return ActionStatus(
+      phase: phase,
+      idempotencyKey: '$base-${_nextAttempt(r)}',
+      message: r?.message,
+      confirm: [
+        for (final s in handled) ?_handled[s.name]!.confirm,
+      ].firstOrNull,
+      disabled:
+          phase == ActionPhase.pending ||
+          (phase == ActionPhase.done && spec.disableAfterSuccess),
+    );
   }
 
   /// react-lang `retryQueries`: refetches the failed Queries, or every Query
@@ -720,6 +892,8 @@ final class OpenUiSession {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    _runningActionNodes.clear();
+    _activeActions.clear();
     _cancelStore();
     _cancelQueries();
     _queries.dispose();

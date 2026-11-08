@@ -15,6 +15,7 @@ import 'package:flutter/services.dart';
 import '../localizations.dart';
 import '../theme.dart';
 import '../view.dart';
+import 'action_gate.dart';
 import 'block_slot.dart' show PressableScope;
 import 'flex_row.dart';
 import 'glyph.dart';
@@ -237,6 +238,7 @@ class IuiButton extends StatelessWidget {
     this.variant = 'solid',
     this.tone,
     this.size = 'md',
+    this.phase,
     this.onTap,
   });
 
@@ -251,6 +253,9 @@ class IuiButton extends StatelessWidget {
 
   /// `sm`, `md` or `lg`.
   final String size;
+
+  /// A handled action's phase: a spinner while pending, a check when done.
+  final ActionPhase? phase;
 
   /// Null shows the button disabled.
   final VoidCallback? onTap;
@@ -347,7 +352,17 @@ class IuiButton extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    if (Glyph.has(context, icon)) ...[
+                    if (phase == ActionPhase.pending) ...[
+                      _Spinner(size: size == 'sm' ? 14 : 16, color: color),
+                      const SizedBox(width: 7),
+                    ] else if (phase == ActionPhase.done) ...[
+                      Glyph(
+                        'check',
+                        size: size == 'sm' ? 14 : 16,
+                        color: color,
+                      ),
+                      const SizedBox(width: 7),
+                    ] else if (Glyph.has(context, icon)) ...[
                       Glyph(icon!, size: size == 'sm' ? 14 : 16, color: color),
                       const SizedBox(width: 7),
                     ],
@@ -381,15 +396,21 @@ Widget buildButton(BuildContext context, OpenUiNode node) {
       ? ''
       : jsString(node.props['label']);
   final enabled = node.props.boolean('disabled') != true && !node.isStreaming;
-  final button = IuiButton(
-    label: label,
-    icon: node.props.string('icon'),
-    variant: node.props.string('variant') ?? 'solid',
-    tone: node.props.string('color'),
-    size: node.props.string('size') ?? 'md',
-    onTap: enabled
-        ? () => node.run('action', label: label, sendLabel: true)
-        : null,
+  final button = ActionGate(
+    node: node,
+    prop: 'action',
+    enabled: enabled,
+    label: (_) => label,
+    sendLabel: true,
+    builder: (context, status, onTap) => IuiButton(
+      label: label,
+      icon: node.props.string('icon'),
+      variant: node.props.string('variant') ?? 'solid',
+      tone: node.props.string('color'),
+      size: node.props.string('size') ?? 'md',
+      phase: status?.phase,
+      onTap: onTap == null ? null : () => onTap(context),
+    ),
   );
   if (node.props.boolean('block') == true) {
     return SizedBox(width: double.infinity, child: button);
@@ -409,60 +430,104 @@ Widget buildIconButton(BuildContext context, OpenUiNode node) {
   final label = given ?? icon;
   final variant = node.props.string('variant') ?? 'outline';
   final enabled = !node.isStreaming;
-  Widget button = Press(
-    onTap: enabled ? (_) => node.run('action', label: label) : null,
-    builder: (hovered, pressed) {
-      final overlay = pressed
-          ? theme.pressed
-          : hovered
-          ? theme.hover
-          : null;
-      final (background, foreground, border) = switch (variant) {
-        'ghost' => (
-          overlay,
-          hovered || pressed ? theme.ink : theme.muted,
-          const Color(0x00000000),
-        ),
-        'solid' => (
-          hovered && !pressed ? theme.inkHover : theme.ink,
-          theme.onInk,
-          theme.ink,
-        ),
-        _ => (
-          Color.alphaBlend(overlay ?? const Color(0x00000000), theme.canvas),
-          theme.ink,
-          theme.border,
-        ),
-      };
-      return Opacity(
-        opacity: enabled ? 1 : 0.4,
-        child: AnimatedContainer(
-          duration: _buttonFade,
-          curve: Curves.ease,
-          width: 34,
-          height: 34,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: background,
-            shape: BoxShape.circle,
-            border: Border.all(color: border),
-          ),
-          child: Glyph(icon, size: 16, color: foreground),
-        ),
-      );
-    },
-  );
-  if (given != null) button = Tooltip(message: given, child: button);
   return Align(
     alignment: AlignmentDirectional.centerStart,
     widthFactor: 1,
     heightFactor: 1,
-    child: Semantics(
-      container: true,
-      button: true,
+    child: ActionGate(
+      node: node,
+      prop: 'action',
       enabled: enabled,
-      label: label,
-      child: button,
+      label: (_) => label,
+      builder: (context, status, onTap) {
+        final phase = status?.phase;
+        Widget button = Press(
+          onTap: onTap,
+          builder: (hovered, pressed) {
+            final overlay = pressed
+                ? theme.pressed
+                : hovered
+                ? theme.hover
+                : null;
+            final (background, foreground, border) = switch (variant) {
+              'ghost' => (
+                overlay,
+                hovered || pressed ? theme.ink : theme.muted,
+                const Color(0x00000000),
+              ),
+              'solid' => (
+                hovered && !pressed ? theme.inkHover : theme.ink,
+                theme.onInk,
+                theme.ink,
+              ),
+              _ => (
+                Color.alphaBlend(
+                  overlay ?? const Color(0x00000000),
+                  theme.canvas,
+                ),
+                theme.ink,
+                theme.border,
+              ),
+            };
+            return Opacity(
+              opacity: onTap != null ? 1 : 0.4,
+              child: AnimatedContainer(
+                duration: _buttonFade,
+                curve: Curves.ease,
+                width: 34,
+                height: 34,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: background,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: border),
+                ),
+                child: switch (phase) {
+                  ActionPhase.pending => _Spinner(size: 16, color: foreground),
+                  ActionPhase.done => Glyph(
+                    'check',
+                    size: 16,
+                    color: foreground,
+                  ),
+                  ActionPhase.failed => Glyph(
+                    Glyph.has(context, 'circle-alert')
+                        ? 'circle-alert'
+                        : 'info',
+                    size: 16,
+                    color: theme.status['danger'] ?? foreground,
+                  ),
+                  _ => Glyph(icon, size: 16, color: foreground),
+                },
+              ),
+            );
+          },
+        );
+        if (given != null) button = Tooltip(message: given, child: button);
+        return Semantics(
+          container: true,
+          button: true,
+          enabled: onTap != null,
+          label: label,
+          child: button,
+        );
+      },
+    ),
+  );
+}
+
+/// A 2px spinner sized to an icon or a button's text.
+class _Spinner extends StatelessWidget {
+  const _Spinner({required this.size, this.color});
+  final double size;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) => SizedBox.square(
+    dimension: size,
+    child: CircularProgressIndicator(
+      strokeWidth: 2,
+      color: color,
+      semanticsLabel: OpenUiLocalizations.of(context).loadingData,
     ),
   );
 }
@@ -502,88 +567,96 @@ Widget buildPressable(BuildContext context, OpenUiNode node) {
     );
   }
   final ring = selected && !hasRow;
-  return Semantics(
-    container: true,
-    button: true,
+  return ActionGate(
+    node: node,
+    prop: 'action',
     enabled: !streaming,
-    toggled: node.props['selected'] is bool ? selected : null,
-    child: Press(
-      radius: radius,
-      onTap: streaming
-          ? null
-          : (ctx) => node.run('action', label: _textOf(ctx)),
-      builder: (hovered, pressed) {
-        final scale = hasRow || reduce
-            ? 1.0
-            : (pressed ? 0.98 : (hovered ? 1.01 : 1.0));
-        final overlay = pressed
-            ? 0.08
-            : hovered
-            ? 0.05
-            : (ring ? 0.06 : 0.0);
-        return AnimatedScale(
-          scale: scale,
-          duration: fade,
-          curve: Curves.easeOut,
-          child: Stack(
-            children: [
-              AnimatedContainer(
-                duration: fade,
-                curve: Curves.easeOut,
-                padding: padding == null ? null : EdgeInsets.all(padding),
-                decoration: BoxDecoration(
-                  color: theme.bg(background),
-                  gradient: theme.bgGradient(background),
-                  borderRadius: shape,
-                ),
-                foregroundDecoration: BoxDecoration(
-                  borderRadius: shape,
-                  border: Border.all(
-                    color: ring
-                        ? theme.ink.withValues(alpha: 0.2)
-                        : const Color(0x00000000),
-                  ),
-                ),
-                child: content,
-              ),
-              Positioned.fill(
-                child: IgnorePointer(
-                  child: AnimatedContainer(
+    label: _textOf,
+    builder: (context, status, onTap) => Semantics(
+      container: true,
+      button: true,
+      enabled: onTap != null,
+      toggled: node.props['selected'] is bool ? selected : null,
+      child: Press(
+        radius: radius,
+        onTap: onTap,
+        builder: (hovered, pressed) {
+          final scale = hasRow || reduce
+              ? 1.0
+              : (pressed ? 0.98 : (hovered ? 1.01 : 1.0));
+          final overlay = pressed
+              ? 0.08
+              : hovered
+              ? 0.05
+              : (ring ? 0.06 : 0.0);
+          final pending = status?.phase == ActionPhase.pending;
+          return Opacity(
+            opacity: pending ? 0.6 : 1,
+            child: AnimatedScale(
+              scale: scale,
+              duration: fade,
+              curve: Curves.easeOut,
+              child: Stack(
+                children: [
+                  AnimatedContainer(
                     duration: fade,
                     curve: Curves.easeOut,
+                    padding: padding == null ? null : EdgeInsets.all(padding),
                     decoration: BoxDecoration(
-                      color: theme.ink.withValues(alpha: overlay),
+                      color: theme.bg(background),
+                      gradient: theme.bgGradient(background),
                       borderRadius: shape,
                     ),
-                  ),
-                ),
-              ),
-              if (ring)
-                PositionedDirectional(
-                  top: 8,
-                  end: 8,
-                  child: Container(
-                    width: 18,
-                    height: 18,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: theme.ink,
-                      shape: BoxShape.circle,
+                    foregroundDecoration: BoxDecoration(
+                      borderRadius: shape,
+                      border: Border.all(
+                        color: ring
+                            ? theme.ink.withValues(alpha: 0.2)
+                            : const Color(0x00000000),
+                      ),
                     ),
-                    child: CustomPaint(
-                      size: const Size.square(12),
-                      painter: _CheckMark(
-                        theme.brightness == Brightness.dark
-                            ? const Color(0xFF171717)
-                            : const Color(0xFFFFFFFF),
+                    child: content,
+                  ),
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: AnimatedContainer(
+                        duration: fade,
+                        curve: Curves.easeOut,
+                        decoration: BoxDecoration(
+                          color: theme.ink.withValues(alpha: overlay),
+                          borderRadius: shape,
+                        ),
                       ),
                     ),
                   ),
-                ),
-            ],
-          ),
-        );
-      },
+                  if (ring)
+                    PositionedDirectional(
+                      top: 8,
+                      end: 8,
+                      child: Container(
+                        width: 18,
+                        height: 18,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: theme.ink,
+                          shape: BoxShape.circle,
+                        ),
+                        child: CustomPaint(
+                          size: const Size.square(12),
+                          painter: _CheckMark(
+                            theme.brightness == Brightness.dark
+                                ? const Color(0xFF171717)
+                                : const Color(0xFFFFFFFF),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
     ),
   );
 }

@@ -596,12 +596,29 @@ final class OpenUiNode {
   );
 
   /// Runs the action in [prop]. With no action and [sendLabel], the [label]
-  /// goes to the assistant, like a Button without an action.
-  void run(String prop, {String label = '', bool sendLabel = false}) {
+  /// goes to the assistant, like a Button without an action. [confirmed]
+  /// answers the action's confirm step.
+  void run(
+    String prop, {
+    String label = '',
+    bool sendLabel = false,
+    bool confirmed = false,
+  }) {
     final action = props.action(prop);
     if (action == null && !sendLabel) return;
-    _session.run(action, label: label, formName: formName, emit: _emit);
+    _session.run(
+      action,
+      label: label,
+      formName: formName,
+      emit: _emit,
+      confirmed: confirmed,
+      nodeId: id,
+    );
   }
+
+  /// The status of the handled action in [prop], or null when it has none.
+  ActionStatus? actionStatus(String prop) =>
+      _session.actionStatus(props.action(prop), nodeId: id);
 
   /// Whether [prop] holds an action.
   bool hasAction(String prop) => props.action(prop) != null;

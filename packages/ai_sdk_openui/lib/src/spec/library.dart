@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import '../lang/parser.dart';
 import '../lang/policy.dart';
+import '../runtime/host_actions.dart';
 import 'bound.dart';
 import 'prompt.dart';
 import 'schema.dart';
@@ -57,10 +58,22 @@ final class ActionSpec {
     this.name, {
     required this.description,
     required this.params,
+    this.handler,
+    this.confirm,
+    this.disableAfterSuccess = false,
   });
   final String name;
   final String description;
   final Map<String, Schema> params;
+
+  /// Runs the step in the session instead of sending it to the host as an event.
+  final ActionHandler? handler;
+
+  /// Ask this before running; the session runs nothing until `confirmed: true`.
+  final String? confirm;
+
+  /// Stop repeats once a run succeeds.
+  final bool disableAfterSuccess;
 
   /// A slot schema that takes only this action: `S.union([copy.ref, Steps.openUrl])`.
   Schema get ref => S.actionRef(name, params);

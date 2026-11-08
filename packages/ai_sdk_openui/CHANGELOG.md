@@ -1,5 +1,11 @@
 ## 3.1.0 (unreleased)
 
+- Async host actions: `ActionSpec(handler:)` runs a library action in the session and returns `ActionSuccess` or
+  `ActionFailure(message)`. Each run gets an `idempotencyKey` that stays the same for retries of the same write,
+  and `OpenUiSession.actionStatus(action, nodeId:)` reports pending, done or failed per triggering node.
+  `confirm:` makes `run` wait for `confirmed: true`, and `disableAfterSuccess:` stops repeats. Statuses are saved
+  in `session.state` under `__openui_actions` and restored from `initialState`; a run cut off mid-flight restores
+  as failed. Actions without a handler still reach the host as events.
 - `Impure` (the clock and random seams that `@Today`, `@Now` and `@Random` use) is public, so hosts and tests can pin time and randomness.
 - `intelligentUiWithout(optionalIuiComponents)` gives a library without Math, Map, MapMarker, YouTube and HtmlView, and `chatPromptFor(library)` / `dashboardPrompt(library:)` drop the medium-rule clauses for components the library lacks. `intelligentUi` and `chatPrompt` are unchanged.
 - `library.validate(program, policy: ValidationPolicy(...))` and `validateProgram` (from a spec's JSON Schema

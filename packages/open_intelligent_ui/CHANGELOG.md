@@ -1,5 +1,8 @@
 ## 3.1.0 (unreleased)
 
+- Button, IconButton and Pressable show a handled action's pending, done and failed states, ask for an inline
+  confirmation when the action has `confirm`, and stay disabled after success with `disableAfterSuccess`.
+  `OpenUiNode` gains `actionStatus(prop)` and `run(confirmed:)`.
 - Every rendered element has a stable key from its statement id (inline elements: parent id and
   position). `OpenUiView(semanticsIdentifiers: true)` also sets Semantics identifiers for UI tests.
 - Elements are keyed by statement id, so a statement that is renamed or moved inline mounts a new

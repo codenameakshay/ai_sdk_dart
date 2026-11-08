@@ -15,6 +15,15 @@ export 'src/lang/policy.dart'
 export 'src/runtime/action_message.dart' show buildActionUserMessage;
 export 'src/runtime/errors.dart'
     show OpenUiError, OpenUiErrorCode, OpenUiErrorSource;
+export 'src/runtime/host_actions.dart'
+    show
+        ActionFailure,
+        ActionHandler,
+        ActionInvocation,
+        ActionPhase,
+        ActionResult,
+        ActionStatus,
+        ActionSuccess;
 export 'src/runtime/form_validation.dart'
     show
         ParsedRule,

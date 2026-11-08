@@ -148,6 +148,10 @@ final class FieldState {
 
 typedef _Run = ({ActionPhase phase, int attempt, String? message});
 typedef _ActiveAction = ({String base, ActionSpec spec});
+typedef _PlanRun = ({ActionPhase phase, int cursor, String? message});
+typedef _ActivePlan = ({int cursor, ActionPlan plan});
+
+const _actionPlansStateKey = '__plans';
 
 /// lang-core `unwrapFieldValue`: form fields store `{value, componentType}`.
 Object? _unwrapField(Object? v) =>
@@ -229,9 +233,12 @@ final class OpenUiSession {
   final String actionScope;
 
   final Map<String, _Run> _actions = {};
+  final Map<String, _PlanRun> _plans = {};
   final Set<String> _locallyRunActions = {};
+  final Set<String> _locallyRunPlans = {};
   final Set<String> _runningActionNodes = {};
   final Map<String, _ActiveAction> _activeActions = {};
+  final Map<String, _ActivePlan> _activePlans = {};
   late final Map<String, ActionSpec> _handled = {
     for (final a in library.actions)
       if (a.handler != null) a.name: a,
@@ -384,6 +391,24 @@ final class OpenUiSession {
             : value['message'] as String,
       );
     }
+    final savedPlans = saved[_actionPlansStateKey];
+    if (savedPlans is! Map) return;
+    for (final MapEntry(:key, :value) in savedPlans.entries) {
+      if (_locallyRunPlans.contains('$key') ||
+          value is! Map ||
+          value['cursor'] is! num) {
+        continue;
+      }
+      final phase = ActionPhase.values.asNameMap()[value['phase']];
+      if (phase == null || phase == ActionPhase.idle) continue;
+      _plans['$key'] = (
+        phase: phase == ActionPhase.pending ? ActionPhase.failed : phase,
+        cursor: (value['cursor'] as num).toInt(),
+        message: phase == ActionPhase.pending || value['message'] is! String
+            ? null
+            : value['message'] as String,
+      );
+    }
   }
 
   /// Whether the answer may not run yet: it streams, or it is an incomplete or invalid Cloud bundle.
@@ -407,7 +432,7 @@ final class OpenUiSession {
 
   /// The `$state` and form fields, as JSON to persist and pass back as
   /// `initialState`.
-  Map<String, Object?> get state => _actions.isEmpty
+  Map<String, Object?> get state => _actions.isEmpty && _plans.isEmpty
       ? _store.snapshot
       : Map.unmodifiable({
           ..._store.snapshot,
@@ -417,6 +442,15 @@ final class OpenUiSession {
                 'phase': r.phase.name,
                 'attempt': r.attempt,
                 'message': ?r.message,
+              },
+            if (_plans.isNotEmpty)
+              _actionPlansStateKey: {
+                for (final MapEntry(:key, value: r) in _plans.entries)
+                  key: {
+                    'phase': r.phase.name,
+                    'cursor': r.cursor,
+                    'message': ?r.message,
+                  },
               },
           },
         });
@@ -688,6 +722,52 @@ final class OpenUiSession {
     return _store.snapshot;
   }
 
+  String _planKey(ActionPlan plan, String nodeId) {
+    final steps = [
+      for (final step in plan.steps)
+        {
+          'step': step.jsFields,
+          if (step case RunStep(:final statementId, :final refType))
+            'statement': switch (refType) {
+              RuntimeRefType.mutation =>
+                _result?.mutationStatements
+                    .where((s) => s.statementId == statementId)
+                    .firstOrNull,
+              _ =>
+                _result?.queryStatements
+                    .where((s) => s.statementId == statementId)
+                    .firstOrNull,
+            }?.jsFields,
+        },
+    ];
+    return actionBaseKey(actionScope, nodeId, '__plan', {'steps': steps});
+  }
+
+  void _writePlan(String key, _PlanRun plan) {
+    _locallyRunPlans.add(key);
+    _plans[key] = plan;
+    _notifyStateChange();
+  }
+
+  void _notifyStateChange() {
+    onStateUpdate?.call(state);
+    _onChange();
+  }
+
+  bool _completedPlanIsDisabled(ActionPlan plan, String nodeId) {
+    for (final step in plan.steps) {
+      if (step case CustomStep(:final name, :final params)) {
+        final spec = _handled[name];
+        if (spec == null || !spec.disableAfterSuccess) continue;
+        final normalized =
+            Js.normalize(params, json: true)! as Map<String, Object?>;
+        final base = actionBaseKey(actionScope, nodeId, spec.name, normalized);
+        if (_actions[base]?.phase == ActionPhase.done) return true;
+      }
+    }
+    return false;
+  }
+
   /// Runs a click. A plan runs its steps in order: `@Set` evaluates at click
   /// time, a failed Mutation stops the plan, host steps go to [emit]. With
   /// no action, the [label] goes to the assistant (a Button without an
@@ -743,10 +823,31 @@ final class OpenUiSession {
     final guarded = plan.steps.any(
       (s) => s is CustomStep && _handled.containsKey(s.name),
     );
+    final planKey = guarded ? _planKey(plan, nodeId) : null;
+    final savedPlan = planKey == null ? null : _plans[planKey];
+    if (savedPlan?.phase == ActionPhase.done &&
+        _completedPlanIsDisabled(plan, nodeId)) {
+      return;
+    }
+    final start = savedPlan?.phase == ActionPhase.done
+        ? 0
+        : savedPlan?.cursor ?? 0;
     if (guarded && !_runningActionNodes.add(nodeId)) return;
     try {
-      for (final step in plan.steps) {
+      if (guarded) {
+        _activePlans[nodeId] = (cursor: start, plan: plan);
+        _writePlan(planKey!, (
+          phase: ActionPhase.pending,
+          cursor: start,
+          message: null,
+        ));
+      }
+      for (var index = start; index < plan.steps.length; index++) {
         if (_disposed) return;
+        final step = plan.steps[index];
+        if (guarded) {
+          _activePlans[nodeId] = (cursor: index, plan: plan);
+        }
         switch (step) {
           case RunStep(:final statementId, :final refType):
             if (refType == RuntimeRefType.mutation) {
@@ -760,6 +861,22 @@ final class OpenUiSession {
                 statementId,
                 args is Map ? args.cast() : const {},
               )) {
+                if (guarded && !_disposed) {
+                  _writePlan(planKey!, (
+                    phase: ActionPhase.failed,
+                    cursor: index,
+                    message: _queries
+                        .getSnapshot()
+                        .errors
+                        .where(
+                          (error) =>
+                              error.source == OpenUiErrorSource.mutation &&
+                              error.statementId == statementId,
+                        )
+                        .firstOrNull
+                        ?.message,
+                  ));
+                }
                 return;
               }
             } else {
@@ -782,7 +899,20 @@ final class OpenUiSession {
               Js.normalize(params, json: true)! as Map<String, Object?>,
               formName,
               nodeId,
+              planKey: guarded ? planKey : null,
+              cursor: index,
+              nextCursor: index + 1,
+              done: index + 1 == plan.steps.length,
             )) {
+              if (guarded &&
+                  !_disposed &&
+                  _plans[planKey!]?.phase == ActionPhase.pending) {
+                _writePlan(planKey, (
+                  phase: ActionPhase.done,
+                  cursor: index,
+                  message: null,
+                ));
+              }
               return;
             }
           case SetStep(:final target, :final valueAst):
@@ -797,21 +927,39 @@ final class OpenUiSession {
               _store.set(t, decls[t], pristine: true);
             }
         }
+        final isHandledCustom = switch (step) {
+          CustomStep(:final name) when _handled.containsKey(name) => true,
+          _ => false,
+        };
+        if (guarded && !isHandledCustom) {
+          final next = index + 1;
+          _writePlan(planKey!, (
+            phase: next == plan.steps.length
+                ? ActionPhase.done
+                : ActionPhase.pending,
+            cursor: next,
+            message: null,
+          ));
+        }
       }
     } finally {
       if (guarded) {
         _runningActionNodes.remove(nodeId);
         _activeActions.remove(nodeId);
+        _activePlans.remove(nodeId);
         _onChange();
       }
     }
   }
 
-  void _setRun(String base, _Run run) {
+  void _setRun(String base, _Run run, {String? planKey, _PlanRun? planRun}) {
     _locallyRunActions.add(base);
     _actions[base] = run;
-    onStateUpdate?.call(state);
-    _onChange();
+    if (planKey != null && planRun != null) {
+      _locallyRunPlans.add(planKey);
+      _plans[planKey] = planRun;
+    }
+    _notifyStateChange();
   }
 
   int _nextAttempt(_Run? r) => r == null
@@ -824,8 +972,12 @@ final class OpenUiSession {
     ActionSpec spec,
     Map<String, Object?> params,
     String? formName,
-    String nodeId,
-  ) async {
+    String nodeId, {
+    String? planKey,
+    int cursor = 0,
+    int nextCursor = 0,
+    bool done = false,
+  }) async {
     final base = actionBaseKey(actionScope, nodeId, spec.name, params);
     final last = _actions[base];
     if (last?.phase == ActionPhase.pending) return false;
@@ -834,11 +986,14 @@ final class OpenUiSession {
     }
     final attempt = _nextAttempt(last);
     _activeActions[nodeId] = (base: base, spec: spec);
-    _setRun(base, (
-      phase: ActionPhase.pending,
-      attempt: attempt,
-      message: null,
-    ));
+    _setRun(
+      base,
+      (phase: ActionPhase.pending, attempt: attempt, message: null),
+      planKey: planKey,
+      planRun: planKey == null
+          ? null
+          : (phase: ActionPhase.pending, cursor: cursor, message: null),
+    );
     ActionResult result;
     try {
       result = await spec.handler!(
@@ -855,55 +1010,110 @@ final class OpenUiSession {
       result = ActionFailure(errorMessage(e));
     }
     if (_disposed) return false;
-    _setRun(base, switch (result) {
-      ActionFailure(:final message) => (
-        phase: ActionPhase.failed,
-        attempt: attempt,
-        message: message,
-      ),
-      ActionSuccess() => (
-        phase: ActionPhase.done,
-        attempt: attempt,
-        message: null,
-      ),
-    });
-    return result is ActionSuccess;
+    final success = result is ActionSuccess;
+    _setRun(
+      base,
+      switch (result) {
+        ActionFailure(:final message) => (
+          phase: ActionPhase.failed,
+          attempt: attempt,
+          message: message,
+        ),
+        ActionSuccess() => (
+          phase: ActionPhase.done,
+          attempt: attempt,
+          message: null,
+        ),
+      },
+      planKey: planKey,
+      planRun: planKey == null
+          ? null
+          : (
+              phase: success
+                  ? done
+                        ? ActionPhase.done
+                        : ActionPhase.pending
+                  : ActionPhase.failed,
+              cursor: success ? nextCursor : cursor,
+              message: switch (result) {
+                ActionFailure(:final message) => message,
+                ActionSuccess() => null,
+              },
+            ),
+    );
+    return success;
   }
 
-  /// The active handled step's status, or the first handled step's status
-  /// when none is active; null when [action] has no handled steps.
+  /// The current/next handled step at the plan cursor, or the first handled
+  /// step after completion; the enclosing plan's phase takes precedence.
+  /// Null when [action] has no handled steps.
   /// [ActionStatus.confirm] is the first confirm of any handled step.
   ActionStatus? actionStatus(OpenUiAction? action, {String nodeId = ''}) {
-    final steps = action?._plan?.steps ?? const <ActionStep>[];
+    final plan = action?._plan;
+    final steps = plan?.steps ?? const <ActionStep>[];
     final handled = [
       for (final s in steps)
         if (s is CustomStep && _handled.containsKey(s.name)) s,
     ];
     if (handled.isEmpty) return null;
-    final first = handled.first;
-    final firstSpec = _handled[first.name]!;
-    final firstBase = actionBaseKey(
-      actionScope,
-      nodeId,
-      firstSpec.name,
-      Js.normalize(first.params, json: true)! as Map<String, Object?>,
-    );
-    final active = _activeActions[nodeId];
-    final spec = active?.spec ?? firstSpec;
-    final base = active?.base ?? firstBase;
+    final activePlan = _activePlans[nodeId];
+    final planState = activePlan == null
+        ? _plans[_planKey(plan!, nodeId)]
+        : (
+            phase: ActionPhase.pending,
+            cursor: activePlan.cursor,
+            message: null,
+          );
+    final activeSteps = activePlan?.plan.steps ?? steps;
+    final cursor = planState?.cursor ?? 0;
+    final statusStep =
+        _handledStepAtOrAfter(activeSteps, cursor) ??
+        _handledStepAtOrAfter(activeSteps, 0)!;
+    var spec = _handled[statusStep.name]!;
+    final params = statusStep.params;
+    final isActiveHandledStep =
+        activePlan != null &&
+        cursor < activeSteps.length &&
+        activeSteps[cursor] is CustomStep &&
+        _handled.containsKey((activeSteps[cursor] as CustomStep).name);
+    final active = isActiveHandledStep ? _activeActions[nodeId] : null;
+    if (active != null) {
+      spec = active.spec;
+    }
+    final base =
+        active?.base ??
+        actionBaseKey(
+          actionScope,
+          nodeId,
+          spec.name,
+          Js.normalize(params, json: true)! as Map<String, Object?>,
+        );
     final r = _actions[base];
-    final phase = r?.phase ?? ActionPhase.idle;
+    final phase = planState?.phase ?? r?.phase ?? ActionPhase.idle;
+    final disableAfterSuccess =
+        phase == ActionPhase.done && _completedPlanIsDisabled(plan!, nodeId);
     return ActionStatus(
       phase: phase,
       idempotencyKey: '$base-${_nextAttempt(r)}',
-      message: r?.message,
+      message: planState?.message ?? r?.message,
       confirm: [
         for (final s in handled) ?_handled[s.name]!.confirm,
       ].firstOrNull,
       disabled:
           phase == ActionPhase.pending ||
-          (phase == ActionPhase.done && spec.disableAfterSuccess),
+          disableAfterSuccess ||
+          (planState == null &&
+              phase == ActionPhase.done &&
+              spec.disableAfterSuccess),
     );
+  }
+
+  CustomStep? _handledStepAtOrAfter(List<ActionStep> steps, int start) {
+    for (var i = start; i < steps.length; i++) {
+      final step = steps[i];
+      if (step is CustomStep && _handled.containsKey(step.name)) return step;
+    }
+    return null;
   }
 
   /// react-lang `retryQueries`: refetches the failed Queries, or every Query
@@ -934,7 +1144,9 @@ final class OpenUiSession {
     _disposed = true;
     _runningActionNodes.clear();
     _activeActions.clear();
+    _activePlans.clear();
     _locallyRunActions.clear();
+    _locallyRunPlans.clear();
     _cancelStore();
     _cancelQueries();
     _queries.dispose();

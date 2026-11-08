@@ -863,6 +863,8 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
 
   Widget _overlay(BuildContext context, OpenUiTheme theme, Widget surface) {
     final inset = MediaQuery.sizeOf(context).width <= 520 ? 12.0 : 24.0;
+    // A phone's status bar and home indicator sit inside the reference's inset.
+    final safe = MediaQuery.paddingOf(context);
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
@@ -875,10 +877,10 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
             dismissible: false,
           ),
           Positioned.fill(
-            left: inset,
-            top: inset,
-            right: inset,
-            bottom: inset,
+            left: inset + safe.left,
+            top: inset + safe.top,
+            right: inset + safe.right,
+            bottom: inset + safe.bottom,
             child: CallbackShortcuts(
               bindings: {
                 const SingleActivator(LogicalKeyboardKey.escape): () =>

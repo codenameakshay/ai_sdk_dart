@@ -732,6 +732,17 @@ void main() {
       },
     );
 
+    testWidgets('the expanded map stays inside the safe area', (tester) async {
+      tester.view.padding = const FakeViewPadding(top: 62 * 3, bottom: 34 * 3);
+      addTearDown(tester.view.resetPadding);
+      await _pumpAbove(tester, _sf);
+      await tester.tap(find.text('Expand'));
+      await tester.pump();
+      final map = tester.getRect(find.byType(fm.FlutterMap));
+      expect(map.top, 62 + 24);
+      expect(map.bottom, 600 - 34 - 24);
+    });
+
     testWidgets('Escape and Collapse return the map to the page', (
       tester,
     ) async {

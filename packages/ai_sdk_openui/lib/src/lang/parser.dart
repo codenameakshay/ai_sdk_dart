@@ -799,14 +799,14 @@ final class StreamParser {
 
   ParseResult push(String chunk, {bool complete = false}) {
     _buf += chunk;
-    return result(complete: complete);
+    return getResult(complete: complete);
   }
 
   /// Sets the full text so far; restarts when it is not an extension.
   ParseResult set(String fullText, {bool complete = false}) {
     if (fullText.length < _buf.length || !fullText.startsWith(_buf)) reset();
     _buf += fullText.substring(_buf.length);
-    return result(complete: complete);
+    return getResult(complete: complete);
   }
 
   void _addStatement(String text) {
@@ -868,7 +868,7 @@ final class StreamParser {
     return stmtStart;
   }
 
-  ParseResult result({bool complete = false}) {
+  ParseResult getResult({bool complete = false}) {
     final next = preprocess(_buf);
     if (!next.startsWith(_cleaned.substring(0, _completedEnd))) {
       _completedEnd = 0;
@@ -923,3 +923,21 @@ final class StreamParser {
     );
   }
 }
+
+/// lang-core `Parser`: parses whole programs against one library schema.
+final class Parser {
+  Parser._(this._schema, this._rootName);
+  final CompiledSchema _schema;
+  final String? _rootName;
+
+  ParseResult parse(String input) =>
+      parseProgram(input, _schema, rootName: _rootName);
+}
+
+/// lang-core `createParser`; pass `library.toJsonSchema()`.
+Parser createParser(JsonSchema schema, {String? rootName}) =>
+    Parser._(CompiledSchema.fromJsonSchema(schema), rootName);
+
+/// lang-core `createStreamingParser`; pass `library.toJsonSchema()`.
+StreamParser createStreamingParser(JsonSchema schema, {String? rootName}) =>
+    StreamParser(CompiledSchema.fromJsonSchema(schema), rootName: rootName);

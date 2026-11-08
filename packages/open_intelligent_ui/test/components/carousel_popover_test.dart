@@ -1,0 +1,244 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:open_intelligent_ui/open_intelligent_ui.dart';
+
+import '../support/pump.dart';
+
+Finder _card(int index) => find
+    .byWidgetPredicate(
+      (w) =>
+          w is Container &&
+          w.decoration is BoxDecoration &&
+          (w.decoration! as BoxDecoration).borderRadius ==
+              BorderRadius.circular(14),
+    )
+    .at(index);
+
+Finder _arrow(String label) => find.byWidgetPredicate(
+  (w) => w is Semantics && w.properties.label == label,
+);
+
+Finder _panel() => find.byWidgetPredicate(
+  (w) =>
+      w is Container &&
+      w.decoration is BoxDecoration &&
+      (w.decoration! as BoxDecoration).borderRadius ==
+          BorderRadius.circular(12),
+);
+
+double _horizontalPixels(WidgetTester tester) => tester
+    .state<ScrollableState>(
+      find.byWidgetPredicate(
+        (w) => w is Scrollable && w.axis == Axis.horizontal,
+      ),
+    )
+    .position
+    .pixels;
+
+Finder _sizedBoxAround(WidgetTester tester, String text) =>
+    find.ancestor(of: find.text(text), matching: find.byType(SizedBox)).first;
+
+void _usePhoneSize(WidgetTester tester) {
+  tester.view.physicalSize = const Size(400, 800);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(() {
+    tester.view.resetPhysicalSize();
+    tester.view.resetDevicePixelRatio();
+  });
+}
+
+void main() {
+  group('Carousel', () {
+    testWidgets('cards in one carousel are equal in height', (tester) async {
+      await pumpProgram(
+        tester,
+        'root = Col([c])\n'
+        'c = Carousel([Card([Text("a")]), Card([Text("b"), Text("c"), Text("d")])])',
+      );
+      final short = tester.getSize(_card(0)).height;
+      final tall = tester.getSize(_card(1)).height;
+      expect(short, tall);
+    });
+
+    testWidgets('an item is at most 85 percent of a phone-width track', (
+      tester,
+    ) async {
+      _usePhoneSize(tester);
+      await pumpProgram(
+        tester,
+        'root = Col([c])\nc = Carousel([Text("One")], 640)',
+      );
+      expect(
+        tester.getSize(_sizedBoxAround(tester, 'One')).width,
+        closeTo(312.8, 0.5),
+      );
+    });
+
+    testWidgets(
+      'Next shows on a macOS carousel with overflow, Previous does not',
+      (tester) async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+        await pumpProgram(
+          tester,
+          'root = Col([c])\n'
+          'c = Carousel([Text("One"), Text("Two"), Text("Three"), Text("Four"), Text("Five")])',
+        );
+        await tester.pumpAndSettle();
+        expect(_arrow('Next'), findsOneWidget);
+        expect(_arrow('Previous'), findsNothing);
+        debugDefaultTargetPlatformOverride = null;
+      },
+    );
+
+    testWidgets(
+      'tapping Next pages 85 percent of the viewport, clamped to the end',
+      (tester) async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+        await pumpProgram(
+          tester,
+          'root = Col([c])\n'
+          'c = Carousel([Text("One"), Text("Two"), Text("Three"), Text("Four"), Text("Five")])',
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(_arrow('Next'));
+        await tester.pumpAndSettle();
+        expect(_horizontalPixels(tester), closeTo(480, 0.5));
+        expect(_arrow('Previous'), findsOneWidget);
+        debugDefaultTargetPlatformOverride = null;
+      },
+    );
+
+    testWidgets('no arrows show on an android carousel', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      await pumpProgram(
+        tester,
+        'root = Col([c])\n'
+        'c = Carousel([Text("One"), Text("Two"), Text("Three"), Text("Four"), Text("Five")])',
+      );
+      await tester.pumpAndSettle();
+      expect(_arrow('Next'), findsNothing);
+      expect(_arrow('Previous'), findsNothing);
+      debugDefaultTargetPlatformOverride = null;
+    });
+  });
+
+  group('Popover', () {
+    testWidgets(
+      'an icon in the trigger sits 4 px after the text, centred on it',
+      (tester) async {
+        await pumpProgram(
+          tester,
+          'root = Col([p])\np = Popover(["Details", Icon("info", "sm")], "x")',
+        );
+        final text = tester.getRect(find.text('Details'));
+        final glyph = tester.getRect(find.byType(Glyph));
+        expect(glyph.center.dy, closeTo(text.center.dy, 1));
+        expect(glyph.left, closeTo(text.right + 4, 0.5));
+      },
+    );
+
+    testWidgets('a list of content elements is spaced 8 px apart', (
+      tester,
+    ) async {
+      await pumpProgram(
+        tester,
+        'root = Col([p])\np = Popover("i", [Text("one"), Text("two")])',
+      );
+      await tester.tap(find.text('i'));
+      await tester.pumpAndSettle();
+      final gap =
+          tester.getRect(find.text('two')).top -
+          tester.getRect(find.text('one')).bottom;
+      expect(gap, closeTo(8, 0.5));
+    });
+
+    testWidgets('Escape closes the panel', (tester) async {
+      await pumpProgram(
+        tester,
+        'root = Col([p])\np = Popover("i", "Escape me")',
+      );
+      await tester.tap(find.text('i'));
+      await tester.pumpAndSettle();
+      expect(find.text('Escape me'), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.text('Escape me'), findsNothing);
+    });
+
+    testWidgets('scrolling the page closes the panel', (tester) async {
+      await pumpProgram(
+        tester,
+        'root = Col([p, b])\n'
+        'p = Popover("i", "Scroll me away")\n'
+        'b = Box([], "col", null, null, null, null, null, null, 700)',
+      );
+      await tester.tap(find.text('i'));
+      await tester.pumpAndSettle();
+      expect(find.text('Scroll me away'), findsOneWidget);
+      tester
+          .state<ScrollableState>(
+            find.byWidgetPredicate(
+              (w) => w is Scrollable && w.axis == Axis.vertical,
+            ),
+          )
+          .position
+          .jumpTo(20);
+      await tester.pumpAndSettle();
+      expect(find.text('Scroll me away'), findsNothing);
+    });
+
+    testWidgets('the panel is clamped to 12 px from the phone edge', (
+      tester,
+    ) async {
+      _usePhoneSize(tester);
+      await pumpProgram(
+        tester,
+        'root = Row([Spacer(), p])\np = Popover("i", "Right side")',
+      );
+      await tester.tap(find.text('i'));
+      await tester.pumpAndSettle();
+      expect(tester.getRect(_panel()).left, closeTo(108, 0.5));
+    });
+
+    testWidgets(
+      'the panel opens above the trigger when there is no room below',
+      (tester) async {
+        _usePhoneSize(tester);
+        await pumpProgram(
+          tester,
+          'root = Col([b, p])\n'
+          'b = Box([], "col", null, null, null, null, null, null, 700)\n'
+          'p = Popover("i", "Above")',
+        );
+        await tester.tap(find.text('i'));
+        await tester.pumpAndSettle();
+        expect(
+          tester.getRect(_panel()).bottom,
+          closeTo(tester.getRect(find.text('i')).top - 8, 0.5),
+        );
+      },
+    );
+
+    testWidgets(
+      'a tap outside the panel closes it and still reaches a Button',
+      (tester) async {
+        final pumped = await pumpProgram(
+          tester,
+          'root = Col([Button("Go", @ToAssistant("Hi")), p])\n'
+          'p = Popover("i", "Outside")',
+        );
+        await tester.tap(find.text('i'));
+        await tester.pumpAndSettle();
+        expect(find.text('Outside'), findsOneWidget);
+        await tester.tap(find.text('Go'));
+        await tester.pumpAndSettle();
+        expect(find.text('Outside'), findsNothing);
+        expect(pumped.events.map((e) => e.type), [
+          ActionEvent.continueConversation,
+        ]);
+      },
+    );
+  });
+}

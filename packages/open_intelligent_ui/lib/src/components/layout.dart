@@ -5,15 +5,21 @@ import 'package:flutter/material.dart';
 
 import '../theme.dart';
 import '../view.dart';
+import 'block_slot.dart';
 import 'flex_row.dart';
 import 'media.dart' show MediaRowSlot;
 
 Widget buildCol(BuildContext context, OpenUiNode node) {
-  final items = _stack(_items(node, node.props['children']));
+  final gap = OpenUiTheme.space(node.props['gap']);
+  final items = _slot(
+    _stack(_items(node, node.props['children'])),
+    parent: _flowParent(context, node, flow: gap == null),
+    flow: gap == null,
+  );
   return _column(
     context,
     items,
-    gap: OpenUiTheme.space(node.props['gap']),
+    gap: gap,
     cross: _cross(node.props.string('align'), CrossAxisAlignment.stretch),
     align: node.props.string('align'),
   );
@@ -23,18 +29,30 @@ Widget buildRow(BuildContext context, OpenUiNode node) {
   final gap = OpenUiTheme.space(node.props['gap']) ?? 8;
   final align = node.props.string('align');
   final justify = node.props.string('justify');
-  final items = _items(node, node.props['children']);
+  final items = _slot(
+    _items(node, node.props['children']),
+    parent: SlotParent.other,
+    flow: false,
+  );
   if (node.props.boolean('wrap') ?? false) {
-    return _wrap(
-      items,
-      axis: Axis.horizontal,
-      gap: gap,
-      align: align,
-      justify: justify,
-      fallback: WrapCrossAlignment.center,
+    return _cardHead(
+      context,
+      node,
+      _wrap(
+        items,
+        axis: Axis.horizontal,
+        gap: gap,
+        align: align,
+        justify: justify,
+        fallback: WrapCrossAlignment.center,
+      ),
     );
   }
-  return _row(items, gap: gap, align: align, justify: justify);
+  return _cardHead(
+    context,
+    node,
+    _row(items, gap: gap, align: align, justify: justify),
+  );
 }
 
 Widget buildBox(BuildContext context, OpenUiNode node) {
@@ -47,7 +65,7 @@ Widget buildBox(BuildContext context, OpenUiNode node) {
   final Widget content;
   if (wrap) {
     content = _wrap(
-      items,
+      _slot(items, parent: SlotParent.other, flow: false),
       axis: row ? Axis.horizontal : Axis.vertical,
       gap: gap ?? (row ? 8 : 0),
       align: align,
@@ -55,11 +73,20 @@ Widget buildBox(BuildContext context, OpenUiNode node) {
       fallback: row ? WrapCrossAlignment.center : WrapCrossAlignment.start,
     );
   } else if (row) {
-    content = _row(items, gap: gap ?? 8, align: align, justify: justify);
+    content = _row(
+      _slot(items, parent: SlotParent.other, flow: false),
+      gap: gap ?? 8,
+      align: align,
+      justify: justify,
+    );
   } else {
     content = _column(
       context,
-      _stack(items),
+      _slot(
+        _stack(items),
+        parent: _flowParent(context, node, flow: gap == null),
+        flow: gap == null,
+      ),
       gap: gap,
       cross: _cross(align, CrossAxisAlignment.stretch),
       main: _main(justify),
@@ -73,7 +100,7 @@ Widget buildBox(BuildContext context, OpenUiNode node) {
   final radius = OpenUiTheme.radius(node.props['radius']) ?? 0;
   final padded = Padding(
     padding: EdgeInsets.all(OpenUiTheme.space(node.props['padding']) ?? 0),
-    child: content,
+    child: row ? _cardHead(context, node, content) : content,
   );
   final fixedHeight =
       !MediaRowSlot.of(context) &&
@@ -105,7 +132,7 @@ Widget buildBox(BuildContext context, OpenUiNode node) {
   );
 
   // In a media row the photo slot sets the size (CSS `!important`).
-  if (!MediaRowSlot.of(context)) box = _sized(box, node);
+  if (!MediaRowSlot.of(context)) box = _sized(context, box, node);
 
   final ink = theme.inkOn(background);
   if (ink == null) return box;
@@ -118,12 +145,30 @@ Widget buildBox(BuildContext context, OpenUiNode node) {
 /// A Box's width and height. A percent height only applies inside a bounded
 /// height, as in CSS; content taller than a fixed height overflows without
 /// breaking the layout.
-Widget _sized(Widget box, OpenUiNode node) {
-  final width = OpenUiTheme.length(node.props['width']);
-  final height = OpenUiTheme.length(node.props['height']);
+Widget _sized(BuildContext context, Widget box, OpenUiNode node) {
+  final fontSize = DefaultTextStyle.of(context).style.fontSize ?? 14;
+  final viewport = MediaQuery.sizeOf(context);
+  final width = OpenUiTheme.length(
+    node.props['width'],
+    fontSize: fontSize,
+    viewport: viewport,
+  );
+  final height = OpenUiTheme.length(
+    node.props['height'],
+    fontSize: fontSize,
+    viewport: viewport,
+  );
   var out = box;
   if (width.px != null || height.px != null) {
     out = SizedBox(width: width.px, height: height.px, child: out);
+    // A stretched column would widen it; CSS keeps an explicit width.
+    if (width.px != null) {
+      out = Align(
+        alignment: AlignmentDirectional.centerStart,
+        widthFactor: 1,
+        child: out,
+      );
+    }
   }
   if (width.fraction != null || height.fraction != null) {
     final inner = out;
@@ -145,7 +190,11 @@ Widget buildGrid(BuildContext context, OpenUiNode node) {
   );
   final gap = OpenUiTheme.space(node.props['gap']) ?? 12;
   final minWidth = node.props.number('minChildWidth') ?? 0;
-  final items = _items(node, node.props['children']);
+  final items = _slot(
+    _items(node, node.props['children']),
+    parent: SlotParent.grid,
+    flow: false,
+  );
   if (minWidth == 0) return _gridRows(items, columns, gap);
   final minPx = math.max(0, minWidth).toDouble();
   return LayoutBuilder(
@@ -164,10 +213,15 @@ Widget buildCard(BuildContext context, OpenUiNode node) {
   final nested = context.findAncestorWidgetOfExactType<_CardScope>() != null;
   final compact = nested || MediaQuery.sizeOf(context).width <= 640;
   final soft = node.props.string('variant') == 'soft';
+  final gap = OpenUiTheme.space(node.props['gap']);
   final body = _column(
     context,
-    _stack(_items(node, node.props['children'])),
-    gap: OpenUiTheme.space(node.props['gap']),
+    _slot(
+      _stack(_items(node, node.props['children'])),
+      parent: SlotParent.card,
+      flow: gap == null,
+    ),
+    gap: gap,
     cross: CrossAxisAlignment.stretch,
     flowBase: 12,
   );
@@ -185,7 +239,7 @@ Widget buildCard(BuildContext context, OpenUiNode node) {
     child: _CardScope(
       child: DefaultTextStyle.merge(
         style: const TextStyle(fontSize: 14, height: 1.55),
-        child: body,
+        child: CardHeadScope(active: false, child: body),
       ),
     ),
   );
@@ -200,7 +254,11 @@ Widget buildSpacer(BuildContext context, OpenUiNode node) =>
     const SizedBox.shrink();
 
 Widget buildForm(BuildContext context, OpenUiNode node) {
-  final items = _stack(_items(node, node.props['children']));
+  final items = _slot(
+    _stack(_items(node, node.props['children'])),
+    parent: SlotParent.other,
+    flow: false,
+  );
   return node.form(
     Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -263,6 +321,60 @@ List<_Item> _items(OpenUiNode node, Object? value) {
 
 List<_Item> _stack(List<_Item> items) =>
     items.where((item) => item.type != 'Spacer').toList();
+
+/// Wraps each non-Spacer item in its [BlockSlot]; indexes skip Spacers.
+List<_Item> _slot(
+  List<_Item> items, {
+  required SlotParent parent,
+  required bool flow,
+}) {
+  final out = <_Item>[];
+  var index = 0;
+  OpenUiElement? previous;
+  for (final item in items) {
+    if (item.type == 'Spacer') {
+      out.add(item);
+      continue;
+    }
+    out.add(
+      _Item(
+        BlockSlot(
+          element: item.element,
+          parent: parent,
+          index: index,
+          previous: previous,
+          flow: flow,
+          child: item.widget,
+        ),
+        item.element,
+      ),
+    );
+    index++;
+    previous = item.element;
+  }
+  return out;
+}
+
+/// A flow column inside a grid or carousel item is card-sized, as in CSS
+/// `.iui-grid > .iui-flow`; its children inherit that.
+SlotParent _flowParent(
+  BuildContext context,
+  OpenUiNode node, {
+  required bool flow,
+}) {
+  if (!flow) return SlotParent.other;
+  final parent = BlockSlot.of(context, node.element)?.parent;
+  return parent == SlotParent.grid || parent == SlotParent.carouselItem
+      ? SlotParent.cardSizedFlow
+      : SlotParent.other;
+}
+
+/// A Row, or a row Box, in a card's first slot heads the card.
+Widget _cardHead(BuildContext context, OpenUiNode node, Widget content) {
+  final slot = BlockSlot.of(context, node.element);
+  final head = slot?.parent == SlotParent.card && slot?.index == 0;
+  return head ? CardHeadScope(active: true, child: content) : content;
+}
 
 bool _isBadgeRow(OpenUiElement? element) =>
     element?.typeName == 'Row' &&
@@ -376,16 +488,24 @@ Widget _row(
             fixed: (w) => (w * 0.33).clamp(120, 200),
             child: MediaRowSlot(child: item.widget),
           )
+        else if (_flexOf(item) case final flex?)
+          FlexRowItem(grow: flex, zeroBasis: true, child: item.widget)
         else
-          FlexRowItem(grow: _flexOf(item)?.toDouble() ?? 0, child: item.widget),
+          FlexRowItem(shrink: !_hasNumericWidth(item), child: item.widget),
     ],
   );
 }
 
-int? _flexOf(_Item item) {
+/// A Box's `flex: N 1 0%` share. A flex of 0 or less is no flex; CSS gives
+/// it width 0 instead (parity note).
+double? _flexOf(_Item item) {
   final flex = item.type == 'Box' ? item.element!.props.number('flex') : null;
-  return flex != null && flex > 0 ? math.max(1, flex.round()) : null;
+  return flex != null && flex > 0 ? flex.toDouble() : null;
 }
+
+/// A Box with a px width keeps it (`flex: 0 0 auto`).
+bool _hasNumericWidth(_Item item) =>
+    item.type == 'Box' && item.element!.props['width'] is num;
 
 Widget _wrap(
   List<_Item> items, {
@@ -418,20 +538,26 @@ Widget _gridRows(List<_Item> items, int columns, double gap) => Column(
   spacing: gap,
   children: [
     for (var start = 0; start < items.length; start += columns)
-      Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        spacing: gap,
+      FlexRow(
+        gap: gap,
+        align: FlexAlign.stretch,
         children: [
           for (var i = start; i < start + columns; i++)
-            Expanded(
+            FlexRowItem(
+              fixed: (w) => math.max(0, w - gap * (columns - 1)) / columns,
               child: i < items.length
-                  ? items[i].widget
+                  ? _cell(items[i])
                   : const SizedBox.shrink(),
             ),
         ],
       ),
   ],
 );
+
+/// Photos keep their own height at the top of a stretched grid cell.
+Widget _cell(_Item item) => item.type == 'Image' || item.type == 'SearchImage'
+    ? Align(alignment: Alignment.topCenter, child: item.widget)
+    : item.widget;
 
 ThemeData _themed(BuildContext context, OpenUiTheme tokens) {
   final base = Theme.of(context);

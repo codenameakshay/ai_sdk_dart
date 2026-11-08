@@ -42,8 +42,10 @@ model text ──► OpenUiSession.update(text, streaming)
    implements Lang 1.1 with its own action model, has no edge-rule validation, and its prompt generator cannot
    produce the golden prompt. The direct port parsed all 45 clean (no errors, unresolved or orphaned names) and
    gave the same result when fed in 7-character chunks. It is pure Dart, so a Dart server can build the system
-   prompt and check a program without Flutter. That is why the engine is its own package. Lang-core's telemetry
-   is not ported.
+   prompt and check a program without Flutter. That is why the engine is its own package. `lang_core.dart`
+   exports the low-level surface (lexer, parsers, `mergeStatements`, `jsonToOpenUI`, evaluator, store, query
+   manager) under lang-core's names; the main barrel adds the message envelope, form validation, structured
+   errors, the MCP helpers, `library.extend()` and the OpenUI Cloud prompt.
 2. **One schema DSL describes every prop.** `S` mirrors Zod. Each node emits the JSON Schema the parser compiles
    and the function arguments validate against, and the type the prompt prints (`Color`, `Node[]`,
    `$binding<string | number>`, `ActionExpression`). Built-in functions and steps are specs too. Golden tests
@@ -58,8 +60,9 @@ model text ──► OpenUiSession.update(text, streaming)
    only ever see evaluated values.
 5. **`OpenUiSession` is the runtime**, in pure Dart: `update`, lazy `root`, `state` to persist, `issues`, a
    synchronous `listen`, `field`, `run`, `dispose`. It ports react-lang's `useOpenUIState`: store
-   initialization, form state as `{value, componentType}` wrappers, queries blocked while streaming, and steps
-   run in their original order (a failed Mutation stops the plan).
+   initialization, form state as `{value, componentType}` wrappers, queries blocked while streaming, actions
+   allowed while plain text streams (only an unfinished OpenUI Cloud bundle blocks them), structured `errors`
+   with `onError` and `onStateUpdate`, and steps run in their original order (a failed Mutation stops the plan).
 6. **Events keep lang-core's payload:** `ActionEvent(type, params, humanFriendlyMessage, formState, formName)`.
    One `run` accepts a step plan, a legacy `{type, ...}` action object, or no action (a Button without an action
    sends its label).
@@ -78,15 +81,16 @@ ChatController ── streamingMessageId ──► row id while streaming ═ co
       │ chatMessageBuilder(ChatMessage)         ▼
       └──────────────────────────────► OpenUiChat: one OpenUiSession per id
                                                 │ @ToAssistant
-   sendMessage(OpenUiMessage.fromAction) ◄──────┘
+   sendMessage(actionUserMessage(event)) ◄──────┘
    updateMessage(id, content + ]]>openui:context [state]) ◄── session.onStateUpdate
 ```
 
 1. **One session per message id.** The streaming row gets the id that the answer commits under,
    so `$state` typed while the answer streams carries over. Sessions of answers that leave the
    transcript (reload, clear, a failed run) are disposed, which stops their Query timers.
-2. **Turns use the reference's envelope.** `OpenUiMessage` ports lang-core's `message.ts`. A
-   `@ToAssistant` turn is react-ui's `buildActionUserMessage`:
+2. **Turns use the reference's envelope.** Messages are read and written with lang-core's
+   `parseMessage` and `buildMessage`. A `@ToAssistant` turn is react-ui's
+   `buildActionUserMessage`, ported as `actionUserMessage`:
    `["User clicked: …", formState, context?]` after the message.
 3. **State lives in the transcript.** The chat prompt tells the model to start an edited page
    from "that answer's context and form values", so, like react-ui, user edits are written into
@@ -137,21 +141,58 @@ The finished diff went to the same two reviewers.
   statement that started it went away, and a replaced Mutation accepted a stale answer.
 - **Muse Wonder Full:** did not run, for the same provider error as in the design round.
 
+## Port audit
+
+A later audit read the port side by side with lang-core, react-lang and the reference, and found exports the
+first pass had skipped, functions whose output differed from JavaScript, and rendering gaps. The follow-up
+closed them, each with a test that fails on the earlier code:
+
+- **Engine:** the message envelope, `mergeStatements`, `jsonToOpenUI`, form validation, `enrichErrors` and
+  structured errors, the MCP helpers, `library.extend()`, restricted step refs, the OpenUI Cloud prompt and
+  artifact tool, response bundles, per-prop evaluation errors, and lang-core's query manager names.
+- **Functions:** `@Format` and `@Plural` round like `Intl`, currencies print en-US prefixes (`CA$`, `A$`),
+  date strings parse like V8's `Date`, case mapping follows JavaScript, and arithmetic keeps doubles past
+  2^53. `patterns.test.ts`, the fourth reference test file, is ported.
+- **Renderer:** tables lay out like HTML tables, grid rows share a height, card typography and the card-title
+  rule apply, Markdown tables and links match, Svg overflows its box and composites opacity as a layer,
+  `SvgText` no longer crashes on `currentColor`, the map expands in place and flies between frames, and
+  Inter is bundled.
+
 ## Parity
 
-Every component, function and action of the reference library is ported, with its name,
-argument order and option values unchanged (the spec golden proves it). These are the known
-differences in rendering:
+Every component, function and action of the reference library is ported, with its name, argument order and
+option values unchanged. The spec golden proves the names and signatures; the function tests, ported case for
+case from the reference's four test files and checked against Node, prove the behaviour.
 
-- Maps draw raster tiles with `flutter_map` instead of the reference's MapLibre vector style,
-  frame without the fly and line-draw animations, and expand to a full-screen route.
-- A small or medium Title that opens a Card keeps its own size (the reference's CSS reads the
-  parent's structure, which a builder cannot see).
-- Carousel items align to the top instead of sharing a height, and have no arrow buttons.
-  Popover always opens below its trigger. Table rows have no hover tint.
-- Text uses the platform font; the reference loads Inter.
-- `@Sort` on text orders like English `localeCompare` without accents or ICU punctuation
-  weights; map pins detect emoji by the main Unicode blocks.
+**Kept on purpose.** These differ from react-lang because matching it would bring back a bug:
+
+- Re-applying `initialState` fills only keys the store does not have, so a user's edits survive.
+- A Query shared by several statements keeps its answer and loading state when the statement that started it
+  goes away.
+- Data shaped like an action step runs only as `open_url` (with a string URL) or `continue_conversation`, so
+  tool data cannot set state or fire Mutations.
+- The store compares array and object defaults by value, so a re-parse does not notify on every chunk.
+- A prop whose expression throws evaluates to null (with its runtime error) instead of lang-core's raw
+  expression, so builders only ever see JSON values.
+
+**Known differences:**
+
+- Maps draw raster tiles with `flutter_map`, not the reference's MapLibre vector style. Vector tiles would need
+  `vector_map_tiles` and its renderer, which is heavy on mobile.
+- Inter ships as static 400, 500 and 600 faces; the reference's CSS asks for 440, 560 and 640.
+- Math uses `flutter_math_fork`, which supports less TeX than KaTeX; unsupported input shows the source.
+- `@Sort` on text folds Latin accents and orders punctuation before digits, an approximation of ICU
+  `localeCompare`; map pins detect emoji by the main Unicode blocks.
+- A Table cell holding a component other than Badge, Button, IconButton, Icon or Link has no measured
+  min-content width, so a narrow table may squeeze it.
+- The native YouTube embed sends `https://www.youtube-nocookie.com/` as its Referer unless
+  `OpenUiServices.embedReferrer` names the host app's site.
+- A Popover trigger wraps instead of overflowing when its row is narrower than its content.
+- The expanded map covers the page with a scrim but does not hide the page from screen readers, as
+  `aria-modal` does: `BlockSemantics` inside an `OverlayPortal` also hides the map itself.
+
+**Not ported:** lang-core telemetry and devtools, React rendering and hooks, the deprecated `generatePrompt`,
+MCP client auto-detection, and `console.warn` output.
 
 ## Follow-up work
 

@@ -4,8 +4,10 @@ import '../lang/ast.dart';
 import '../lang/js.dart';
 import '../lang/parser.dart';
 import '../spec/library.dart';
+import 'errors.dart';
 import 'evaluator.dart';
 import 'queries.dart';
+import 'response_bundle.dart';
 import 'store.dart';
 
 /// What a click, a submit or a library action asks the host to do. The
@@ -111,7 +113,7 @@ final class Props {
   OpenUiAction? action(String name) {
     final v = this[name];
     if (v is OpenUiAction) return v;
-    if (v is Map && v['type'] is String) return OpenUiAction._legacy(v.cast());
+    if (v is Map) return OpenUiAction._legacy(v.cast());
     return null;
   }
 
@@ -150,19 +152,21 @@ final class OpenUiSession {
     this.library, {
     List<OpenUiTool> tools = const [],
     Map<String, Object?> initialState = const {},
+    this.onError,
     this.onStateUpdate,
   }) : _tools = {for (final t in tools) t.name: t},
        _initialState = initialState,
        _parser = StreamParser(library.compiled, rootName: library.rootName) {
     _queries = QueryManager(_tools.isEmpty ? null : _callTool);
     _cancelStore = _store.listen(_onStoreChange);
-    _cancelQueries = _queries.listen(_onChange);
+    _cancelQueries = _queries.subscribe(_onChange);
     final schema = library.toJsonSchema();
     final fnSchemas =
         (schema['functions'] as Map?)?.cast<String, Map>() ?? const {};
     _context = EvaluationContext(
       getState: (name) => _unwrapField(_store.get(name)),
-      resolveRef: _queries.result,
+      resolveRef: (name) =>
+          _queries.getMutationResult(name) ?? _queries.getResult(name),
       functions: {
         for (final f in library.functions)
           f.name: RuntimeFunction(
@@ -176,15 +180,15 @@ final class OpenUiSession {
             in ((schema['actions'] as Map?) ?? const {}).entries)
           '$key': ((value as Map)['params'] as Map).cast(),
       },
-      reportError: (message) => _runtimeIssues.add(message),
     );
   }
 
   final OpenUiLibrary library;
 
-  /// Called with [state] after a change the store did not make itself while
-  /// starting up: a field edit, a `$binding` write or an `@Set`. Mirrors
-  /// react-lang's `onStateUpdate`; persist [state] here.
+  /// react-lang `onError`: the settled answer's errors, once per change.
+  final void Function(List<OpenUiError> errors)? onError;
+
+  /// react-lang `onStateUpdate`: the store after each user or action change.
   final void Function(Map<String, Object?> state)? onStateUpdate;
   final Map<String, OpenUiTool> _tools;
   final Map<String, Object?> _initialState;
@@ -195,19 +199,27 @@ final class OpenUiSession {
   late final void Function() _cancelStore;
   late final void Function() _cancelQueries;
   final List<void Function()> _listeners = [];
-  final List<String> _runtimeIssues = [];
 
   String? _text;
   bool _streaming = true;
+  bool _blocked = true;
+  ResponseBundle? _bundle;
+  String? _scriptRevision;
+  Set<String> _scriptNames = const {};
   ParseResult? _result;
+  OpenUiError? _parseException;
+  List<OpenUiError> _runtimeErrors = const [];
+  String _lastErrorKey = '';
   String? _storeKey;
   OpenUiElement? _root;
   bool _dirty = true;
   bool _disposed = false;
 
+  bool get _bundleBlocked => (_bundle?.isBundle ?? false) && _blocked;
+
   Future<Object?> _callTool(String name, Map<String, Object?> args) {
     final tool = _tools[name];
-    if (tool == null) throw ToolNotFound(name, _tools.keys.toList());
+    if (tool == null) throw ToolNotFoundError(name, _tools.keys.toList());
     return tool.call(args);
   }
 
@@ -216,14 +228,43 @@ final class OpenUiSession {
     if (_disposed || (text == _text && streaming == _streaming)) return;
     _text = text;
     _streaming = streaming;
-    final result = _parser.set(text, complete: !streaming);
+    final bundle = parseResponseBundle(text, streaming: streaming);
+    _bundle = bundle;
+    _blocked = streaming || !bundle.complete || bundle.error != null;
+    if (!_blocked) {
+      _scriptRevision = bundle.scriptRevision;
+      _scriptNames = bundle.scripts;
+    }
+    _parseException = bundle.error == null
+        ? null
+        : OpenUiError(
+            source: OpenUiErrorSource.parser,
+            code: OpenUiErrorCode.parseFailed,
+            message: bundle.error!,
+          );
+    ParseResult? result;
+    if (bundle.program.isNotEmpty) {
+      try {
+        result = _parser.set(bundle.program, complete: !streaming);
+      } catch (e) {
+        // coverage:ignore-start
+        _parseException = OpenUiError(
+          source: OpenUiErrorSource.parser,
+          code: OpenUiErrorCode.parseException,
+          message: 'Parser crashed: ${errorMessage(e)}',
+          hint: 'The response may contain syntax the parser cannot handle',
+        );
+        // coverage:ignore-end
+      }
+    }
     _result = result;
-    final key =
-        '${Js.stringify(result.stateDeclarations)}::${Js.stringify(_initialState)}';
+    final declarations = result?.stateDeclarations ?? const {};
+    final key = '${Js.stringify(declarations)}::${Js.stringify(_initialState)}';
     if (key != _storeKey) {
       _storeKey = key;
       final persisted = <String, Object?>{};
       _initializing = true;
+      // initialState only fills keys the store lacks, so a re-parse never undoes user edits.
       for (final MapEntry(:key, :value) in _initialState.entries) {
         if (key.startsWith(r'$')) {
           if (!_store.has(key)) persisted[key] = value;
@@ -231,7 +272,7 @@ final class OpenUiSession {
           _store.set(key, value);
         }
       }
-      _store.initialize(result.stateDeclarations, persisted);
+      _store.initialize(declarations, persisted);
       _initializing = false;
     }
     _syncQueries();
@@ -240,22 +281,55 @@ final class OpenUiSession {
 
   bool _initializing = false;
 
-  bool get isStreaming => _streaming;
-  bool get isQueryLoading => _queries.isLoading;
+  /// Whether the answer may not run yet: it streams, or it is an incomplete or invalid Cloud bundle.
+  bool get isStreaming => _blocked;
+
+  /// Whether a Query is loading, or a bundle still streaming has Queries that will load.
+  bool get isQueryLoading =>
+      _queries.getSnapshot().loading.isNotEmpty ||
+      (_streaming &&
+          _bundleBlocked &&
+          (_result?.queryStatements.length ?? 0) > 0);
 
   /// The `$state` and form fields, as JSON to persist and pass back as
   /// `initialState`.
   Map<String, Object?> get state => _store.snapshot;
 
-  /// Parser warnings and errors, runtime errors and query failures.
-  List<String> get issues {
+  /// lang-core `OpenUIError`s of the settled answer: parse, validation, runtime and tool errors. Empty while streaming.
+  List<OpenUiError> get errors {
+    if (_streaming) return const [];
     _evaluateIfDirty();
+    final result = _result;
     return [
-      for (final e in _result?.meta.errors ?? const []) e.message,
-      ..._runtimeIssues,
-      for (final e in _queries.errors) e.message,
+      ?_parseException,
+      if ((_bundle?.program ?? '').isNotEmpty &&
+          (result?.meta.statementCount ?? 0) == 0 &&
+          _parseException == null)
+        OpenUiError(
+          source: OpenUiErrorSource.parser,
+          code: OpenUiErrorCode.parseFailed,
+          message: 'Response could not be parsed as valid openui-lang',
+          hint:
+              'The entire response must be valid openui-lang code starting with root = ${library.rootName}(...)',
+        ),
+      ...enrichErrors(
+        result?.meta.errors ?? const [],
+        library.toJsonSchema(),
+        library.components.keys.toList(),
+      ),
+      ..._runtimeErrors,
+      ..._queries.getSnapshot().errors,
     ];
   }
+
+  /// The errors from failed Queries: what a retry button acts on.
+  List<OpenUiError> get queryErrors => [
+    for (final e in _queries.getSnapshot().errors)
+      if (e.source == OpenUiErrorSource.query) e,
+  ];
+
+  /// The messages of [errors].
+  List<String> get issues => [for (final e in errors) e.message];
 
   /// The evaluated root, or null before a component has streamed in.
   OpenUiElement? get root {
@@ -274,9 +348,9 @@ final class OpenUiSession {
       _dirty = true;
       return;
     }
+    onStateUpdate?.call(_store.snapshot);
     _syncQueries();
     _onChange();
-    onStateUpdate?.call(_store.snapshot);
   }
 
   void _onChange() {
@@ -284,31 +358,56 @@ final class OpenUiSession {
     for (final l in [..._listeners]) {
       l();
     }
+    _reportErrors();
+  }
+
+  void _reportErrors() {
+    final onError = this.onError;
+    if (onError == null) return;
+    if (_streaming) {
+      if (_lastErrorKey.isNotEmpty) {
+        _lastErrorKey = '';
+        onError(const []);
+      }
+      return;
+    }
+    final errors = this.errors;
+    final key = Js.stringify([for (final e in errors) e.toJson()]);
+    if (key == _lastErrorKey) return;
+    _lastErrorKey = key;
+    onError(errors);
   }
 
   void _syncQueries() {
+    if (_blocked || _disposed) return;
     final result = _result;
-    if (_streaming || result == null || _disposed) return;
     final snapshot = _store.snapshot;
     Object? eval(Ast? node) => node == null ? null : evaluate(node, _context);
-    _queries.evaluate([
-      for (final q in result.queryStatements)
-        QueryNode(
-          statementId: q.statementId,
-          toolName: Js.string(eval(q.toolAst) ?? ''),
-          args: eval(q.argsAst),
-          defaults: eval(q.defaultsAst),
-          refreshSeconds: switch (eval(q.refreshAst)) {
-            final num n => n,
-            _ => null,
-          },
-          deps: q.deps == null
-              ? null
-              : {for (final d in q.deps!) d: snapshot[d]},
-        ),
+    QueryNode queryNode(QueryStatementInfo q) {
+      final toolName = Js.string(eval(q.toolAst) ?? '');
+      final deps = <String, Object?>{
+        for (final d in q.deps ?? const <String>[]) d: snapshot[d],
+        if (_scriptNames.contains(toolName))
+          '__openuiScriptRevision': _scriptRevision,
+      };
+      return QueryNode(
+        statementId: q.statementId,
+        toolName: toolName,
+        args: eval(q.argsAst),
+        defaults: eval(q.defaultsAst),
+        refreshInterval: eval(q.refreshAst),
+        deps: deps.isEmpty ? null : deps,
+        complete: q.complete,
+      );
+    }
+
+    _queries.evaluateQueries([
+      for (final q in result?.queryStatements ?? const <QueryStatementInfo>[])
+        queryNode(q),
     ]);
     _queries.registerMutations({
-      for (final m in result.mutationStatements)
+      for (final m
+          in result?.mutationStatements ?? const <MutationStatementInfo>[])
         m.statementId: Js.string(eval(m.toolAst) ?? ''),
     });
   }
@@ -316,40 +415,34 @@ final class OpenUiSession {
   void _evaluateIfDirty() {
     if (!_dirty) return;
     _dirty = false;
-    _runtimeIssues.clear();
+    final errors = <OpenUiError>[];
+    _runtimeErrors = errors;
     final result = _result;
-    if (result == null) {
+    if (result == null ||
+        (result.root == null && result.rootExpression == null)) {
       _root = null;
       return;
     }
     try {
-      ElementNode? node = result.root;
-      if (node == null && result.rootExpression != null) {
-        final value = evaluate(
-          result.rootExpression!,
-          _context,
-          library.isReactive,
-        );
-        if (value is ElementNode) {
-          node = value;
-        } else {
-          _runtimeIssues.add('root does not evaluate to a component');
-        }
-      }
-      _root = node == null
-          ? null
-          : OpenUiElement._(
-              evaluateElement(node, _context, library.isReactive),
-            );
+      final node = evaluateRoot(result, _context, library.isReactive, errors);
+      _root = node == null ? null : OpenUiElement._(node);
     } catch (e) {
-      // Defensive, as in lang-core: no known input throws past the evaluator.
-      _runtimeIssues.add('Prop evaluation failed: $e'); // coverage:ignore-line
+      // coverage:ignore-start
+      errors.add(
+        OpenUiError(
+          source: OpenUiErrorSource.runtime,
+          code: OpenUiErrorCode.runtimeError,
+          message: 'Prop evaluation failed: ${errorMessage(e)}',
+        ),
+      );
+      _root = null;
+      // coverage:ignore-end
     }
   }
 
   /// A field's value and setter: a `$binding` writes its `$variable`;
   /// anything else is a form field named [name] (inside [formName]), whose
-  /// value starts as [initial].
+  /// value starts as [bound].
   FieldState field(
     String name,
     Object? bound, {
@@ -369,20 +462,44 @@ final class OpenUiSession {
     final hasValue = formName == null
         ? _store.has(name)
         : raw is Map && raw.containsKey(name);
-    return FieldState._(hasValue ? _fieldValue(formName, name) : bound, (
-      value,
-    ) {
-      final wrapped = {'value': value, 'componentType': componentType};
-      if (formName == null) {
-        _store.set(name, wrapped);
-      } else {
-        final raw = _store.get(formName);
-        _store.set(formName, {
-          if (raw is Map) ...raw.cast<String, Object?>(),
-          name: wrapped,
-        });
-      }
-    });
+    return FieldState._(
+      hasValue ? _fieldValue(formName, name) : bound,
+      (value) => _writeField(formName, name, componentType, value),
+    );
+  }
+
+  /// react-lang `useSetDefaultValue`: stores [defaultValue] for a field that has no value yet, once the answer has settled.
+  void setDefaultValue(
+    String name,
+    Object? defaultValue, {
+    String? formName,
+    String? componentType,
+  }) {
+    if (_disposed || isStreaming || defaultValue == null) return;
+    final raw = formName == null ? null : _store.get(formName);
+    final hasValue = formName == null
+        ? _store.has(name)
+        : raw is Map && raw.containsKey(name);
+    if (hasValue) return;
+    _writeField(formName, name, componentType, defaultValue);
+  }
+
+  void _writeField(
+    String? formName,
+    String name,
+    String? componentType,
+    Object? value,
+  ) {
+    final wrapped = {'value': value, 'componentType': componentType};
+    if (formName == null) {
+      _store.set(name, wrapped);
+    } else {
+      final raw = _store.get(formName);
+      _store.set(formName, {
+        if (raw is Map) ...raw.cast<String, Object?>(),
+        name: wrapped,
+      });
+    }
   }
 
   Object? _fieldValue(String? formName, String name) {
@@ -402,14 +519,15 @@ final class OpenUiSession {
   /// Runs a click. A plan runs its steps in order: `@Set` evaluates at click
   /// time, a failed Mutation stops the plan, host steps go to [emit]. With
   /// no action, the [label] goes to the assistant (a Button without an
-  /// action). Does nothing while the program streams.
+  /// action). Plain text runs while it streams; an OpenUI Cloud bundle
+  /// does not run until it is complete and valid.
   Future<void> run(
     OpenUiAction? action, {
     required String label,
     String? formName,
     required void Function(ActionEvent event) emit,
   }) async {
-    if (_disposed || _streaming) return;
+    if (_disposed || _bundleBlocked) return;
     ActionEvent event(
       String type,
       Map<String, Object?> params, [
@@ -423,17 +541,16 @@ final class OpenUiSession {
     );
     final legacy = action?._legacy;
     if (legacy != null) {
-      final type =
-          legacy['type'] is String && (legacy['type'] as String).isNotEmpty
-          ? legacy['type'] as String
+      final type = Js.truthy(legacy['type'])
+          ? Js.string(legacy['type'])
           : ActionEvent.continueConversation;
       if (library.actions.any((a) => a.name == type)) return;
       emit(
         event(type, {
           if (legacy['params'] is Map)
             ...(legacy['params'] as Map).cast<String, Object?>(),
-          if (legacy['url'] != null) 'url': legacy['url'],
-          if (legacy['context'] != null) 'context': legacy['context'],
+          if (Js.truthy(legacy['url'])) 'url': legacy['url'],
+          if (Js.truthy(legacy['context'])) 'context': legacy['context'],
         }, label),
       );
       return;
@@ -444,7 +561,7 @@ final class OpenUiSession {
       return;
     }
     for (final step in plan.steps) {
-      if (_disposed || _streaming) return;
+      if (_disposed) return;
       switch (step) {
         case RunStep(:final statementId, :final refType):
           if (refType == RuntimeRefType.mutation) {
@@ -486,10 +603,8 @@ final class OpenUiSession {
 
   /// Retries failed queries.
   void retryQueries() {
-    final failed = [
-      for (final e in _queries.errors)
-        if (!e.isMutation) e.statementId,
-    ];
+    if (_bundleBlocked) return;
+    final failed = [for (final e in queryErrors) e.statementId!];
     if (failed.isNotEmpty) _queries.invalidate(failed);
   }
 

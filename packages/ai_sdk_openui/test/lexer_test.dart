@@ -22,6 +22,7 @@ String show(Ast n) => switch (n) {
   NumNode(:final value) => '$value',
   BoolNode(:final value) => '$value',
   NullNode() => 'null',
+  ValueNode(:final value) => jsonEncode(value),
   RefNode(:final name) => name,
   StateRefNode(:final name) => name,
   UnaryOpNode(:final op, :final operand) => '($op ${show(operand)})',

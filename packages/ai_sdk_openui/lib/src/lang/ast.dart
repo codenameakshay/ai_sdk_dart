@@ -117,6 +117,13 @@ final class PlaceholderNode extends Ast {
   final String name;
 }
 
+/// A runtime value spliced into an `@Each` template that has no literal form (a component, an action, a
+/// binding); it evaluates to itself.
+final class ValueNode extends Ast {
+  const ValueNode(this.value);
+  final Object? value;
+}
+
 bool isRuntimeExpr(Ast node) => switch (node) {
   StateRefNode() ||
   RuntimeRefNode() ||
@@ -177,7 +184,7 @@ Ast literalAst(Object? value) => switch (value) {
     for (final MapEntry(:key, value: v) in value.entries)
       ('$key', literalAst(v)),
   ]),
-  _ => const NullNode(),
+  _ => ValueNode(value),
 };
 
 /// The literal value of a node, or `(found: false)` when it is not a literal.

@@ -3,11 +3,21 @@ import 'package:flutter/material.dart';
 
 import '../theme.dart';
 import '../view.dart';
+import 'block_slot.dart';
 import 'glyph.dart';
 import 'markdown.dart';
 
 const _tabular = [FontFeature.tabularFigures()];
 final _stepMarker = RegExp(r'^[0-9A-Za-z]{1,2}$');
+
+const _headingLevels = <String, int>{
+  '3xl': 1,
+  '2xl': 2,
+  'xl': 2,
+  'lg': 2,
+  'md': 3,
+  'sm': 4,
+};
 
 const _textSizes = <String, ({double size, double height})>{
   'xs': (size: 12, height: 1.6),
@@ -62,11 +72,15 @@ List<InlineSpan> _textSpans(
   Object? value,
   TextStyle style,
 ) {
-  if (value is String) return inlineSpans(value, context, style: style);
+  if (value is String) {
+    return inlineSpans(_preLine(value, dropSpace: true), context, style: style);
+  }
   if (value is! List) return const [];
   final spans = <InlineSpan>[];
+  var dropSpace = true;
   for (final part in value.expand((p) => p is List ? p : [p])) {
     if (part is OpenUiElement) {
+      dropSpace = false;
       spans.add(
         WidgetSpan(
           alignment: PlaceholderAlignment.middle,
@@ -76,15 +90,24 @@ List<InlineSpan> _textSpans(
           ),
         ),
       );
-    } else {
-      spans.addAll(
-        part == null
-            ? const []
-            : inlineSpans(jsString(part), context, style: style),
-      );
+    } else if (part != null) {
+      final text = _preLine(jsString(part), dropSpace: dropSpace);
+      if (text.isNotEmpty) {
+        dropSpace = text.endsWith('\n') || text.endsWith(' ');
+      }
+      spans.addAll(inlineSpans(text, context, style: style));
     }
   }
   return spans;
+}
+
+/// CSS `white-space: pre-line`: runs of spaces collapse to one, newlines stay,
+/// and spaces at the start or end of a line disappear.
+String _preLine(String text, {required bool dropSpace}) {
+  final collapsed = text
+      .replaceAll(RegExp(r'[ \t\f\r]+'), ' ')
+      .replaceAll(RegExp(r' ?\n ?'), '\n');
+  return dropSpace ? collapsed.replaceFirst(RegExp('^ '), '') : collapsed;
 }
 
 Widget _richText(
@@ -104,20 +127,58 @@ int? _lineLimit(Props props) {
   return lines != null && lines > 0 ? lines : null;
 }
 
+/// The direct child of a card, or the first item of its head row.
+bool _isCardTitle(BuildContext context, BlockSlot? slot) =>
+    (slot?.parent == SlotParent.card && slot?.index == 0) ||
+    CardHeadScope.of(context);
+
+/// Directly in a card, or in a flow column inside a grid or carousel item.
+bool _isCardSized(BlockSlot? slot) =>
+    slot?.parent == SlotParent.card || slot?.parent == SlotParent.cardSizedFlow;
+
+/// A Text or Caption right under a card's title, which makes it a subtitle.
+bool _isSubtitle(BuildContext context, BlockSlot? slot) {
+  final previous = slot?.previous;
+  if (previous == null || previous.typeName != 'Title') return false;
+  final size = previous.props.string('size');
+  if (size != null && size != 'sm' && size != 'md') return false;
+  return (slot?.parent == SlotParent.card && slot?.index == 1) ||
+      CardHeadScope.of(context);
+}
+
+Widget _subtitleGap(Widget text, bool subtitle, BlockSlot? slot) =>
+    subtitle && slot?.flow == false
+    ? Padding(padding: const EdgeInsets.only(top: 2), child: text)
+    : text;
+
 Widget buildTitle(BuildContext context, OpenUiNode node) {
   final theme = node.theme;
-  final metrics = _titleMetrics(node.props.string('size'));
+  final name = node.props.string('size');
+  final slot = BlockSlot.of(context, node.element);
+  final base = _titleMetrics(name);
+  final cardTitle =
+      (name == null || name == 'sm' || name == 'md') &&
+      _isCardTitle(context, slot);
+  final cardSized =
+      (name == 'lg' || name == 'xl' || name == '2xl' || name == '3xl') &&
+      _isCardSized(slot);
+  final (fontSize, height, letterSpacing, weight) = cardTitle
+      ? (14.0, 20 / 14, base.letterSpacing, FontWeight.w500)
+      : cardSized
+      ? (18.0, 24 / 18, -0.3, FontWeight.w600)
+      : (base.fontSize, base.height, base.letterSpacing, FontWeight.w600);
   final style = _textStyle(
     theme,
     color: theme.fg(node.props['color']) ?? theme.ink,
-    size: metrics.fontSize,
-    height: metrics.height,
-    letterSpacing: metrics.letterSpacing,
-    weight: FontWeight.w600,
+    size: fontSize,
+    height: height,
+    letterSpacing: letterSpacing,
+    weight: weight,
     fontFeatures: _tabular,
   );
   return Semantics(
     header: true,
+    headingLevel: _headingLevels[name ?? 'md'] ?? 3,
     child: _richText(context, node.props.string('text') ?? '', style),
   );
 }
@@ -125,12 +186,25 @@ Widget buildTitle(BuildContext context, OpenUiNode node) {
 Widget buildText(BuildContext context, OpenUiNode node) {
   final props = node.props;
   final theme = node.theme;
-  final size = _textSizes[props.string('size')];
+  final slot = BlockSlot.of(context, node.element);
+  final sizeName = props.string('size');
+  final size = _textSizes[sizeName];
+  final cardSized =
+      _isCardSized(slot) &&
+      sizeName != 'xs' &&
+      sizeName != 'sm' &&
+      sizeName != 'lg';
+  final subtitle = _isSubtitle(context, slot);
+  final metrics = cardSized
+      ? (fontSize: 15.0, height: 22 / 15)
+      : subtitle
+      ? (fontSize: 13.0, height: 18 / 13)
+      : (fontSize: size?.size, height: size?.height ?? 1.6);
   final style = _textStyle(
     theme,
-    color: theme.fg(props['color']) ?? theme.ink,
-    size: size?.size,
-    height: size?.height ?? 1.6,
+    color: theme.fg(props['color']) ?? (subtitle ? theme.muted : theme.ink),
+    size: metrics.fontSize,
+    height: metrics.height,
     weight: _weights[props.string('weight')],
     fontStyle: props.boolean('italic') == true ? FontStyle.italic : null,
     decoration: props.boolean('lineThrough') == true
@@ -138,20 +212,30 @@ Widget buildText(BuildContext context, OpenUiNode node) {
         : null,
     fontFeatures: props.boolean('tabularNums') == true ? _tabular : null,
   );
-  return _richText(context, props['text'], style, maxLines: _lineLimit(props));
+  return _subtitleGap(
+    _richText(context, props['text'], style, maxLines: _lineLimit(props)),
+    subtitle,
+    slot,
+  );
 }
 
 Widget buildCaption(BuildContext context, OpenUiNode node) {
   final theme = node.theme;
-  return _richText(
-    context,
-    node.props.string('text') ?? '',
-    _textStyle(
-      theme,
-      color: theme.fg(node.props['color']) ?? theme.muted,
-      size: 12,
-      height: 1.6,
+  final slot = BlockSlot.of(context, node.element);
+  final subtitle = _isSubtitle(context, slot);
+  return _subtitleGap(
+    _richText(
+      context,
+      node.props.string('text') ?? '',
+      _textStyle(
+        theme,
+        color: theme.fg(node.props['color']) ?? theme.muted,
+        size: subtitle ? 13.0 : 12.0,
+        height: subtitle ? 18 / 13 : 1.6,
+      ),
     ),
+    subtitle,
+    slot,
   );
 }
 

@@ -4,6 +4,7 @@ import '../../lang/js.dart';
 import '../../spec/library.dart';
 import '../../spec/schema.dart';
 import 'dates.dart' show dayOf, isoDay, parseDate, utcDay;
+import 'js_number.dart';
 import 'shared.dart';
 
 Schema _keyValue() => S.list(
@@ -27,15 +28,19 @@ List<Object?> _mapField(List<Object?> rows, String field, List<num> values) {
   if (field.isEmpty) return values;
   final out = <Object?>[];
   for (var i = 0; i < rows.length; i++) {
-    final row = rows[i];
-    out.add(
-      row is Map
-          ? {...row.cast<String, Object?>(), field: values[i]}
-          : {field: values[i]},
-    );
+    out.add({..._spread(rows[i]), field: values[i]});
   }
   return out;
 }
+
+/// The own properties `{...row}` copies in JavaScript: a map's entries, a
+/// list's or string's indices, nothing for a number, boolean or null.
+Map<String, Object?> _spread(Object? row) => switch (row) {
+  Map() => row.cast<String, Object?>(),
+  List() => {for (var i = 0; i < row.length; i++) '$i': row[i]},
+  String() => {for (var i = 0; i < row.length; i++) '$i': row[i]},
+  _ => const {},
+};
 
 /// How many rows a `Top` slice takes: JavaScript's `slice(0, Math.trunc(n))`.
 int _take(num n, int length) {
@@ -253,7 +258,7 @@ final List<FunctionSpec> dataFunctions = [
     fn: (a) {
       final rows = a['rows'] as List<Object?>;
       final field = a['field'] as String;
-      num total = 0;
+      var total = 0.0;
       final running = <num>[];
       for (final row in rows) {
         total += toNum(read(row, field)) ?? 0;
@@ -278,7 +283,7 @@ final List<FunctionSpec> dataFunctions = [
       final averages = <num>[];
       for (var i = 0; i < values.length; i++) {
         final from = math.max(0, i - w + 1);
-        num total = 0;
+        var total = 0.0;
         for (var j = from; j <= i; j++) {
           total += values[j];
         }
@@ -329,8 +334,7 @@ final List<FunctionSpec> dataFunctions = [
           a['max'] as num? ?? (values.isEmpty ? 1 : values.reduce(math.max));
       if (hi <= lo) hi = lo + 1;
       final width = (hi - lo) / n;
-      // Past 20 digits toStringAsFixed throws; such bins are far below any displayed precision.
-      final decimals = math.min(20, math.max(0, 1 - _floorLog10(width)));
+      final decimals = math.max(0, 1 - _floorLog10(width));
       final counts = List<int>.filled(n, 0);
       for (final v in values) {
         if (v < lo || v > hi) continue;
@@ -340,7 +344,7 @@ final List<FunctionSpec> dataFunctions = [
       for (var i = 0; i < n; i++) {
         final start = lo + i * width;
         out.add({
-          'key': Js.string(Js.parseNumber(start.toStringAsFixed(decimals))),
+          'key': Js.string(Js.parseNumber(toFixed(start.toDouble(), decimals))),
           'value': counts[i],
           'start': start,
           'end': start + width,
@@ -375,13 +379,13 @@ final List<FunctionSpec> dataFunctions = [
         };
       }
       final sorted = [...values]..sort();
-      final mean = values.fold<num>(0, (x, v) => x + v) / count;
+      final mean = values.fold<double>(0, (x, v) => x + v) / count;
       final mid = count ~/ 2;
       final median = count.isOdd
           ? sorted[mid]
           : (sorted[mid - 1] + sorted[mid]) / 2;
       final stdev = math.sqrt(
-        values.fold<num>(0, (x, v) => x + (v - mean) * (v - mean)) / count,
+        values.fold<double>(0, (x, v) => x + (v - mean) * (v - mean)) / count,
       );
       return {
         'count': count,

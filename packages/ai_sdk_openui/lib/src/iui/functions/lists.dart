@@ -232,16 +232,19 @@ final List<FunctionSpec> listFunctions = [
       if (step == 0 || !step.isFinite) {
         throw StateError('step must be a non-zero number');
       }
-      final raw = ((end - start) / step).ceilToDouble();
+      final raw = ((end.toDouble() - start.toDouble()) / step).ceilToDouble();
       if (raw > maxItems) throw StateError('more than $maxItems items');
       final count = raw.isNaN || raw < 0 ? 0 : raw.toInt();
       final whole = _isInteger(start) && _isInteger(step);
       return [
         for (var i = 0; i < count; i++)
           if (whole)
-            start + i * step
+            // Doubles, as JavaScript: an int product could overflow.
+            start.toDouble() + i * step.toDouble()
           else
-            double.parse((start + i * step).toDouble().toStringAsPrecision(12)),
+            double.parse(
+              (start.toDouble() + i * step.toDouble()).toStringAsPrecision(12),
+            ),
       ];
     },
   ),

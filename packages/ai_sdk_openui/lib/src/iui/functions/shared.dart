@@ -27,14 +27,41 @@ abstract final class Impure {
   /// as the reference's vitest config does.
   static DateTime Function(DateTime instant) toLocal = _toLocal;
 
+  /// The epoch milliseconds of a local wall-clock time, given as epoch
+  /// milliseconds read as UTC: how JavaScript reads a date string without a
+  /// time zone.
+  static int Function(int wallMs) fromLocal = _fromLocal;
+
   static DateTime _toLocal(DateTime instant) => instant.toLocal();
+
+  static int _fromLocal(int wallMs) {
+    final w = DateTime.fromMillisecondsSinceEpoch(wallMs, isUtc: true);
+    return DateTime(
+      w.year,
+      w.month,
+      w.day,
+      w.hour,
+      w.minute,
+      w.second,
+      w.millisecond,
+    ).millisecondsSinceEpoch;
+  }
+
+  /// Reads and formats dates in UTC, as the reference's tests run with TZ=UTC.
+  static void useUtc() {
+    toLocal = (instant) => instant.toUtc();
+    fromLocal = (wallMs) => wallMs;
+  }
 
   static void reset() {
     random = _random.nextDouble;
     now = DateTime.now;
     toLocal = _toLocal;
+    fromLocal = _fromLocal;
   }
 }
+
+final _arrayIndex = RegExp(r'^(0|[1-9][0-9]*)$');
 
 /// Reads [field] from a row with dot paths; "" is the item itself.
 Object? read(Object? item, String field) {
@@ -44,8 +71,13 @@ Object? read(Object? item, String field) {
     if (cur is Map) {
       cur = cur[key];
     } else if (cur is List) {
-      final i = int.tryParse(key);
-      cur = i != null && i >= 0 && i < cur.length ? cur[i] : null;
+      // An array reads its length and canonical indices ("1", not "01" or "+1").
+      if (key == 'length') {
+        cur = cur.length;
+      } else {
+        final i = _arrayIndex.hasMatch(key) ? int.tryParse(key) : null;
+        cur = i != null && i < cur.length ? cur[i] : null;
+      }
     } else {
       return null;
     }
@@ -95,8 +127,8 @@ num aggregate(List<Object?> rows, String? field, String how) {
   final values = [for (final r in rows) ?toNum(read(r, field ?? ''))];
   if (values.isEmpty) return 0;
   return switch (how) {
-    'sum' => values.fold<num>(0, (a, b) => a + b),
-    'avg' => values.fold<num>(0, (a, b) => a + b) / values.length,
+    'sum' => values.fold<double>(0, (a, b) => a + b),
+    'avg' => values.fold<double>(0, (a, b) => a + b) / values.length,
     'min' => values.reduce(math.min),
     _ => values.reduce(math.max),
   };

@@ -1,3 +1,4 @@
+import 'package:ai_sdk_openui/src/iui/functions/dates.dart';
 import 'package:ai_sdk_openui/src/iui/functions/shared.dart';
 import 'package:test/test.dart';
 
@@ -10,6 +11,25 @@ Object? _r(String expr) => value(expr.replaceAll('ROWS', _rows));
 
 const _cases = <String, List<(String, Object?)>>{
   'FormatDate': [
+    (r'@FormatDate("Oct 9, 2026")', 'Oct 9, 2026'),
+    (r'@FormatDate("2026/10/09")', 'Oct 9, 2026'),
+    (r'@FormatDate("10/09/2026")', 'Oct 9, 2026'),
+    (r'@FormatDate("2026-1-5", "iso")', '2026-01-05'),
+    (r'@FormatDate("+002026-10-09")', 'Oct 9, 2026'),
+    (
+      r'@FormatDate("Fri, 09 Oct 2026 22:15:00 GMT", "datetime")',
+      'Oct 9, 10:15 PM',
+    ),
+    (r'@FormatDate("20261009")', null),
+    (r'@FormatDate("2026-10-09T25:00:00Z")', null),
+    (r'@FormatDate("0050-03-01")', 'Mar 1, 1950'),
+    (r'@FormatDate("0000-02-29")', null),
+    (r'@FormatDate("0004-02-29")', 'Feb 29, 1904'),
+    (r'@FormatDate("-000001-01-01T00:00:00Z")', 'Jan 1, 2'),
+    (r'@FormatDate("-000001-06-01T00:00:00Z", "iso")', '-000001-06'),
+    (r'@FormatDate(8.64e15, "iso")', '+275760-09'),
+    (r'@FormatDate(-8.64e15, "long")', 'Tuesday, April 20, 271822'),
+    (r'@FormatDate(-8.64e15, "month")', 'Apr 271822'),
     (r'@FormatDate("2026-10-09")', 'Oct 9, 2026'),
     (r'@FormatDate("2026-10-09", "short")', 'Oct 9'),
     (r'@FormatDate("2026-10-09", "long")', 'Friday, October 9, 2026'),
@@ -23,6 +43,7 @@ const _cases = <String, List<(String, Object?)>>{
     (r'@FormatDate("soon")', null),
   ],
   'AddDays': [
+    (r'@AddDays("0050-03-01", 1)', '1950-03-02'),
     (r'@AddDays("2026-10-09", 3)', '2026-10-12'),
     (r'@AddDays("2026-12-30", 5)', '2027-01-04'),
     (r'@AddDays("2026-03-01", -1)', '2026-02-28'),
@@ -30,12 +51,15 @@ const _cases = <String, List<(String, Object?)>>{
     (r'@AddDays("bad", 1)', null),
   ],
   'DaysBetween': [
+    (r'@DaysBetween("2026-01-01", "Oct 9, 2026")', 281),
     (r'@DaysBetween("2026-10-09", "2026-12-25")', 77),
     (r'@DaysBetween("2026-12-25", "2026-10-09")', -77),
     (r'@DaysBetween("2026-10-09", "2026-10-09")', 0),
     (r'@DaysBetween("2026-10-09", null)', null),
   ],
   'AddMonths': [
+    (r'@AddMonths("0050-01-31", 1)', '1950-02-28'),
+    (r'@AddMonths("2026-01-31", 1e9)', null),
     (r'@AddMonths("2026-01-31", 1)', '2026-02-28'),
     (r'@AddMonths("2026-10-09", -12)', '2025-10-09'),
     (r'@AddMonths("2026-11-15", 3)', '2027-02-15'),
@@ -46,6 +70,7 @@ const _cases = <String, List<(String, Object?)>>{
     (r'@MonthsBetween("2026-03-15", "2026-01-20")', -1),
   ],
   'StartOf': [
+    (r'@StartOf("0050-06-15", "month")', '1950-06-01'),
     (r'@StartOf("2026-10-09", "week")', '2026-10-05'),
     (r'@StartOf("2026-10-05", "week")', '2026-10-05'),
     (r'@StartOf("2026-10-11", "week")', '2026-10-05'),
@@ -53,6 +78,12 @@ const _cases = <String, List<(String, Object?)>>{
     (r'@StartOf("2026-10-09", "year")', '2026-01-01'),
   ],
   'GroupBy': [
+    (
+      r'@GroupBy([{k: "a", v: 9007199254740991}, {k: "a", v: 1}, {k: "a", v: 1}, {k: "a", v: 1}], "k", "v")',
+      [
+        {'key': 'a', 'value': 9007199254740992},
+      ],
+    ),
     (
       r'@GroupBy(ROWS, "region", "amount")',
       [
@@ -129,6 +160,13 @@ const _cases = <String, List<(String, Object?)>>{
     (r'@Between(ROWS, 3, 1)', null),
   ],
   'Bucket': [
+    (
+      r'@Bucket([{d: "2026-10-09"}, {d: "Oct 12, 2026"}, {d: "junk"}], "d", "week")',
+      [
+        {'key': '2026-10-05', 'value': 1},
+        {'key': '2026-10-12', 'value': 1},
+      ],
+    ),
     (
       r'@Bucket(ROWS, "date", "week", "amount")',
       [
@@ -210,7 +248,12 @@ const _cases = <String, List<(String, Object?)>>{
 };
 
 void main() {
-  setUp(() => Impure.toLocal = (d) => d.toUtc());
+  test('rejects non-ECMAScript whitespace around calendar dates', () {
+    expect(() => parseDate('\u00852026-10-09\u0085'), throwsStateError);
+    expect(parseDate('\u00a02026-10-09\u00a0').day, 20735);
+  });
+
+  setUp(Impure.useUtc);
   tearDown(Impure.reset);
 
   for (final MapEntry(key: name, value: rows) in _cases.entries) {
@@ -220,6 +263,32 @@ void main() {
       }
     });
   }
+
+  group('a date-time without a zone', () {
+    test("is read in the viewer's zone, as new Date reads it", () {
+      // A viewer four hours behind UTC.
+      Impure.toLocal = (d) => d.toUtc().subtract(const Duration(hours: 4));
+      Impure.fromLocal = (wall) => wall + 4 * 3600000;
+      expect(
+        value('@FormatDate("2026-10-09T23:30", "datetime")'),
+        'Oct 9, 11:30 PM',
+      );
+      expect(
+        value('@FormatDate("2026-10-09T23:30Z", "datetime")'),
+        'Oct 9, 7:30 PM',
+      );
+      expect(value('@DaysBetween("2026-10-09", "2026-10-09T23:30")'), 0);
+    });
+  });
+
+  group('a dot path into a list', () {
+    test('reads length and canonical indices only', () {
+      expect(value('@Join([[1, 2], [3]], ", ", "length")'), '2, 1');
+      expect(value('@Join([[1, 2], [3]], ", ", "1")'), '2');
+      expect(value('@Join([[1, 2], [3]], ", ", "01")'), '');
+      expect(value('@Join([[1, 2], [3]], ", ", "+1")'), '');
+    });
+  });
 
   group('@Now', () {
     test('returns the current instant as ISO', () {

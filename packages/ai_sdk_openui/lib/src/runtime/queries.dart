@@ -1,33 +1,24 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import '../lang/js.dart';
+import 'errors.dart';
+import 'mcp.dart';
 
 /// Calls a tool by name: what `Query` and `Mutation` run.
 typedef ToolCaller =
     Future<Object?> Function(String name, Map<String, Object?> args);
 
-/// Thrown by a [ToolCaller] that has no tool of that name.
-final class ToolNotFound implements Exception {
-  const ToolNotFound(this.toolName, [this.available = const []]);
+/// Thrown by a [ToolCaller] that has no tool of that name (lang-core `ToolNotFoundError`).
+final class ToolNotFoundError implements Exception {
+  const ToolNotFoundError(this.toolName, [this.availableTools = const []]);
   final String toolName;
-  final List<String> available;
+  final List<String> availableTools;
+  String get message =>
+      '[openui] No handler for tool "$toolName". Available: ${availableTools.isEmpty ? '(none)' : availableTools.join(', ')}';
   @override
-  String toString() =>
-      'No handler for tool "$toolName". Available: ${available.isEmpty ? '(none)' : available.join(', ')}';
-}
-
-final class QueryError {
-  const QueryError({
-    required this.statementId,
-    required this.toolName,
-    required this.message,
-    required this.isMutation,
-  });
-  final String statementId;
-  final String toolName;
-  final String message;
-  final bool isMutation;
+  String toString() => message;
 }
 
 /// A Query statement evaluated against the current state.
@@ -37,15 +28,43 @@ final class QueryNode {
     required this.toolName,
     required this.args,
     required this.defaults,
-    this.refreshSeconds,
+    this.refreshInterval,
     this.deps,
+    this.complete = true,
   });
   final String statementId;
   final String toolName;
   final Object? args;
   final Object? defaults;
-  final num? refreshSeconds;
+
+  /// The evaluated refresh value, in seconds, as the program gave it.
+  final Object? refreshInterval;
   final Map<String, Object?>? deps;
+
+  /// False while the statement still streams; such a node is not fetched.
+  final bool complete;
+}
+
+/// lang-core `QuerySnapshot`: every statement's data plus loading, refetching and error lists.
+final class QuerySnapshot {
+  const QuerySnapshot({
+    this.data = const {},
+    this.loading = const [],
+    this.refetching = const [],
+    this.errors = const [],
+  });
+
+  /// Query results and mutation results by statement id.
+  final Map<String, Object?> data;
+
+  /// Statement ids that are loading.
+  final List<String> loading;
+
+  /// Loading statement ids that have fetched before.
+  final List<String> refetching;
+
+  /// Queries first, then mutations.
+  final List<OpenUiError> errors;
 }
 
 final class _CacheEntry {
@@ -64,16 +83,16 @@ final class _Query {
   bool loading = false;
   bool everFetched = false;
   bool needsRefetch = false;
-  num refreshSeconds = 0;
+  Object? refreshInterval = 0;
   Timer? timer;
-  QueryError? error;
+  OpenUiError? error;
 }
 
 final class _Mutation {
   _Mutation(this.toolName);
   String toolName;
   Map<String, Object?> result = {'status': 'idle'};
-  QueryError? error;
+  OpenUiError? error;
 }
 
 String _stable(Object? value) => jsonEncode(_sorted(value));
@@ -86,7 +105,11 @@ Object? _sorted(Object? value) => switch (value) {
   List() => [for (final v in value) _sorted(v)],
   num() when value.isNaN => '__NaN__',
   num() when value.isInfinite => value > 0 ? '__Inf__' : '__-Inf__',
-  double() when value == value.truncateToDouble() => value.toInt(),
+  double()
+      when value >= -9223372036854775808.0 &&
+          value < 9223372036854775808.0 &&
+          value == value.truncateToDouble() =>
+    value.toInt(),
   num() || String() || bool() || null => value,
   _ => null,
 };
@@ -102,11 +125,13 @@ final class QueryManager {
   final Map<String, _Mutation> _mutations = {};
   final Map<String, _CacheEntry> _cache = {};
   final List<void Function()> _listeners = [];
+  QuerySnapshot _snapshot = const QuerySnapshot();
   String _snapshotKey = '';
   bool _disposed = false;
   int _generation = 0;
 
-  void Function() listen(void Function() listener) {
+  /// Calls [listener] after every snapshot change; returns a cancel.
+  void Function() subscribe(void Function() listener) {
     _listeners.add(listener);
     return () => _listeners.remove(listener);
   }
@@ -117,22 +142,43 @@ final class QueryManager {
     }
   }
 
-  /// Whether anything observable changed since the last rebuild.
+  /// Builds the next snapshot; returns whether anything observable changed.
   bool _rebuild() {
+    final data = <String, Object?>{};
+    final loading = <String>[];
+    final refetching = <String>[];
+    final errors = <OpenUiError>[];
+    for (final MapEntry(:key, :value) in _queries.entries) {
+      data[key] = getResult(key);
+      if (value.loading) {
+        loading.add(key);
+        if (value.everFetched) refetching.add(key);
+      }
+      if (value.error != null) errors.add(value.error!);
+    }
+    for (final MapEntry(:key, :value) in _mutations.entries) {
+      data[key] = value.result;
+      if (value.error != null) errors.add(value.error!);
+    }
     final key = _stable({
-      for (final MapEntry(:key, :value) in _queries.entries)
-        key: [Js.stringify(result(key)), value.loading, value.error?.message],
-      for (final MapEntry(:key, :value) in _mutations.entries)
-        key: [value.result, value.error?.message],
+      'data': data,
+      'loading': loading,
+      'refetching': refetching,
+      'errors': [for (final e in errors) e.toJson()],
     });
     if (key == _snapshotKey) return false;
     _snapshotKey = key;
+    _snapshot = QuerySnapshot(
+      data: data,
+      loading: loading,
+      refetching: refetching,
+      errors: errors,
+    );
     return true;
   }
 
-  Object? result(String statementId) {
-    final m = _mutations[statementId];
-    if (m != null) return m.result;
+  /// The data a Query statement shows: its cached result, else the previous key's, else its defaults.
+  Object? getResult(String statementId) {
     final q = _queries[statementId];
     if (q == null) return null;
     final entry = _cache[q.cacheKey];
@@ -142,29 +188,59 @@ final class QueryManager {
     return q.node.defaults;
   }
 
-  bool get isLoading => _queries.values.any((q) => q.loading);
+  /// The last result of a Mutation, or null when [statementId] is not one.
+  Map<String, Object?>? getMutationResult(String statementId) =>
+      _mutations[statementId]?.result;
 
-  List<QueryError> get errors => [
-    for (final q in _queries.values)
-      if (q.error != null) q.error!,
-    for (final m in _mutations.values)
-      if (m.error != null) m.error!,
-  ];
+  /// Whether the Query [statementId] is loading.
+  bool isLoading(String statementId) => _queries[statementId]?.loading ?? false;
 
-  QueryError _error(
+  /// Whether any Query is loading.
+  bool isAnyLoading() => _queries.values.any((q) => q.loading);
+
+  /// The latest snapshot of every statement.
+  QuerySnapshot getSnapshot() => _snapshot;
+
+  OpenUiError _error(
     String sid,
     String tool,
     Object err, {
     required bool mutation,
   }) {
     final kind = mutation ? 'Mutation' : 'Query';
-    return QueryError(
+    final source = mutation
+        ? OpenUiErrorSource.mutation
+        : OpenUiErrorSource.query;
+    if (err is ToolNotFoundError) {
+      return OpenUiError(
+        source: source,
+        code: OpenUiErrorCode.toolNotFound,
+        message: '$kind tool "$tool" not found',
+        statementId: sid,
+        component: kind,
+        toolName: tool,
+        hint: err.availableTools.isEmpty
+            ? null
+            : 'Available tools: ${err.availableTools.join(', ')}',
+      );
+    }
+    if (err is McpToolError) {
+      return OpenUiError(
+        source: source,
+        code: OpenUiErrorCode.mcpError,
+        message: '$kind "$tool" returned an error: ${err.toolErrorText}',
+        statementId: sid,
+        component: kind,
+        toolName: tool,
+      );
+    }
+    return OpenUiError(
+      source: source,
+      code: OpenUiErrorCode.toolError,
+      message: '$kind "$tool" failed: ${errorMessage(err)}',
       statementId: sid,
+      component: kind,
       toolName: tool,
-      isMutation: mutation,
-      message: err is ToolNotFound
-          ? '$kind tool "$tool" not found'
-          : '$kind "$tool" failed: $err',
     );
   }
 
@@ -190,6 +266,7 @@ final class QueryManager {
         return;
       }
       entry.data = data;
+      // Every statement on this key gets the data, not just the one that started the fetch.
       for (final current in _queries.values.where(
         (q) => q.cacheKey == cacheKey,
       )) {
@@ -244,7 +321,7 @@ final class QueryManager {
   }
 
   /// Reconciles the active queries with the program's Query statements.
-  void evaluate(List<QueryNode> nodes) {
+  void evaluateQueries(List<QueryNode> nodes) {
     if (_disposed) return;
     final active = {for (final n in nodes) n.statementId};
     for (final sid
@@ -255,6 +332,7 @@ final class QueryManager {
       if (q.prevCacheKey != null) _cleanup(q.prevCacheKey!);
     }
     for (final node in nodes) {
+      if (!node.complete) continue;
       final cacheKey =
           '${node.toolName}::${_stable(node.args)}${node.deps != null ? '::${_stable(node.deps)}' : ''}';
       final existing = _queries[node.statementId];
@@ -276,13 +354,14 @@ final class QueryManager {
           !(entry?.inFlight ?? false)) {
         unawaited(_fetch(cacheKey, node.statementId));
       }
-      final interval = node.refreshSeconds ?? 0;
-      if (interval != q.refreshSeconds) {
+      final interval = node.refreshInterval ?? 0;
+      if (!Js.strictEquals(interval, q.refreshInterval)) {
         q.timer?.cancel();
         q.timer = null;
-        if (interval > 0 && (interval * 1000).isFinite) {
+        final seconds = Js.number(interval);
+        if (seconds > 0 && (seconds * 1000).isFinite) {
           q.timer = Timer.periodic(
-            Duration(milliseconds: (interval * 1000).round()),
+            Duration(milliseconds: math.max(1, (seconds * 1000).round())),
             (_) {
               if (_disposed || _call == null) return;
               if (!(_cache[q.cacheKey]?.inFlight ?? false)) {
@@ -291,7 +370,7 @@ final class QueryManager {
             },
           );
         }
-        q.refreshSeconds = interval;
+        q.refreshInterval = interval;
       }
     }
     if (_rebuild()) _notify();
@@ -328,10 +407,12 @@ final class QueryManager {
   }
 
   /// `@Run(mutation)`: returns whether it succeeded, so a plan can halt.
+  /// After a success, [refreshQueryIds] are refetched.
   Future<bool> fireMutation(
     String statementId,
-    Map<String, Object?> args,
-  ) async {
+    Map<String, Object?> args, [
+    List<String>? refreshQueryIds,
+  ]) async {
     final call = _call;
     final m = _mutations[statementId];
     if (_disposed ||
@@ -363,13 +444,19 @@ final class QueryManager {
         return false;
       }
       m
-        ..result = {'status': 'error', 'error': '$err'}
+        ..result = {'status': 'error', 'error': errorMessage(err)}
         ..error = _error(statementId, m.toolName, err, mutation: true);
     }
     _rebuild();
     _notify();
+    if (ok && refreshQueryIds != null && refreshQueryIds.isNotEmpty) {
+      invalidate(refreshQueryIds);
+    }
     return ok;
   }
+
+  /// Makes a disposed manager fetch again.
+  void activate() => _disposed = false;
 
   void dispose() {
     _disposed = true;
@@ -379,7 +466,7 @@ final class QueryManager {
       q.timer?.cancel();
       q
         ..timer = null
-        ..refreshSeconds = 0
+        ..refreshInterval = 0
         ..loading = false
         ..needsRefetch = false;
     }

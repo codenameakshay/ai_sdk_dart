@@ -77,17 +77,17 @@ void main() {
   test('a non-finite refresh interval cannot crash query reconciliation', () {
     final manager = QueryManager(null);
     addTearDown(manager.dispose);
-    manager.evaluate([
+    manager.evaluateQueries([
       const QueryNode(
         statementId: 'q',
         toolName: 't',
         args: {},
         defaults: 'waiting',
-        refreshSeconds: double.infinity,
+        refreshInterval: double.infinity,
       ),
     ]);
-    expect(manager.result('q'), 'waiting');
-    expect(manager.isLoading, isFalse);
+    expect(manager.getResult('q'), 'waiting');
+    expect(manager.isAnyLoading(), isFalse);
   });
 
   test('disposing from a host event stops the remaining action steps', () async {
@@ -118,18 +118,11 @@ void main() {
     expect(session.state[r'$n'], 9);
   });
 
-  test('actions do not run while the answer streams', () async {
+  test('actions run while plain text streams', () async {
     final session = OpenUiSession(_library);
     addTearDown(session.dispose);
     session.update('root = Out(1, @ToAssistant("go"))', streaming: true);
     final events = <ActionEvent>[];
-    await session.run(
-      session.root!.props.action('action'),
-      label: 'go',
-      emit: events.add,
-    );
-    expect(events, isEmpty);
-    session.update('root = Out(1, @ToAssistant("go"))', streaming: false);
     await session.run(
       session.root!.props.action('action'),
       label: 'go',
@@ -154,14 +147,14 @@ void main() {
         args: const {},
         defaults: 'waiting',
       );
-      manager.evaluate([node('a'), node('b')]);
-      manager.evaluate([node('b')]);
-      expect(manager.isLoading, isTrue);
+      manager.evaluateQueries([node('a'), node('b')]);
+      manager.evaluateQueries([node('b')]);
+      expect(manager.isAnyLoading(), isTrue);
       pending.complete('answer');
       await _settle();
       expect(calls, 1);
-      expect(manager.result('b'), 'answer');
-      expect(manager.isLoading, isFalse);
+      expect(manager.getResult('b'), 'answer');
+      expect(manager.isAnyLoading(), isFalse);
     },
   );
 

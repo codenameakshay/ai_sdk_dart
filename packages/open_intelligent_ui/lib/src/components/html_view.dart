@@ -143,7 +143,11 @@ Widget buildYouTube(BuildContext context, OpenUiNode node) {
   final title = node.props.string('title');
   final label = title == null || title.isEmpty ? 'YouTube video' : title;
   final Widget body = host.canHostWebPages
-      ? host.youTubeHost(id: id, title: label)
+      ? host.youTubeHost(
+          id: id,
+          title: label,
+          referrer: node.services.embedReferrer,
+        )
       : Semantics(
           button: true,
           label: 'Play $label',

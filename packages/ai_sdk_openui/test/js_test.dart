@@ -18,6 +18,12 @@ void main() {
   });
 
   group('Number(string)', () {
+    test('does not treat next-line characters as numeric whitespace', () {
+      expect(Js.number('\u00851\u0085').isNaN, true);
+      expect(Js.number('\u0085').isNaN, true);
+      expect(Js.number('\u00a01\ufeff'), 1);
+    });
+
     test('parses hex, octal and binary literals', () {
       expect(Js.number('0x1f'), 31);
       expect(Js.number('0XFF'), 255);
@@ -215,5 +221,25 @@ void main() {
     expect(Js.typeOf(1), 'number');
     expect(Js.typeOf(true), 'boolean');
     expect(Js.typeOf([1]), 'object');
+  });
+
+  test('JSON.stringify spells large and small doubles like JavaScript', () {
+    expect(
+      Js.stringify([9007199254740992.0, 1e20, 1e21, 1e-6, 1e-7, -0.0, 2.5]),
+      '[9007199254740992,100000000000000000000,1e+21,0.000001,1e-7,0,2.5]',
+    );
+  });
+
+  test('JSON.stringify puts array-index keys first, in order', () {
+    expect(
+      Js.stringify({
+        '2': 'b',
+        '1': 'a',
+        '01': 'c',
+        '4294967295': 'd',
+        '0': 'z',
+      }),
+      '{"0":"z","1":"a","2":"b","01":"c","4294967295":"d"}',
+    );
   });
 }

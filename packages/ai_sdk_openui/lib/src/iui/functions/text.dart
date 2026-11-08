@@ -1,11 +1,10 @@
-import 'package:intl/intl.dart';
-
 import '../../lang/js.dart';
 import '../../spec/library.dart';
 import '../../spec/schema.dart';
+import 'js_number.dart';
+import 'number_format.dart';
 import 'shared.dart';
-
-const _locale = 'en_US';
+import 'unicode.dart';
 
 final List<FunctionSpec> textFunctions = [
   FunctionSpec(
@@ -27,14 +26,22 @@ final List<FunctionSpec> textFunctions = [
       final d = decimals?.truncate().clamp(0, 10).toInt();
       final currency = a['currency'] as String?;
       return switch (kind) {
-        'currency' => _currency(value, d ?? 2, _currencyCode(currency)),
-        'percent' => '${_decimal(0, d ?? 1).format(value)}%',
-        'compact' when currency == null || currency.isEmpty => _compact(
+        'currency' => formatCurrency(
           value,
-          d ?? 1,
+          _currencyCode(currency),
+          minFraction: d ?? 2,
+          maxFraction: d ?? 2,
         ),
-        'compact' => _compactCurrency(value, d ?? 1, _currencyCode(currency)),
-        _ => _decimal(0, d ?? 2).format(value),
+        'percent' =>
+          '${formatDecimal(value, minFraction: 0, maxFraction: d ?? 1)}%',
+        'compact' => formatCompact(
+          value,
+          maxFraction: d ?? 1,
+          currency: currency == null || currency.isEmpty
+              ? null
+              : _currencyCode(currency),
+        ),
+        _ => formatDecimal(value, minFraction: 0, maxFraction: d ?? 2),
       };
     },
   ),
@@ -73,7 +80,7 @@ final List<FunctionSpec> textFunctions = [
       final word = a['word'] as String;
       final plural = a['plural'] as String?;
       final noun = n.abs() == 1 ? word : (plural ?? '${word}s');
-      return '${_decimal(0, 2).format(n)} $noun';
+      return '${formatDecimal(n, minFraction: 0, maxFraction: 2)} $noun';
     },
   ),
   FunctionSpec(
@@ -102,21 +109,21 @@ final List<FunctionSpec> textFunctions = [
     description: 'Text in upper case',
     params: {'text': S.string()},
     returns: S.string(),
-    fn: (a) => (a['text'] as String).toUpperCase(),
+    fn: (a) => jsUpperCase(a['text'] as String),
   ),
   FunctionSpec(
     'Lower',
     description: 'Text in lower case',
     params: {'text': S.string()},
     returns: S.string(),
-    fn: (a) => (a['text'] as String).toLowerCase(),
+    fn: (a) => jsLowerCase(a['text'] as String),
   ),
   FunctionSpec(
     'Trim',
     description: 'Text without spaces at the start and end',
     params: {'text': S.string()},
     returns: S.string(),
-    fn: (a) => (a['text'] as String).trim(),
+    fn: (a) => jsTrim(a['text'] as String),
   ),
   FunctionSpec(
     'Capitalize',
@@ -126,7 +133,7 @@ final List<FunctionSpec> textFunctions = [
     returns: S.string(),
     fn: (a) => (a['text'] as String).replaceAllMapped(
       RegExp(r'(^|[\s\-(/"])(\p{L})', unicode: true),
-      (m) => '${m[1]}${m[2]!.toUpperCase()}',
+      (m) => '${m[1]}${jsUpperCase(m[2]!)}',
     ),
   ),
   FunctionSpec(
@@ -139,7 +146,7 @@ final List<FunctionSpec> textFunctions = [
       final sep = (a['sep'] as String?) ?? ',';
       final parts = (a['text'] as String)
           .split(sep)
-          .map((p) => p.trim())
+          .map(jsTrim)
           .where((p) => p.isNotEmpty)
           .toList();
       if (parts.length > maxItems) {
@@ -173,17 +180,23 @@ final List<FunctionSpec> textFunctions = [
       final seconds = a['seconds'] as num;
       if (!seconds.isFinite) throw StateError('seconds is not a finite number');
       final sign = seconds < 0 ? '-' : '';
-      final total = (seconds.abs() + 0.5).floor();
-      final h = total ~/ 3600;
-      final m = (total % 3600) ~/ 60;
+      // Doubles, as JavaScript counts: an int would overflow past 2^63 seconds.
+      final total = jsRound(seconds.abs());
+      final h = (total / 3600).floorToDouble();
+      final m = (total % 3600 / 60).floorToDouble();
       final s = total % 60;
-      String two(int n) => n.toString().padLeft(2, '0');
+      String two(double n) => Js.numberToString(n).padLeft(2, '0');
       if (((a['style'] as String?) ?? 'short') == 'clock') {
-        return sign + (h > 0 ? '$h:${two(m)}:${two(s)}' : '$m:${two(s)}');
+        return sign +
+            (h > 0
+                ? '${Js.numberToString(h)}:${two(m)}:${two(s)}'
+                : '${Js.numberToString(m)}:${two(s)}');
       }
-      if (h > 0) return '$sign${h}h${m > 0 ? ' ${m}m' : ''}';
-      if (m > 0) return '$sign${m}m${s > 0 ? ' ${two(s)}s' : ''}';
-      return '$sign${s}s';
+      final hours = Js.numberToString(h);
+      final minutes = Js.numberToString(m);
+      if (h > 0) return '$sign${hours}h${m > 0 ? ' ${minutes}m' : ''}';
+      if (m > 0) return '$sign${minutes}m${s > 0 ? ' ${two(s)}s' : ''}';
+      return '$sign${Js.numberToString(s)}s';
     },
   ),
   FunctionSpec(
@@ -203,30 +216,6 @@ final List<FunctionSpec> textFunctions = [
 
 /// The code when it is three letters, else USD, as the reference's `currencyCode`.
 String _currencyCode(String? code) {
-  final upper = (code ?? 'USD').toUpperCase();
+  final upper = jsUpperCase(code ?? 'USD');
   return RegExp(r'^[A-Z]{3}$').hasMatch(upper) ? upper : 'USD';
 }
-
-NumberFormat _decimal(int minDigits, int maxDigits) =>
-    NumberFormat('#,##0', _locale)
-      ..minimumFractionDigits = minDigits
-      ..maximumFractionDigits = maxDigits;
-
-String _currency(num value, int digits, String code) =>
-    NumberFormat.simpleCurrency(
-      locale: _locale,
-      name: code,
-      decimalDigits: digits,
-    ).format(value);
-
-String _compact(num value, int maxDigits) =>
-    (NumberFormat.compact(locale: _locale)
-          ..minimumFractionDigits = 0
-          ..maximumFractionDigits = maxDigits)
-        .format(value);
-
-String _compactCurrency(num value, int maxDigits, String code) =>
-    (NumberFormat.compactSimpleCurrency(locale: _locale, name: code)
-          ..minimumFractionDigits = 0
-          ..maximumFractionDigits = maxDigits)
-        .format(value);

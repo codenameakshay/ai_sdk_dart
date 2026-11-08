@@ -119,6 +119,8 @@ Widget buildSvgText(BuildContext context, OpenUiNode node) =>
 Widget buildSvg(BuildContext context, OpenUiNode node) {
   final theme = node.theme;
   final ink = DefaultTextStyle.of(context).style.color ?? theme.ink;
+  final fontSize = DefaultTextStyle.of(context).style.fontSize ?? 14;
+  final viewport = MediaQuery.sizeOf(context);
   final box = (_ok(node.props['viewBox'], _viewBox) ?? '0 0 100 100')
       .trim()
       .split(RegExp(r'[\s,]+'))
@@ -128,8 +130,16 @@ Widget buildSvg(BuildContext context, OpenUiNode node) {
   final scene = [
     for (final e in node.props.elements('children')) ?_shape(e, theme, ink),
   ];
-  final width = OpenUiTheme.length(node.props['width']);
-  final height = OpenUiTheme.length(node.props['height']).px;
+  final width = OpenUiTheme.length(
+    node.props['width'],
+    fontSize: fontSize,
+    viewport: viewport,
+  );
+  final height = OpenUiTheme.length(
+    node.props['height'],
+    fontSize: fontSize,
+    viewport: viewport,
+  ).px;
   final maxWidth = node.props['width'] == null && viewBox.width > 0
       ? math.max(280.0, viewBox.width * 1.5)
       : double.infinity;
@@ -139,8 +149,8 @@ Widget buildSvg(BuildContext context, OpenUiNode node) {
           ? constraints.maxWidth
           : 320.0;
       final w = math.min(
-        width.px ?? available * (width.fraction ?? 1),
-        maxWidth,
+        math.min(width.px ?? available * (width.fraction ?? 1), maxWidth),
+        available,
       );
       final h =
           height ??
@@ -188,6 +198,7 @@ final class _TextShape extends SvgShape {
     this.size,
     this.anchor,
     this.weight,
+    this.fontFamily,
     super.paint,
   );
   final String text;
@@ -195,6 +206,7 @@ final class _TextShape extends SvgShape {
   final double size;
   final String anchor;
   final FontWeight weight;
+  final String? fontFamily;
 }
 
 final class _GroupShape extends SvgShape {
@@ -205,6 +217,10 @@ final class _GroupShape extends SvgShape {
 
 /// Filled shapes default to the text color; with only a stroke they stay
 /// unfilled. Lines and polylines stroke in the text color, 2 wide.
+/// A paint color; `currentColor` is the text color.
+Color? _color(Object? v, OpenUiTheme theme, Color ink) =>
+    v is String && v.trim().toLowerCase() == 'currentcolor' ? ink : theme.fg(v);
+
 SvgPaint _paintOf(
   Props p,
   OpenUiTheme theme,
@@ -213,8 +229,10 @@ SvgPaint _paintOf(
 }) {
   final hasFill = p['fill'] != null, hasStroke = p['stroke'] != null;
   return SvgPaint(
-    fill: hasFill ? theme.fg(p['fill']) : (filled && !hasStroke ? ink : null),
-    stroke: hasStroke ? theme.fg(p['stroke']) : (filled ? null : ink),
+    fill: hasFill
+        ? _color(p['fill'], theme, ink)
+        : (filled && !hasStroke ? ink : null),
+    stroke: hasStroke ? _color(p['stroke'], theme, ink) : (filled ? null : ink),
     strokeWidth: _n(p['strokeWidth']) ?? (filled ? null : 2),
     opacity: _opacity(p['opacity']),
   );
@@ -316,7 +334,8 @@ SvgShape? _shape(OpenUiElement e, OpenUiTheme theme, Color ink) {
           'medium' => FontWeight.w500,
           _ => FontWeight.w400,
         },
-        SvgPaint(fill: p['fill'] != null ? theme.fg(p['fill']) : ink),
+        theme.fontFamily,
+        SvgPaint(fill: _color(p['fill'], theme, ink) ?? ink),
       );
   }
   return null;
@@ -359,37 +378,41 @@ class SvgScenePainter extends CustomPainter {
         dy = (size.height - viewBox.height * scale) / 2;
     canvas
       ..save()
-      ..clipRect(Offset.zero & size)
       ..translate(dx, dy)
       ..scale(scale)
       ..translate(-viewBox.left, -viewBox.top);
     for (final s in scene) {
-      _draw(canvas, s, 1);
+      _draw(canvas, s);
     }
     canvas.restore();
   }
 
-  void _draw(Canvas canvas, SvgShape shape, double opacity) {
-    final alpha = opacity * (shape.paint.opacity ?? 1);
-    Color fade(Color c) => c.withValues(alpha: c.a * alpha);
+  /// Opacity is a layer, as an SVG group's is: the shape or group draws at
+  /// full alpha inside it.
+  void _draw(Canvas canvas, SvgShape shape) {
+    final opacity = shape.paint.opacity ?? 1;
+    final layered = opacity < 1;
+    if (layered) {
+      canvas.saveLayer(null, Paint()..color = Color.fromRGBO(0, 0, 0, opacity));
+    }
     switch (shape) {
       case _GroupShape(:final children, :final transform):
         canvas.save();
         if (transform != null) canvas.transform(transform.storage);
         for (final c in children) {
-          _draw(canvas, c, alpha);
+          _draw(canvas, c);
         }
         canvas.restore();
       case _PathShape(:final path, paint: final p):
         if (p.fill != null) {
-          canvas.drawPath(path, Paint()..color = fade(p.fill!));
+          canvas.drawPath(path, Paint()..color = p.fill!);
         }
         if (p.stroke != null && (p.strokeWidth ?? 1) > 0) {
           canvas.drawPath(
             path,
             Paint()
               ..style = PaintingStyle.stroke
-              ..color = fade(p.stroke!)
+              ..color = p.stroke!
               ..strokeWidth = p.strokeWidth ?? 1
               ..strokeCap = StrokeCap.round
               ..strokeJoin = StrokeJoin.round,
@@ -401,15 +424,19 @@ class SvgScenePainter extends CustomPainter {
         :final size,
         :final anchor,
         :final weight,
+        :final fontFamily,
         paint: final p,
       ):
+        final fill = p.fill;
+        if (fill == null) break;
         final painter = TextPainter(
           text: TextSpan(
             text: text,
             style: TextStyle(
               fontSize: size,
               fontWeight: weight,
-              color: fade(p.fill!),
+              fontFamily: fontFamily,
+              color: fill,
               height: 1,
             ),
           ),
@@ -432,6 +459,7 @@ class SvgScenePainter extends CustomPainter {
         );
         painter.dispose();
     }
+    if (layered) canvas.restore();
   }
 
   @override

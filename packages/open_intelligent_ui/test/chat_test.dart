@@ -6,6 +6,7 @@ import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_intelligent_ui/chat.dart';
+import 'package:open_intelligent_ui/open_intelligent_ui.dart' show ActionEvent;
 import 'package:open_intelligent_ui/src/chat.dart' show formFields;
 
 /// A model whose answers the test streams by hand, one call at a time.
@@ -467,6 +468,63 @@ void main() {
     test('has no fields without an object', () {
       expect(formFields('text'), isEmpty);
       expect(formFields(null), isEmpty);
+    });
+  });
+
+  group('actionUserMessage', () {
+    test('sends the message with the click and form state', () {
+      const event = ActionEvent(
+        type: ActionEvent.continueConversation,
+        humanFriendlyMessage: 'Tailor my Lisbon trip',
+        formState: {
+          'prefs': {
+            'pace': {'value': 'Packed', 'componentType': 'RadioGroup'},
+          },
+        },
+        formName: 'prefs',
+      );
+      expect(
+        actionUserMessage(event),
+        ']]>openui:content\nTailor my Lisbon trip\n]]>openui:context\n'
+        '["User clicked: Tailor my Lisbon trip",'
+        '{"prefs":{"pace":{"value":"Packed","componentType":"RadioGroup"}}}]',
+      );
+    });
+
+    test('appends the action context after the form state', () {
+      const event = ActionEvent(
+        type: ActionEvent.continueConversation,
+        params: {
+          'context': {'orderId': 42},
+        },
+        humanFriendlyMessage: 'Show details',
+      );
+      expect(
+        actionUserMessage(event),
+        ']]>openui:content\nShow details\n]]>openui:context\n'
+        '["User clicked: Show details",{},{"orderId":42}]',
+      );
+    });
+
+    test('includes an explicitly null action context', () {
+      const event = ActionEvent(
+        type: ActionEvent.continueConversation,
+        params: {'context': null},
+        humanFriendlyMessage: 'Continue',
+      );
+      expect(
+        actionUserMessage(event),
+        ']]>openui:content\nContinue\n]]>openui:context\n'
+        '["User clicked: Continue",{},null]',
+      );
+    });
+
+    test('drops the content line when there is no message', () {
+      const event = ActionEvent(type: ActionEvent.continueConversation);
+      expect(
+        actionUserMessage(event),
+        '\n]]>openui:context\n["User clicked: ",{}]',
+      );
     });
   });
 }

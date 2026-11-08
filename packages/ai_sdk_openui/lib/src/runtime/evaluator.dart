@@ -1,7 +1,8 @@
 import '../lang/ast.dart';
 import 'builtins.dart';
+import 'errors.dart';
 import '../lang/js.dart';
-import '../lang/parser.dart' show loopVarName;
+import '../lang/parser.dart' show ParseResult, loopVarName;
 import '../lang/validation.dart';
 
 /// A two-way binding: writing `$value` runs [expr] and stores the result in
@@ -116,6 +117,8 @@ Object? evaluate(Ast node, EvaluationContext ctx, [IsReactiveProp? reactive]) {
       return value;
     case NullNode() || PlaceholderNode():
       return null;
+    case ValueNode(:final value):
+      return value;
     case StateRefNode(:final name):
       return ctx.extraScope?[name] ?? ctx.getState(name);
     case RefNode(:final name):
@@ -331,7 +334,7 @@ Object? _callFunction(
   try {
     result = def.fn((args as Map).cast());
   } catch (e) {
-    ctx.reportError?.call('@$name threw: $e');
+    ctx.reportError?.call('@$name threw: ${errorMessage(e)}');
     return null;
   }
   final returns = def.returns;
@@ -461,6 +464,77 @@ List<Object?> _evaluateEach(
   ];
 }
 
+/// lang-core `evaluateElementProps`: evaluates each prop, reporting a failure to [errors] instead of throwing.
+ElementNode evaluateElementProps(
+  ElementNode el,
+  EvaluationContext ctx,
+  IsReactiveProp reactive,
+  List<OpenUiError> errors,
+) {
+  if (!el.hasDynamicProps) return el;
+  var key = '';
+  void report(String message) => errors.add(
+    OpenUiError(
+      source: OpenUiErrorSource.runtime,
+      code: OpenUiErrorCode.runtimeError,
+      component: el.typeName,
+      statementId: el.statementId,
+      message: 'Evaluating prop "$key" on ${el.typeName} failed: $message',
+      hint: 'Check the expression used for prop "$key"',
+    ),
+  );
+  final propCtx = ctx.copyWith(reportError: report);
+  final out = <String, Object?>{};
+  for (final MapEntry(key: prop, :value) in el.props.entries) {
+    key = prop;
+    try {
+      out[prop] = evaluateProp(
+        value,
+        propCtx,
+        reactive,
+        reactive(el.typeName, prop),
+        recurseElement: (child) =>
+            evaluateElementProps(child, propCtx, reactive, errors),
+      );
+    } catch (e) {
+      // lang-core keeps the raw value; Dart props never hold syntax, so it reads as null.
+      out[prop] = null;
+      report(errorMessage(e));
+    }
+  }
+  return el.withProps(out);
+}
+
+/// lang-core `evaluateRoot`: the root element, or the component a runtime entry picks; null if none.
+ElementNode? evaluateRoot(
+  ParseResult result,
+  EvaluationContext ctx,
+  IsReactiveProp reactive,
+  List<OpenUiError> errors,
+) {
+  final root = result.root;
+  if (root != null) return evaluateElementProps(root, ctx, reactive, errors);
+  final expression = result.rootExpression;
+  if (expression == null) return null;
+  final value = evaluate(expression, ctx, reactive);
+  if (value is ElementNode) {
+    return evaluateElementProps(value, ctx, reactive, errors);
+  }
+  errors.add(
+    const OpenUiError(
+      source: OpenUiErrorSource.runtime,
+      code: OpenUiErrorCode.noRoot,
+      statementId: 'root',
+      message: 'root does not evaluate to a component',
+    ),
+  );
+  return null;
+}
+
+/// lang-core `stripReactiveAssign`: a binding read as its current state value.
+Object? stripReactiveAssign(Object? value, EvaluationContext ctx) =>
+    value is ReactiveAssign ? ctx.getState(value.target) : value;
+
 /// lang-core `evaluateElementInline` / `evaluateElementProps`: resolves every
 /// prop of an element for rendering.
 ElementNode evaluateElement(
@@ -480,8 +554,11 @@ Object? evaluateProp(
   Object? value,
   EvaluationContext ctx,
   IsReactiveProp reactive,
-  bool isReactive,
-) {
+  bool isReactive, {
+  ElementNode Function(ElementNode el)? recurseElement,
+}) {
+  final recurse =
+      recurseElement ?? (ElementNode el) => evaluateElement(el, ctx, reactive);
   if (value == null ||
       value is String && !isReactive ||
       value is num ||
@@ -494,11 +571,10 @@ Object? evaluateProp(
       return ReactiveAssign(value.name, const StateRefNode(r'$value'));
     }
     final result = evaluate(value, ctx, reactive);
-    if (result is ElementNode) return evaluateElement(result, ctx, reactive);
+    if (result is ElementNode) return recurse(result);
     if (result is List) {
       return [
-        for (final item in result)
-          item is ElementNode ? evaluateElement(item, ctx, reactive) : item,
+        for (final item in result) item is ElementNode ? recurse(item) : item,
       ];
     }
     if (result is ReactiveAssign && !isReactive) {
@@ -507,9 +583,18 @@ Object? evaluateProp(
     return result;
   }
   if (value is List) {
-    return [for (final v in value) evaluateProp(v, ctx, reactive, isReactive)];
+    return [
+      for (final v in value)
+        evaluateProp(
+          v,
+          ctx,
+          reactive,
+          isReactive,
+          recurseElement: recurseElement,
+        ),
+    ];
   }
-  if (value is ElementNode) return evaluateElement(value, ctx, reactive);
+  if (value is ElementNode) return recurse(value);
   if (value is ActionPlan || value is ReactiveAssign) return value;
   if (value is Map) {
     if (!value.values.any(
@@ -519,7 +604,13 @@ Object? evaluateProp(
     }
     return <String, Object?>{
       for (final MapEntry(:key, value: v) in value.entries)
-        '$key': evaluateProp(v, ctx, reactive, isReactive),
+        '$key': evaluateProp(
+          v,
+          ctx,
+          reactive,
+          isReactive,
+          recurseElement: recurseElement,
+        ),
     };
   }
   return value;

@@ -87,7 +87,7 @@ final class OpenUiChat {
     _unsaved.clear();
   }
 
-  OpenUiSession _session(String id, OpenUiMessage message) {
+  OpenUiSession _session(String id, ParsedMessage message) {
     return _sessions.putIfAbsent(id, () {
       final entry = controller.chatMessages
           .where((m) => m.id == id)
@@ -120,7 +120,7 @@ final class OpenUiChat {
     final raw = entry?.message.content;
     if (raw == null) return;
     _unsaved.remove(id);
-    final parsed = OpenUiMessage.parse(raw);
+    final parsed = parseMessage(raw);
     final state = session.state;
     _writing = id;
     try {
@@ -128,11 +128,7 @@ final class OpenUiChat {
         id,
         ModelMessage(
           role: ModelMessageRole.assistant,
-          content: OpenUiMessage(
-            content: parsed.content,
-            attributes: parsed.attributes,
-            context: state.isEmpty ? null : [state],
-          ).build(),
+          content: _withState(parsed, state),
         ),
       );
     } finally {
@@ -151,10 +147,7 @@ final class OpenUiChat {
   void _send(ActionEvent event) {
     if (_disposed || controller.isLoading) return;
     unawaited(
-      controller.sendMessage(
-        agent: agent,
-        text: OpenUiMessage.fromAction(event),
-      ),
+      controller.sendMessage(agent: agent, text: actionUserMessage(event)),
     );
   }
 
@@ -177,10 +170,7 @@ final class OpenUiChat {
               entry.status != ConversationMessageStatus.streaming) {
             final raw = entry.message.content;
             if (raw != null) {
-              session.update(
-                OpenUiMessage.parse(raw).content,
-                streaming: false,
-              );
+              session.update(parseMessage(raw).content, streaming: false);
               _committed(id);
             }
           }
@@ -198,6 +188,30 @@ final class OpenUiChat {
     });
   }
 }
+
+/// The user turn that a `continue_conversation` [event] sends, as react-ui's
+/// `buildActionUserMessage` writes it: the message, then
+/// `["User clicked: …", formState, context?]`.
+String actionUserMessage(ActionEvent event) {
+  final message = event.humanFriendlyMessage;
+  final built = buildMessage(
+    content: message,
+    context: [
+      'User clicked: $message',
+      event.formState,
+      if (event.params.containsKey('context')) event.params['context'],
+    ],
+  );
+  return message.isNotEmpty ? built : built.substring(built.indexOf('\n') + 1);
+}
+
+/// [message] stored again with [state] as its context, as react-ui saves it.
+String _withState(ParsedMessage message, Map<String, Object?> state) =>
+    buildMessage(
+      content: message.content,
+      attributes: message.attributes,
+      context: state.isEmpty ? null : [state],
+    );
 
 /// react-ui keeps an answer's state as the first item of its context.
 Map<String, Object?> _stateOf(Object? context) => switch (context) {
@@ -225,7 +239,7 @@ class _Answer extends StatefulWidget {
 }
 
 class _AnswerState extends State<_Answer> {
-  late OpenUiMessage _message;
+  late ParsedMessage _message;
   late OpenUiSession _session;
 
   @override
@@ -241,7 +255,7 @@ class _AnswerState extends State<_Answer> {
   }
 
   void _sync() {
-    _message = OpenUiMessage.parse(widget.raw, streaming: widget.streaming);
+    _message = parseMessage(widget.raw, streaming: widget.streaming);
     _session = widget.chat._session(widget.id, _message)
       ..update(_message.content, streaming: widget.streaming);
     if (!widget.streaming) widget.chat._committed(widget.id);
@@ -289,7 +303,7 @@ class _OpenUiUserMessageState extends State<OpenUiUserMessage> {
 
   @override
   Widget build(BuildContext context) {
-    final message = OpenUiMessage.parse(widget.text);
+    final message = parseMessage(widget.text);
     final fields = formFields(message.context);
     final scheme = Theme.of(context).colorScheme;
     final small = Theme.of(context).textTheme.bodySmall;

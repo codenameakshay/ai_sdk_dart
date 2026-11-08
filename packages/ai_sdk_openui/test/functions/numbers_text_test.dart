@@ -54,6 +54,21 @@ void main() {
       ('@MixColor("red", "#000000", 0.5)', null),
     ],
     'Format': [
+      ('@Format(1.005)', '1.01'),
+      ('@Format(2.675)', '2.68'),
+      ('@Format(1.005, "percent", 2)', '1.01%'),
+      ('@Format(123456789.12345679, "number", 10)', '123,456,789.12345679'),
+      ('@Format(1e21)', '1,000,000,000,000,000,000,000'),
+      ('@Format(1e21, "currency")', '\$1,000,000,000,000,000,000,000.00'),
+      ('@Format(1e21, "compact")', '1,000,000,000T'),
+      ('@Format(999950, "compact")', '1M'),
+      ('@Format(1234.5, "currency", 2, "CAD")', 'CA\$1,234.50'),
+      ('@Format(1234.5, "currency", 2, "AUD")', 'A\$1,234.50'),
+      ('@Format(1234.5, "currency", 2, "MXN")', 'MX\$1,234.50'),
+      ('@Format(1234.5, "currency", 2, "CHF")', 'CHF 1,234.50'),
+      ('@Format(1234.5, "currency", 2, "KWD")', 'KWD 1,234.50'),
+      ('@Format(1234.5, "currency", 2, "xyz")', 'XYZ 1,234.50'),
+      ('@Format(1234567, "compact", null, "CAD")', 'CA\$1.2M'),
       ('@Format(12345.678)', '12,345.68'),
       ('@Format(12345.6, "number")', '12,345.6'),
       ('@Format(2.5, "number", 0)', '3'),
@@ -81,6 +96,8 @@ void main() {
       ('@Join("ab")', null),
     ],
     'Plural': [
+      ('@Plural(1.005, "cup")', '1.01 cups'),
+      ('@Plural(1e21, "star")', '1,000,000,000,000,000,000,000 stars'),
       ('@Plural(1, "guest")', '1 guest'),
       ('@Plural(3, "guest")', '3 guests'),
       ('@Plural(0, "item")', '0 items'),
@@ -106,12 +123,18 @@ void main() {
       ('@Convert(1, "kg", "m")', null),
       ('@Convert(1, "parsec", "m")', null),
     ],
-    'Trim': [('@Trim("  hi there ")', 'hi there'), ('@Trim(3)', null)],
+    'Trim': [
+      ('@Trim("\u0085x\u0085")', '\u0085x\u0085'),
+      ('@Trim("  hi there ")', 'hi there'),
+      ('@Trim(3)', null),
+    ],
     'Capitalize': [
+      ('@Capitalize("ßen street")', 'SSen Street'),
       ('@Capitalize("new york-city trip")', 'New York-City Trip'),
       ('@Capitalize("élan vital")', 'Élan Vital'),
     ],
     'Split': [
+      ('@Split("\u0085a\u0085,b")', ['\u0085a\u0085', 'b']),
       ('@Split("a, b,,c")', ['a', 'b', 'c']),
       ('@Split("eggs\nmilk", "\n")', ['eggs', 'milk']),
       ('@Split("")', <Object?>[]),
@@ -121,6 +144,10 @@ void main() {
       ('@Replace("abc", "", "x")', 'abc'),
     ],
     'Duration': [
+      ('@Duration(0.49999999999999994)', '0s'),
+      ('@Duration(-0.4)', '-0s'),
+      ('@Duration(1e20)', '27777777777777776h 46m'),
+      ('@Duration(1e20, "clock")', '27777777777777776:46:40'),
       ('@Duration(4800)', '1h 20m'),
       ('@Duration(245)', '4m 05s'),
       ('@Duration(45)', '45s'),
@@ -135,11 +162,18 @@ void main() {
       ('@Default(false, true)', false),
     ],
     'Upper': [
+      ('@Upper("straße")', 'STRASSE'),
+      ('@Upper("ﬁx")', 'FIX'),
       ('@Upper("abc")', 'ABC'),
       ('@Upper("")', ''),
       ('@Upper(5)', null),
     ],
-    'Lower': [('@Lower("AbC")', 'abc'), ('@Lower(null)', null)],
+    'Lower': [
+      ('@Lower("ΟΔΟΣ")', 'οδος'),
+      ('@Lower("İ")', 'i̇'),
+      ('@Lower("AbC")', 'abc'),
+      ('@Lower(null)', null),
+    ],
   };
 
   group('@Default with state', () {

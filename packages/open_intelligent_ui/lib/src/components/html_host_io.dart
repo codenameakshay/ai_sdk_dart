@@ -17,8 +17,11 @@ Widget htmlPageHost({
 }) => _NativePage(document: document, onHeight: onHeight);
 
 /// A YouTube embed that may only navigate within YouTube's own hosts.
-Widget youTubeHost({required String id, required String title}) =>
-    _NativeYouTube(id: id);
+Widget youTubeHost({
+  required String id,
+  required String title,
+  String? referrer,
+}) => _NativeYouTube(id: id, referrer: referrer);
 
 class _NativePage extends StatefulWidget {
   const _NativePage({required this.document, required this.onHeight});
@@ -61,20 +64,13 @@ class _NativePageState extends State<_NativePage> {
   }
 
   @override
-  void dispose() {
-    _controller
-      ..clearLocalStorage()
-      ..clearCache();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) => WebViewWidget(controller: _controller);
 }
 
 class _NativeYouTube extends StatefulWidget {
-  const _NativeYouTube({required this.id});
+  const _NativeYouTube({required this.id, this.referrer});
   final String id;
+  final String? referrer;
   @override
   State<_NativeYouTube> createState() => _NativeYouTubeState();
 }
@@ -94,14 +90,20 @@ class _NativeYouTubeState extends State<_NativeYouTube> {
     )
     ..loadRequest(
       Uri.parse('https://www.youtube-nocookie.com/embed/${widget.id}'),
+      headers: _headers(widget.referrer),
     );
+
+  static Map<String, String> _headers(String? referrer) => {
+    'Referer': referrer ?? 'https://www.youtube-nocookie.com/',
+  };
 
   @override
   void didUpdateWidget(_NativeYouTube old) {
     super.didUpdateWidget(old);
-    if (old.id != widget.id) {
+    if (old.id != widget.id || old.referrer != widget.referrer) {
       _controller.loadRequest(
         Uri.parse('https://www.youtube-nocookie.com/embed/${widget.id}'),
+        headers: _headers(widget.referrer),
       );
     }
   }

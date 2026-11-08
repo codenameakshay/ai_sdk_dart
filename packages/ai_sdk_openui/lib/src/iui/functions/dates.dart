@@ -4,7 +4,9 @@ import 'package:intl/intl.dart';
 
 import '../../spec/library.dart';
 import '../../spec/schema.dart';
+import 'js_date.dart';
 import 'shared.dart';
+import 'unicode.dart';
 
 const _dayMs = 86400000;
 
@@ -17,11 +19,8 @@ const _wholeLimit = 1000000000;
 final _dateOnly = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$');
 
 const _formats = {
-  'date': 'MMM d, y',
   'short': 'MMM d',
-  'long': 'EEEE, MMMM d, y',
   'weekday': 'EEE',
-  'month': 'MMM y',
   'time': 'h:mm a',
   'datetime': 'MMM d, h:mm a',
 };
@@ -32,41 +31,66 @@ DateTime utcDay(int day) {
   return DateTime.fromMillisecondsSinceEpoch(day * _dayMs, isUtc: true);
 }
 
-/// Days since 1970-01-01 of a calendar date. Months and days past their range
-/// roll over, as `Date.UTC` does.
-int dayOf(int year, int month, int day) =>
-    DateTime.utc(year, month, day).millisecondsSinceEpoch ~/ _dayMs;
+/// Days since 1970-01-01 of a calendar date, as `Date.UTC(year, month - 1,
+/// day) / DAY`: months and days past their range roll over, and a year from
+/// 0 to 99 means 1900 to 1999.
+int dayOf(int year, int month, int day) {
+  final y = year >= 0 && year <= 99 ? year + 1900 : year;
+  final days = makeDay(y.toDouble(), (month - 1).toDouble(), day.toDouble());
+  if (!(days.abs() <= _maxDay)) throw StateError('date out of range');
+  return days.toInt();
+}
 
 /// A date as a calendar day plus, for a timestamp or date-time, the instant.
 /// "YYYY-MM-DD" is a calendar date with no time zone; other dates are read in
-/// the viewer's time zone.
+/// the viewer's time zone, as `new Date(value)` reads them.
 ({int day, DateTime? instant}) parseDate(Object value) {
   if (value is String) {
-    final m = _dateOnly.firstMatch(value.trim());
+    final m = _dateOnly.firstMatch(jsTrim(value));
     if (m != null) {
       final y = int.parse(m[1]!);
       final mo = int.parse(m[2]!);
       final d = int.parse(m[3]!);
-      final check = DateTime.utc(y, mo, d);
-      if (check.month != mo || check.day != d) {
-        throw StateError('invalid date "$value"');
-      }
-      return (day: dayOf(y, mo, d), instant: null);
+      final day = dayOf(y, mo, d);
+      final (_, cm, cd) = _ymd(day);
+      if (cm != mo || cd != d) throw StateError('invalid date "$value"');
+      return (day: day, instant: null);
     }
   }
-  final DateTime? instant = switch (value) {
-    String() => DateTime.tryParse(value),
+  final ms = switch (value) {
+    String() => jsDateParse(value, Impure.fromLocal),
     num() when value.isFinite && value.abs() <= 8.64e15 =>
-      DateTime.fromMillisecondsSinceEpoch(value.truncate(), isUtc: true),
-    _ => null,
+      value.truncateToDouble(),
+    _ => double.nan,
   };
-  if (instant == null) throw StateError('invalid date "$value"');
+  if (ms.isNaN) throw StateError('invalid date "$value"');
+  final instant = DateTime.fromMillisecondsSinceEpoch(ms.toInt(), isUtc: true);
   final local = Impure.toLocal(instant);
   return (day: dayOf(local.year, local.month, local.day), instant: instant);
 }
 
-/// The `YYYY-MM-DD` of a calendar day.
-String isoDay(int day) => utcDay(day).toIso8601String().substring(0, 10);
+/// The `YYYY-MM-DD` of a calendar day, as `toISOString().slice(0, 10)`
+/// writes it: years outside 0 to 9999 get a sign and six digits.
+String isoDay(int day) {
+  final d = utcDay(day);
+  final year = d.year >= 0 && d.year <= 9999
+      ? d.year.toString().padLeft(4, '0')
+      : '${d.year < 0 ? '-' : '+'}${d.year.abs().toString().padLeft(6, '0')}';
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '$year-${two(d.month)}-${two(d.day)}'.substring(0, 10);
+}
+
+/// en-US `toLocaleString` of [at] for a FormatDate style. A year at or
+/// before 0 shows as its era year (0 is 1, -1 is 2), as Intl writes it.
+String _formatDate(DateTime at, String style) {
+  final year = at.year <= 0 ? 1 - at.year : at.year;
+  return switch (style) {
+    'date' => '${DateFormat('MMM d', 'en_US').format(at)}, $year',
+    'long' => '${DateFormat('EEEE, MMMM d', 'en_US').format(at)}, $year',
+    'month' => '${DateFormat('MMM', 'en_US').format(at)} $year',
+    _ => DateFormat(_formats[style]!, 'en_US').format(at),
+  };
+}
 
 /// Year, month (1-12) and day of a calendar day.
 (int, int, int) _ymd(int day) {
@@ -119,7 +143,7 @@ final List<FunctionSpec> dateFunctions = [
       final instant = parsed.instant;
       // A calendar date formats in UTC so its day never shifts with the viewer's zone.
       final at = instant == null ? utcDay(parsed.day) : Impure.toLocal(instant);
-      return DateFormat(_formats[style]!, 'en_US').format(at);
+      return _formatDate(at, style);
     },
   ),
   FunctionSpec(
@@ -138,7 +162,7 @@ final List<FunctionSpec> dateFunctions = [
     fn: (a) {
       final (y, m, d) = _ymd(parseDate(a['date']!).day);
       final target = m + _whole(a['months']);
-      final last = DateTime.utc(y, target + 1, 0).day;
+      final last = _ymd(dayOf(y, target + 1, 0)).$3;
       return isoDay(dayOf(y, target, math.min(d, last)));
     },
   ),

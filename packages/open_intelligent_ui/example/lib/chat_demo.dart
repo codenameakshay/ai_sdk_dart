@@ -43,7 +43,7 @@ const _relaxedPlan =
 /// What the scripted model answers to [userText]: the tailored page for a
 /// `@ToAssistant` turn that carries `$pace`, otherwise the trip page.
 String scriptedReply(String userText) {
-  final message = OpenUiMessage.parse(userText);
+  final message = parseMessage(userText);
   if (message.context case [_, final Map<String, Object?> state, ...]) {
     return tailoredProgram(jsString(state[r'$pace'] ?? 'Relaxed'));
   }

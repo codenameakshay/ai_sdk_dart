@@ -47,6 +47,23 @@ abstract final class S {
 
   /// A reference to a component, emitted as `$ref` into `$defs`.
   static Schema ref(String component) => _Ref(component);
+
+  /// A slot that takes only the library action [name].
+  static Schema actionRef(String name, Map<String, Schema> params) =>
+      _StepRef(name, {'type': S.literal(name), 'params': S.object(params)});
+}
+
+/// Refs of the built-in steps that have a legacy JSON shape, for restricted action slots:
+/// `S.union([Steps.openUrl, S.actionRef('Copy', {...})])`.
+abstract final class Steps {
+  static final Schema openUrl = _StepRef('OpenUrl', {
+    'type': S.literal('open_url'),
+    'url': S.string(),
+  });
+  static final Schema toAssistant = _StepRef('ToAssistant', {
+    'type': S.literal('continue_conversation'),
+    'context': S.string().optional(),
+  });
 }
 
 final class _Prim extends Schema {
@@ -265,6 +282,33 @@ final class _Ref extends Schema {
   );
 }
 
+final class _StepRef extends Schema {
+  const _StepRef(
+    this.name,
+    this.shape, {
+    super.isOptional,
+    super.isReactive,
+    super.tagName,
+    super.isNullable,
+  });
+  final String name;
+  final Map<String, Schema> shape;
+  @override
+  Schema _copy({
+    bool? isOptional,
+    bool? isReactive,
+    String? tagName,
+    bool? isNullable,
+  }) => _StepRef(
+    name,
+    shape,
+    isOptional: isOptional ?? this.isOptional,
+    isReactive: isReactive ?? this.isReactive,
+    tagName: tagName ?? this.tagName,
+    isNullable: isNullable ?? this.isNullable,
+  );
+}
+
 /// Emits Zod v4 `toJSONSchema` output. [defs] collects referenced
 /// definitions in first-seen order; [resolveRef] supplies a ref's body.
 final class JsonSchemaEmitter {
@@ -302,6 +346,7 @@ final class JsonSchemaEmitter {
       'additionalProperties': emit(value),
     },
     _Ref(:final name) => _ref(name),
+    _StepRef(:final name, :final shape) => _stepRef(name, shape),
   };
 
   Map<String, Object?> emitObject(Map<String, Schema> shape) {
@@ -337,6 +382,14 @@ final class JsonSchemaEmitter {
     }
     return {r'$ref': '#/\$defs/$name'};
   }
+
+  Map<String, Object?> _stepRef(String name, Map<String, Schema> shape) {
+    if (!defs.containsKey(name)) {
+      defs[name] = null;
+      defs[name] = emitObject(shape);
+    }
+    return {r'$ref': '#/\$defs/$name'};
+  }
 }
 
 /// lang-core `resolveTypeAnnotation`: the type a prompt signature prints.
@@ -349,6 +402,7 @@ String _baseType(Schema s) {
   if (s.tagName != null) return s.tagName!;
   return switch (s) {
     _Ref(:final name) => name,
+    _StepRef(:final name) => '@$name',
     _Union(:final options) => options.map(typeAnnotation).join(' | '),
     _List(:final item) =>
       item is _Union && item.tagName == null
@@ -376,3 +430,88 @@ String signature(String name, Map<String, Schema> params, [Schema? returns]) {
   final sig = '$name($fields)';
   return returns == null ? sig : '$sig → ${typeAnnotation(returns)}';
 }
+
+/// For `extend`: the component union [schema] is, or holds as its list item, when one option names a [known] component.
+Schema? slotUnion(Schema schema, Set<String> known) => switch (schema) {
+  _List(:final item) => slotUnion(item, known),
+  _Union(:final options)
+      when options.any((o) => o is _Ref && known.contains(o.name)) =>
+    schema,
+  _ => null,
+};
+
+/// For `extend`: [schema] with [removed] refs dropped and [added] refs appended to the union [slot].
+Schema rebindComponents(
+  Schema schema, {
+  required Set<String> known,
+  required Set<String> removed,
+  required Schema? slot,
+  required List<String> added,
+  required String path,
+}) {
+  Never onlyType(String name) => throw ArgumentError(
+    '[extend] Cannot remove "$name": it is the only type allowed in $path.',
+  );
+
+  Schema walk(Schema s) {
+    switch (s) {
+      case _Ref(:final name):
+        if (removed.contains(name)) onlyType(name);
+        return s;
+      case _Union(:final options):
+        if (!options.any((o) => o is _Ref && known.contains(o.name))) {
+          final walked = [for (final o in options) walk(o)];
+          return _allIdentical(walked, options)
+              ? s
+              : _withFlags(_Union(walked), s);
+        }
+        final kept = [
+          for (final o in options)
+            if (!(o is _Ref && removed.contains(o.name))) walk(o),
+        ];
+        final extra = identical(s, slot)
+            ? [
+                for (final a in added)
+                  if (!kept.any((k) => k is _Ref && k.name == a)) S.ref(a),
+              ]
+            : <Schema>[];
+        if (kept.isEmpty && extra.isEmpty) {
+          onlyType((options.first as _Ref).name);
+        }
+        final next = [...kept, ...extra];
+        return _allIdentical(next, options) ? s : _withFlags(_Union(next), s);
+      case _List(:final item):
+        final next = walk(item);
+        return identical(next, item) ? s : _withFlags(_List(next), s);
+      case _Object(:final shape):
+        final next = {for (final e in shape.entries) e.key: walk(e.value)};
+        final unchanged = shape.keys.every((k) => identical(next[k], shape[k]));
+        return unchanged ? s : _withFlags(_Object(next), s);
+      case _Record(:final key, :final value):
+        final k = walk(key);
+        final v = walk(value);
+        return identical(k, key) && identical(v, value)
+            ? s
+            : _withFlags(_Record(k, v), s);
+      default:
+        return s;
+    }
+  }
+
+  return walk(schema);
+}
+
+bool _allIdentical(List<Schema> a, List<Schema> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (!identical(a[i], b[i])) return false;
+  }
+  return true;
+}
+
+Schema _withFlags(Schema built, Schema from) => built._copy(
+  isOptional: from.isOptional,
+  isReactive: from.isReactive,
+  tagName: from.tagName,
+  isNullable: from.isNullable,
+);

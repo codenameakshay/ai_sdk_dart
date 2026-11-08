@@ -99,6 +99,7 @@ void main() {
         expect(article, {
           'action': 'query',
           'format': 'json',
+          'origin': '*',
           'formatversion': '2',
           'generator': 'search',
           'gsrsearch': 'Belem Tower',
@@ -116,6 +117,7 @@ void main() {
           'action': 'query',
           'format': 'json',
           'formatversion': '2',
+          'origin': '*',
           'generator': 'search',
           'gsrsearch': 'Belem Tower filetype:bitmap',
           'gsrnamespace': '6',

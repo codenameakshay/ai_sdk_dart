@@ -95,6 +95,7 @@ final class WikimediaImageSearch {
       'action': 'query',
       'format': 'json',
       'formatversion': '2',
+      'origin': '*',
       ...params,
     });
     final data = await _get(url);

@@ -48,9 +48,15 @@ final class RunResult {
   /// Parser, runtime and query issues.
   List<String> get issues => _session.issues;
 
+  /// The `action` prop as evaluated: a plan, or nested lists of plans from `@Each`.
+  Object? get actions => _root?.props['action'];
+
   /// Runs a plan's steps as a click does; returns the state after.
-  Future<Map<String, Object?>> click([OpenUiAction? plan]) async {
-    await _session.run(plan ?? action, label: '', emit: (_) {});
+  Future<Map<String, Object?>> click([
+    OpenUiAction? plan,
+    void Function(ActionEvent event)? emit,
+  ]) async {
+    await _session.run(plan ?? action, label: '', emit: emit ?? (_) {});
     return _session.state;
   }
 }

@@ -55,6 +55,9 @@ final class ActionSpec {
   final String name;
   final String description;
   final Map<String, Schema> params;
+
+  /// A slot schema that takes only this action: `S.union([copy.ref, Steps.openUrl])`.
+  Schema get ref => S.actionRef(name, params);
 }
 
 /// A tool `Query` and `Mutation` can call. The same list prints the prompt's
@@ -82,6 +85,7 @@ final class PromptOptions {
     this.toolCalls,
     this.builtinFunctions,
     this.tools = const [],
+    this.toolNames = const [],
     this.examples = const [],
     this.toolExamples = const [],
     this.additionalRules = const [],
@@ -93,6 +97,9 @@ final class PromptOptions {
   final bool? toolCalls;
   final bool? builtinFunctions;
   final List<OpenUiTool> tools;
+
+  /// Tools listed by name only, without a signature (lang-core string tools).
+  final List<String> toolNames;
   final List<String> examples;
   final List<String> toolExamples;
   final List<String> additionalRules;
@@ -149,6 +156,7 @@ final class OpenUiLibrary {
     this.groups = const [],
     this.functions = const [],
     this.actions = const [],
+    this.id,
   }) : rootName = root.typeName,
        components = {for (final c in components) c.typeName: c} {
     if (!this.components.containsKey(rootName)) {
@@ -174,6 +182,9 @@ final class OpenUiLibrary {
   final List<ComponentGroup> groups;
   final List<FunctionSpec> functions;
   final List<ActionSpec> actions;
+
+  /// lang-core library `id`; [toSpec] includes it when set.
+  final String? id;
 
   late final Map<String, Object?> _jsonSchema = _buildJsonSchema();
   late final CompiledSchema compiled = CompiledSchema.fromJsonSchema(
@@ -272,6 +283,7 @@ final class OpenUiLibrary {
           },
       },
     'schema': _jsonSchema,
+    if (id != null) 'id': id,
   };
 
   /// [toSpec] as `spec.json` text: two-space JSON and a final newline.
@@ -327,6 +339,7 @@ final class OpenUiLibrary {
                 outputSchema: t.outputSchema,
               ),
           ],
+          toolNames: options.toolNames,
           examples: options.examples,
           toolExamples: options.toolExamples,
           additionalRules: options.additionalRules,

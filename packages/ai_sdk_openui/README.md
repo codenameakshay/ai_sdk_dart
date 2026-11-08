@@ -10,9 +10,13 @@ the prompt or check a program. Render it in Flutter with
 [`open_intelligent_ui`](../open_intelligent_ui).
 
 It is a line-by-line port of `@openuidev/lang-core` 1.0.0 (parser, streaming parser,
-validation, evaluator, store, query manager, prompt generator) and of the reference app's
-library at commit `9df2e64`: 55 components, 59 `@functions`, `@CopyToClipboard`, the chat and
-dashboard prompt options, and the demo data tools.
+validation, evaluator, store, query manager, prompt generator, message envelope, statement
+merge and serializer, form validation, structured errors, MCP helpers, `library.extend()` and
+the OpenUI Cloud prompt), of react-lang's state, query and action handling, and of the
+reference app's library at commit `9df2e64`: 55 components, 59 `@functions`,
+`@CopyToClipboard`, the chat and dashboard prompt options, and the demo data tools.
+`package:ai_sdk_openui/lang_core.dart` exports the low-level lang-core surface under its
+JavaScript names.
 
 ## Use
 
@@ -49,5 +53,8 @@ print(report.isClean ? 'ok' : report.errors);
   reference's generated files except for eight lines where those files predate the reference's
   own source (`test/prompt_drift.dart` lists them).
 - The reference's 45 gallery programs parse with no errors, stream to the same tree, and
-  evaluate with no issues (`test/conformance_test.dart`). Its function tests are ported.
-- Lang-core's telemetry is not ported.
+  evaluate with no issues (`test/conformance_test.dart`). Its four function test files are
+  ported case for case, and the JavaScript-sensitive functions (number and currency
+  formatting, date parsing, case mapping) are checked against Node.
+- Lang-core's telemetry and devtools are not ported. See `DESIGN.md` in `open_intelligent_ui`
+  for the deliberate differences.

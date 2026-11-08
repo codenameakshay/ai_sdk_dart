@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../theme.dart';
 import '../view.dart';
+import 'flex_row.dart';
 import 'glyph.dart';
 
 typedef _Choice = ({String value, String label, String? description});
@@ -665,6 +666,7 @@ Widget buildSegmentedControl(BuildContext context, OpenUiNode node) {
   final value = _plain(f.value);
   final block = node.props.boolean('block') == true;
   final dark = theme.brightness == Brightness.dark;
+  final compact = MediaQuery.sizeOf(context).width <= 640;
   Widget segment(_Choice o) {
     final selected = o.value == value;
     return Semantics(
@@ -673,8 +675,10 @@ Widget buildSegmentedControl(BuildContext context, OpenUiNode node) {
       child: _Press(
         onTap: (_) => f.set(o.value),
         builder: (hovered, pressed) => Container(
-          alignment: block ? Alignment.center : null,
-          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 14),
+          padding: EdgeInsets.symmetric(
+            vertical: 6,
+            horizontal: compact ? 11 : 14,
+          ),
           decoration: BoxDecoration(
             color: selected
                 ? (dark ? theme.surfaceStrong : theme.canvas)
@@ -707,18 +711,28 @@ Widget buildSegmentedControl(BuildContext context, OpenUiNode node) {
       borderRadius: BorderRadius.circular(999),
     ),
     child: block
-        ? Row(
+        ? FlexRow(
+            gap: 2,
             children: [
-              for (final (i, o) in choices.indexed) ...[
-                if (i > 0) const SizedBox(width: 2),
-                Expanded(child: segment(o)),
-              ],
+              // A Stack measures its child at natural width, then centres it
+              // in the share the row gives it.
+              for (final o in choices)
+                FlexRowItem(
+                  grow: 1,
+                  shrink: false,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [segment(o)],
+                  ),
+                ),
             ],
           )
-        : Wrap(
-            spacing: 2,
-            runSpacing: 2,
-            children: [for (final o in choices) segment(o)],
+        : SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              spacing: 2,
+              children: [for (final o in choices) segment(o)],
+            ),
           ),
   );
   return block
@@ -746,9 +760,19 @@ Widget buildSlider(BuildContext context, OpenUiNode node) {
   final value = raw == null ? min : raw.clamp(min, max).toDouble();
   final unit = node.props.string('unit') ?? '';
   final prefix = RegExp(r'^[$€£¥₹]').hasMatch(unit);
-  final readout = prefix
-      ? '$unit${_numberText(value)}'
-      : '${_numberText(value)}$unit';
+  String readoutOf(double v) =>
+      prefix ? '$unit${_numberText(v)}' : '${_numberText(v)}$unit';
+  double snap(double v) {
+    final snapped = min + ((v - min) / step).round() * step;
+    return double.parse(snapped.clamp(min, max).toStringAsFixed(10));
+  }
+
+  final readout = readoutOf(value);
+  final count = (max - min) / step;
+  final steps = count.round();
+  final divisions = (count - steps).abs() < 1e-9 && steps >= 1 && steps <= 1000
+      ? steps
+      : null;
   final marks = [
     for (final m in node.props.list('marks'))
       if (m is Map &&
@@ -807,12 +831,10 @@ Widget buildSlider(BuildContext context, OpenUiNode node) {
             min: min,
             max: max,
             value: value,
-            semanticFormatterCallback: (_) => readout,
+            divisions: divisions,
+            semanticFormatterCallback: (v) => readoutOf(snap(v)),
             onChanged: (v) {
-              final snapped = min + ((v - min) / step).round() * step;
-              final next = double.parse(
-                snapped.clamp(min, max).toStringAsFixed(10),
-              );
+              final next = snap(v);
               f.set(next == next.truncateToDouble() ? next.toInt() : next);
             },
           ),
@@ -1045,11 +1067,25 @@ Widget buildRadioGroup(BuildContext context, OpenUiNode node) {
             ((box.maxWidth + gap) / (200 + gap)).floor(),
           );
           final width = (box.maxWidth - gap * (columns - 1)) / columns;
-          return Wrap(
-            spacing: gap,
-            runSpacing: gap,
+          final rows = [
+            for (var i = 0; i < choices.length; i += columns)
+              choices.sublist(i, math.min(i + columns, choices.length)),
+          ];
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              for (final o in choices) SizedBox(width: width, child: option(o)),
+              for (final (i, row) in rows.indexed) ...[
+                if (i > 0) const SizedBox(height: gap),
+                FlexRow(
+                  gap: gap,
+                  align: FlexAlign.stretch,
+                  children: [
+                    for (final o in row)
+                      FlexRowItem(fixed: (_) => width, child: option(o)),
+                  ],
+                ),
+              ],
             ],
           );
         },
@@ -1102,9 +1138,10 @@ Widget buildDatePicker(BuildContext context, OpenUiNode node) {
   final min = _parseDate(node.props.string('min'));
   final max = _parseDate(node.props.string('max'));
   final style = _text(theme, size: 16, height: 1.4, tabular: true);
+  final localizations = MaterialLocalizations.of(context);
   final shown = current == null
-      ? 'mm/dd/yyyy'
-      : '${current.month.toString().padLeft(2, '0')}/${current.day.toString().padLeft(2, '0')}/${current.year.toString().padLeft(4, '0')}';
+      ? localizations.dateHelpText
+      : localizations.formatCompactDate(current);
   return _labeled(
     theme,
     label,

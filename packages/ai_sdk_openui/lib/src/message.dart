@@ -100,7 +100,8 @@ final class OpenUiMessage {
     var out = '${_prefix}content${query.isEmpty ? '' : '?$query'}\n$content';
     final value = context;
     if (value != null) {
-      out += '\n${_prefix}context\n${_stringify(value)}';
+      out +=
+          '\n${_prefix}context\n${value is String ? value : _stringify(value)}';
     }
     return end ? '$out\n${_prefix}end' : out;
   }

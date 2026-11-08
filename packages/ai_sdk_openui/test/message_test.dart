@@ -117,10 +117,10 @@ void main() {
       );
     });
 
-    test('adds the end marker and JSON encodes string context', () {
+    test('adds the end marker and passes string context through', () {
       expect(
         const OpenUiMessage(content: 'x', context: 'raw', end: true).build(),
-        ']]>openui:content\nx\n]]>openui:context\n"raw"\n]]>openui:end',
+        ']]>openui:content\nx\n]]>openui:context\nraw\n]]>openui:end',
       );
     });
   });

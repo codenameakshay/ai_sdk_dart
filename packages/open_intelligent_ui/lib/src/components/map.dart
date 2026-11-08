@@ -348,9 +348,11 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
   }
 
   void _mapEvent(fm.MapEvent event) {
-    if (event is fm.MapEventMoveStart &&
-        (event.source == fm.MapEventSource.dragStart ||
-            event.source == fm.MapEventSource.multiFingerGestureStart)) {
+    const userStarts = {
+      fm.MapEventSource.dragStart,
+      fm.MapEventSource.multiFingerGestureStart,
+    };
+    if (event is fm.MapEventMoveStart && userStarts.contains(event.source)) {
       _userMoved = true;
       _fly.stop();
     }

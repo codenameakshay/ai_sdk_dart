@@ -115,4 +115,47 @@ void main() {
     final header = tester.getSize(find.text('A')).height + 22;
     expect(table.size.height, header + 1);
   });
+
+  testWidgets('a table repaints with the new theme and relayouts on resize', (
+    tester,
+  ) async {
+    Widget app(Brightness b, int columns) => MaterialApp(
+      theme: ThemeData(brightness: b),
+      home: Scaffold(
+        body: IuiTable(
+          head: [for (var c = 0; c < columns; c++) Text('H$c')],
+          rows: [
+            [for (var c = 0; c < columns; c++) IuiCell(Text('c$c'))],
+          ],
+        ),
+      ),
+    );
+    await tester.pumpWidget(app(Brightness.light, 2));
+    final table = tester.renderObject<RenderIuiTable>(
+      find.byWidgetPredicate((w) => w.runtimeType.toString() == '_TableLayout'),
+    );
+    final twoColumns = tester.getTopLeft(find.text('H1')).dx;
+    await tester.pumpWidget(app(Brightness.dark, 3));
+    await tester.pumpAndSettle();
+    expect(
+      tester.renderObject<RenderIuiTable>(
+        find.byWidgetPredicate(
+          (w) => w.runtimeType.toString() == '_TableLayout',
+        ),
+      ),
+      same(table),
+    );
+    expect(tester.getTopLeft(find.text('H1')).dx, lessThan(twoColumns));
+    _phone(tester);
+    await tester.pumpWidget(app(Brightness.dark, 3));
+    expect(tester.getTopLeft(find.text('H0')).dx, 1 + 12);
+  });
+
+  testWidgets('a table with no columns is empty', (tester) async {
+    await pumpProgram(tester, 'root = Col([Table([], [])])');
+    final table = tester.renderObject<RenderIuiTable>(
+      find.byWidgetPredicate((w) => w.runtimeType.toString() == '_TableLayout'),
+    );
+    expect(table.size.height, 0);
+  });
 }

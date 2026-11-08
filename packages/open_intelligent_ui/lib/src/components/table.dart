@@ -217,8 +217,10 @@ class _CellData extends ParentDataWidget<_CellParentData> {
     renderObject.parent?.markNeedsLayout();
   }
 
+  // coverage:ignore-start
   @override
   Type get debugTypicalAncestorWidgetClass => _TableLayout;
+  // coverage:ignore-end
 }
 
 class _TableLayout extends MultiChildRenderObjectWidget {

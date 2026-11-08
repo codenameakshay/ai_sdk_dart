@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
@@ -812,6 +813,46 @@ void main() {
       final framed = controller.camera.zoom;
       await _settle(tester);
       expect(controller.camera.zoom, framed);
+
+      controller.move(const ll.LatLng(0, 0), 3);
+      await tester.pump();
+      await tester.tap(_button('Show every place'));
+      await tester.pump();
+      expect(controller.camera.zoom, greaterThan(10));
+      expect(controller.camera.center.latitude, closeTo(37.81, 0.05));
+    });
+
+    testWidgets('the back button collapses an expanded map', (tester) async {
+      await _pumpAbove(tester, _sf);
+      await tester.tap(find.text('Expand'));
+      await tester.pump();
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      expect(find.text('Expand'), findsOneWidget);
+    });
+
+    testWidgets('a glass control lightens under the pointer', (tester) async {
+      await _pump(tester, _sf);
+      Color fill() => tester
+          .widget<Material>(
+            find
+                .ancestor(
+                  of: find.text('Expand'),
+                  matching: find.byType(Material),
+                )
+                .first,
+          )
+          .color!;
+      expect(fill(), OpenUiTheme.light.glass);
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      addTearDown(mouse.removePointer);
+      await mouse.addPointer(location: Offset.zero);
+      await mouse.moveTo(tester.getCenter(find.text('Expand')));
+      await tester.pump();
+      expect(fill(), OpenUiTheme.light.glassHover);
+      await mouse.moveTo(Offset.zero);
+      await tester.pump();
+      expect(fill(), OpenUiTheme.light.glass);
     });
   });
 

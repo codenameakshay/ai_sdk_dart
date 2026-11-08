@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'css_color.dart';
@@ -18,6 +19,7 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
     required this.ink,
     required this.onInk,
     required this.muted,
+    Color? faint,
     required this.status,
     required this.statusSoft,
     required this.badge,
@@ -30,15 +32,17 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
     required this.glassRingHover,
     required this.shadow,
     required this.shadowSmall,
-    this.fontFamily,
-    this.monoFontFamily = 'monospace',
-  });
+    this.fontFamily = 'packages/open_intelligent_ui/Inter',
+    String? monoFontFamily,
+  }) : faint = faint ?? muted,
+       _monoFontFamily = monoFontFamily;
 
   final Brightness brightness;
   final Color canvas;
   final Color ink;
   final Color onInk;
   final Color muted;
+  final Color faint;
 
   /// `info`, `success`, `warning`, `danger`, `purple`, `pink`.
   final Map<String, Color> status;
@@ -58,9 +62,17 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
   final List<BoxShadow> shadow;
   final List<BoxShadow> shadowSmall;
   final String? fontFamily;
-  final String monoFontFamily;
+  final String? _monoFontFamily;
 
-  Color get faint => muted;
+  /// Code and monospace text: the platform's mono face when none is set.
+  String get monoFontFamily =>
+      _monoFontFamily ??
+      switch (defaultTargetPlatform) {
+        TargetPlatform.iOS || TargetPlatform.macOS => 'Menlo',
+        TargetPlatform.windows => 'Consolas',
+        _ => 'monospace',
+      };
+
   Color get hover => _alpha(ink, 0.05);
   Color get pressed => _alpha(ink, 0.08);
   Color get surface => _alpha(ink, 0.04);
@@ -70,7 +82,7 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
   Color get borderStrong => _alpha(ink, 0.10);
   Color get rangeTrack => _alpha(ink, 0.06);
   Color get badgeNeutralSoft => _alpha(ink, 0.06);
-  Color get inkHover => Color.lerp(ink, canvas, 0.18)!;
+  Color get inkHover => mixColors(ink, 0.82, canvas, space: 'oklch');
 
   static const radiusSm = 6.0;
   static const radiusMd = 10.0;
@@ -261,7 +273,7 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
 
   /// These tokens with [ink] replaced, for content on a raw-color background.
   OpenUiTheme withInk(Color ink) =>
-      copyWith(ink: ink, muted: _alpha(ink, 0.72));
+      copyWith(ink: ink, muted: _alpha(ink, 0.72), faint: _alpha(ink, 0.55));
 
   /// Spacing counted in 4px steps.
   static double? space(Object? value) {
@@ -315,6 +327,7 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
     Color? ink,
     Color? onInk,
     Color? muted,
+    Color? faint,
     String? fontFamily,
   }) => OpenUiTheme(
     brightness: brightness,
@@ -322,6 +335,7 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
     ink: ink ?? this.ink,
     onInk: onInk ?? this.onInk,
     muted: muted ?? this.muted,
+    faint: faint ?? this.faint,
     status: status,
     statusSoft: statusSoft,
     badge: badge,
@@ -335,7 +349,7 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
     shadow: shadow,
     shadowSmall: shadowSmall,
     fontFamily: fontFamily ?? this.fontFamily,
-    monoFontFamily: monoFontFamily,
+    monoFontFamily: _monoFontFamily,
   );
 
   @override
@@ -351,6 +365,7 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
       ink: c(ink, other.ink),
       onInk: c(onInk, other.onInk),
       muted: c(muted, other.muted),
+      faint: c(faint, other.faint),
       status: m(status, other.status),
       statusSoft: m(statusSoft, other.statusSoft),
       badge: m(badge, other.badge),
@@ -367,7 +382,7 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
       shadowSmall:
           BoxShadow.lerpList(shadowSmall, other.shadowSmall, t) ?? shadowSmall,
       fontFamily: t < 0.5 ? fontFamily : other.fontFamily,
-      monoFontFamily: t < 0.5 ? monoFontFamily : other.monoFontFamily,
+      monoFontFamily: t < 0.5 ? _monoFontFamily : other._monoFontFamily,
     );
   }
 }

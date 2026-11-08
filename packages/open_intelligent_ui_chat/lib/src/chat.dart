@@ -311,6 +311,7 @@ class _OpenUiUserMessageState extends State<OpenUiUserMessage> {
     final fields = formFields(message.context);
     final scheme = Theme.of(context).colorScheme;
     final small = Theme.of(context).textTheme.bodySmall;
+    final theme = OpenUiTheme.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
@@ -320,14 +321,14 @@ class _OpenUiUserMessageState extends State<OpenUiUserMessage> {
             constraints: const BoxConstraints(maxWidth: 320),
             decoration: BoxDecoration(
               border: Border.all(color: scheme.outlineVariant),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(theme.radii.lg),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
                 InkWell(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(theme.radii.lg),
                   onTap: () => setState(() => _open = !_open),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(

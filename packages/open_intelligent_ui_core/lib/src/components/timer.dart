@@ -103,7 +103,7 @@ class _CountdownTimerState extends State<CountdownTimer> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
           border: Border.all(color: theme.border),
-          borderRadius: BorderRadius.circular(OpenUiTheme.radiusLg),
+          borderRadius: BorderRadius.circular(theme.radii.lg),
         ),
         child: Wrap(
           alignment: WrapAlignment.spaceBetween,
@@ -119,9 +119,9 @@ class _CountdownTimerState extends State<CountdownTimer> {
                   Text(
                     label,
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: theme.typography.size(14),
                       height: 1.4,
-                      fontWeight: OpenUiTheme.weightMedium,
+                      fontWeight: theme.typography.medium,
                       color: theme.ink,
                     ),
                   ),
@@ -130,11 +130,11 @@ class _CountdownTimerState extends State<CountdownTimer> {
                 Text(
                   clock(left),
                   style: TextStyle(
-                    fontSize: 32,
+                    fontSize: theme.typography.size(32),
                     height: 1.1,
-                    fontWeight: OpenUiTheme.weightSemibold,
+                    fontWeight: theme.typography.semibold,
                     letterSpacing: -0.32,
-                    fontFeatures: const [FontFeature.tabularFigures()],
+                    fontFeatures: theme.typography.tabular,
                     color: done ? theme.status['success'] : theme.ink,
                   ),
                 ),

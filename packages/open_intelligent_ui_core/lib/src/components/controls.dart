@@ -33,12 +33,16 @@ TextStyle _text(
   fontWeight: weight,
   height: height,
   color: color ?? theme.ink,
-  fontFeatures: tabular ? const [FontFeature.tabularFigures()] : null,
+  fontFeatures: tabular ? theme.typography.tabular : null,
   decoration: TextDecoration.none,
 );
 
-TextStyle _labelStyle(OpenUiTheme theme) =>
-    _text(theme, size: 14, weight: OpenUiTheme.weightMedium, height: 1.4);
+TextStyle _labelStyle(OpenUiTheme theme) => _text(
+  theme,
+  size: theme.typography.size(14),
+  weight: theme.typography.medium,
+  height: 1.4,
+);
 
 String? _nonEmpty(String? value) =>
     value == null || value.isEmpty ? null : value;
@@ -262,17 +266,17 @@ class IuiButton extends StatelessWidget {
       'sm' => (
         32.0,
         const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-        13.0,
+        theme.typography.size(13.0),
       ),
       'lg' => (
         44.0,
         const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
-        15.0,
+        theme.typography.size(15.0),
       ),
       _ => (
         36.0,
         const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-        14.0,
+        theme.typography.size(14.0),
       ),
     };
     return Semantics(
@@ -290,7 +294,7 @@ class IuiButton extends StatelessWidget {
           Color? background;
           Color foreground = toneColor ?? theme.ink;
           Color? border;
-          EdgeInsets pad = padding;
+          EdgeInsetsGeometry pad = padding;
           switch (variant) {
             case 'outline':
               background = Color.alphaBlend(
@@ -316,17 +320,23 @@ class IuiButton extends StatelessWidget {
                 foreground = theme.onInk;
               }
           }
+          final s = theme.styleOf('Button', variant);
+          background = s.background ?? background;
+          foreground = s.foreground ?? foreground;
+          border = s.border ?? border;
           return Opacity(
             opacity: enabled ? 1 : 0.4,
             child: AnimatedContainer(
               duration: _buttonFade,
               curve: Curves.ease,
               constraints: BoxConstraints(minHeight: minHeight),
-              padding: pad,
+              padding: s.padding ?? pad,
               decoration: BoxDecoration(
                 color: background,
                 border: Border.all(color: border ?? const Color(0x00000000)),
-                borderRadius: BorderRadius.circular(999),
+                borderRadius: BorderRadius.circular(
+                  s.radius ?? theme.radii.full,
+                ),
               ),
               child: TweenAnimationBuilder<Color?>(
                 tween: ColorTween(end: foreground),
@@ -349,7 +359,7 @@ class IuiButton extends StatelessWidget {
                           theme,
                           size: fontSize,
                           color: color,
-                          weight: OpenUiTheme.weightMedium,
+                          weight: theme.typography.medium,
                           height: 1.2,
                         ),
                       ),
@@ -460,8 +470,7 @@ Widget buildPressable(BuildContext context, OpenUiNode node) {
   final theme = node.theme;
   final streaming = node.isStreaming;
   final selected = node.props.boolean('selected') == true;
-  final radius =
-      OpenUiTheme.radius(node.props['radius']) ?? OpenUiTheme.radiusLg;
+  final radius = theme.radiusOf(node.props['radius']) ?? theme.radii.lg;
   final hasRow = node.props
       .elements('children')
       .any(
@@ -471,7 +480,7 @@ Widget buildPressable(BuildContext context, OpenUiNode node) {
       );
   final background = node.props['background'];
   final on = theme.inkOn(background);
-  final padding = OpenUiTheme.space(node.props.number('padding'));
+  final padding = theme.spaceOf(node.props.number('padding'));
   final shape = BorderRadius.circular(radius);
   final reduce = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
   final fade = reduce ? Duration.zero : const Duration(milliseconds: 120);
@@ -643,7 +652,12 @@ class _TextBoxState extends State<_TextBox> {
   @override
   Widget build(BuildContext context) {
     final theme = OpenUiTheme.of(context);
-    final style = _text(theme, size: 16, height: 1.4, tabular: true);
+    final style = _text(
+      theme,
+      size: theme.typography.size(16),
+      height: 1.4,
+      tabular: true,
+    );
     final rows = widget.rows;
     return ListenableBuilder(
       listenable: _focus,
@@ -652,7 +666,7 @@ class _TextBoxState extends State<_TextBox> {
         padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
         decoration: BoxDecoration(
           color: theme.canvas,
-          borderRadius: BorderRadius.circular(OpenUiTheme.radiusMd),
+          borderRadius: BorderRadius.circular(theme.radii.md),
           border: Border.all(
             color: _focus.hasFocus ? theme.ink : theme.borderStrong,
           ),
@@ -739,7 +753,7 @@ Widget buildSelect(BuildContext context, OpenUiNode node) {
   final choices = _choices(node.props.list('options'));
   final value = _plain(f.value);
   final selected = choices.indexWhere((o) => o.value == value);
-  final style = _text(theme, size: 16, height: 1.4);
+  final style = _text(theme, size: theme.typography.size(16), height: 1.4);
   return _labeled(
     theme,
     label,
@@ -749,7 +763,7 @@ Widget buildSelect(BuildContext context, OpenUiNode node) {
       padding: const EdgeInsets.only(left: 12, right: 12),
       decoration: BoxDecoration(
         color: theme.canvas,
-        borderRadius: BorderRadius.circular(OpenUiTheme.radiusMd),
+        borderRadius: BorderRadius.circular(theme.radii.md),
         border: Border.all(color: theme.borderStrong),
       ),
       child: Material(
@@ -765,7 +779,7 @@ Widget buildSelect(BuildContext context, OpenUiNode node) {
             ),
             style: style,
             dropdownColor: theme.canvas,
-            borderRadius: BorderRadius.circular(OpenUiTheme.radiusMd),
+            borderRadius: BorderRadius.circular(theme.radii.md),
             icon: Glyph(
               'chevron-down',
               size: 16,
@@ -829,10 +843,10 @@ Widget buildSegmentedControl(BuildContext context, OpenUiNode node) {
               softWrap: false,
               style: _text(
                 theme,
-                size: 13,
+                size: theme.typography.size(13),
                 height: 1.4,
                 color: color,
-                weight: selected ? OpenUiTheme.weightMedium : null,
+                weight: selected ? theme.typography.medium : null,
               ),
             ),
           ),
@@ -927,7 +941,7 @@ Widget buildSlider(BuildContext context, OpenUiNode node) {
           label: _plain(m['label']),
         ),
   ];
-  final small = _text(theme, size: 13, height: 1.4);
+  final small = _text(theme, size: theme.typography.size(13), height: 1.4);
   return Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     mainAxisSize: MainAxisSize.min,
@@ -944,9 +958,9 @@ Widget buildSlider(BuildContext context, OpenUiNode node) {
               softWrap: false,
               style: _text(
                 theme,
-                size: 12,
+                size: theme.typography.size(12),
                 height: 1.4,
-                weight: OpenUiTheme.weightMedium,
+                weight: theme.typography.medium,
                 tabular: true,
               ),
             ),
@@ -993,7 +1007,7 @@ Widget buildSlider(BuildContext context, OpenUiNode node) {
             builder: (context, box) {
               final style = _text(
                 theme,
-                size: 11,
+                size: theme.typography.size(11),
                 height: 18 / 11,
                 color: theme.muted,
                 tabular: true,
@@ -1257,9 +1271,9 @@ Widget buildRadioGroup(BuildContext context, OpenUiNode node) {
           o.label,
           style: _text(
             theme,
-            size: variant == 'list' ? null : 15,
+            size: variant == 'list' ? null : theme.typography.size(15),
             height: variant == 'list' ? null : 22 / 15,
-            weight: variant == 'cards' ? OpenUiTheme.weightMedium : null,
+            weight: variant == 'cards' ? theme.typography.medium : null,
             color: variant == 'pills' && selected ? theme.onInk : theme.ink,
           ),
         ),
@@ -1267,7 +1281,12 @@ Widget buildRadioGroup(BuildContext context, OpenUiNode node) {
           const SizedBox(height: 2),
           Text(
             o.description!,
-            style: _text(theme, size: 14, height: 21 / 14, color: theme.muted),
+            style: _text(
+              theme,
+              size: theme.typography.size(14),
+              height: 21 / 14,
+              color: theme.muted,
+            ),
           ),
         ],
       ],
@@ -1278,7 +1297,9 @@ Widget buildRadioGroup(BuildContext context, OpenUiNode node) {
       checked: selected,
       child: Press(
         focusNode: focus,
-        radius: variant == 'cards' ? 14 : (variant == 'pills' ? 999 : 4),
+        radius: variant == 'cards'
+            ? theme.radii.xl
+            : (variant == 'pills' ? 999 : 4),
         onTap: (_) => f.set(o.value),
         builder: (hovered, pressed) {
           if (variant == 'list') {
@@ -1330,7 +1351,7 @@ Widget buildRadioGroup(BuildContext context, OpenUiNode node) {
               color: selected
                   ? (cards ? theme.pressed : theme.ink)
                   : (hovered ? theme.hover : const Color(0x00000000)),
-              borderRadius: BorderRadius.circular(cards ? 14 : 999),
+              borderRadius: BorderRadius.circular(cards ? theme.radii.xl : 999),
               border: Border.all(
                 color: selected ? theme.ink : theme.border,
                 width: ringWidth,
@@ -1345,13 +1366,13 @@ Widget buildRadioGroup(BuildContext context, OpenUiNode node) {
 
   Widget options(List<FocusNode> nodes) => switch (variant) {
     'pills' => Wrap(
-      spacing: OpenUiTheme.controlGap,
-      runSpacing: OpenUiTheme.controlGap,
+      spacing: theme.spacing.controlGap,
+      runSpacing: theme.spacing.controlGap,
       children: [for (final (i, o) in choices.indexed) option(o, nodes[i])],
     ),
     'cards' => LayoutBuilder(
       builder: (context, box) {
-        const gap = OpenUiTheme.controlGap;
+        final gap = theme.spacing.controlGap;
         final columns = math.max(
           1,
           ((box.maxWidth + gap) / (200 + gap)).floor(),
@@ -1362,7 +1383,7 @@ Widget buildRadioGroup(BuildContext context, OpenUiNode node) {
           mainAxisSize: MainAxisSize.min,
           children: [
             for (var start = 0; start < choices.length; start += columns) ...[
-              if (start > 0) const SizedBox(height: gap),
+              if (start > 0) SizedBox(height: gap),
               FlexRow(
                 gap: gap,
                 align: FlexAlign.stretch,
@@ -1435,7 +1456,12 @@ Widget buildDatePicker(BuildContext context, OpenUiNode node) {
   final current = f.value is String ? _parseDate(f.value as String) : null;
   final min = _parseDate(node.props.string('min'));
   final max = _parseDate(node.props.string('max'));
-  final style = _text(theme, size: 16, height: 1.4, tabular: true);
+  final style = _text(
+    theme,
+    size: theme.typography.size(16),
+    height: 1.4,
+    tabular: true,
+  );
   final localizations = MaterialLocalizations.of(context);
   final shown = current == null
       ? localizations.dateHelpText
@@ -1448,7 +1474,7 @@ Widget buildDatePicker(BuildContext context, OpenUiNode node) {
       label: _nonEmpty(label) == null ? 'Date' : null,
       value: current == null ? null : _formatDate(current),
       child: Press(
-        radius: OpenUiTheme.radiusMd,
+        radius: theme.radii.md,
         onTap: (ctx) async {
           final first = min ?? DateTime(1900);
           final last = max != null && !max.isBefore(first)
@@ -1504,7 +1530,7 @@ Widget buildDatePicker(BuildContext context, OpenUiNode node) {
           padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
           decoration: BoxDecoration(
             color: theme.canvas,
-            borderRadius: BorderRadius.circular(OpenUiTheme.radiusMd),
+            borderRadius: BorderRadius.circular(theme.radii.md),
             border: Border.all(color: theme.borderStrong),
           ),
           child: Row(

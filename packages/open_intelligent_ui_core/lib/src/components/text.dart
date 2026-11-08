@@ -9,7 +9,6 @@ import 'controls.dart' show Press;
 import 'glyph.dart';
 import 'markdown.dart';
 
-const _tabular = [FontFeature.tabularFigures()];
 final _stepMarker = RegExp(r'^[0-9A-Za-z]{1,2}$');
 
 const _headingLevels = <String, int>{
@@ -21,30 +20,28 @@ const _headingLevels = <String, int>{
   'sm': 4,
 };
 
-const _textSizes = <String, ({double size, double height})>{
-  'xs': (size: 12, height: 1.6),
-  'sm': (size: 14, height: 1.55),
-  'md': (size: 16, height: 1.6),
-  'lg': (size: 18, height: 1.55),
-};
-
-const _weights = <String, FontWeight>{
-  'normal': OpenUiTheme.weightNormal,
-  'medium': OpenUiTheme.weightMedium,
-  'semibold': OpenUiTheme.weightSemibold,
-};
+FontWeight? _weightNamed(OpenUiTypography typography, String? name) =>
+    switch (name) {
+      'normal' => typography.normal,
+      'medium' => typography.medium,
+      'semibold' => typography.semibold,
+      _ => null,
+    };
 
 ({double fontSize, double height, double letterSpacing}) _titleMetrics(
+  OpenUiTheme theme,
   String? size, {
   required bool compact,
-}) => switch (size) {
-  'sm' => (fontSize: 15, height: 1.5, letterSpacing: 0),
-  'lg' => (fontSize: compact ? 19 : 21, height: 1.3, letterSpacing: -0.55),
-  'xl' => (fontSize: 25, height: 1.2, letterSpacing: -0.8),
-  '2xl' => (fontSize: compact ? 28 : 32, height: 1.15, letterSpacing: -1),
-  '3xl' => (fontSize: compact ? 34 : 40, height: 1.1, letterSpacing: -1.4),
-  _ => (fontSize: 17, height: 1.4, letterSpacing: -0.2),
-};
+}) {
+  final title = theme.typography.title[size] ?? theme.typography.title['md']!;
+  return (
+    fontSize: theme.typography.size(
+      compact ? title.compactFontSize : title.fontSize,
+    ),
+    height: title.height,
+    letterSpacing: title.letterSpacing,
+  );
+}
 
 TextStyle _textStyle(
   OpenUiTheme theme, {
@@ -165,6 +162,7 @@ Widget buildTitle(BuildContext context, OpenUiNode node) {
   final name = node.props.string('size');
   final slot = BlockSlot.of(context, node.element);
   final base = _titleMetrics(
+    theme,
     name,
     compact: MediaQuery.sizeOf(context).width <= 640,
   );
@@ -175,14 +173,19 @@ Widget buildTitle(BuildContext context, OpenUiNode node) {
       (name == 'lg' || name == 'xl' || name == '2xl' || name == '3xl') &&
       _isCardSized(slot);
   final (fontSize, height, letterSpacing, weight) = cardTitle
-      ? (14.0, 20 / 14, base.letterSpacing, OpenUiTheme.weightMedium)
+      ? (
+          theme.typography.size(14),
+          20 / 14,
+          base.letterSpacing,
+          theme.typography.medium,
+        )
       : cardSized
-      ? (18.0, 24 / 18, -0.3, OpenUiTheme.weightSemibold)
+      ? (theme.typography.size(18), 24 / 18, -0.3, theme.typography.semibold)
       : (
           base.fontSize,
           base.height,
           base.letterSpacing,
-          OpenUiTheme.weightSemibold,
+          theme.typography.semibold,
         );
   final style = _textStyle(
     theme,
@@ -191,7 +194,7 @@ Widget buildTitle(BuildContext context, OpenUiNode node) {
     height: height,
     letterSpacing: letterSpacing,
     weight: weight,
-    fontFeatures: _tabular,
+    fontFeatures: theme.typography.tabular,
   );
   return Semantics(
     header: true,
@@ -205,7 +208,7 @@ Widget buildText(BuildContext context, OpenUiNode node) {
   final theme = node.theme;
   final slot = BlockSlot.of(context, node.element);
   final sizeName = props.string('size');
-  final size = _textSizes[sizeName];
+  final size = theme.typography.text[sizeName];
   final cardSized =
       _isCardSized(slot) &&
       sizeName != 'xs' &&
@@ -213,10 +216,13 @@ Widget buildText(BuildContext context, OpenUiNode node) {
       sizeName != 'lg';
   final subtitle = _isSubtitle(context, slot);
   final metrics = cardSized
-      ? (fontSize: 15.0, height: 22 / 15)
+      ? (fontSize: theme.typography.size(15), height: 22 / 15)
       : subtitle
-      ? (fontSize: 13.0, height: 18 / 13)
-      : (fontSize: size?.size, height: size?.height ?? 1.6);
+      ? (fontSize: theme.typography.size(13), height: 18 / 13)
+      : (
+          fontSize: size == null ? null : theme.typography.size(size.fontSize),
+          height: size?.height ?? 1.6,
+        );
   final struck = props.boolean('lineThrough') == true;
   final style = _textStyle(
     theme,
@@ -227,10 +233,12 @@ Widget buildText(BuildContext context, OpenUiNode node) {
             : null),
     size: metrics.fontSize,
     height: metrics.height,
-    weight: _weights[props.string('weight')],
+    weight: _weightNamed(theme.typography, props.string('weight')),
     fontStyle: props.boolean('italic') == true ? FontStyle.italic : null,
     decoration: struck ? TextDecoration.lineThrough : null,
-    fontFeatures: props.boolean('tabularNums') == true ? _tabular : null,
+    fontFeatures: props.boolean('tabularNums') == true
+        ? theme.typography.tabular
+        : null,
   );
   return _subtitleGap(
     _richText(context, props['text'], style, maxLines: _lineLimit(props)),
@@ -250,7 +258,7 @@ Widget buildCaption(BuildContext context, OpenUiNode node) {
       _textStyle(
         theme,
         color: theme.fg(node.props['color']) ?? theme.muted,
-        size: subtitle ? 13.0 : 12.0,
+        size: theme.typography.size(subtitle ? 13 : 12),
         height: subtitle ? 18 / 13 : 1.6,
       ),
     ),
@@ -266,9 +274,9 @@ Widget buildLabel(BuildContext context, OpenUiNode node) {
     style: _textStyle(
       theme,
       color: theme.ink,
-      size: 14,
+      size: theme.typography.size(14),
       height: 1.4,
-      weight: OpenUiTheme.weightMedium,
+      weight: theme.typography.medium,
     ),
   );
 }
@@ -279,7 +287,8 @@ Widget buildBadge(BuildContext context, OpenUiNode node) {
   final (background, foreground) = tone == 'info'
       ? (theme.statusSoft['info'], theme.status['info'])
       : (theme.badgeSoft[tone], theme.badge[tone]);
-  final color = foreground ?? theme.ink;
+  final s = theme.styleOf('Badge', tone);
+  final color = s.foreground ?? foreground ?? theme.ink;
   final icon = node.props.string('icon');
   return Align(
     alignment: AlignmentDirectional.centerStart,
@@ -287,10 +296,13 @@ Widget buildBadge(BuildContext context, OpenUiNode node) {
     heightFactor: 1,
     child: Container(
       constraints: const BoxConstraints(minHeight: 26),
-      padding: EdgeInsets.fromLTRB(Glyph.has(context, icon) ? 8 : 10, 3, 10, 3),
+      padding:
+          s.padding ??
+          EdgeInsets.fromLTRB(Glyph.has(context, icon) ? 8 : 10, 3, 10, 3),
       decoration: BoxDecoration(
-        color: background ?? theme.badgeNeutralSoft,
-        borderRadius: BorderRadius.circular(999),
+        color: s.background ?? background ?? theme.badgeNeutralSoft,
+        borderRadius: BorderRadius.circular(s.radius ?? theme.radii.full),
+        border: s.border == null ? null : Border.all(color: s.border!),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -307,9 +319,9 @@ Widget buildBadge(BuildContext context, OpenUiNode node) {
               style: _textStyle(
                 theme,
                 color: color,
-                size: 13,
+                size: theme.typography.size(13),
                 height: 18 / 13,
-                weight: OpenUiTheme.weightMedium,
+                weight: theme.typography.medium,
               ),
             ),
           ),
@@ -387,9 +399,9 @@ Widget _numberCircle(OpenUiTheme theme, int number) => Container(
     style: _textStyle(
       theme,
       color: theme.onInk,
-      size: 13,
+      size: theme.typography.size(13),
       height: 1,
-      fontFeatures: _tabular,
+      fontFeatures: theme.typography.tabular,
     ),
   ),
 );
@@ -427,10 +439,10 @@ Widget _customMarker(OpenUiTheme theme, String marker) {
         style: _textStyle(
           theme,
           color: theme.onInk,
-          size: 12,
+          size: theme.typography.size(12),
           height: 1,
-          weight: OpenUiTheme.weightMedium,
-          fontFeatures: _tabular,
+          weight: theme.typography.medium,
+          fontFeatures: theme.typography.tabular,
         ),
       ),
     );
@@ -441,8 +453,8 @@ Widget _customMarker(OpenUiTheme theme, String marker) {
     style: _textStyle(
       theme,
       color: theme.muted,
-      size: 13,
-      fontFeatures: _tabular,
+      size: theme.typography.size(13),
+      fontFeatures: theme.typography.tabular,
     ),
   );
 }
@@ -592,7 +604,7 @@ Widget buildListItem(BuildContext context, OpenUiNode node) {
       _richText(
         context,
         props.string('title') ?? '',
-        TextStyle(fontWeight: inRich ? OpenUiTheme.weightMedium : null),
+        TextStyle(fontWeight: inRich ? theme.typography.medium : null),
       ),
       if (description.isNotEmpty) ...[
         const SizedBox(height: 2),

@@ -24,7 +24,7 @@ Widget buildCarousel(BuildContext context, OpenUiNode node) {
     itemWidth: (node.props.number('itemWidth') ?? 240)
         .clamp(80, 640)
         .toDouble(),
-    gap: OpenUiTheme.space(node.props.number('gap')) ?? 12,
+    gap: node.theme.spaceOf(node.props.number('gap')) ?? 12,
     items: _slots(node, node.props['children']),
     arrows:
         platform == TargetPlatform.macOS ||
@@ -477,14 +477,14 @@ final class _PopoverState extends State<_Popover> {
                     decoration: BoxDecoration(
                       color: theme.canvas,
                       border: Border.all(color: theme.border),
-                      borderRadius: BorderRadius.circular(OpenUiTheme.radiusLg),
+                      borderRadius: BorderRadius.circular(theme.radii.lg),
                       boxShadow: theme.shadow,
                     ),
                     child: DefaultTextStyle(
                       style: TextStyle(
                         fontFamily: theme.fontFamily,
-                        fontSize: 14,
-                        fontWeight: OpenUiTheme.weightNormal,
+                        fontSize: theme.typography.size(14),
+                        fontWeight: theme.typography.normal,
                         height: 1.5,
                         color: theme.ink,
                       ),
@@ -544,7 +544,7 @@ Widget buildQuote(BuildContext context, OpenUiNode node) {
                       text,
                       context,
                       style: TextStyle(
-                        fontSize: 16,
+                        fontSize: theme.typography.size(16),
                         height: 1.6,
                         color: theme.ink,
                       ),
@@ -558,7 +558,10 @@ Widget buildQuote(BuildContext context, OpenUiNode node) {
                         (context, links) => inlineSpans(
                           cite,
                           context,
-                          style: TextStyle(fontSize: 13, color: theme.muted),
+                          style: TextStyle(
+                            fontSize: theme.typography.size(13),
+                            color: theme.muted,
+                          ),
                           links: links,
                         ),
                       ),

@@ -709,7 +709,11 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                   value: _group,
                   isDense: true,
                   icon: const SizedBox.shrink(),
-                  style: TextStyle(fontSize: 12, height: 1.5, color: theme.ink),
+                  style: TextStyle(
+                    fontSize: theme.typography.size(12),
+                    height: 1.5,
+                    color: theme.ink,
+                  ),
                   dropdownColor: theme.canvas,
                   items: [
                     const DropdownMenuItem(
@@ -908,7 +912,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
             onEnter: (_) => setState(() => _mouseOver = true),
             onExit: (_) => setState(() => _mouseOver = false),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(OpenUiTheme.radius2xl),
+              borderRadius: BorderRadius.circular(theme.radii.xxl),
               child: FocusTraversalGroup(
                 policy: OrderedTraversalPolicy(),
                 child: Stack(
@@ -946,7 +950,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                               child: Text(
                                 tiles.attribution,
                                 style: TextStyle(
-                                  fontSize: 8,
+                                  fontSize: theme.typography.size(8),
                                   height: 10 / 8,
                                   color: theme.muted,
                                   fontFamily: 'Helvetica Neue',
@@ -961,7 +965,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                         ),
                       ),
                     if (_hint)
-                      const Positioned.fill(
+                      Positioned.fill(
                         child: IgnorePointer(
                           child: ColoredBox(
                             color: Color(0x66000000),
@@ -971,7 +975,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
                                   color: Colors.white,
-                                  fontSize: 20,
+                                  fontSize: theme.typography.size(20),
                                 ),
                               ),
                             ),
@@ -1058,9 +1062,9 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                                 Text(
                                   _expanded ? 'Collapse' : 'Expand',
                                   style: TextStyle(
-                                    fontSize: 12,
+                                    fontSize: theme.typography.size(12),
                                     height: 1.5,
-                                    fontWeight: OpenUiTheme.weightMedium,
+                                    fontWeight: theme.typography.medium,
                                     color: theme.ink,
                                   ),
                                 ),
@@ -1101,7 +1105,9 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                                 color: theme.glass,
                                 clipBehavior: Clip.antiAlias,
                                 shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
+                                  borderRadius: BorderRadius.circular(
+                                    theme.radii.md,
+                                  ),
                                   side: BorderSide(color: theme.glassRing),
                                 ),
                                 child: Column(
@@ -1145,7 +1151,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                             child: Text(
                               'Drag to explore and use + and − to zoom. Select a place to highlight it.$routeNote',
                               style: TextStyle(
-                                fontSize: 12,
+                                fontSize: theme.typography.size(12),
                                 height: 1.5,
                                 color: theme.muted,
                               ),
@@ -1160,7 +1166,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                         child: DecoratedBox(
                           decoration: BoxDecoration(
                             color: theme.canvas.withValues(alpha: 0.92),
-                            borderRadius: BorderRadius.circular(6),
+                            borderRadius: BorderRadius.circular(theme.radii.sm),
                           ),
                           child: Padding(
                             padding: const EdgeInsets.symmetric(
@@ -1170,7 +1176,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                             child: Text(
                               'Route overview',
                               style: TextStyle(
-                                fontSize: 10,
+                                fontSize: theme.typography.size(10),
                                 height: 1.6,
                                 color: theme.muted,
                               ),
@@ -1190,7 +1196,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                               child: Text(
                                 'Map tiles are temporarily unavailable. The places are still shown.',
                                 style: TextStyle(
-                                  fontSize: 12,
+                                  fontSize: theme.typography.size(12),
                                   height: 1.5,
                                   color: theme.muted,
                                 ),
@@ -1273,9 +1279,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                   label: 'Map',
                   child: DecoratedBox(
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(
-                        OpenUiTheme.radius2xl,
-                      ),
+                      borderRadius: BorderRadius.circular(theme.radii.xxl),
                       boxShadow: const [
                         BoxShadow(
                           color: Color(0x2E000000),
@@ -1408,7 +1412,7 @@ class _Card extends StatelessWidget {
       decoration: BoxDecoration(
         color: theme.canvas,
         border: Border.all(color: theme.border),
-        borderRadius: BorderRadius.circular(OpenUiTheme.radiusLg),
+        borderRadius: BorderRadius.circular(theme.radii.lg),
         boxShadow: theme.shadow,
       ),
       child: Padding(padding: const EdgeInsets.all(12), child: child),
@@ -1496,11 +1500,11 @@ class _PinState extends State<_Pin> with SingleTickerProviderStateMixin {
                 child: Text(
                   '${place.order + 1}',
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: theme.typography.size(12),
                     height: 1,
-                    fontWeight: OpenUiTheme.weightSemibold,
+                    fontWeight: theme.typography.semibold,
                     color: theme.onInk,
-                    fontFeatures: const [FontFeature.tabularFigures()],
+                    fontFeatures: theme.typography.tabular,
                   ),
                 ),
               ),
@@ -1524,7 +1528,10 @@ class _PinState extends State<_Pin> with SingleTickerProviderStateMixin {
               child: Center(
                 child: Text(
                   place.icon!,
-                  style: const TextStyle(fontSize: 18, height: 1),
+                  style: TextStyle(
+                    fontSize: theme.typography.size(18),
+                    height: 1,
+                  ),
                 ),
               ),
             ),
@@ -1581,9 +1588,9 @@ class _PinState extends State<_Pin> with SingleTickerProviderStateMixin {
               style: TextStyle(
                 fontFamily: 'Arial',
                 fontFamilyFallback: const ['Helvetica'],
-                fontSize: fontSize,
+                fontSize: theme.typography.size(fontSize),
                 height: 15 / fontSize,
-                fontWeight: OpenUiTheme.weightSemibold,
+                fontWeight: theme.typography.semibold,
                 color: theme.ink,
                 shadows: halo,
               ),

@@ -108,6 +108,8 @@ model text ──► OpenUiSession.update(text, streaming)
     the umbrella it resolves to Inter. Without it, Flutter uses the platform font. `fontFamily: null` inherits the
     host font.
 
+13. **Theme tokens are instance fields with the reference values as defaults.** `OpenUiTheme` reads its radii, spacing, typography and component styles from the instance, so a host changes them with `copyWith` or `fromMaterial`. The static constants (`radiusSm`, `spaceTight`, `weightNormal`, ...) stay as the reference values. Per-component styles cover Card, Button, Badge and Table first.
+
 ## Chat integration
 
 `package:open_intelligent_ui/chat.dart` is the adapter for `ai_sdk_flutter_ui`. It is a separate

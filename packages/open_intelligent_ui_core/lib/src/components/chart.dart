@@ -33,15 +33,18 @@ double _fixed1(double v) => double.parse(v.toStringAsFixed(1));
 
 /// `.iui-chart-tick`: faint 11px tabular figures in the theme font.
 TextStyle chartTickStyle(OpenUiTheme theme) => TextStyle(
-  fontSize: 11,
+  fontSize: theme.typography.size(11),
   color: theme.faint,
   fontFamily: theme.fontFamily,
-  fontFeatures: const [FontFeature.tabularFigures()],
+  fontFeatures: theme.typography.tabular,
 );
 
 /// `.iui-chart-category`: muted 12px in the theme font.
-TextStyle chartCategoryStyle(OpenUiTheme theme) =>
-    TextStyle(fontSize: 12, color: theme.muted, fontFamily: theme.fontFamily);
+TextStyle chartCategoryStyle(OpenUiTheme theme) => TextStyle(
+  fontSize: theme.typography.size(12),
+  color: theme.muted,
+  fontFamily: theme.fontFamily,
+);
 
 /// An area's fill: a top-to-bottom gradient over the area's own bounding
 /// box (SVG objectBoundingBox), stop-opacity times the color's alpha.
@@ -228,7 +231,13 @@ class _Legend extends StatelessWidget {
             children: [
               _Dot(theme.chart[i % 6]),
               const SizedBox(width: 7),
-              Text(s, style: TextStyle(fontSize: 12, color: theme.muted)),
+              Text(
+                s,
+                style: TextStyle(
+                  fontSize: theme.typography.size(12),
+                  color: theme.muted,
+                ),
+              ),
             ],
           ),
       ],
@@ -407,11 +416,14 @@ class _Tooltip extends StatelessWidget {
           decoration: BoxDecoration(
             color: theme.canvas,
             border: Border.all(color: theme.border),
-            borderRadius: BorderRadius.circular(OpenUiTheme.radiusLg),
+            borderRadius: BorderRadius.circular(theme.radii.lg),
             boxShadow: theme.shadow,
           ),
           child: DefaultTextStyle.merge(
-            style: TextStyle(fontSize: 12, color: theme.muted),
+            style: TextStyle(
+              fontSize: theme.typography.size(12),
+              color: theme.muted,
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               mainAxisSize: MainAxisSize.min,
@@ -420,7 +432,7 @@ class _Tooltip extends StatelessWidget {
                 Text(
                   title,
                   style: TextStyle(
-                    fontWeight: OpenUiTheme.weightSemibold,
+                    fontWeight: theme.typography.semibold,
                     color: theme.ink,
                   ),
                 ),
@@ -442,8 +454,8 @@ class _Tooltip extends StatelessWidget {
                         value,
                         style: TextStyle(
                           color: theme.ink,
-                          fontWeight: OpenUiTheme.weightMedium,
-                          fontFeatures: const [FontFeature.tabularFigures()],
+                          fontWeight: theme.typography.medium,
+                          fontFeatures: theme.typography.tabular,
                         ),
                       ),
                     ],
@@ -913,17 +925,20 @@ class _PieChart extends StatelessWidget {
                   Expanded(
                     child: Text(
                       item.label,
-                      style: TextStyle(fontSize: 13, color: theme.ink),
+                      style: TextStyle(
+                        fontSize: theme.typography.size(13),
+                        color: theme.ink,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 8),
                   Text(
                     '${jsString((item.value / total * 1000).round() / 10)}%',
                     style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: OpenUiTheme.weightMedium,
+                      fontSize: theme.typography.size(13),
+                      fontWeight: theme.typography.medium,
                       color: theme.ink,
-                      fontFeatures: const [FontFeature.tabularFigures()],
+                      fontFeatures: theme.typography.tabular,
                     ),
                   ),
                 ],

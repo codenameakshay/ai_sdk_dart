@@ -54,13 +54,16 @@ class _CodeBlockState extends State<_CodeBlock> {
   @override
   Widget build(BuildContext context) {
     final theme = OpenUiTheme.of(context);
-    final head = TextStyle(fontSize: 12, color: theme.muted);
+    final head = TextStyle(
+      fontSize: theme.typography.size(12),
+      color: theme.muted,
+    );
     return Container(
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: theme.surface,
         border: Border.all(color: theme.border),
-        borderRadius: BorderRadius.circular(OpenUiTheme.radiusLg),
+        borderRadius: BorderRadius.circular(theme.radii.lg),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -95,7 +98,7 @@ class _CodeBlockState extends State<_CodeBlock> {
                         ),
                         decoration: BoxDecoration(
                           color: hovered ? theme.hover : null,
-                          borderRadius: BorderRadius.circular(6),
+                          borderRadius: BorderRadius.circular(theme.radii.sm),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -127,7 +130,7 @@ class _CodeBlockState extends State<_CodeBlock> {
               widget.code,
               style: TextStyle(
                 fontFamily: theme.monoFontFamily,
-                fontSize: 13,
+                fontSize: theme.typography.size(13),
                 height: 1.6,
                 color: theme.ink,
               ),

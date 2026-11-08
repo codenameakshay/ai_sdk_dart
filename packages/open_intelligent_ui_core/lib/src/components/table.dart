@@ -13,21 +13,20 @@ final _numeric = RegExp(
   r'^[-+−]?[$€£¥₹]?\s?\d[\d,]*(\.\d+)?\s?(%|[kKmMbB]|bn)?$',
 );
 final _blank = RegExp(r'^(n/a|—|–|-)$', caseSensitive: false);
-final _tabular = [const FontFeature.tabularFigures()];
 const _fixedComponents = {'Badge', 'Button', 'IconButton', 'Icon', 'Link'};
 
 /// `.iui-table th`: 13px, weight 560, ink.
 TextStyle iuiTableHeadStyle(OpenUiTheme t) => TextStyle(
-  fontSize: 13,
+  fontSize: t.typography.size(13),
   height: 1.5,
-  fontWeight: OpenUiTheme.weightMedium,
+  fontWeight: t.typography.medium,
   color: t.ink,
   fontFamily: t.fontFamily,
 );
 
 /// `.iui-table td`: 14px, line height 1.5, ink.
 TextStyle iuiTableBodyStyle(OpenUiTheme t) => TextStyle(
-  fontSize: 14,
+  fontSize: t.typography.size(14),
   height: 1.5,
   color: t.ink,
   fontFamily: t.fontFamily,
@@ -74,9 +73,15 @@ class _IuiTableState extends State<IuiTable> {
   @override
   Widget build(BuildContext context) {
     final theme = OpenUiTheme.of(context);
+    final s = theme.styleOf('Table');
+    final tableTheme = s.foreground == null
+        ? theme
+        : theme.withInk(s.foreground!);
     final phone = MediaQuery.sizeOf(context).width <= 640;
     final h = phone ? 12.0 : 16.0;
     final bodyV = phone ? 11.0 : 13.0;
+    final styledPadding = s.padding?.resolve(Directionality.of(context));
+    final horizontalPadding = styledPadding?.horizontal ?? 2 * h;
     final columns = widget.head.length;
     bool numeric(int c) => c < widget.numeric.length && widget.numeric[c];
     Widget align(Widget child, int c) => Align(
@@ -96,11 +101,15 @@ class _IuiTableState extends State<IuiTable> {
             container: true,
             role: SemanticsRole.columnHeader,
             child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: h, vertical: 11),
+              padding:
+                  styledPadding ??
+                  EdgeInsets.symmetric(horizontal: h, vertical: 11),
               child: DefaultTextStyle.merge(
-                style: iuiTableHeadStyle(
-                  theme,
-                ).copyWith(fontFeatures: numeric(c) ? _tabular : null),
+                style: iuiTableHeadStyle(tableTheme).copyWith(
+                  fontFeatures: numeric(c)
+                      ? tableTheme.typography.tabular
+                      : null,
+                ),
                 softWrap: false,
                 child: align(widget.head[c], c),
               ),
@@ -113,18 +122,19 @@ class _IuiTableState extends State<IuiTable> {
             r,
             c,
             c < widget.rows[r].length ? widget.rows[r][c] : null,
-            theme,
-            EdgeInsets.symmetric(horizontal: h, vertical: bodyV),
+            tableTheme,
+            styledPadding ??
+                EdgeInsets.symmetric(horizontal: h, vertical: bodyV),
             numeric(c),
             align,
           ),
     ];
 
-    return Container(
+    Widget table = Container(
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        border: Border.all(color: theme.border),
-        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: s.border ?? theme.border),
+        borderRadius: BorderRadius.circular(s.radius ?? theme.radii.xl),
       ),
       child: LayoutBuilder(
         builder: (_, constraints) => SingleChildScrollView(
@@ -136,9 +146,9 @@ class _IuiTableState extends State<IuiTable> {
               key: _layoutKey,
               columns: columns,
               availableWidth: constraints.maxWidth,
-              horizontalPadding: h,
+              horizontalPadding: horizontalPadding,
               hoveredRow: _hovered,
-              header: theme.surface,
+              header: s.background ?? theme.surface,
               hover: theme.surface.withValues(alpha: theme.surface.a * 0.7),
               line: theme.border,
               children: cells,
@@ -147,6 +157,18 @@ class _IuiTableState extends State<IuiTable> {
         ),
       ),
     );
+    if (s.foreground case final foreground?) {
+      table = Theme(
+        data: Theme.of(context).copyWith(
+          extensions: [...Theme.of(context).extensions.values, tableTheme],
+        ),
+        child: DefaultTextStyle.merge(
+          style: TextStyle(color: foreground),
+          child: table,
+        ),
+      );
+    }
+    return table;
   }
 
   Widget _bodyCell(
@@ -176,7 +198,7 @@ class _IuiTableState extends State<IuiTable> {
           child: DefaultTextStyle.merge(
             style: iuiTableBodyStyle(
               theme,
-            ).copyWith(fontFeatures: numeric ? _tabular : null),
+            ).copyWith(fontFeatures: numeric ? theme.typography.tabular : null),
             softWrap: !numeric,
             child: align(cell?.child ?? const SizedBox.shrink(), c),
           ),
@@ -471,7 +493,7 @@ class RenderIuiTable extends RenderBox
         // CSS min-content is about one glyph; Flutter's only breaks at words.
         return _fixedComponents.contains(data.component)
             ? (min: probe, max: probe)
-            : (min: 2 * _horizontalPadding, max: probe);
+            : (min: _horizontalPadding, max: probe);
     }
   }
 
@@ -591,14 +613,20 @@ class RenderIuiTable extends RenderBox
 
 Widget buildTable(BuildContext context, OpenUiNode node) {
   final theme = node.theme;
+  final style = theme.styleOf('Table');
+  final tableTheme = style.foreground == null
+      ? theme
+      : theme.withInk(style.foreground!);
   final columns = node.props.list('columns').map(_label).toList();
   final rows = node.props.list('rows').whereType<List<Object?>>().toList();
   final numeric = [
     for (var c = 0; c < columns.length; c++) _isNumeric(rows, c),
   ];
-  final body = iuiTableBodyStyle(theme);
+  final body = iuiTableBodyStyle(tableTheme);
   return IuiTable(
-    head: [for (final c in columns) Text(c)],
+    head: [
+      for (final c in columns) Text(c, style: iuiTableHeadStyle(tableTheme)),
+    ],
     numeric: numeric,
     rows: [
       for (final row in rows)

@@ -157,7 +157,7 @@ List<InlineSpan> inlineSpans(
         out.addAll(
           walk(
             token.substring(2, token.length - 2),
-            current.copyWith(fontWeight: OpenUiTheme.weightSemibold),
+            current.copyWith(fontWeight: theme.typography.semibold),
             link,
           ),
         );
@@ -443,7 +443,7 @@ class MarkdownBlocks extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = OpenUiTheme.of(context);
     final base = DefaultTextStyle.of(context).style.copyWith(
-      fontSize: 16,
+      fontSize: theme.typography.size(16),
       height: 1.65,
       color: theme.ink,
       fontFamily: theme.fontFamily,
@@ -501,12 +501,12 @@ class MarkdownBlocks extends StatelessWidget {
         );
       case _Heading(:final level, :final text):
         final style = base.copyWith(
-          fontWeight: OpenUiTheme.weightSemibold,
-          fontSize: switch (level) {
+          fontWeight: theme.typography.semibold,
+          fontSize: theme.typography.size(switch (level) {
             1 => 22,
             2 => 19,
             _ => 16,
-          },
+          }),
           letterSpacing: switch (level) {
             1 => -0.5,
             2 => -0.3,
@@ -528,7 +528,7 @@ class MarkdownBlocks extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: BoxDecoration(
             color: theme.surface,
-            borderRadius: BorderRadius.circular(OpenUiTheme.radiusMd),
+            borderRadius: BorderRadius.circular(theme.radii.md),
           ),
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
@@ -536,7 +536,7 @@ class MarkdownBlocks extends StatelessWidget {
               text,
               style: base.copyWith(
                 fontFamily: theme.monoFontFamily,
-                fontSize: 13,
+                fontSize: theme.typography.size(13),
                 height: 1.6,
               ),
             ),
@@ -547,8 +547,8 @@ class MarkdownBlocks extends StatelessWidget {
       case _ListBlock(:final ordered, :final start, :final items):
         final marker = base.copyWith(
           color: theme.muted,
-          fontWeight: ordered ? OpenUiTheme.weightMedium : null,
-          fontFeatures: ordered ? const [FontFeature.tabularFigures()] : null,
+          fontWeight: ordered ? theme.typography.medium : null,
+          fontFeatures: ordered ? theme.typography.tabular : null,
         );
         // An outside marker ends at the item's edge, its trailing space included.
         final painter = TextPainter(

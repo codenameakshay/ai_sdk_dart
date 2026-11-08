@@ -106,6 +106,90 @@ OpenUiView(
 the components the library has. Without the umbrella, text uses the platform font unless the host
 bundles Inter or sets `fontFamily`.
 
+## Theming
+
+`OpenUiTheme` is a `ThemeExtension`. Register one on the app theme and the components read their
+tokens from it. Without a registered theme, the reference's light or dark tokens apply.
+
+Build the theme from the host, so colors and the body font follow the app:
+
+```dart
+final host = ThemeData(colorSchemeSeed: Colors.indigo);
+final app = ThemeData(
+  colorScheme: host.colorScheme,
+  extensions: [OpenUiTheme.fromMaterial(host)],
+);
+```
+
+Inside a widget, `OpenUiTheme.fromMaterial(Theme.of(context))` builds the same tokens from the current
+theme. `OpenUiTheme.fromColorScheme(scheme, fontFamily: ...)` builds them from a `ColorScheme` and a font
+family. Change single tokens with `copyWith`:
+
+```dart
+final theme = OpenUiTheme.fromMaterial(Theme.of(context)).copyWith(
+  radii: const OpenUiRadii(md: 6),
+  typography: const OpenUiTypography(scale: 1.1),
+);
+```
+
+| Group | Field | What it holds |
+| --- | --- | --- |
+| Colors | `canvas`, `ink`, `onInk`, `muted`, `faint`, `status`, `statusSoft`, `badge`, `badgeSoft`, `chart`, `mapWater`, `glass`, `glassHover`, `glassRing`, `glassRingHover` | Surfaces, text, status tints, chart and map colors |
+| Radii | `radii` (`OpenUiRadii`) | `sm` 6, `md` 10, `lg` 12, `xl` 14, `xxl` 20, `full` 999 |
+| Spacing | `spacing` (`OpenUiSpacing`) | `unit` 4 is the step that `spaceOf` multiplies model values by. The named steps (`tight`, `inner`, `group`, `section`, `actionGap`, ...) are px values. |
+| Typography | `typography` (`OpenUiTypography`) | `scale` multiplies every built-in font size through `size(px)`. `text` holds the Text sizes `xs` to `lg`, and `title` the Title sizes `sm` to `3xl`. Each size has a line height, a letter spacing and an optional `compactFontSize` for phone widths. `normal`, `medium` and `semibold` are weights 440, 560 and 640. `tabularFigures` is on by default. |
+| Elevation | `shadow`, `shadowSmall` | Box shadows for cards and small surfaces |
+| Components | `components` (`Map<String, OpenUiComponentStyle>`) | Per-component styles, keyed as below |
+
+A component style sets `background`, `foreground`, `border`, `radius` or `padding`. Unset fields keep the
+built-in value. A key with a variant after a dot overrides its base key. The keys are:
+
+- `'Card'`, `'Card.soft'`
+- `'Button'`, `'Button.outline'`
+- `'Badge'`, `'Badge.success'`
+- `'Table'`
+
+### Override one component
+
+Wrap a stock builder with `composeBuilders`. The stock builders are in `components.dart`, and
+`intelligentUiBuilders` is the base set:
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:open_intelligent_ui/components.dart';
+import 'package:open_intelligent_ui/open_intelligent_ui.dart';
+
+final builders = composeBuilders([
+  {
+    'Card': (context, node) =>
+        Material(elevation: 2, child: buildCard(context, node)),
+  },
+], base: intelligentUiBuilders);
+
+OpenUiView(session: session, builders: builders);
+```
+
+To restyle a component without code, register a theme with `components`:
+
+```dart
+Theme(
+  data: ThemeData(
+    extensions: [
+      OpenUiTheme.light.copyWith(
+        components: {
+          'Card': OpenUiComponentStyle(radius: 4, border: Colors.indigo),
+          'Button.outline': OpenUiComponentStyle(
+            foreground: Colors.indigo,
+            radius: 8,
+          ),
+        },
+      ),
+    ],
+  ),
+  child: child,
+);
+```
+
 ## Platforms
 
 `HtmlView` and `YouTube` use a web view on Android, iOS and macOS (only the initial page loads,

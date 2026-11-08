@@ -159,8 +159,7 @@ class _PhotoState extends State<Photo> {
               widget.aspectRatio! < 5
         ? widget.aspectRatio!.toDouble()
         : 1.5;
-    final radius =
-        OpenUiTheme.radius(widget.radius ?? 'lg') ?? OpenUiTheme.radiusLg;
+    final radius = theme.radiusOf(widget.radius ?? 'lg') ?? theme.radii.lg;
     final reduce = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
     final Widget content;
     if (current != null) {

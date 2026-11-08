@@ -23,6 +23,7 @@ Future<Pumped> pumpProgram(
   Map<String, Object?> initialState = const {},
   OpenUiServices? services,
   bool streaming = false,
+  OpenUiTheme? theme,
 }) async {
   final session = OpenUiSession(
     intelligentUi,
@@ -35,7 +36,9 @@ Future<Pumped> pumpProgram(
   final opened = <Uri>[];
   await tester.pumpWidget(
     MaterialApp(
-      theme: ThemeData(brightness: brightness),
+      theme: theme == null
+          ? ThemeData(brightness: brightness)
+          : ThemeData(brightness: brightness, extensions: [theme]),
       home: OpenUiScope(
         services:
             services ??

@@ -1,5 +1,10 @@
 ## 3.1.0 (unreleased)
 
+- Theme tokens: `OpenUiTheme` takes `radii`, `spacing`, `typography` (scale, Text and Title sizes, weights,
+  tabular figures) and `components` (per-component styles for Card, Button, Badge and Table), and builds from a
+  host theme with `OpenUiTheme.fromColorScheme` or `fromMaterial`. Defaults are the reference's values, so nothing
+  changes until you set them. The static radius, spacing and weight constants stay as the reference values.
+- Stock builders (`buildCard`, `buildButton`, ...) are exported from `components.dart` so a host can wrap one.
 - The renderer is split into packages. `open_intelligent_ui` still includes everything: every
   component, Inter, Lucide icons, links that open in the browser, and `package:open_intelligent_ui/chat.dart`.
   Nothing changes for apps that use it.

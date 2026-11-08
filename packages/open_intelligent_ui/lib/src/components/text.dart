@@ -72,11 +72,15 @@ List<InlineSpan> _textSpans(
   Object? value,
   TextStyle style,
 ) {
-  if (value is String) return inlineSpans(value, context, style: style);
+  if (value is String) {
+    return inlineSpans(_preLine(value, dropSpace: true), context, style: style);
+  }
   if (value is! List) return const [];
   final spans = <InlineSpan>[];
+  var dropSpace = true;
   for (final part in value.expand((p) => p is List ? p : [p])) {
     if (part is OpenUiElement) {
+      dropSpace = false;
       spans.add(
         WidgetSpan(
           alignment: PlaceholderAlignment.middle,
@@ -86,15 +90,24 @@ List<InlineSpan> _textSpans(
           ),
         ),
       );
-    } else {
-      spans.addAll(
-        part == null
-            ? const []
-            : inlineSpans(jsString(part), context, style: style),
-      );
+    } else if (part != null) {
+      final text = _preLine(jsString(part), dropSpace: dropSpace);
+      if (text.isNotEmpty) {
+        dropSpace = text.endsWith('\n') || text.endsWith(' ');
+      }
+      spans.addAll(inlineSpans(text, context, style: style));
     }
   }
   return spans;
+}
+
+/// CSS `white-space: pre-line`: runs of spaces collapse to one, newlines stay,
+/// and spaces at the start or end of a line disappear.
+String _preLine(String text, {required bool dropSpace}) {
+  final collapsed = text
+      .replaceAll(RegExp(r'[ \t\f\r]+'), ' ')
+      .replaceAll(RegExp(r' ?\n ?'), '\n');
+  return dropSpace ? collapsed.replaceFirst(RegExp('^ '), '') : collapsed;
 }
 
 Widget _richText(

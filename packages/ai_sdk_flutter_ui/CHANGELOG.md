@@ -3,7 +3,9 @@
 - Added `ChatController.streamingMessageId` (the id the in-flight answer commits under),
   `ChatController.updateMessage`, and a `chatMessageBuilder` on `ChatMessageList` and
   `AiChatScaffold` that receives each row's `ChatMessage`, so per-message UI state can be keyed
-  by id from the first streamed token. `ConversationChatController.updateMessage` returns false.
+  by id from the first streamed token. `ConversationChatController.updateMessage` saves through a
+  backend that implements the new `ConversationMessageEditBackend` (`LocalConversationBackend` does)
+  and returns false for other backends.
 - Raised the `ai_sdk_dart` dependency floor to `^3.1.0`: parts-based message rendering uses
   `ModelMessage.text`, which is absent from core 3.0.0. The new floor also includes the
   interleaved reasoning/text fixes used by streaming controllers.

@@ -177,22 +177,7 @@ final class OpenUiSession {
          rootName: library.rootName,
          boundNames: {for (final r in records) r.variable},
        ) {
-    final saved = initialState[actionStateKey];
-    if (saved is Map) {
-      for (final MapEntry(:key, :value) in saved.entries) {
-        if (value is! Map || value['attempt'] is! num) continue;
-        final phase = ActionPhase.values.asNameMap()[value['phase']];
-        if (phase == null || phase == ActionPhase.idle) continue;
-        final cut = phase == ActionPhase.pending;
-        _actions['$key'] = (
-          phase: cut ? ActionPhase.failed : phase,
-          attempt: (value['attempt'] as num).toInt(),
-          message: cut || value['message'] is! String
-              ? null
-              : value['message'] as String,
-        );
-      }
-    }
+    _restoreActions(initialState[actionStateKey]);
     _queries = QueryManager(_tools.isEmpty ? null : _callTool);
     _cancelStore = _store.listen(_onStoreChange);
     _cancelQueries = _queries.subscribe(_onChange);
@@ -244,6 +229,7 @@ final class OpenUiSession {
   final String actionScope;
 
   final Map<String, _Run> _actions = {};
+  final Set<String> _locallyRunActions = {};
   final Set<String> _runningActionNodes = {};
   final Map<String, _ActiveAction> _activeActions = {};
   late final Map<String, ActionSpec> _handled = {
@@ -275,6 +261,7 @@ final class OpenUiSession {
   (String, String?, bool)? _parseKey;
   String _lastErrorKey = '';
   String? _storeKey;
+  String _restoredStateKey = '';
   OpenUiElement? _root;
   bool _dirty = true;
   bool _disposed = false;
@@ -287,11 +274,23 @@ final class OpenUiSession {
     return tool.call(args);
   }
 
-  /// Sets the full program text so far. The same text and flag is a no-op.
-  void update(String text, {required bool streaming}) {
-    if (_disposed || (text == _text && streaming == _streaming)) return;
+  /// Sets the full program text and any restored state. Identical text,
+  /// streaming flag, and restored state is a no-op.
+  void update(
+    String text, {
+    required bool streaming,
+    Map<String, Object?>? restoredState,
+  }) {
+    final restoredStateKey = Js.stringify(restoredState ?? const {});
+    if (_disposed ||
+        (text == _text &&
+            streaming == _streaming &&
+            restoredStateKey == _restoredStateKey)) {
+      return;
+    }
     _text = text;
     _streaming = streaming;
+    _restoredStateKey = restoredStateKey;
     final bundle = parseResponseBundle(text, streaming: streaming);
     _bundle = bundle;
     _blocked = streaming || !bundle.complete || bundle.error != null;
@@ -330,29 +329,62 @@ final class OpenUiSession {
     }
     final declarations = {...?_result?.stateDeclarations}
       ..removeWhere((k, _) => _bound.containsKey(k));
-    final key = '${Js.stringify(declarations)}::${Js.stringify(_initialState)}';
+    final key =
+        '${Js.stringify(declarations)}::${Js.stringify(_initialState)}::$restoredStateKey';
     if (key != _storeKey) {
-      _storeKey = key;
-      final persisted = <String, Object?>{};
       _initializing = true;
-      // initialState only fills keys the store lacks, so a re-parse never undoes user edits.
-      for (final MapEntry(:key, value: raw) in _initialState.entries) {
-        if (key == actionStateKey || _bound.containsKey(key)) continue;
-        final value = Js.normalize(raw);
-        if (key.startsWith(r'$')) {
+      try {
+        final persisted = <String, Object?>{};
+        // initialState only fills keys the store lacks, so a re-parse never undoes user edits.
+        for (final MapEntry(:key, value: raw) in _initialState.entries) {
+          if (key == actionStateKey || _bound.containsKey(key)) continue;
+          final value = Js.normalize(raw);
           if (!_store.has(key)) persisted[key] = value;
-        } else if (!_store.has(key)) {
-          _store.set(key, value);
         }
+        _store.initialize(declarations, persisted);
+        _store.restoreUntouched(_restorableState(restoredState));
+        _restoreActions(restoredState?[actionStateKey]);
+      } finally {
+        _initializing = false;
       }
-      _store.initialize(declarations, persisted);
-      _initializing = false;
+      _storeKey = key;
     }
     _syncQueries();
     _onChange();
   }
 
   bool _initializing = false;
+  bool _settingDefaultValue = false;
+
+  Map<String, Object?> _restorableState(Map<String, Object?>? state) {
+    if (state == null) return const {};
+    return {
+      for (final MapEntry(:key, :value) in state.entries)
+        if (key != actionStateKey && !_bound.containsKey(key))
+          key: Js.normalize(value),
+    };
+  }
+
+  void _restoreActions(Object? saved) {
+    if (saved is! Map) return;
+    for (final MapEntry(:key, :value) in saved.entries) {
+      if (_locallyRunActions.contains('$key') ||
+          value is! Map ||
+          value['attempt'] is! num) {
+        continue;
+      }
+      final phase = ActionPhase.values.asNameMap()[value['phase']];
+      if (phase == null || phase == ActionPhase.idle) continue;
+      final cut = phase == ActionPhase.pending;
+      _actions['$key'] = (
+        phase: cut ? ActionPhase.failed : phase,
+        attempt: (value['attempt'] as num).toInt(),
+        message: cut || value['message'] is! String
+            ? null
+            : value['message'] as String,
+      );
+    }
+  }
 
   /// Whether the answer may not run yet: it streams, or it is an incomplete or invalid Cloud bundle.
   bool get isStreaming => _blocked;
@@ -465,7 +497,7 @@ final class OpenUiSession {
       _dirty = true;
       return;
     }
-    onStateUpdate?.call(state);
+    if (!_settingDefaultValue) onStateUpdate?.call(state);
     _syncQueries();
     _onChange();
   }
@@ -608,19 +640,25 @@ final class OpenUiSession {
         ? _store.has(name)
         : raw is Map && raw.containsKey(name);
     if (hasValue) return;
-    _writeField(formName, name, componentType, defaultValue);
+    _settingDefaultValue = true;
+    try {
+      _writeField(formName, name, componentType, defaultValue, local: false);
+    } finally {
+      _settingDefaultValue = false;
+    }
   }
 
   void _writeField(
     String? formName,
     String name,
     String? componentType,
-    Object? value,
-  ) {
+    Object? value, {
+    bool local = true,
+  }) {
     if (_bound.containsKey(formName ?? name)) return;
     final wrapped = {'value': value, 'componentType': ?componentType};
     if (formName == null) {
-      _store.set(name, wrapped);
+      _store.set(name, wrapped, local: local);
     } else {
       final raw = _store.get(formName);
       _store.set(
@@ -629,6 +667,7 @@ final class OpenUiSession {
           if (raw is Map) ...raw.cast<String, Object?>().entries,
           MapEntry(name, wrapped),
         ]),
+        local: local,
       );
     }
   }
@@ -769,6 +808,7 @@ final class OpenUiSession {
   }
 
   void _setRun(String base, _Run run) {
+    _locallyRunActions.add(base);
     _actions[base] = run;
     onStateUpdate?.call(state);
     _onChange();
@@ -894,6 +934,7 @@ final class OpenUiSession {
     _disposed = true;
     _runningActionNodes.clear();
     _activeActions.clear();
+    _locallyRunActions.clear();
     _cancelStore();
     _cancelQueries();
     _queries.dispose();

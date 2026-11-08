@@ -3,6 +3,6 @@
 library;
 
 export 'package:open_intelligent_ui_chat/open_intelligent_ui_chat.dart'
-    show OpenUiUserMessage;
+    show OpenUiAnswerView, OpenUiUserMessage;
 
 export 'src/chat.dart' show OpenUiChat;

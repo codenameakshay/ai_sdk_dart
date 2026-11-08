@@ -6,33 +6,52 @@ import 'package:flutter/material.dart';
 
 import 'package:open_intelligent_ui_core/open_intelligent_ui_core.dart';
 
+import 'answer_view.dart';
+
 /// Renders Open Intelligent UI answers in an `ai_sdk_flutter_ui` chat.
 ///
 /// Pass [buildMessage] as `chatMessageBuilder` to `AiChatScaffold` or
-/// `ChatMessageList`, and give the agent `library.systemPrompt(chatPromptFor(library))`
-/// as its instructions. Each answer keeps one [OpenUiSession] by message id,
-/// from the first streamed token to the committed message. A `@ToAssistant`
-/// click sends the next user turn with its form state, as react-ui does.
-/// Edits are written back into the answer's `]]>openui:context`, so the model
-/// sees them on the next turn and a restored transcript starts from them.
+/// `ChatMessageList`. Answers are fed to one [OpenUiAnswers] by message id, so
+/// streaming, saving and replay follow one path. A `@ToAssistant` click is sent
+/// through [send], or through [agent] when [send] is null; the chat does not add
+/// that turn to the transcript itself. Edits are written back into the answer's
+/// `]]>openui:context`, so the model sees them on the next turn and a restored
+/// transcript starts from them.
 base class OpenUiChat {
   OpenUiChat({
     required this.controller,
-    required this.agent,
+    this.agent,
+    this.send,
     OpenUiLibrary? library,
     OpenUiBuilderLookup? builders,
     this.tools = const [],
     this.onAction,
     this.fallbackServices = const OpenUiServices(),
+    this.locale,
+    this.records,
   }) : library = library ?? intelligentUiFor(builders ?? openUiCoreBuilders),
        builders = builders ?? openUiCoreBuilders {
+    if (agent == null && send == null) {
+      throw ArgumentError('OpenUiChat needs an agent or a send function.');
+    }
+    _answers = OpenUiAnswers(
+      library: this.library,
+      tools: tools,
+      locale: locale,
+      records: records,
+      onSave: _onSave,
+    );
     controller.addListener(_prune);
   }
 
   final ChatController controller;
 
-  /// The agent that answers `@ToAssistant` turns.
-  final ToolLoopAgent agent;
+  /// The agent that answers `@ToAssistant` turns when [send] is null.
+  final ToolLoopAgent? agent;
+
+  /// Sends the text of a `@ToAssistant` turn over any transport.
+  final Future<void> Function(String text)? send;
+
   final OpenUiLibrary library;
   final OpenUiBuilderLookup builders;
 
@@ -45,10 +64,16 @@ base class OpenUiChat {
   /// Services for answers' views wherever the app's scope leaves them unset.
   final OpenUiServices fallbackServices;
 
-  final Map<String, OpenUiSession> _sessions = {};
-  final Set<String> _unsaved = {};
+  /// The locale of each answer's session.
+  final String? locale;
+
+  /// The records each answer's session binds, by message id.
+  final List<BoundRecord> Function(String id)? records;
+
+  late final OpenUiAnswers _answers;
   final Map<String, ChatMessage> _committedEntries = {};
   String? _writing;
+  bool _sendingAction = false;
   bool _disposed = false;
 
   /// A `chatMessageBuilder` for `AiChatScaffold` and `ChatMessageList`.
@@ -58,15 +83,16 @@ base class OpenUiChat {
     bool isStreaming,
   ) {
     final content = message.message.content;
+    final text = _answerText(message.message);
     return switch (message.message.role) {
       ModelMessageRole.user when content != null => OpenUiUserMessage(
         text: content,
       ),
-      ModelMessageRole.assistant when content != null => _Answer(
+      ModelMessageRole.assistant when text != null => _Answer(
         key: ValueKey(message.id),
         chat: this,
         id: message.id,
-        raw: content,
+        raw: text,
         streaming: isStreaming,
       ),
       ModelMessageRole.user => ChatMessageBubble(message: message.message),
@@ -75,60 +101,32 @@ base class OpenUiChat {
   }
 
   /// The session for the answer with [id], if it has been built.
-  OpenUiSession? sessionOf(String id) => _sessions[id];
+  OpenUiSession? sessionOf(String id) => _answers.sessionOf(id);
 
   void dispose() {
     _disposed = true;
     controller.removeListener(_prune);
-    for (final session in _sessions.values) {
-      session.dispose();
-    }
-    _sessions.clear();
+    _answers.dispose();
     _committedEntries.clear();
-    _unsaved.clear();
   }
 
-  OpenUiSession _session(String id, ParsedMessage message) {
-    return _sessions.putIfAbsent(id, () {
-      final entry = controller.chatMessages
-          .where((m) => m.id == id)
-          .firstOrNull;
-      if (entry != null) _committedEntries[id] = entry;
-      return OpenUiSession(
-        library,
-        tools: tools,
-        initialState: _stateOf(message.context),
-        onStateUpdate: (_) => _save(id),
-      );
-    });
-  }
-
-  void _save(String id) {
-    if (_unsaved.add(id)) scheduleMicrotask(() => _write(id));
-  }
-
-  /// Writes the session's state into the committed answer. An answer that is
-  /// still streaming has no committed message yet; it is written on commit.
-  void _write(String id) {
-    final session = _sessions[id];
-    if (_disposed || !_unsaved.contains(id) || session == null) {
-      return;
-    }
+  /// Feeds the current text of the answer [id] to its session. The committed
+  /// entry it was built from is kept, so a later change to it counts as a
+  /// replacement.
+  OpenUiSession _update(String id, String raw, {required bool streaming}) {
     final entry = controller.chatMessages.where((m) => m.id == id).firstOrNull;
-    final raw = entry?.message.content;
-    if (raw == null || entry!.status == ConversationMessageStatus.streaming) {
-      return;
-    }
-    _unsaved.remove(id);
-    final state = session.state;
+    if (entry != null) _committedEntries.putIfAbsent(id, () => entry);
+    return _answers.update(id, raw, streaming: streaming);
+  }
+
+  /// Writes an edited answer's text, with its state, into the committed
+  /// transcript.
+  void _onSave(String id, String text) {
     _writing = id;
     try {
       controller.updateMessage(
         id,
-        ModelMessage(
-          role: ModelMessageRole.assistant,
-          content: _withState(raw, state),
-        ),
+        ModelMessage(role: ModelMessageRole.assistant, content: text),
       );
     } finally {
       _writing = null;
@@ -139,89 +137,68 @@ base class OpenUiChat {
     }
   }
 
-  void _committed(String id) {
-    if (_unsaved.contains(id)) scheduleMicrotask(() => _write(id));
-  }
-
   void _send(ActionEvent event) {
-    if (_disposed || controller.isLoading) return;
-    unawaited(
-      controller.sendMessage(agent: agent, text: buildActionUserMessage(event)),
-    );
+    if (_disposed || controller.isLoading || _sendingAction) return;
+    _sendingAction = true;
+    final sender = send;
+    unawaited(() async {
+      try {
+        final text = buildActionUserMessage(event);
+        if (sender != null) {
+          await sender(text);
+        } else {
+          await controller.sendMessage(agent: agent!, text: text);
+        }
+      } finally {
+        _sendingAction = false;
+      }
+    }());
   }
 
   /// Drops the sessions of answers that left the transcript (reload, clear),
-  /// so their Query timers stop.
+  /// or were replaced by another text, so their Query timers stop. Feeds a
+  /// committed answer its final text.
   void _prune() {
     final entries = {for (final m in controller.chatMessages) m.id: m};
-    _sessions.removeWhere((id, session) {
-      final entry = entries[id];
-      if (entry != null) {
-        final previous = _committedEntries[id];
-        final replaced =
-            previous != null &&
-            !identical(previous, entry) &&
-            _writing != id &&
-            controller is! ConversationChatController;
-        if (!replaced) {
-          _committedEntries[id] = entry;
-          if (session.isStreaming &&
-              entry.status != ConversationMessageStatus.streaming) {
-            final raw = entry.message.content;
-            if (raw != null) {
-              session.update(raw, streaming: false);
-              _committed(id);
-            }
-          }
-          return false;
-        }
-      } else if (controller.isLoading &&
-          session.isStreaming &&
-          controller.streamingMessageId == id) {
-        return false;
+    _committedEntries.removeWhere((id, _) => !entries.containsKey(id));
+    for (final MapEntry(key: id, value: entry) in entries.entries) {
+      final previous = _committedEntries[id];
+      final replaced =
+          previous != null &&
+          !identical(previous, entry) &&
+          _writing != id &&
+          controller is! ConversationChatController;
+      if (replaced) {
+        _answers.remove(id);
+        _committedEntries.remove(id);
+        continue;
       }
-      session.dispose();
-      _unsaved.remove(id);
-      _committedEntries.remove(id);
-      return true;
-    });
+      _committedEntries[id] = entry;
+      if (_answers.isStreaming(id) &&
+          entry.status != ConversationMessageStatus.streaming) {
+        final raw = _answerText(entry.message);
+        if (raw != null) _answers.update(id, raw, streaming: false);
+      }
+    }
+    final streamingId = controller.isLoading
+        ? controller.streamingMessageId
+        : null;
+    _answers.retain([
+      ...entries.keys,
+      if (streamingId != null && _answers.isStreaming(streamingId)) streamingId,
+    ]);
   }
 }
 
-/// Replaces the saved context without dropping Cloud scripts or framing.
-String _withState(String raw, Map<String, Object?> state) {
-  final markers = RegExp(
-    r'^\]\]>openui:([a-z]+)([^\n]*)$',
-    multiLine: true,
-  ).allMatches(raw).toList();
-  bool section(RegExpMatch marker, String kind) =>
-      marker[1] == kind &&
-      (marker[2]!.trim().isEmpty || marker[2]!.startsWith('?'));
-  final content = markers.where((m) => section(m, 'content')).lastOrNull;
-  final context = markers
-      .where((m) => section(m, 'context') && m.start > (content?.start ?? -1))
-      .lastOrNull;
-  final built = buildMessage(
-    content: '',
-    context: state.isEmpty ? null : [state],
-  );
-  final saved = state.isEmpty ? '' : built.substring(built.indexOf('\n') + 2);
-  if (context != null) {
-    final next = markers.where((m) => m.start > context.start).firstOrNull;
-    return raw.substring(0, context.start) +
-        saved +
-        (next == null ? '' : '\n${raw.substring(next.start)}');
-  }
-  final framed = content == null ? buildMessage(content: raw) : raw;
-  return saved.isEmpty ? framed : '$framed\n$saved';
+/// The text of an answer: its content, or the text of its text parts, which is
+/// how `ConversationChatController` stores assistant messages.
+String? _answerText(ModelMessage message) {
+  final content = message.content;
+  if (content != null) return content;
+  if (message.parts == null) return null;
+  final text = message.text;
+  return text.isEmpty ? null : text;
 }
-
-/// react-ui keeps an answer's state as the first item of its context.
-Map<String, Object?> _stateOf(Object? context) => switch (context) {
-  [final Map<String, Object?> state, ...] => state,
-  final Map<String, Object?> state => state,
-  _ => const {},
-};
 
 class _Answer extends StatefulWidget {
   const _Answer({
@@ -242,9 +219,6 @@ class _Answer extends StatefulWidget {
 }
 
 class _AnswerState extends State<_Answer> {
-  late ParsedMessage _message;
-  late OpenUiSession _session;
-
   @override
   void initState() {
     super.initState();
@@ -258,34 +232,23 @@ class _AnswerState extends State<_Answer> {
   }
 
   void _sync() {
-    _message = parseMessage(widget.raw, streaming: widget.streaming);
-    _session = widget.chat._session(widget.id, _message)
-      ..update(widget.raw, streaming: widget.streaming);
-    if (!widget.streaming) widget.chat._committed(widget.id);
+    if (widget.chat._disposed) return;
+    widget.chat._update(widget.id, widget.raw, streaming: widget.streaming);
   }
 
   @override
   Widget build(BuildContext context) {
-    final prose =
-        !widget.streaming &&
-        _session.root == null &&
-        _message.content.trim().isNotEmpty;
+    final chat = widget.chat;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
-      child: prose
-          ? AssistantMessageView(
-              message: ModelMessage(
-                role: ModelMessageRole.assistant,
-                content: _message.content,
-              ),
-            )
-          : OpenUiView(
-              session: _session,
-              builders: widget.chat.builders,
-              onToAssistant: widget.chat._send,
-              onAction: widget.chat.onAction,
-              fallbackServices: widget.chat.fallbackServices,
-            ),
+      child: OpenUiAnswerView(
+        answers: chat._answers,
+        id: widget.id,
+        builders: chat.builders,
+        onToAssistant: chat._send,
+        onAction: chat.onAction,
+        fallbackServices: chat.fallbackServices,
+      ),
     );
   }
 }

@@ -327,6 +327,64 @@ class _NoRetryBackend implements ConversationBackend {
   }
 }
 
+class _FailingEditBackend extends LocalConversationBackend {
+  _FailingEditBackend({required super.agent, required super.initial});
+
+  @override
+  Future<void> updateMessage(ConversationMessage message) async =>
+      throw StateError('read-only');
+}
+
+class _SynchronouslyFailingEditBackend extends LocalConversationBackend {
+  _SynchronouslyFailingEditBackend({
+    required super.agent,
+    required super.initial,
+  });
+
+  @override
+  Future<void> updateMessage(ConversationMessage message) {
+    throw StateError('read-only');
+  }
+}
+
+class _DelayedEditBackend extends LocalConversationBackend {
+  _DelayedEditBackend({required super.agent, required super.initial});
+
+  final completions = <Completer<void>>[];
+  final writes = <ConversationMessage>[];
+
+  @override
+  Future<void> updateMessage(ConversationMessage message) {
+    writes.add(message);
+    final completion = Completer<void>();
+    completions.add(completion);
+    return completion.future.then((_) => super.updateMessage(message));
+  }
+}
+
+class _DelayedRestoreEditBackend extends LocalConversationBackend {
+  _DelayedRestoreEditBackend({required super.agent, required super.initial});
+
+  final restoreEvent = Completer<void>();
+  final releaseRestore = Completer<void>();
+
+  @override
+  Future<void> restore(Map<String, dynamic> encoded) async {
+    final message = conversation.messages.single;
+    await super.updateMessage(
+      ConversationMessage(
+        id: message.id,
+        role: message.role,
+        status: message.status,
+        parts: [TextPart(id: '${message.id}-interim', text: 'interim')],
+      ),
+    );
+    restoreEvent.complete();
+    await releaseRestore.future;
+    await super.restore(encoded);
+  }
+}
+
 class _StreamPartsModel extends LanguageModelV4 {
   _StreamPartsModel(this.parts);
   final List<LanguageModelV4StreamPart> parts;
@@ -3297,5 +3355,716 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(executions, 0);
     expect(model.streamCalls, 2);
+  });
+
+  test(
+    'updateMessage saves an edit through a LocalConversationBackend',
+    () async {
+      final local = LocalConversationBackend(
+        agent: _textAgent('unused'),
+        initial: Conversation(
+          id: 'chat-1',
+          messages: [
+            ConversationMessage(
+              id: 'a1',
+              role: ConversationRole.assistant,
+              parts: [TextPart(id: 'p1', text: 'old')],
+            ),
+          ],
+        ),
+      );
+      final chat = ConversationChatController(ConversationController(local));
+      addTearDown(chat.dispose);
+
+      expect(
+        chat.updateMessage(
+          'a1',
+          const ModelMessage(role: ModelMessageRole.assistant, content: 'new'),
+        ),
+        isTrue,
+      );
+      expect(chat.chatMessages.single.id, 'a1');
+      expect(chat.chatMessages.single.message.text, 'new');
+      expect(
+        chat.chatMessages.single.status,
+        ConversationMessageStatus.complete,
+      );
+
+      await Future<void>.delayed(Duration.zero);
+      final stored = local.conversation.messages.single;
+      expect(stored.parts.single, isA<TextPart>());
+      expect(stored.parts.single.id, 'p1');
+      expect((stored.parts.single as TextPart).text, 'new');
+      expect(chat.chatMessages.single.message.text, 'new');
+      expect(
+        chat.updateMessage(
+          'missing',
+          const ModelMessage(role: ModelMessageRole.assistant, content: 'x'),
+        ),
+        isFalse,
+      );
+    },
+  );
+
+  test('a local backend rejects an edit to an unknown message id', () async {
+    final local = LocalConversationBackend(
+      agent: _textAgent('unused'),
+      initial: _empty(),
+    );
+    addTearDown(local.dispose);
+
+    await expectLater(
+      local.updateMessage(
+        ConversationMessage(
+          id: 'missing',
+          role: ConversationRole.assistant,
+          parts: [TextPart(id: 'p1', text: 'x')],
+        ),
+      ),
+      throwsArgumentError,
+    );
+  });
+
+  test('updateMessage keeps the message other parts', () async {
+    final local = LocalConversationBackend(
+      agent: _textAgent('unused'),
+      initial: Conversation(
+        id: 'chat-1',
+        messages: [
+          ConversationMessage(
+            id: 'a1',
+            role: ConversationRole.assistant,
+            parts: [
+              ReasoningPart(id: 'r1', text: 'think'),
+              TextPart(id: 'p1', text: 'a'),
+              TextPart(id: 'p2', text: 'b'),
+            ],
+          ),
+          ConversationMessage(
+            id: 'a2',
+            role: ConversationRole.assistant,
+            parts: [ReasoningPart(id: 'r2', text: 'x')],
+          ),
+        ],
+      ),
+    );
+    final chat = ConversationChatController(ConversationController(local));
+    addTearDown(chat.dispose);
+
+    expect(
+      chat.updateMessage(
+        'a1',
+        const ModelMessage(role: ModelMessageRole.assistant, content: 'new'),
+      ),
+      isTrue,
+    );
+    expect(
+      chat.updateMessage(
+        'a2',
+        const ModelMessage(role: ModelMessageRole.assistant, content: 'new'),
+      ),
+      isTrue,
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    final [first, second] = local.conversation.messages;
+    expect(first.parts.map((part) => part.id), ['r1', 'p1']);
+    expect((first.parts[0] as ReasoningPart).text, 'think');
+    expect((first.parts[1] as TextPart).text, 'new');
+    expect(second.parts.map((part) => part.id), ['r2', 'a2-text']);
+    expect((second.parts[1] as TextPart).text, 'new');
+  });
+
+  test('updateMessage is false without an edit-capable backend', () async {
+    final remote = RemoteConversationBackend(
+      transport: RemoteConversationTransport(
+        endpoint: Uri.parse('http://127.0.0.1:1/chat'),
+      ),
+      initial: Conversation(
+        id: 'chat-1',
+        messages: [
+          ConversationMessage(
+            id: 'a1',
+            role: ConversationRole.assistant,
+            parts: [TextPart(id: 'p1', text: 'old')],
+          ),
+        ],
+      ),
+    );
+    final chat = ConversationChatController(ConversationController(remote));
+    addTearDown(chat.dispose);
+
+    expect(
+      chat.updateMessage(
+        'a1',
+        const ModelMessage(role: ModelMessageRole.assistant, content: 'new'),
+      ),
+      isFalse,
+    );
+    expect(chat.chatMessages.single.message.text, 'old');
+  });
+
+  test('a failed backend edit becomes the controller error', () async {
+    final chat = ConversationChatController(
+      ConversationController(
+        _FailingEditBackend(
+          agent: _textAgent('unused'),
+          initial: Conversation(
+            id: 'chat-1',
+            messages: [
+              ConversationMessage(
+                id: 'a1',
+                role: ConversationRole.assistant,
+                parts: [TextPart(id: 'p1', text: 'old')],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    addTearDown(chat.dispose);
+
+    expect(
+      chat.updateMessage(
+        'a1',
+        const ModelMessage(role: ModelMessageRole.assistant, content: 'new'),
+      ),
+      isTrue,
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    expect(chat.status, ChatStatus.error);
+    expect(chat.error, isA<StateError>());
+  });
+
+  test('a synchronous backend edit failure becomes the controller error', () {
+    final chat = ConversationChatController(
+      ConversationController(
+        _SynchronouslyFailingEditBackend(
+          agent: _textAgent('unused'),
+          initial: Conversation(
+            id: 'chat-1',
+            messages: [
+              ConversationMessage(
+                id: 'a1',
+                role: ConversationRole.assistant,
+                parts: [TextPart(id: 'p1', text: 'old')],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    addTearDown(chat.dispose);
+
+    expect(
+      () => chat.updateMessage(
+        'a1',
+        const ModelMessage(role: ModelMessageRole.assistant, content: 'new'),
+      ),
+      returnsNormally,
+    );
+    expect(chat.status, ChatStatus.error);
+    expect(chat.error, isA<StateError>());
+  });
+
+  test(
+    'updateMessage rejects the streaming target but edits completed history',
+    () async {
+      final model = _ControllableModel();
+      addTearDown(() {
+        if (!model.release.isCompleted) model.release.complete();
+      });
+      final local = LocalConversationBackend(
+        agent: ToolLoopAgent(model: model),
+        initial: Conversation(
+          id: 'chat-1',
+          messages: [
+            ConversationMessage(
+              id: 'old-assistant',
+              role: ConversationRole.assistant,
+              metadata: {'source': 'seed'},
+              extra: {'retained': true},
+              parts: [
+                ReasoningPart(id: 'old-reasoning', text: 'keep'),
+                TextPart(id: 'old-text', text: 'old'),
+              ],
+            ),
+          ],
+        ),
+      );
+      final chat = ConversationChatController(ConversationController(local));
+      addTearDown(chat.dispose);
+
+      final send = chat.sendText('next');
+      await model.started.future;
+      final streaming = chat.chatMessages.singleWhere(
+        (message) => message.status == ConversationMessageStatus.streaming,
+      );
+      expect(
+        chat.updateMessage(
+          streaming.id,
+          const ModelMessage(role: ModelMessageRole.assistant, content: 'edit'),
+        ),
+        isFalse,
+      );
+      expect(
+        chat.updateMessage(
+          'old-assistant',
+          const ModelMessage(
+            role: ModelMessageRole.assistant,
+            content: 'edited',
+          ),
+        ),
+        isTrue,
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        (local.conversation.messages
+                    .singleWhere((message) => message.id == 'old-assistant')
+                    .parts
+                    .last
+                as TextPart)
+            .text,
+        'edited',
+      );
+
+      model.release.complete();
+      await send;
+      final finalAssistant = local.conversation.messages.singleWhere(
+        (message) => message.id == streaming.id,
+      );
+      expect(finalAssistant.id, streaming.id);
+      expect(finalAssistant.status, ConversationMessageStatus.complete);
+      expect(finalAssistant.parts.whereType<TextPart>().single.text, 'partial');
+      expect(
+        chat.chatMessages
+            .singleWhere((message) => message.id == 'old-assistant')
+            .id,
+        'old-assistant',
+      );
+      final editedHistory = local.conversation.messages.singleWhere(
+        (message) => message.id == 'old-assistant',
+      );
+      expect(editedHistory.status, ConversationMessageStatus.complete);
+      expect(editedHistory.metadata, {'source': 'seed'});
+      expect(editedHistory.extra, {'retained': true});
+      expect(editedHistory.parts.map((part) => part.id), [
+        'old-reasoning',
+        'old-text',
+      ]);
+      expect((editedHistory.parts.first as ReasoningPart).text, 'keep');
+      expect((editedHistory.parts.last as TextPart).text, 'edited');
+    },
+  );
+
+  test('a new send does not suppress a pending edit failure', () async {
+    final model = _ControllableModel();
+    addTearDown(() {
+      if (!model.release.isCompleted) model.release.complete();
+    });
+    final backend = _DelayedEditBackend(
+      agent: ToolLoopAgent(model: model),
+      initial: Conversation(
+        id: 'chat-1',
+        messages: [
+          ConversationMessage(
+            id: 'a1',
+            role: ConversationRole.assistant,
+            parts: [TextPart(id: 'p1', text: 'old')],
+          ),
+        ],
+      ),
+    );
+    final chat = ConversationChatController(ConversationController(backend));
+    addTearDown(chat.dispose);
+
+    expect(
+      chat.updateMessage(
+        'a1',
+        const ModelMessage(role: ModelMessageRole.assistant, content: 'edit'),
+      ),
+      isTrue,
+    );
+    final send = chat.sendText('next');
+    await model.started.future;
+    backend.completions.single.completeError(StateError('edit rejected'));
+    await Future<void>.delayed(Duration.zero);
+
+    expect(chat.error, isA<StateError>());
+    expect(chat.status, ChatStatus.error);
+    model.release.complete();
+    await send;
+  });
+
+  test(
+    'restoring a transcript supersedes an older pending edit failure',
+    () async {
+      final initial = Conversation(
+        id: 'chat-1',
+        messages: [
+          ConversationMessage(
+            id: 'a1',
+            role: ConversationRole.assistant,
+            parts: [TextPart(id: 'p1', text: 'old')],
+          ),
+        ],
+      );
+      final backend = _DelayedEditBackend(
+        agent: _textAgent('unused'),
+        initial: initial,
+      );
+      final chat = ConversationChatController(ConversationController(backend));
+      addTearDown(chat.dispose);
+
+      expect(
+        chat.updateMessage(
+          'a1',
+          const ModelMessage(role: ModelMessageRole.assistant, content: 'edit'),
+        ),
+        isTrue,
+      );
+      await Future<void>.delayed(Duration.zero);
+      await chat.conversationController.restore(
+        ConversationCodec.encode(initial),
+      );
+      backend.completions.single.completeError(
+        StateError('stale edit rejected'),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(chat.error, isNull);
+      expect(chat.status, ChatStatus.ready);
+      expect(chat.chatMessages.single.message.text, 'old');
+    },
+  );
+
+  test(
+    'serializes edits per message and retains the latest optimistic text',
+    () async {
+      final backend = _DelayedEditBackend(
+        agent: _textAgent('unused'),
+        initial: Conversation(
+          id: 'chat-1',
+          messages: [
+            ConversationMessage(
+              id: 'a1',
+              role: ConversationRole.assistant,
+              parts: [TextPart(id: 'p1', text: 'old')],
+            ),
+          ],
+        ),
+      );
+      final chat = ConversationChatController(ConversationController(backend));
+      addTearDown(chat.dispose);
+
+      chat.updateMessage(
+        'a1',
+        const ModelMessage(role: ModelMessageRole.assistant, content: 'first'),
+      );
+      chat.updateMessage(
+        'a1',
+        const ModelMessage(role: ModelMessageRole.assistant, content: 'last'),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(backend.completions, hasLength(1));
+
+      backend.completions.single.complete();
+      await pumpUntil(() => backend.completions.length == 2);
+      expect(chat.chatMessages.single.message.text, 'last');
+      expect(
+        (backend.conversation.messages.single.parts.single as TextPart).text,
+        'first',
+      );
+
+      backend.completions[1].complete();
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        (backend.conversation.messages.single.parts.single as TextPart).text,
+        'last',
+      );
+      expect(chat.chatMessages.single.message.text, 'last');
+    },
+  );
+
+  test('edit queues are independent for different messages', () async {
+    final backend = _DelayedEditBackend(
+      agent: _textAgent('unused'),
+      initial: Conversation(
+        id: 'chat-1',
+        messages: [
+          ConversationMessage(
+            id: 'a1',
+            role: ConversationRole.assistant,
+            parts: [TextPart(id: 'p1', text: 'one')],
+          ),
+          ConversationMessage(
+            id: 'a2',
+            role: ConversationRole.assistant,
+            parts: [TextPart(id: 'p2', text: 'two')],
+          ),
+        ],
+      ),
+    );
+    final chat = ConversationChatController(ConversationController(backend));
+    addTearDown(chat.dispose);
+
+    chat.updateMessage(
+      'a1',
+      const ModelMessage(role: ModelMessageRole.assistant, content: 'first'),
+    );
+    chat.updateMessage(
+      'a2',
+      const ModelMessage(role: ModelMessageRole.assistant, content: 'second'),
+    );
+
+    expect(backend.writes.map((message) => message.id), ['a1', 'a2']);
+    backend.completions[0].complete();
+    backend.completions[1].complete();
+    await Future<void>.delayed(Duration.zero);
+  });
+
+  test('a failed edit does not prevent the next queued edit', () async {
+    final backend = _DelayedEditBackend(
+      agent: _textAgent('unused'),
+      initial: Conversation(
+        id: 'chat-1',
+        messages: [
+          ConversationMessage(
+            id: 'a1',
+            role: ConversationRole.assistant,
+            parts: [TextPart(id: 'p1', text: 'old')],
+          ),
+        ],
+      ),
+    );
+    final chat = ConversationChatController(ConversationController(backend));
+    addTearDown(chat.dispose);
+
+    chat.updateMessage(
+      'a1',
+      const ModelMessage(role: ModelMessageRole.assistant, content: 'first'),
+    );
+    chat.updateMessage(
+      'a1',
+      const ModelMessage(role: ModelMessageRole.assistant, content: 'last'),
+    );
+    expect(backend.completions, hasLength(1));
+
+    backend.completions[0].completeError(StateError('first write failed'));
+    await pumpUntil(() => backend.completions.length == 2);
+    expect(chat.error, isA<StateError>());
+    backend.completions[1].complete();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(
+      (backend.conversation.messages.single.parts.single as TextPart).text,
+      'last',
+    );
+    expect(chat.chatMessages.single.message.text, 'last');
+    expect(chat.status, ChatStatus.error);
+  });
+
+  test('restore releases queued edits for the restored transcript', () async {
+    final initial = Conversation(
+      id: 'chat-1',
+      messages: [
+        ConversationMessage(
+          id: 'a1',
+          role: ConversationRole.assistant,
+          parts: [TextPart(id: 'p1', text: 'old')],
+        ),
+      ],
+    );
+    final backend = _DelayedEditBackend(
+      agent: _textAgent('unused'),
+      initial: initial,
+    );
+    final chat = ConversationChatController(ConversationController(backend));
+    addTearDown(chat.dispose);
+
+    chat.updateMessage(
+      'a1',
+      const ModelMessage(role: ModelMessageRole.assistant, content: 'stale'),
+    );
+    chat.updateMessage(
+      'a1',
+      const ModelMessage(role: ModelMessageRole.assistant, content: 'queued'),
+    );
+    await chat.conversationController.restore(
+      ConversationCodec.encode(initial),
+    );
+    chat.updateMessage(
+      'a1',
+      const ModelMessage(role: ModelMessageRole.assistant, content: 'restored'),
+    );
+    expect(backend.completions, hasLength(2));
+
+    backend.completions[0].complete();
+    await Future<void>.delayed(Duration.zero);
+    expect(backend.completions, hasLength(2));
+    backend.completions[1].complete();
+    await Future<void>.delayed(Duration.zero);
+    expect(
+      (backend.conversation.messages.single.parts.single as TextPart).text,
+      'restored',
+    );
+  });
+
+  test('edits stay disabled through intermediate restore snapshots', () async {
+    final initial = Conversation(
+      id: 'chat-1',
+      messages: [
+        ConversationMessage(
+          id: 'a1',
+          role: ConversationRole.assistant,
+          parts: [TextPart(id: 'p1', text: 'original')],
+        ),
+      ],
+    );
+    final backend = _DelayedRestoreEditBackend(
+      agent: _textAgent('unused'),
+      initial: initial,
+    );
+    addTearDown(() {
+      if (!backend.releaseRestore.isCompleted) {
+        backend.releaseRestore.complete();
+      }
+    });
+    final chat = ConversationChatController(ConversationController(backend));
+    addTearDown(chat.dispose);
+
+    final restore = chat.conversationController.restore(
+      ConversationCodec.encode(initial),
+    );
+    try {
+      await backend.restoreEvent.future;
+      await Future<void>.delayed(Duration.zero);
+      expect(chat.chatMessages.single.message.text, 'interim');
+
+      expect(
+        chat.updateMessage(
+          'a1',
+          const ModelMessage(role: ModelMessageRole.assistant, content: 'edit'),
+        ),
+        isFalse,
+      );
+    } finally {
+      if (!backend.releaseRestore.isCompleted) {
+        backend.releaseRestore.complete();
+      }
+      await restore;
+    }
+  });
+
+  test('backend status wins over a stale streaming adapter snapshot', () async {
+    final streamingMessage = ConversationMessage(
+      id: 'a1',
+      role: ConversationRole.assistant,
+      status: ConversationMessageStatus.streaming,
+      parts: [TextPart(id: 'p1', text: 'old')],
+    );
+    final backend = LocalConversationBackend(
+      agent: _textAgent('unused'),
+      initial: Conversation(id: 'chat-1', messages: [streamingMessage]),
+    );
+    final chat = ConversationChatController(ConversationController(backend));
+    addTearDown(chat.dispose);
+
+    final update = backend.updateMessage(
+      ConversationMessage(
+        id: 'a1',
+        role: ConversationRole.assistant,
+        status: ConversationMessageStatus.complete,
+        parts: [TextPart(id: 'p1', text: 'old')],
+      ),
+    );
+    expect(
+      chat.chatMessages.single.status,
+      ConversationMessageStatus.streaming,
+    );
+    expect(
+      chat.updateMessage(
+        'a1',
+        const ModelMessage(role: ModelMessageRole.assistant, content: 'edited'),
+      ),
+      isTrue,
+    );
+    await update;
+    await Future<void>.delayed(Duration.zero);
+    expect(chat.chatMessages.single.message.text, 'edited');
+  });
+
+  test('dispose prevents queued edits from reaching the backend', () async {
+    final backend = _DelayedEditBackend(
+      agent: _textAgent('unused'),
+      initial: Conversation(
+        id: 'chat-1',
+        messages: [
+          ConversationMessage(
+            id: 'a1',
+            role: ConversationRole.assistant,
+            parts: [TextPart(id: 'p1', text: 'old')],
+          ),
+        ],
+      ),
+    );
+    final chat = ConversationChatController(ConversationController(backend));
+
+    chat.updateMessage(
+      'a1',
+      const ModelMessage(role: ModelMessageRole.assistant, content: 'first'),
+    );
+    chat.updateMessage(
+      'a1',
+      const ModelMessage(role: ModelMessageRole.assistant, content: 'queued'),
+    );
+    expect(backend.completions, hasLength(1));
+    chat.dispose();
+    backend.completions.single.complete();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(backend.completions, hasLength(1));
+  });
+
+  test('stopping a stream retains a pending completed-message edit', () async {
+    final model = _ControllableModel();
+    addTearDown(() {
+      if (!model.release.isCompleted) model.release.complete();
+    });
+    final backend = _DelayedEditBackend(
+      agent: ToolLoopAgent(model: model),
+      initial: Conversation(
+        id: 'chat-1',
+        messages: [
+          ConversationMessage(
+            id: 'a1',
+            role: ConversationRole.assistant,
+            parts: [TextPart(id: 'p1', text: 'old')],
+          ),
+        ],
+      ),
+    );
+    final chat = ConversationChatController(ConversationController(backend));
+    addTearDown(chat.dispose);
+
+    chat.updateMessage(
+      'a1',
+      const ModelMessage(role: ModelMessageRole.assistant, content: 'edited'),
+    );
+    final send = chat.sendText('next');
+    await model.started.future;
+    await chat.stop();
+
+    expect(
+      chat.chatMessages
+          .firstWhere((message) => message.id == 'a1')
+          .message
+          .text,
+      'edited',
+    );
+    backend.completions.single.complete();
+    model.release.complete();
+    await send;
   });
 }

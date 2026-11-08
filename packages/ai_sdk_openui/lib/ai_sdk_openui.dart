@@ -13,6 +13,16 @@ export 'src/lang/policy.dart'
         ValidationReport,
         validateProgram;
 export 'src/runtime/action_message.dart' show buildActionUserMessage;
+export 'src/runtime/answers.dart'
+    show
+        OpenUiAnswers,
+        OpenUiMessageDone,
+        OpenUiMessageEvent,
+        OpenUiPatch,
+        OpenUiTextDelta,
+        OpenUiTextSnapshot,
+        messageState,
+        messageWithState;
 export 'src/runtime/errors.dart'
     show OpenUiError, OpenUiErrorCode, OpenUiErrorSource;
 export 'src/runtime/host_actions.dart'

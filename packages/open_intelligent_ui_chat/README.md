@@ -41,4 +41,35 @@ AiChatScaffold(
 `OpenUiChat` advertises only the components its builders draw. Pass the builders of the plugins you
 add, as above.
 
+## Custom transport
+
+`send` carries `@ToAssistant` turns over any transport instead of an agent. The chat does not add
+the turn to the transcript; the transport does, as `ConversationChatController.sendText` does.
+
+```dart
+final chat = OpenUiChat(
+  controller: controller,
+  send: (text) async {
+    controller.append(ModelMessage(role: ModelMessageRole.user, content: text));
+    final reply = await myServer.answer(text); // OpenUI text
+    controller.append(
+      ModelMessage(role: ModelMessageRole.assistant, content: reply),
+    );
+  },
+  locale: 'en-US',
+  records: (id) => [BoundRecord('orders', orders)],
+);
+```
+
+## Render one answer
+
+`OpenUiAnswerView` renders one message of an `OpenUiAnswers` (ai_sdk_openui) by its id, for a
+transport that keeps answers outside a chat transcript:
+
+```dart
+final answers = OpenUiAnswers(library: library, onSave: (id, text) => store(id, text));
+answers.append(id, delta); // or update, patch, listen, finish
+OpenUiAnswerView(answers: answers, id: id, onToAssistant: sendTurn);
+```
+
 Part of [open_intelligent_ui](https://pub.dev/packages/open_intelligent_ui); see its README.

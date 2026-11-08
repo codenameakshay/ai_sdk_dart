@@ -3,12 +3,20 @@ import 'dart:async';
 
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
-import 'package:ai_sdk_openui/ai_sdk_openui.dart' show buildActionUserMessage;
+import 'package:ai_sdk_openui/ai_sdk_openui.dart'
+    show
+        OpenUiAnswers,
+        OpenUiMessageEvent,
+        OpenUiTextDelta,
+        OpenUiMessageDone,
+        buildActionUserMessage;
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:open_intelligent_ui_core/open_intelligent_ui_core.dart' as core;
 import 'package:open_intelligent_ui/chat.dart';
-import 'package:open_intelligent_ui/open_intelligent_ui.dart' show ActionEvent;
+import 'package:open_intelligent_ui/open_intelligent_ui.dart'
+    show ActionEvent, intelligentUi;
 import 'package:open_intelligent_ui_chat/src/chat.dart' show formFields;
 
 /// A model whose answers the test streams by hand, one call at a time.
@@ -80,33 +88,38 @@ final class _Harness {
 Future<_Harness> _pump(
   WidgetTester tester, {
   List<ModelMessage> initial = const [],
+  ChatController? controller,
+  Future<void> Function(String text)? send,
 }) async {
   tester.view.physicalSize = const Size(390 * 3, 844 * 3);
   tester.view.devicePixelRatio = 3;
   addTearDown(tester.view.reset);
   final model = _HandModel();
   final agent = ToolLoopAgent(model: model);
-  final controller = ChatController(
-    generateId: _ids(),
-    initialMessages: initial,
+  final transcript =
+      controller ??
+      ChatController(generateId: _ids(), initialMessages: initial);
+  final chat = OpenUiChat(
+    controller: transcript,
+    agent: send == null ? agent : null,
+    send: send,
   );
-  final chat = OpenUiChat(controller: controller, agent: agent);
   addTearDown(() {
     chat.dispose();
-    controller.dispose();
+    transcript.dispose();
   });
   await tester.pumpWidget(
     MaterialApp(
       home: Scaffold(
         body: AiChatScaffold(
-          controller: controller,
+          controller: transcript,
           agent: agent,
           chatMessageBuilder: chat.buildMessage,
         ),
       ),
     ),
   );
-  return _Harness(controller, model, chat);
+  return _Harness(transcript, model, chat);
 }
 
 const _greeting =
@@ -120,7 +133,7 @@ void main() {
   ) async {
     final h = await _pump(tester);
     await _real(tester, () {
-      unawaited(h.controller.sendMessage(agent: h.chat.agent, text: 'hello'));
+      unawaited(h.controller.sendMessage(agent: h.chat.agent!, text: 'hello'));
     });
     await _real(tester, () => h.model.say(_greeting));
     expect(find.text('Hi Ana'), findsOneWidget);
@@ -231,14 +244,14 @@ void main() {
   ) async {
     final h = await _pump(tester);
     await _real(tester, () {
-      unawaited(h.controller.sendMessage(agent: h.chat.agent, text: 'first'));
+      unawaited(h.controller.sendMessage(agent: h.chat.agent!, text: 'first'));
     });
     await _real(tester, () => h.model.say(_greeting));
     final firstId = h.controller.streamingMessageId!;
     expect(h.chat.sessionOf(firstId), isNotNull);
 
     await _real(tester, () {
-      unawaited(h.controller.sendMessage(agent: h.chat.agent, text: 'second'));
+      unawaited(h.controller.sendMessage(agent: h.chat.agent!, text: 'second'));
     });
     expect(h.controller.isLoading, isTrue);
     expect(h.chat.sessionOf(firstId), isNull);
@@ -265,7 +278,7 @@ void main() {
   ) async {
     final h = await _pump(tester);
     await _real(tester, () {
-      unawaited(h.controller.sendMessage(agent: h.chat.agent, text: 'hello'));
+      unawaited(h.controller.sendMessage(agent: h.chat.agent!, text: 'hello'));
     });
     await _real(tester, () => h.model.say(_greeting));
     await tester.enterText(find.byType(TextField).first, 'Cy');
@@ -285,7 +298,7 @@ void main() {
   ) async {
     final h = await _pump(tester);
     await _real(tester, () {
-      unawaited(h.controller.sendMessage(agent: h.chat.agent, text: 'hello'));
+      unawaited(h.controller.sendMessage(agent: h.chat.agent!, text: 'hello'));
     });
     await _real(tester, () => h.model.say(_greeting));
     await tester.enterText(find.byType(TextField).first, 'Cy');
@@ -346,7 +359,7 @@ void main() {
         r'$name = "Ana"';
     final h = await _pump(tester);
     await _real(tester, () {
-      unawaited(h.controller.sendMessage(agent: h.chat.agent, text: 'hello'));
+      unawaited(h.controller.sendMessage(agent: h.chat.agent!, text: 'hello'));
     });
     await _real(tester, () => h.model.say(program));
     final session = h.chat.sessionOf(h.controller.streamingMessageId!)!;
@@ -404,7 +417,7 @@ void main() {
   ) async {
     final h = await _pump(tester);
     await _real(tester, () {
-      unawaited(h.controller.sendMessage(agent: h.chat.agent, text: 'hello'));
+      unawaited(h.controller.sendMessage(agent: h.chat.agent!, text: 'hello'));
     });
     await _real(
       tester,
@@ -477,7 +490,7 @@ void main() {
       ],
     );
     await _real(tester, () {
-      unawaited(h.controller.reload(agent: h.chat.agent));
+      unawaited(h.controller.reload(agent: h.chat.agent!));
     });
     await _real(tester, () {
       h.model.say(_greeting);
@@ -488,7 +501,7 @@ void main() {
     expect(session.root, isNotNull);
 
     await _real(tester, () {
-      unawaited(h.controller.reload(agent: h.chat.agent));
+      unawaited(h.controller.reload(agent: h.chat.agent!));
     });
     expect(h.model.calls, hasLength(2));
     expect(h.chat.sessionOf(first), isNull);
@@ -499,7 +512,7 @@ void main() {
   testWidgets('a failed answer drops its streaming session', (tester) async {
     final h = await _pump(tester);
     await _real(tester, () {
-      unawaited(h.controller.sendMessage(agent: h.chat.agent, text: 'hello'));
+      unawaited(h.controller.sendMessage(agent: h.chat.agent!, text: 'hello'));
     });
     await _real(tester, () => h.model.say(_greeting));
     final id = h.controller.streamingMessageId!;
@@ -553,6 +566,357 @@ void main() {
     await tester.tap(find.text('Form data (1 field)'));
     await tester.pump();
     expect(find.text('city: Lisbon'), findsOneWidget);
+  });
+
+  testWidgets('a send transport renders an answer from a plain event stream', (
+    tester,
+  ) async {
+    final events = StreamController<OpenUiMessageEvent>();
+    addTearDown(events.close);
+    late _Harness h;
+    Future<void> relay(String text) async {
+      h.controller
+        ..append(ModelMessage(role: ModelMessageRole.user, content: text))
+        ..append(
+          const ModelMessage(role: ModelMessageRole.assistant, content: ''),
+        );
+      final id = h.controller.chatMessages.last.id;
+      var raw = '';
+      await for (final event in events.stream) {
+        if (event is OpenUiTextDelta) raw += event.delta;
+        h.controller.updateMessage(
+          id,
+          ModelMessage(role: ModelMessageRole.assistant, content: raw),
+        );
+        if (event is OpenUiMessageDone) return;
+      }
+    }
+
+    h = await _pump(
+      tester,
+      initial: const [
+        ModelMessage(
+          role: ModelMessageRole.assistant,
+          content: r'root = Col([Button("Go", @ToAssistant("go"))])',
+        ),
+      ],
+      send: relay,
+    );
+    await tester.tap(find.text('Go'));
+    await tester.pump();
+
+    await _real(
+      tester,
+      () => events.add(
+        const OpenUiTextDelta(
+          'm3',
+          'root = Col([Input(\$name), Text("Hi " + \$name)])\n',
+        ),
+      ),
+    );
+    expect(
+      h.chat.sessionOf(h.controller.chatMessages.last.id)!.root,
+      isNotNull,
+    );
+
+    await _real(
+      tester,
+      () => events.add(const OpenUiTextDelta('m3', r'$name = "Ana"')),
+    );
+    await _real(tester, () => events.add(const OpenUiMessageDone('m3')));
+    expect(find.text('Hi Ana'), findsOneWidget);
+  });
+
+  testWidgets('a new chat over a saved transcript shows the saved state', (
+    tester,
+  ) async {
+    final first = await _pump(
+      tester,
+      initial: const [
+        ModelMessage(role: ModelMessageRole.assistant, content: _greeting),
+      ],
+    );
+    await tester.enterText(find.byType(TextField).first, 'Bo');
+    await tester.pump();
+
+    await _pump(tester, initial: first.controller.messages);
+    expect(find.text('Hi Bo'), findsOneWidget);
+  });
+
+  testWidgets('an answer stored as text parts renders and saves edits', (
+    tester,
+  ) async {
+    final h = await _pump(
+      tester,
+      initial: [
+        const ModelMessage(role: ModelMessageRole.user, content: 'hello'),
+        ModelMessage.parts(
+          role: ModelMessageRole.assistant,
+          parts: const [LanguageModelV4TextPart(text: _greeting)],
+        ),
+      ],
+    );
+    expect(find.text('Hi Ana'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).first, 'Bo');
+    await tester.pump();
+    expect(
+      h.controller.messages[1].content,
+      ']]>openui:content\n$_greeting\n]]>openui:context\n[{"\$name":"Bo"}]',
+    );
+  });
+
+  testWidgets('send carries @ToAssistant turns without an agent', (
+    tester,
+  ) async {
+    final sent = <String>[];
+    await _pump(
+      tester,
+      initial: const [
+        ModelMessage(
+          role: ModelMessageRole.assistant,
+          content:
+              r'root = Col([Button("More", @ToAssistant("Tell me more"))])',
+        ),
+      ],
+      send: (text) async => sent.add(text),
+    );
+    await tester.tap(find.text('More'));
+    await tester.pump();
+    expect(sent.single, contains('Tell me more'));
+    expect(sent.single, contains('User clicked: Tell me more'));
+  });
+
+  testWidgets('send ignores a second click while the transport is pending', (
+    tester,
+  ) async {
+    final sent = <String>[];
+    final pendingSends = <Completer<void>>[];
+    await _pump(
+      tester,
+      initial: const [
+        ModelMessage(
+          role: ModelMessageRole.assistant,
+          content:
+              r'root = Col([Button("More", @ToAssistant("Tell me more"))])',
+        ),
+      ],
+      send: (text) {
+        sent.add(text);
+        final pendingSend = Completer<void>();
+        pendingSends.add(pendingSend);
+        return pendingSend.future;
+      },
+    );
+
+    await tester.tap(find.text('More'));
+    await tester.pump();
+    await tester.tap(find.text('More'));
+    await tester.pump();
+
+    expect(sent, hasLength(1));
+    pendingSends.single.complete();
+    await tester.pump();
+    await tester.tap(find.text('More'));
+    await tester.pump();
+    expect(sent, hasLength(2));
+    pendingSends.last.complete();
+  });
+
+  testWidgets('a failed send can be retried without hiding its error', (
+    tester,
+  ) async {
+    var attempts = 0;
+    await _pump(
+      tester,
+      initial: const [
+        ModelMessage(
+          role: ModelMessageRole.assistant,
+          content:
+              r'root = Col([Button("More", @ToAssistant("Tell me more"))])',
+        ),
+      ],
+      send: (_) async {
+        attempts++;
+        if (attempts == 1) throw StateError('offline');
+      },
+    );
+
+    final callback = tester
+        .widget<core.OpenUiView>(find.byType(core.OpenUiView))
+        .onToAssistant!;
+    final errors = <Object>[];
+    final failed = Completer<void>();
+    runZonedGuarded(
+      () => callback(
+        const ActionEvent(
+          type: ActionEvent.continueConversation,
+          humanFriendlyMessage: 'Tell me more',
+        ),
+      ),
+      (error, _) {
+        errors.add(error);
+        failed.complete();
+      },
+    );
+    await failed.future;
+    expect(errors.single, isA<StateError>());
+
+    await tester.tap(find.text('More'));
+    await tester.pump();
+    expect(attempts, 2);
+  });
+
+  test('OpenUiChat needs an agent or a send function', () {
+    final controller = ChatController();
+    addTearDown(controller.dispose);
+    expect(() => OpenUiChat(controller: controller), throwsArgumentError);
+  });
+
+  testWidgets('OpenUiAnswerView renders a message from any transport', (
+    tester,
+  ) async {
+    final saved = <String, String>{};
+    final answers = OpenUiAnswers(
+      library: intelligentUi,
+      onSave: (id, text) => saved[id] = text,
+    );
+    addTearDown(answers.dispose);
+
+    answers.append('m1', _greeting);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: OpenUiAnswerView(answers: answers, id: 'm1'),
+        ),
+      ),
+    );
+    expect(find.text('Hi Ana'), findsOneWidget);
+
+    answers.finish('m1');
+    await tester.pump();
+    await tester.enterText(find.byType(TextField).first, 'Bo');
+    await tester.pump();
+    expect(saved['m1'], endsWith('[{"\$name":"Bo"}]'));
+
+    answers.update('m2', 'Just text', streaming: false);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: OpenUiAnswerView(answers: answers, id: 'm2'),
+        ),
+      ),
+    );
+    expect(find.text('Just text'), findsOneWidget);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: OpenUiAnswerView(answers: answers, id: 'missing'),
+        ),
+      ),
+    );
+    expect(find.byType(TextField), findsNothing);
+  });
+
+  testWidgets('OpenUiAnswerView renders completed prose from an empty stream', (
+    tester,
+  ) async {
+    final answers = OpenUiAnswers(library: intelligentUi);
+    addTearDown(answers.dispose);
+    answers.update('m1', '', streaming: true);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: OpenUiAnswerView(answers: answers, id: 'm1'),
+        ),
+      ),
+    );
+
+    answers.append('m1', 'Plain response');
+    answers.finish('m1');
+    await tester.pump();
+
+    expect(find.text('Plain response'), findsOneWidget);
+  });
+
+  testWidgets('OpenUiAnswerView switches a program to prose reactively', (
+    tester,
+  ) async {
+    final answers = OpenUiAnswers(library: intelligentUi);
+    addTearDown(answers.dispose);
+    answers.update('m1', _greeting, streaming: false);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: OpenUiAnswerView(answers: answers, id: 'm1'),
+        ),
+      ),
+    );
+    expect(find.text('Hi Ana'), findsOneWidget);
+
+    answers.update('m1', 'Plain response', streaming: false);
+    await tester.pump();
+
+    expect(find.text('Plain response'), findsOneWidget);
+  });
+
+  testWidgets('OpenUiAnswerView switches prose to a program reactively', (
+    tester,
+  ) async {
+    final answers = OpenUiAnswers(library: intelligentUi);
+    addTearDown(answers.dispose);
+    answers.update('m1', 'Plain response', streaming: false);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: OpenUiAnswerView(answers: answers, id: 'm1'),
+        ),
+      ),
+    );
+    expect(find.text('Plain response'), findsOneWidget);
+
+    answers.update('m1', _greeting, streaming: false);
+    await tester.pump();
+
+    expect(find.text('Hi Ana'), findsOneWidget);
+  });
+
+  testWidgets('OpenUiAnswerView preserves and rebinds answer sessions', (
+    tester,
+  ) async {
+    final answers = OpenUiAnswers(library: intelligentUi);
+    addTearDown(answers.dispose);
+    answers.update('m1', _greeting, streaming: false);
+    final original = answers.sessionOf('m1');
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: OpenUiAnswerView(answers: answers, id: 'm1'),
+        ),
+      ),
+    );
+
+    answers.update('m1', _greeting, streaming: false);
+    expect(identical(answers.sessionOf('m1'), original), isTrue);
+
+    answers.remove('m1');
+    answers.update('m1', _greeting, streaming: false);
+    final replacement = answers.sessionOf('m1');
+    expect(identical(replacement, original), isFalse);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: OpenUiAnswerView(answers: answers, id: 'm1'),
+        ),
+      ),
+    );
+    answers.update('m1', 'Replacement prose', streaming: false);
+    await tester.pump();
+    expect(find.text('Replacement prose'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    answers.update('m1', _greeting, streaming: false);
+    await tester.pump();
   });
 
   group('formFields', () {

@@ -1,5 +1,8 @@
 ## 3.1.0 (unreleased)
 
+- `OpenUiChat` takes `send` for any transport, `locale` and `records`; `agent` is optional. The chat
+  renders answers stored as text parts, and `package:open_intelligent_ui/chat.dart` exports
+  `OpenUiAnswerView`.
 - Button, IconButton and Pressable show a handled action's pending, done and failed states, ask for an inline
   confirmation when the action has `confirm`, and stay disabled after success with `disableAfterSuccess`.
   `OpenUiNode` gains `actionStatus(prop)` and `run(confirmed:)`.

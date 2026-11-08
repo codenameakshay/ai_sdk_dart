@@ -23,3 +23,6 @@
 - Svg: a bad path draws up to its first error.
 - Charts and tables: chart hover follows pointer movement, and tables lay out with min-content widths and
   list and table semantics.
+- `package:open_intelligent_ui/chat.dart`: `OpenUiChat` renders answers in
+  `ai_sdk_flutter_ui` chats, and `OpenUiUserMessage` shows `@ToAssistant` turns with their form
+  values. The example has an offline chat demo.

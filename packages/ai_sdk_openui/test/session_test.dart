@@ -79,6 +79,34 @@ void main() {
       expect(child(s.root!, 1).props['text'], 'Hi Bo');
     });
 
+    test('onStateUpdate reports edits but not start-up or new defaults', () {
+      final updates = <Map<String, Object?>>[];
+      final s = OpenUiSession(
+        intelligentUi,
+        initialState: const {
+          'f': {
+            'x': {'value': 1, 'componentType': 'Input'},
+          },
+        },
+        onStateUpdate: (state) => updates.add({...state}),
+      );
+      addTearDown(s.dispose);
+      const program = r'root = Col([Input($name)])';
+      s.update('$program\n\$name = "Ana"', streaming: true);
+      s.update('$program\n\$name = "Ana B"', streaming: false);
+      expect(updates, isEmpty);
+
+      s.field('', child(s.root!).props['value']).set('Bo');
+      expect(updates, [
+        {
+          'f': {
+            'x': {'value': 1, 'componentType': 'Input'},
+          },
+          r'$name': 'Bo',
+        },
+      ]);
+    });
+
     test(
       'untouched variables follow new defaults while streaming; touched ones stay',
       () {

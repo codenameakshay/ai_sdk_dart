@@ -18,3 +18,5 @@
 - `OpenUiSession` gains `onParseResult`, `setTools`, `metadata`, `isGenerating`, `fieldValue`,
   `setDefaultValue`, `retryQueries` and `reportRenderError`.
 - `retryQueries` with nothing failed refetches every Query, as react-lang does.
+- `Js.stringify` (used for saved message context, store comparison and query keys) now writes
+  numbers and integer-like object keys as `JSON.stringify` does.

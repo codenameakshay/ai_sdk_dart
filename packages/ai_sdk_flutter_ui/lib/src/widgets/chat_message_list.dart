@@ -21,6 +21,20 @@ typedef ChatMessageBuilder =
       bool isStreaming,
     );
 
+/// Builds one transcript row from its [ChatMessage], so the row can key state
+/// by [ChatMessage.id].
+///
+/// The in-flight assistant row has the id the message gets when it is
+/// committed ([ChatController.streamingMessageId]), and [isStreaming] true.
+/// A committed row has [isStreaming] true while its status is
+/// [ConversationMessageStatus.streaming].
+typedef ChatMessageEntryBuilder =
+    Widget Function(
+      BuildContext context,
+      ChatMessage message,
+      bool isStreaming,
+    );
+
 /// Renders a [ChatController]'s message history as a natural transcript.
 ///
 /// The default composition is Claude-style: **user** messages are soft,
@@ -43,6 +57,7 @@ class ChatMessageList extends StatefulWidget {
     super.key,
     required this.controller,
     this.messageBuilder,
+    this.chatMessageBuilder,
     this.padding = const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
     this.scrollController,
     this.emptyState,
@@ -55,6 +70,10 @@ class ChatMessageList extends StatefulWidget {
   /// Optional custom row builder. When null, the default transcript
   /// composition is used.
   final ChatMessageBuilder? messageBuilder;
+
+  /// Optional custom row builder that receives each row's [ChatMessage].
+  /// Takes precedence over [messageBuilder].
+  final ChatMessageEntryBuilder? chatMessageBuilder;
 
   /// Padding around the list.
   final EdgeInsetsGeometry padding;
@@ -167,10 +186,16 @@ class _ChatMessageListState extends State<ChatMessageList> {
     return ListenableBuilder(
       listenable: widget.controller,
       builder: (context, _) {
-        final messages = widget.controller.messages;
+        final entries = widget.chatMessageBuilder == null
+            ? null
+            : widget.controller.chatMessages;
+        final messages = entries == null
+            ? widget.controller.messages
+            : [for (final entry in entries) entry.message];
         final streaming = widget.controller.streamingContent;
         final status = widget.controller.status;
-        final hasCustomBuilder = widget.messageBuilder != null;
+        final hasCustomBuilder =
+            widget.messageBuilder != null || entries != null;
         final lastMessage = messages.isEmpty ? null : messages.last;
         final hasRenderedAssistant =
             lastMessage?.role == ModelMessageRole.assistant;
@@ -211,7 +236,23 @@ class _ChatMessageListState extends State<ChatMessageList> {
               }
               final message = messages[index];
               final isNew = !_seen.contains(message);
-              final row = _buildRow(context, message);
+              final row = entries == null
+                  ? _buildRow(context, message)
+                  : widget.chatMessageBuilder!(
+                      context,
+                      entries[index],
+                      entries[index].status ==
+                          ConversationMessageStatus.streaming,
+                    );
+              if (entries != null) {
+                return KeyedSubtree(
+                  key: ValueKey(entries[index].id),
+                  child: AiEntrance(
+                    duration: isNew ? AiMotion.entrance : Duration.zero,
+                    child: row,
+                  ),
+                );
+              }
               return isNew ? AiEntrance(child: row) : row;
             },
           ),
@@ -221,6 +262,21 @@ class _ChatMessageListState extends State<ChatMessageList> {
   }
 
   Widget _buildPendingRow(BuildContext context, String streaming) {
+    final entryBuilder = widget.chatMessageBuilder;
+    if (entryBuilder != null) {
+      final entry = ChatMessage(
+        id: widget.controller.streamingMessageId ?? '',
+        message: ModelMessage(
+          role: ModelMessageRole.assistant,
+          content: streaming,
+        ),
+        status: ConversationMessageStatus.streaming,
+      );
+      return KeyedSubtree(
+        key: ValueKey(entry.id),
+        child: AiEntrance(child: entryBuilder(context, entry, true)),
+      );
+    }
     final builder = widget.messageBuilder;
     if (builder != null) {
       final streamingMessage = ModelMessage(

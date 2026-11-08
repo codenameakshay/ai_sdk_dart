@@ -176,7 +176,7 @@ abstract final class Js {
             ? ordered(value)
             : object([
                 for (final MapEntry(:key, value: v) in value.entries)
-                  MapEntry('$key', v),
+                  MapEntry(string(key), v),
               ]);
         for (final MapEntry(:key, value: v) in map.entries) {
           if (!first) out.write(',');
@@ -240,7 +240,7 @@ abstract final class Js {
         List() => [for (final v in value) normalize(v, json: json)],
         Map() => object([
           for (final MapEntry(:key, value: v) in value.entries)
-            MapEntry('$key', normalize(v, json: json)),
+            MapEntry(string(key), normalize(v, json: json)),
         ]),
         _ => value,
       };

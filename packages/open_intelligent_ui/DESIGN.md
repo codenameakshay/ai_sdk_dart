@@ -114,6 +114,11 @@ model text ──► OpenUiSession.update(text, streaming)
     is the one gate. The umbrella does not re-allow either. HtmlView CDNs and YouTube embeds keep the reference's
     behaviour and are documented in the README's Network table, not switched off: leaving the web package out
     turns them off.
+15. **Element ids come from the statement.** An element's id is its statement id. An inline element
+    gets its parent's id and its slot and index (`<parent>/<slot>.<index>`, or `<parent>/<index>`
+    with no slot). A second element with the same id under one parent gets `~2`, `~3`, and so on.
+    The id is the element's key, `ValueKey('openui:<id>')`, so a renamed or moved statement mounts a
+    new widget.
 
 ## Chat integration
 
@@ -296,6 +301,11 @@ case from the reference's four test files and checked against Node, prove the be
   The map cannot pan past the poles, because flutter_map's latitude limit asserts when its options change.
 - A separate, non-persistent web view data store is not exposed by `webview_flutter` 4.14.
 - `generateSystemPrompt` takes an `OpenUiLibrary`; Dart has no `LibrarySpec` input path.
+- Semantics identifiers (`openui:<id>`) are opt-in through `OpenUiView(semanticsIdentifiers: true)`. Each
+  element then adds a container node to the semantics tree.
+- Charts, Svg and the map canvas stay left-to-right in RTL. Their surrounding controls follow the text
+  direction.
+- Goldens run on Linux only, because text rasterization differs by OS. Regenerate them on Linux.
 
 **Not ported:** lang-core telemetry and devtools, React rendering and hooks, MCP client auto-detection,
 `console.warn` output, react-ui `runChatAction` (the view already routes events by type), react-lang's devtools

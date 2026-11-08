@@ -1,7 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:ai_sdk_openui/ai_sdk_openui.dart';
-import 'package:ai_sdk_openui/intelligent_ui.dart' show formatDecimal;
+import 'package:ai_sdk_openui/intelligent_ui.dart' show Impure, formatDecimal;
 import 'package:flutter/cupertino.dart'
     show
         CupertinoButton,
@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart' show SemanticsRole;
 import 'package:flutter/services.dart';
 
+import '../localizations.dart';
 import '../theme.dart';
 import '../view.dart';
 import 'block_slot.dart' show PressableScope;
@@ -171,10 +172,10 @@ class _PressState extends State<Press> {
             children: [
               widget.builder(_hover && enabled, _down && enabled),
               if (_focus)
-                Positioned(
-                  left: -5,
+                PositionedDirectional(
+                  start: -5,
                   top: -5,
-                  right: -5,
+                  end: -5,
                   bottom: -5,
                   child: IgnorePointer(
                     child: DecoratedBox(
@@ -394,7 +395,7 @@ Widget buildButton(BuildContext context, OpenUiNode node) {
     return SizedBox(width: double.infinity, child: button);
   }
   return Align(
-    alignment: Alignment.centerLeft,
+    alignment: AlignmentDirectional.centerStart,
     widthFactor: 1,
     heightFactor: 1,
     child: button,
@@ -453,7 +454,7 @@ Widget buildIconButton(BuildContext context, OpenUiNode node) {
   );
   if (given != null) button = Tooltip(message: given, child: button);
   return Align(
-    alignment: Alignment.centerLeft,
+    alignment: AlignmentDirectional.centerStart,
     widthFactor: 1,
     heightFactor: 1,
     child: Semantics(
@@ -558,9 +559,9 @@ Widget buildPressable(BuildContext context, OpenUiNode node) {
                 ),
               ),
               if (ring)
-                Positioned(
+                PositionedDirectional(
                   top: 8,
-                  right: 8,
+                  end: 8,
                   child: Container(
                     width: 18,
                     height: 18,
@@ -759,8 +760,8 @@ Widget buildSelect(BuildContext context, OpenUiNode node) {
     label,
     Container(
       constraints: const BoxConstraints(minHeight: 42),
-      alignment: Alignment.centerLeft,
-      padding: const EdgeInsets.only(left: 12, right: 12),
+      alignment: AlignmentDirectional.centerStart,
+      padding: const EdgeInsetsDirectional.only(start: 12, end: 12),
       decoration: BoxDecoration(
         color: theme.canvas,
         borderRadius: BorderRadius.circular(theme.radii.md),
@@ -774,7 +775,8 @@ Widget buildSelect(BuildContext context, OpenUiNode node) {
             isDense: true,
             value: selected < 0 ? null : selected,
             hint: Text(
-              node.props.string('placeholder') ?? 'Choose…',
+              node.props.string('placeholder') ??
+                  OpenUiLocalizations.of(context).choose,
               style: style.copyWith(color: theme.faint),
             ),
             style: style,
@@ -895,7 +897,7 @@ Widget buildSegmentedControl(BuildContext context, OpenUiNode node) {
   return block
       ? group
       : Align(
-          alignment: Alignment.centerLeft,
+          alignment: AlignmentDirectional.centerStart,
           widthFactor: 1,
           heightFactor: 1,
           child: group,
@@ -985,7 +987,7 @@ Widget buildSlider(BuildContext context, OpenUiNode node) {
           ),
           child: MergeSemantics(
             child: Semantics(
-              label: label ?? 'Value',
+              label: label ?? OpenUiLocalizations.of(context).sliderValue,
               child: Slider(
                 min: min,
                 max: max,
@@ -1019,21 +1021,21 @@ Widget buildSlider(BuildContext context, OpenUiNode node) {
                   children: [
                     for (final m in marks)
                       if (m.at <= 0.02)
-                        Positioned(
+                        PositionedDirectional(
                           top: -2,
-                          left: (box.maxWidth - 18) * m.at,
+                          start: (box.maxWidth - 18) * m.at,
                           child: Text(m.label, softWrap: false, style: style),
                         )
                       else if (m.at >= 0.98)
-                        Positioned(
+                        PositionedDirectional(
                           top: -2,
-                          right: (box.maxWidth - 18) * (1 - m.at),
+                          end: (box.maxWidth - 18) * (1 - m.at),
                           child: Text(m.label, softWrap: false, style: style),
                         )
                       else
-                        Positioned(
+                        PositionedDirectional(
                           top: -2,
-                          left: 9 + (box.maxWidth - 18) * m.at,
+                          start: 9 + (box.maxWidth - 18) * m.at,
                           child: FractionalTranslation(
                             translation: const Offset(-0.5, 0),
                             child: Text(m.label, softWrap: false, style: style),
@@ -1114,7 +1116,7 @@ Widget buildCheckbox(BuildContext context, OpenUiNode node) {
   final checked = f.value == true;
   final done = checked && node.props.boolean('lineThrough') == true;
   return Align(
-    alignment: Alignment.centerLeft,
+    alignment: AlignmentDirectional.centerStart,
     widthFactor: 1,
     heightFactor: 1,
     child: Semantics(
@@ -1471,7 +1473,10 @@ Widget buildDatePicker(BuildContext context, OpenUiNode node) {
     label,
     Semantics(
       button: true,
-      label: _nonEmpty(label) == null ? 'Date' : null,
+      label: _nonEmpty(label) == null
+          ? OpenUiLocalizations.of(context).date
+          : null,
+      excludeSemantics: _nonEmpty(label) == null,
       value: current == null ? null : _formatDate(current),
       child: Press(
         radius: theme.radii.md,
@@ -1480,7 +1485,7 @@ Widget buildDatePicker(BuildContext context, OpenUiNode node) {
           final last = max != null && !max.isBefore(first)
               ? max
               : (first.isAfter(DateTime(2100)) ? first : DateTime(2100));
-          final today = DateTime.now();
+          final today = Impure.toLocal(Impure.now());
           var initial = current ?? DateTime(today.year, today.month, today.day);
           if (initial.isBefore(first)) initial = first;
           if (initial.isAfter(last)) initial = last;
@@ -1495,10 +1500,10 @@ Widget buildDatePicker(BuildContext context, OpenUiNode node) {
                   child: Column(
                     children: [
                       Align(
-                        alignment: Alignment.centerRight,
+                        alignment: AlignmentDirectional.centerEnd,
                         child: CupertinoButton(
                           onPressed: () => Navigator.pop(popup),
-                          child: const Text('Done'),
+                          child: Text(OpenUiLocalizations.of(ctx).done),
                         ),
                       ),
                       Expanded(

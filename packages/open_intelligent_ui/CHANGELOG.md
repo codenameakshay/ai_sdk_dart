@@ -1,5 +1,17 @@
 ## 3.1.0 (unreleased)
 
+- Every rendered element has a stable key from its statement id (inline elements: parent id and
+  position). `OpenUiView(semanticsIdentifiers: true)` also sets Semantics identifiers for UI tests.
+- Elements are keyed by statement id, so a statement that is renamed or moved inline mounts a new
+  widget and drops its local widget state (an expanded map, a scroll position).
+- All user-visible text comes from `OpenUiLocalizations` (English by default). Register
+  `OpenUiLocalizationsDelegate({'fr': MyFrenchStrings()})` in `localizationsDelegates` to translate.
+- Right-to-left: layout, padding and positioned controls follow `Directionality`. Charts, drawings
+  and the map canvas stay left-to-right.
+- The engine's clock and random seams are public as `Impure` (`Impure.now`, `Impure.random`);
+  DatePicker's today uses them.
+- The golden tests (light and dark, every component) run on Linux only; regenerate with
+  `fvm flutter test --update-goldens test/goldens` on Linux.
 - Theme tokens: `OpenUiTheme` takes `radii`, `spacing`, `typography` (scale, Text and Title sizes, weights,
   tabular figures) and `components` (per-component styles for Card, Button, Badge and Table), and builds from a
   host theme with `OpenUiTheme.fromColorScheme` or `fromMaterial`. Defaults are the reference's values, so nothing

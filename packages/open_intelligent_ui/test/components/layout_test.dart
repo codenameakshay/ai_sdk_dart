@@ -810,6 +810,59 @@ void main() {
       expect(_rect(tester, 'c').top, closeTo(_rect(tester, 'a').top, 0.5));
     });
 
+    testWidgets('fixed column count at a fractional cell width', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(133, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await pumpProgram(
+        tester,
+        'root = Grid([c1, c2, c3, c4], 3)\n'
+        'c1 = Text("c1")\nc2 = Text("c2")\n'
+        'c3 = Text("c3")\nc4 = Text("c4")',
+      );
+      expect(_rect(tester, 'c3').top, closeTo(_rect(tester, 'c1').top, 0.5));
+      expect(_rect(tester, 'c4').top, greaterThan(_rect(tester, 'c1').top));
+    });
+
+    testWidgets('fixed column count when gaps exceed available width', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(132, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final items = [for (var i = 1; i <= 13; i++) 'c$i'];
+      final defs = [for (final i in items) '$i = Text("$i")'].join('\n');
+      await pumpProgram(
+        tester,
+        'root = Grid([${items.join(', ')}], 12)\n$defs',
+      );
+      expect(_rect(tester, 'c12').top, closeTo(_rect(tester, 'c1').top, 0.5));
+      expect(_rect(tester, 'c13').top, greaterThan(_rect(tester, 'c1').top));
+    });
+
+    testWidgets('intrinsic height includes each grid row and its gap', (
+      tester,
+    ) async {
+      await pumpProgram(
+        tester,
+        'root = Grid([a, b, c, d], 2)\n'
+        'a = Text("a")\nb = Text("b")\n'
+        'c = Text("c")\nd = Text("d")',
+      );
+      final grid = tester.renderObject<RenderFlexRow>(find.byType(FlexRow));
+      final lineHeight = tester
+          .renderObject<RenderParagraph>(find.text('a'))
+          .getMaxIntrinsicHeight(double.infinity);
+      expect(
+        grid.getMaxIntrinsicHeight(768),
+        closeTo(2 * lineHeight + 12, 0.5),
+      );
+    });
+
     testWidgets('columns clamps below 1 to 1', (tester) async {
       await pumpProgram(
         tester,

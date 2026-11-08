@@ -272,6 +272,7 @@ Widget buildForm(BuildContext context, OpenUiNode node) {
         for (final (i, item) in items.indexed)
           i == items.length - 1 && _isAction(item)
               ? Padding(
+                  key: item.siblingKey,
                   padding: EdgeInsets.only(
                     top: theme.spacing.actionGap - theme.spacing.fieldGap,
                   ),
@@ -302,6 +303,11 @@ final class _Item {
   final Widget widget;
   final OpenUiElement? element;
 
+  Key? get siblingKey {
+    final key = widget.key;
+    return key == null ? null : ValueKey<Object>(key);
+  }
+
   String? get type => element?.typeName;
 }
 
@@ -314,9 +320,18 @@ List<_Item> _items(OpenUiNode node, Object? value) {
       }
       return;
     }
-    final element = v is OpenUiElement ? v : null;
+    if (v is OpenUiElement) {
+      final id = node.childId(v, out.length, slot: 'children');
+      out.add(
+        _Item(
+          OpenUiElementView(key: ValueKey('openui:$id'), element: v, id: id),
+          v,
+        ),
+      );
+      return;
+    }
     for (final w in node.render(v)) {
-      out.add(_Item(w, element));
+      out.add(_Item(w, null));
     }
   }
 
@@ -337,6 +352,7 @@ List<_Item> _slot(
     out.add(
       _Item(
         BlockSlot(
+          key: item.siblingKey,
           element: item.element,
           parent: parent,
           index: index,
@@ -419,7 +435,11 @@ Widget _column(
           : 24.0);
   Widget place(_Item item) =>
       cross != CrossAxisAlignment.stretch && _startAligned.contains(item.type)
-      ? Align(alignment: AlignmentDirectional.centerStart, child: item.widget)
+      ? Align(
+          key: item.siblingKey,
+          alignment: AlignmentDirectional.centerStart,
+          child: item.widget,
+        )
       : item.widget;
   final column = Column(
     crossAxisAlignment: cross,
@@ -490,16 +510,27 @@ Widget _row(
     children: [
       for (final item in items)
         if (item.type == 'Spacer')
-          const FlexRowItem(spacer: true, child: SizedBox.shrink())
+          FlexRowItem(
+            key: item.siblingKey,
+            spacer: true,
+            child: const SizedBox.shrink(),
+          )
         else if (_isMedia(item))
           FlexRowItem(
+            key: item.siblingKey,
             fixed: (w) => (w * 0.33).clamp(120, 200),
             child: MediaRowSlot(child: item.widget),
           )
         else if (_flexOf(item) case final flex?)
-          FlexRowItem(grow: flex, zeroBasis: true, child: item.widget)
+          FlexRowItem(
+            key: item.siblingKey,
+            grow: flex,
+            zeroBasis: true,
+            child: item.widget,
+          )
         else
           FlexRowItem(
+            key: item.siblingKey,
             shrink: !_hasNumericWidth(item) && !_rowFixed.contains(item.type),
             alignSelf: _alignSelf(item),
             child: item.widget,
@@ -530,30 +561,28 @@ FlexAlign? _alignSelf(_Item item) => switch (item.type) {
   _ => null,
 };
 
-Widget _gridRows(List<_Item> items, int columns, double gap) => Column(
-  crossAxisAlignment: CrossAxisAlignment.stretch,
-  spacing: gap,
+Widget _gridRows(List<_Item> items, int columns, double gap) => FlexRow(
+  gap: gap,
+  align: FlexAlign.stretch,
+  wrap: true,
+  childrenPerLine: columns,
   children: [
-    for (var start = 0; start < items.length; start += columns)
-      FlexRow(
-        gap: gap,
-        align: FlexAlign.stretch,
-        children: [
-          for (var i = start; i < start + columns; i++)
-            FlexRowItem(
-              fixed: (w) => math.max(0, w - gap * (columns - 1)) / columns,
-              child: i < items.length
-                  ? _cell(items[i])
-                  : const SizedBox.shrink(),
-            ),
-        ],
+    for (final item in items)
+      FlexRowItem(
+        key: item.siblingKey,
+        fixed: (w) => math.max(0, w - gap * (columns - 1)) / columns,
+        child: _cell(item),
       ),
   ],
 );
 
 /// Photos keep their own height at the top of a stretched grid cell.
 Widget _cell(_Item item) => item.type == 'Image' || item.type == 'SearchImage'
-    ? Align(alignment: Alignment.topCenter, child: item.widget)
+    ? Align(
+        key: item.siblingKey,
+        alignment: Alignment.topCenter,
+        child: item.widget,
+      )
     : item.widget;
 
 ThemeData _themed(BuildContext context, OpenUiTheme tokens) {

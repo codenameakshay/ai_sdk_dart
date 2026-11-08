@@ -1,6 +1,7 @@
 import 'package:ai_sdk_openui/ai_sdk_openui.dart';
 import 'package:flutter/material.dart';
 
+import 'localizations.dart';
 import 'view.dart';
 
 /// react-lang `RendererPreviewState`: what an [OpenUiPreview] shows, and how
@@ -149,7 +150,9 @@ class _DefaultPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final name = preview.metadata.name;
-    final title = name == null || name.isEmpty ? 'Untitled artifact' : name;
+    final title = name == null || name.isEmpty
+        ? OpenUiLocalizations.of(context).untitledArtifact
+        : name;
     final content = this.content;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -159,7 +162,11 @@ class _DefaultPreview extends StatelessWidget {
           expanded: preview.isOpen,
           child: TextButton(
             onPressed: preview.isOpen ? preview.close : preview.open,
-            child: Text('$title${preview.isStreaming ? ' (generating…)' : ''}'),
+            child: Text(
+              OpenUiLocalizations.of(
+                context,
+              ).artifactTitle(title, generating: preview.isStreaming),
+            ),
           ),
         ),
         if (content != null)
@@ -173,7 +180,9 @@ class _DefaultPreview extends StatelessWidget {
               children: [
                 TextButton(
                   onPressed: preview.close,
-                  child: Text('Close $title'),
+                  child: Text(
+                    OpenUiLocalizations.of(context).closeArtifact(title),
+                  ),
                 ),
                 content,
               ],

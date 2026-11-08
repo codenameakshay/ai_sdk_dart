@@ -186,6 +186,9 @@ class _IuiTableState extends State<IuiTable> {
         ? _Kind.numeric
         : _Kind.text;
     return _CellData(
+      key: cell?.child.key == null
+          ? null
+          : ValueKey(('table-cell', cell!.child.key)),
       row: r + 1,
       col: c,
       kind: kind,
@@ -219,6 +222,7 @@ final class _CellParentData extends ContainerBoxParentData<RenderBox> {
 
 class _CellData extends ParentDataWidget<_CellParentData> {
   const _CellData({
+    super.key,
     required this.row,
     required this.col,
     required this.kind,
@@ -284,6 +288,7 @@ class _TableLayout extends MultiChildRenderObjectWidget {
     header: header,
     hover: hover,
     line: line,
+    textDirection: Directionality.maybeOf(context) ?? TextDirection.ltr,
   );
 
   @override
@@ -295,7 +300,8 @@ class _TableLayout extends MultiChildRenderObjectWidget {
       ..hoveredRow = hoveredRow
       ..header = header
       ..hover = hover
-      ..line = line;
+      ..line = line
+      ..textDirection = Directionality.maybeOf(context) ?? TextDirection.ltr;
   }
 }
 
@@ -312,13 +318,22 @@ class RenderIuiTable extends RenderBox
     required Color header,
     required Color hover,
     required Color line,
+    required TextDirection textDirection,
   }) : _columns = columns,
        _availableWidth = availableWidth,
        _horizontalPadding = horizontalPadding,
        _hoveredRow = hoveredRow,
        _header = header,
        _hover = hover,
-       _line = line;
+       _line = line,
+       _textDirection = textDirection;
+
+  TextDirection _textDirection;
+  set textDirection(TextDirection v) {
+    if (v == _textDirection) return;
+    _textDirection = v;
+    markNeedsLayout();
+  }
 
   int _columns;
   set columns(int v) {
@@ -569,6 +584,15 @@ class RenderIuiTable extends RenderBox
       );
     }
     size = constraints.constrain(Size(lefts.last, tops.last));
+    if (_textDirection == TextDirection.rtl) {
+      for (var child = firstChild; child != null; child = childAfter(child)) {
+        final data = child.parentData! as _CellParentData;
+        data.offset = Offset(
+          size.width - data.offset.dx - child.size.width,
+          data.offset.dy,
+        );
+      }
+    }
   }
 
   @override
@@ -595,11 +619,12 @@ class RenderIuiTable extends RenderBox
       );
     }
     defaultPaint(context, offset);
+    final foreground = context.canvas;
     final paint = Paint()..color = _line;
     for (var r = 1; r < _rowTops.length; r++) {
       final isLast = r == _rowTops.length - 1;
       if (isLast && r > 1) break;
-      canvas.drawRect(
+      foreground.drawRect(
         Rect.fromLTWH(offset.dx, offset.dy + _rowTops[r] - 1, width, 1),
         paint,
       );
@@ -629,10 +654,16 @@ Widget buildTable(BuildContext context, OpenUiNode node) {
     ],
     numeric: numeric,
     rows: [
-      for (final row in rows)
+      for (final (r, row) in rows.indexed)
         [
           for (var c = 0; c < columns.length; c++)
-            _cell(context, node, c < row.length ? row[c] : null, body),
+            _cell(
+              context,
+              node,
+              c < row.length ? row[c] : null,
+              body,
+              slot: 'r$r.c$c',
+            ),
         ],
     ],
   );
@@ -659,16 +690,10 @@ IuiCell _cell(
   BuildContext context,
   OpenUiNode node,
   Object? value,
-  TextStyle style,
-) => switch (value) {
-  OpenUiElement element => IuiCell(
-    Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: node.render(element),
-    ),
-    component: element.typeName,
-  ),
+  TextStyle style, {
+  required String slot,
+}) => switch (value) {
+  OpenUiElement element => _elementCell(node, element, slot),
   final num number => IuiCell(Text(_formatNumber(number))),
   _ => IuiCell(
     InlineText(
@@ -681,6 +706,19 @@ IuiCell _cell(
     ),
   ),
 };
+
+IuiCell _elementCell(OpenUiNode node, OpenUiElement element, String slot) {
+  final children = node.render(element, slot: slot);
+  return IuiCell(
+    Column(
+      key: ValueKey(('table-content', children.single.key)),
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: children,
+    ),
+    component: element.typeName,
+  );
+}
 
 /// en-US with at most two decimals, as `toLocaleString` prints it.
 String _formatNumber(num value) {

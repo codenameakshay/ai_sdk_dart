@@ -144,33 +144,36 @@ Widget buildSvg(BuildContext context, OpenUiNode node) {
   final maxWidth = node.props['width'] == null && viewBox.width > 0
       ? math.max(280.0, viewBox.width * 1.5)
       : double.infinity;
-  return LayoutBuilder(
-    builder: (context, constraints) {
-      final available = constraints.maxWidth.isFinite
-          ? constraints.maxWidth
-          : 320.0;
-      final w = math.min(
-        math.min(width.px ?? available * (width.fraction ?? 1), maxWidth),
-        available,
-      );
-      final h =
-          height ??
-          (viewBox.width > 0 && viewBox.height > 0
-              ? w * viewBox.height / viewBox.width
-              : w);
-      return Align(
-        alignment: Alignment.topCenter,
-        heightFactor: 1,
-        child: Semantics(
-          image: true,
-          child: SizedBox(
-            width: w,
-            height: h,
-            child: CustomPaint(painter: SvgScenePainter(viewBox, scene)),
+  return Directionality(
+    textDirection: TextDirection.ltr,
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final available = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : 320.0;
+        final w = math.min(
+          math.min(width.px ?? available * (width.fraction ?? 1), maxWidth),
+          available,
+        );
+        final h =
+            height ??
+            (viewBox.width > 0 && viewBox.height > 0
+                ? w * viewBox.height / viewBox.width
+                : w);
+        return Align(
+          alignment: Alignment.topCenter,
+          heightFactor: 1,
+          child: Semantics(
+            image: true,
+            child: SizedBox(
+              width: w,
+              height: h,
+              child: CustomPaint(painter: SvgScenePainter(viewBox, scene)),
+            ),
           ),
-        ),
-      );
-    },
+        );
+      },
+    ),
   );
 }
 

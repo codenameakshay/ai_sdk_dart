@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:ai_sdk_openui/ai_sdk_openui.dart';
 import 'package:flutter/material.dart';
 
+import '../localizations.dart';
 import '../theme.dart';
 import '../view.dart';
 import 'controls.dart' show Press;
@@ -69,7 +70,7 @@ class _CodeBlockState extends State<_CodeBlock> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
-            padding: const EdgeInsets.fromLTRB(14, 6, 8, 6),
+            padding: const EdgeInsetsDirectional.fromSTEB(14, 6, 8, 6),
             decoration: BoxDecoration(
               border: Border(bottom: BorderSide(color: theme.border)),
             ),
@@ -84,7 +85,7 @@ class _CodeBlockState extends State<_CodeBlock> {
                 Semantics(
                   container: true,
                   button: true,
-                  label: 'Copy code',
+                  label: OpenUiLocalizations.of(context).copyCode,
                   excludeSemantics: true,
                   child: Press(
                     radius: 6,
@@ -111,7 +112,9 @@ class _CodeBlockState extends State<_CodeBlock> {
                             ),
                             const SizedBox(width: 5),
                             Text(
-                              _copied ? 'Copied' : 'Copy',
+                              _copied
+                                  ? OpenUiLocalizations.of(context).copied
+                                  : OpenUiLocalizations.of(context).copy,
                               style: head.copyWith(color: color),
                             ),
                           ],

@@ -161,7 +161,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 200));
       p.session.update(
-        'root = Col([Map([MapMarker("New place", 30, 40)])])',
+        'root = Col([map])\nmap = Map([MapMarker("New place", 30, 40)])',
         streaming: false,
       );
       await tester.pump();

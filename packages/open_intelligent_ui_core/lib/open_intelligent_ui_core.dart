@@ -9,6 +9,8 @@ export 'src/components/builders.dart'
     show composeBuilders, intelligentUiFor, openUiCoreBuilders;
 export 'src/components/glyph.dart' show Glyph;
 export 'src/form_validation.dart' show OpenUiFormValidation;
+export 'src/localizations.dart'
+    show OpenUiLocalizations, OpenUiLocalizationsDelegate;
 export 'src/preview.dart' show OpenUiPreview, OpenUiPreviewState;
 export 'src/services.dart'
     show

@@ -24,6 +24,8 @@ Future<Pumped> pumpProgram(
   OpenUiServices? services,
   bool streaming = false,
   OpenUiTheme? theme,
+  TextDirection textDirection = TextDirection.ltr,
+  bool semanticsIdentifiers = false,
 }) async {
   final session = OpenUiSession(
     intelligentUi,
@@ -49,13 +51,17 @@ Future<Pumped> pumpProgram(
               imageLoader: networkImages,
             ),
         child: Scaffold(
-          body: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: OpenUiView(
-              session: session,
-              builders: intelligentUiBuilders,
-              onToAssistant: events.add,
-              onAction: events.add,
+          body: Directionality(
+            textDirection: textDirection,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: OpenUiView(
+                session: session,
+                builders: intelligentUiBuilders,
+                onToAssistant: events.add,
+                onAction: events.add,
+                semanticsIdentifiers: semanticsIdentifiers,
+              ),
             ),
           ),
         ),

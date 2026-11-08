@@ -490,11 +490,11 @@ class MarkdownBlocks extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
             color: theme.surface,
-            border: Border(
-              left: BorderSide(color: theme.borderStrong, width: 3),
+            border: BorderDirectional(
+              start: BorderSide(color: theme.borderStrong, width: 3),
             ),
-            borderRadius: const BorderRadius.horizontal(
-              right: Radius.circular(12),
+            borderRadius: const BorderRadiusDirectional.horizontal(
+              end: Radius.circular(12),
             ),
           ),
           child: rich(text),
@@ -570,10 +570,10 @@ class MarkdownBlocks extends StatelessWidget {
                     width: _listIndent,
                     child: ordered
                         ? Padding(
-                            padding: EdgeInsets.only(right: space),
+                            padding: EdgeInsetsDirectional.only(end: space),
                             child: OverflowBox(
                               maxWidth: double.infinity,
-                              alignment: Alignment.topRight,
+                              alignment: AlignmentDirectional.topEnd,
                               fit: OverflowBoxFit.deferToChild,
                               child: Text(
                                 '${math.min(start + j, _maxOrdinal)}.',
@@ -584,10 +584,10 @@ class MarkdownBlocks extends StatelessWidget {
                             ),
                           )
                         : Align(
-                            alignment: Alignment.topLeft,
+                            alignment: AlignmentDirectional.topStart,
                             child: Padding(
-                              padding: const EdgeInsets.only(
-                                left: 5.4,
+                              padding: const EdgeInsetsDirectional.only(
+                                start: 5.4,
                                 top: 12.2,
                               ),
                               child: SizedBox.square(

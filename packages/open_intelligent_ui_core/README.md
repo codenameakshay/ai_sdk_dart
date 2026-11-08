@@ -160,6 +160,70 @@ Theme(
 );
 ```
 
+## Testing
+
+Pin the clock and the randomness so output does not change between runs. `Impure` is exported from
+`package:ai_sdk_openui/intelligent_ui.dart`, so add `ai_sdk_openui` to the test's dependencies if it is not already there.
+
+```dart
+import 'package:ai_sdk_openui/intelligent_ui.dart';
+
+setUp(() {
+  Impure.useUtc();
+  Impure.now = () => DateTime.utc(2026, 1, 15, 12);
+  Impure.random = () => 0.5;
+});
+
+tearDown(Impure.reset);
+```
+
+- `Impure.now` sets the clock. `Impure.useUtc()` reads and formats dates in UTC, as the reference's tests
+  do. `Impure.reset()` restores the real clock and randomness.
+- DatePicker's "today" and `@Today` read the same clock, so pinning `Impure.now` moves both.
+- Each element has a stable key, `ValueKey('openui:<id>')`. The id is the statement's id in the
+  program. An inline element gets `<parent id>/<slot>.<index>`, and a repeat within one parent gets
+  `~2`, `~3`. Find an element with `find.byKey(const ValueKey('openui:<id>'))`.
+- For UI tests, pass `semanticsIdentifiers: true` to `OpenUiView`. Each element then carries the
+  semantics identifier `openui:<id>`. It is off by default because each element adds a container
+  node to the semantics tree.
+
+## Localization
+
+Every user-visible string comes from `OpenUiLocalizations`. English is the default, so an app with no
+delegate shows English. To translate, subclass `OpenUiLocalizations`, override the getters you change,
+and register a delegate with your other delegates:
+
+```dart
+class MyFrench extends OpenUiLocalizations {
+  const MyFrench();
+
+  @override
+  String get loadingData => 'Chargement des données';
+
+  @override
+  String get copy => 'Copier';
+}
+
+MaterialApp(
+  localizationsDelegates: const [
+    OpenUiLocalizationsDelegate({'fr': MyFrench()}),
+  ],
+  supportedLocales: const [Locale('en'), Locale('fr')],
+  // ...
+);
+```
+
+The delegate serves the subclass for each language code in its map. Other languages get the English
+base. A getter you do not override keeps its English text. Your own widgets read strings with
+`OpenUiLocalizations.of(context)`.
+
+## Right-to-left
+
+Layout follows the ambient `Directionality`. In an RTL locale, rows and tables mirror their children,
+and padding and positioned controls use start and end. Charts, Svg and the map canvas stay
+left-to-right, because their data and drawings keep their own axes. The controls around them follow
+the text direction.
+
 ## Fonts
 
 Text uses the font family `packages/open_intelligent_ui/Inter` by default. That family exists only when

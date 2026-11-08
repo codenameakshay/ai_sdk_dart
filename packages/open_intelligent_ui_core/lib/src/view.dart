@@ -2,6 +2,7 @@ import 'package:ai_sdk_openui/ai_sdk_openui.dart';
 import 'package:flutter/material.dart';
 
 import 'form_validation.dart';
+import 'localizations.dart';
 import 'services.dart';
 import 'theme.dart';
 
@@ -32,6 +33,7 @@ class OpenUiView extends StatefulWidget {
     this.queryLoader,
     this.child,
     this.fallbackServices = const OpenUiServices(),
+    this.semanticsIdentifiers = false,
   });
 
   final OpenUiSession session;
@@ -48,6 +50,10 @@ class OpenUiView extends StatefulWidget {
   /// Services for whatever the nearest OpenUiScope leaves unset (see
   /// OpenUiServices.orElse).
   final OpenUiServices fallbackServices;
+
+  /// Sets a Semantics identifier `openui:<id>` on each element (for UI tests).
+  /// Off by default: each element then adds a container node to the semantics tree.
+  final bool semanticsIdentifiers;
 
   /// react-lang `useRendererQuery`: the nearest view's Query state.
   static OpenUiQueryState queryOf(BuildContext context) =>
@@ -130,6 +136,7 @@ class _OpenUiViewState extends State<OpenUiView> {
           session: session,
           builders: widget.builders,
           emit: _emit,
+          semanticsIdentifiers: widget.semanticsIdentifiers,
           child: widget.child ?? const _DefaultContent(),
         ),
       ),
@@ -183,9 +190,14 @@ class _RendererScope extends InheritedWidget {
 
 Widget _rootView(BuildContext context, OpenUiElement root) {
   final theme = OpenUiTheme.of(context);
+  final id = root.statementId ?? 'root';
   return DefaultTextStyle.merge(
     style: TextStyle(fontFamily: theme.fontFamily, color: theme.ink),
-    child: OpenUiElementView(element: root),
+    child: OpenUiElementView(
+      key: ValueKey('openui:$id'),
+      element: root,
+      id: id,
+    ),
   );
 }
 
@@ -193,11 +205,11 @@ class _QueryLoader extends StatelessWidget {
   const _QueryLoader();
 
   @override
-  Widget build(BuildContext context) => const SizedBox.square(
+  Widget build(BuildContext context) => SizedBox.square(
     dimension: 16,
     child: CircularProgressIndicator(
       strokeWidth: 2,
-      semanticsLabel: 'Loading data',
+      semanticsLabel: OpenUiLocalizations.of(context).loadingData,
     ),
   );
 }
@@ -229,7 +241,8 @@ class _DefaultContent extends StatelessWidget {
     return Stack(
       children: [
         content,
-        if (loading) const Positioned(top: 8, right: 8, child: _QueryLoader()),
+        if (loading)
+          const PositionedDirectional(top: 8, end: 8, child: _QueryLoader()),
       ],
     );
   }
@@ -335,11 +348,13 @@ class _RuntimeScope extends InheritedWidget {
     required this.session,
     required this.builders,
     required this.emit,
+    required this.semanticsIdentifiers,
     required super.child,
   });
   final OpenUiSession session;
   final OpenUiBuilderLookup builders;
   final void Function(ActionEvent) emit;
+  final bool semanticsIdentifiers;
 
   static _RuntimeScope of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<_RuntimeScope>() ??
@@ -347,7 +362,9 @@ class _RuntimeScope extends InheritedWidget {
 
   @override
   bool updateShouldNotify(_RuntimeScope old) =>
-      !identical(session, old.session) || !identical(builders, old.builders);
+      !identical(session, old.session) ||
+      !identical(builders, old.builders) ||
+      semanticsIdentifiers != old.semanticsIdentifiers;
 }
 
 class _FormScope extends InheritedWidget {
@@ -400,8 +417,11 @@ int _nextFieldId = 0;
 /// stay with Flutter's own handler: Flutter catches each widget's build
 /// error itself, so only a global hook could see them.
 class OpenUiElementView extends StatefulWidget {
-  const OpenUiElementView({super.key, required this.element});
+  const OpenUiElementView({super.key, required this.element, this.id});
   final OpenUiElement element;
+
+  /// The element's stable id; defaults to its statement id.
+  final String? id;
 
   @override
   State<OpenUiElementView> createState() => _OpenUiElementViewState();
@@ -416,15 +436,20 @@ class _OpenUiElementViewState extends State<OpenUiElementView> {
     final runtime = _RuntimeScope.of(context);
     final builder = runtime.builders(widget.element.typeName);
     if (builder == null) return const SizedBox.shrink();
+    final id = widget.id ?? widget.element.statementId ?? _id;
     final node = OpenUiNode._(
       element: widget.element,
       session: runtime.session,
       emit: runtime.emit,
       context: context,
       generatedId: _id,
+      id: id,
     );
     try {
-      return _lastGood = builder(context, node);
+      final built = builder(context, node);
+      return _lastGood = runtime.semanticsIdentifiers
+          ? Semantics(container: true, identifier: 'openui:$id', child: built)
+          : built;
     } catch (error, stack) {
       runtime.session.reportRenderError(widget.element.typeName, error);
       FlutterError.reportError(
@@ -449,16 +474,24 @@ final class OpenUiNode {
     required void Function(ActionEvent) emit,
     required BuildContext context,
     required String generatedId,
+    required String id,
   }) : _session = session,
        _emit = emit,
        _context = context,
-       _generatedId = generatedId;
+       _generatedId = generatedId,
+       _nodeId = id;
 
   final OpenUiElement element;
   final OpenUiSession _session;
   final void Function(ActionEvent) _emit;
   final BuildContext _context;
   final String _generatedId;
+  final String _nodeId;
+  final Set<String> _used = {};
+
+  /// This element's stable id: its statement id, or its parent's id and
+  /// position for an inline element.
+  String get id => _nodeId;
 
   Props get props => element.props;
   OpenUiTheme get theme => OpenUiTheme.of(_context);
@@ -504,28 +537,54 @@ final class OpenUiNode {
       _context.dependOnInheritedWidgetOfExactType<_FormScope>()?.validation;
 
   /// Renders a value: an element, text, a number (as JavaScript prints it),
-  /// or a list of them (flattened).
-  List<Widget> render(Object? value) => [..._render(value)];
+  /// or a list of them (flattened). Inline elements take ids under [slot].
+  List<Widget> render(Object? value, {String slot = ''}) {
+    final flat = <Object?>[];
+    _flatten(value, flat);
+    final out = <Widget>[];
+    for (var i = 0; i < flat.length; i++) {
+      final v = flat[i];
+      if (v is OpenUiElement) {
+        final id = childId(v, i, slot: slot);
+        out.add(
+          OpenUiElementView(key: ValueKey('openui:$id'), element: v, id: id),
+        );
+      } else {
+        out.add(Text(jsString(v)));
+      }
+    }
+    return out;
+  }
 
-  Iterable<Widget> _render(Object? value) sync* {
+  static void _flatten(Object? value, List<Object?> out) {
     switch (value) {
-      case null:
-        return;
-      case OpenUiElement():
-        yield OpenUiElementView(element: value);
       case List():
         for (final v in value) {
-          yield* _render(v);
+          _flatten(v, out);
         }
-      case String() || num() || bool():
-        yield Text(jsString(value));
+      case OpenUiElement() || String() || num() || bool():
+        out.add(value);
       default:
-        return;
     }
   }
 
+  /// The id for an inline child at [index] (in the flattened value): its
+  /// statement id, else `<id>/<index>` or `<id>/<slot>.<index>`. A repeat
+  /// within this node gets `~2`, `~3`, and so on.
+  String childId(OpenUiElement child, int index, {String slot = ''}) {
+    final base =
+        child.statementId ??
+        (slot.isEmpty ? '$_nodeId/$index' : '$_nodeId/$slot.$index');
+    var id = base;
+    for (var n = 2; !_used.add(id); n++) {
+      id = '$base~$n';
+    }
+    return id;
+  }
+
   /// [render] of one prop.
-  List<Widget> children([String prop = 'children']) => render(props[prop]);
+  List<Widget> children([String prop = 'children']) =>
+      render(props[prop], slot: prop);
 
   /// A field's value and setter. A `$binding` prop writes its `$variable`;
   /// otherwise it is a form field named [name], else this element's

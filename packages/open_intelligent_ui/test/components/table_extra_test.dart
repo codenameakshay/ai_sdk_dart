@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:open_intelligent_ui/src/components/table.dart';
+
 import '../support/pump.dart';
 
 double _left(WidgetTester tester, String text) =>
@@ -21,7 +23,7 @@ void main() {
       expect(find.text('Drones'), findsOneWidget);
       expect(find.text('Hard'), findsOneWidget);
       expect(
-        find.ancestor(of: find.text('Hard'), matching: find.byType(Table)),
+        find.ancestor(of: find.text('Hard'), matching: find.byType(IuiTable)),
         findsOneWidget,
       );
     });
@@ -75,7 +77,7 @@ void main() {
     testWidgets('a table with no rows shows only its header', (tester) async {
       await pumpProgram(tester, 'root = Col([t])\nt = Table(["A", null], [])');
       expect(find.text('A'), findsOneWidget);
-      expect(find.byType(Table), findsOneWidget);
+      expect(find.byType(IuiTable), findsOneWidget);
     });
 
     testWidgets('a wide table scrolls horizontally inside a narrow screen', (

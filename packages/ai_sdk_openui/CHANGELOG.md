@@ -2,6 +2,13 @@
 
 - `Impure` (the clock and random seams that `@Today`, `@Now` and `@Random` use) is public, so hosts and tests can pin time and randomness.
 - `intelligentUiWithout(optionalIuiComponents)` gives a library without Math, Map, MapMarker, YouTube and HtmlView, and `chatPromptFor(library)` / `dashboardPrompt(library:)` drop the medium-rule clauses for components the library lacks. `intelligentUi` and `chatPrompt` are unchanged.
+- `library.validate(program, policy: ValidationPolicy(...))` and `validateProgram` (from a spec's JSON Schema
+  alone) return a `ValidationReport`: parse issues plus node, depth and string limits, unknown-component handling
+  (drop or fail) and allowed actions, each with its statement id. `toJson()` is the wire form.
+- `dart run ai_sdk_openui:openui validate <spec.json> <program>` prints that report for any spec exported with
+  `toSpecJson()`, including host extensions.
+- `conformance/vectors.json`: programs and the parse results `@openuidev/lang-core` 1.0.0 gives them, for any
+  server; `make test-openui-conformance` checks them against lang-core, and the Dart tests check this port.
 - `Money`: an exact amount in integer minor units with an ISO 4217 code (scale from CLDR), parsed from
   `{minor, currency}` or `{amount: "12.34", currency}`, with `+`, `-` and `format({locale})`. It never uses a
   double. `formatMoney` adds `@FormatMoney` to a library through `extend`.

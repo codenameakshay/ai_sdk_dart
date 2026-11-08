@@ -8,6 +8,9 @@ resolution: workspace
 environment:
   sdk: ^3.11.1
 
+executables:
+  openui: openui
+
 dependencies:
   intl: ^0.20.2
 

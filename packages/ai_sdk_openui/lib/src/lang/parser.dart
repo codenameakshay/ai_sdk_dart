@@ -860,7 +860,13 @@ ParseResult _buildResult(
   for (final stmt in stmtMap.values) {
     switch (stmt) {
       case StateStatement(:final id, :final init):
-        stateDeclarations[id] = _materializeValue(init, ctx);
+        final previous = ctx.currentStatementId;
+        ctx.currentStatementId = id;
+        try {
+          stateDeclarations[id] = _materializeValue(init, ctx);
+        } finally {
+          ctx.currentStatementId = previous;
+        }
       case QueryStatement(:final id, :final expr, :final deps):
         final args = _nameRawCallArgs(expr.args, ctx, id);
         queries.add(

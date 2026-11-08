@@ -89,7 +89,9 @@ abstract final class Js {
   static String numberToString(num value) {
     // 0 first: on the web -0.0 is an int and would print as "-0.0".
     if (value == 0) return '0';
-    if (value is int && value.abs() <= _maxSafe) return '$value';
+    if (value is int && value >= -_maxSafe && value <= _maxSafe) {
+      return '$value';
+    }
     final d = value.toDouble();
     if (d.isNaN) return 'NaN';
     if (d.isInfinite) return d > 0 ? 'Infinity' : '-Infinity';

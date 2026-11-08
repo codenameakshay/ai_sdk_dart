@@ -351,6 +351,19 @@ void main() {
     );
   });
 
+  test('the minimum native integer prints at JavaScript Number precision', () {
+    final minimum = int.parse('-9223372036854775808');
+    expect(Js.string(minimum), '-9223372036854776000');
+    expect(Js.stringify(minimum), '-9223372036854776000');
+    expect(
+      Js.stringify({minimum: 'minimum'}),
+      '{"-9223372036854776000":"minimum"}',
+    );
+    expect(Js.normalize({minimum: 'minimum'}), {
+      '-9223372036854776000': 'minimum',
+    });
+  });
+
   test('JSON.stringify rounds integers to JavaScript Number precision', () {
     expect(
       Js.stringify([

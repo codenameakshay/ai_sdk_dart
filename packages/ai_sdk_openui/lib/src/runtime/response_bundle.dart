@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../lang/message.dart';
+import 'collation.dart';
 
 /// react-lang's reading of an OpenUI Cloud response: the program, its scripts, and whether it may run.
 final class ResponseBundle {
@@ -151,7 +152,7 @@ _Scripts? _readScripts(String header, String payload) {
     final sorted = [
       for (final script in values)
         {'name': script['name'], 'code': script['code']},
-    ]..sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
+    ]..sort((a, b) => localeCompare(a['name'] as String, b['name'] as String));
     return _Scripts(names, jsonEncode(sorted));
   } on FormatException {
     return null;

@@ -53,3 +53,14 @@ final class CardHeadScope extends InheritedWidget {
   bool updateShouldNotify(CardHeadScope oldWidget) =>
       active != oldWidget.active;
 }
+
+/// Marks content inside a Pressable, where struck-through Text is muted.
+final class PressableScope extends InheritedWidget {
+  const PressableScope({super.key, required super.child});
+
+  static bool of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<PressableScope>() != null;
+
+  @override
+  bool updateShouldNotify(PressableScope oldWidget) => false;
+}

@@ -50,4 +50,4 @@ export 'src/runtime/session.dart'
         OpenUiElement,
         OpenUiSession,
         Props;
-export 'src/lang/js.dart' show jsString;
+export 'src/lang/js.dart' show jsNumber, jsString;

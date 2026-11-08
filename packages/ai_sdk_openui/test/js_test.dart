@@ -22,6 +22,14 @@ void main() {
     expect(Js.truthy(<String, Object?>{}), isTrue);
   });
 
+  test('jsNumber reads values as JavaScript Number() does', () {
+    expect(jsNumber('42'), 42);
+    expect(jsNumber(' 0x10 '), 16);
+    expect(jsNumber(true), 1);
+    expect(jsNumber(null), 0);
+    expect(jsNumber('abc').isNaN, isTrue);
+  });
+
   group('Number(string)', () {
     test('does not treat next-line characters as numeric whitespace', () {
       expect(Js.number('\u00851\u0085').isNaN, true);

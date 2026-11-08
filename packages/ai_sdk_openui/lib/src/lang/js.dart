@@ -274,3 +274,6 @@ abstract interface class JsFields {
 
 /// JavaScript `String(value)`: how a program's value prints (`4` is "4").
 String jsString(Object? value) => Js.string(value);
+
+/// JavaScript `Number(value)`: NaN when [value] does not read as a number.
+double jsNumber(Object? value) => Js.number(value);

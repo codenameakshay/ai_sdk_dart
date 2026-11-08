@@ -275,7 +275,7 @@ Widget buildBadge(BuildContext context, OpenUiNode node) {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (lucideCodepoint(icon) != null) ...[
+          if (isLucideIcon(icon)) ...[
             Glyph(icon, size: 14, color: color),
             const SizedBox(width: 5),
           ],

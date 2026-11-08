@@ -13,6 +13,9 @@ int? lucideCodepoint(Object? value) {
   return lucideCodepoints[name];
 }
 
+/// Whether [value] names a lucide icon.
+bool isLucideIcon(Object? value) => lucideCodepoint(value) != null;
+
 /// A lucide icon by name. Unknown names render nothing.
 class Glyph extends StatelessWidget {
   const Glyph(this.name, {super.key, this.size = 18, this.color});

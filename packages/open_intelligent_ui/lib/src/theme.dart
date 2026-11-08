@@ -98,6 +98,12 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
   static const fieldGap = 24.0;
   static const actionGap = 40.0;
 
+  /// The reference's Inter weights. With the variable font a [FontWeight] of
+  /// any value sets the `wght` axis, so these render exactly.
+  static const weightNormal = FontWeight(440);
+  static const weightMedium = FontWeight(560);
+  static const weightSemibold = FontWeight(640);
+
   static final OpenUiTheme light = OpenUiTheme(
     brightness: Brightness.light,
     canvas: const Color(0xFFFDFDFD),

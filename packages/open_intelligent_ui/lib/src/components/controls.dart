@@ -91,10 +91,9 @@ String _textOf(BuildContext context) {
   final parts = <String>[];
   void visit(Element element) {
     final widget = element.widget;
+    if (widget is Glyph) return;
     if (widget is RichText) {
-      if (widget.text.style?.fontFamily?.contains('IuiLucide') != true) {
-        parts.add(widget.text.toPlainText());
-      }
+      parts.add(widget.text.toPlainText());
       return;
     }
     element.visitChildren(visit);
@@ -105,19 +104,20 @@ String _textOf(BuildContext context) {
   return text.substring(0, math.min(120, text.length));
 }
 
-/// Hover, press and keyboard focus for a tappable surface.
-class _Press extends StatefulWidget {
-  const _Press({required this.builder, required this.onTap, this.radius = 999});
+/// Hover, press and keyboard focus for a tappable surface: Enter and Space
+/// activate it, and keyboard focus draws a 2px ink ring 3px outside it.
+class Press extends StatefulWidget {
+  const Press({required this.builder, required this.onTap, this.radius = 999});
 
   final Widget Function(bool hovered, bool pressed) builder;
   final void Function(BuildContext context)? onTap;
   final double radius;
 
   @override
-  State<_Press> createState() => _PressState();
+  State<Press> createState() => _PressState();
 }
 
-class _PressState extends State<_Press> {
+class _PressState extends State<Press> {
   bool _hover = false;
   bool _down = false;
   bool _focus = false;
@@ -211,7 +211,7 @@ Widget buildButton(BuildContext context, OpenUiNode node) {
     ),
     _ => (36.0, const EdgeInsets.symmetric(vertical: 8, horizontal: 16), 14.0),
   };
-  final button = _Press(
+  final button = Press(
     onTap: enabled
         ? (_) => node.run('action', label: label, sendLabel: true)
         : null,
@@ -307,7 +307,7 @@ Widget buildIconButton(BuildContext context, OpenUiNode node) {
   final label = given ?? icon;
   final variant = node.props.string('variant') ?? 'outline';
   final enabled = !node.isStreaming;
-  Widget button = _Press(
+  Widget button = Press(
     onTap: enabled ? (_) => node.run('action', label: label) : null,
     builder: (hovered, pressed) {
       final overlay = pressed
@@ -393,7 +393,7 @@ Widget buildPressable(BuildContext context, OpenUiNode node) {
     button: true,
     enabled: !streaming,
     selected: selected,
-    child: _Press(
+    child: Press(
       radius: radius,
       onTap: streaming
           ? null
@@ -672,7 +672,7 @@ Widget buildSegmentedControl(BuildContext context, OpenUiNode node) {
     return Semantics(
       inMutuallyExclusiveGroup: true,
       checked: selected,
-      child: _Press(
+      child: Press(
         onTap: (_) => f.set(o.value),
         builder: (hovered, pressed) => Container(
           padding: EdgeInsets.symmetric(
@@ -900,7 +900,7 @@ Widget buildCheckbox(BuildContext context, OpenUiNode node) {
     child: Semantics(
       checked: checked,
       label: label,
-      child: _Press(
+      child: Press(
         radius: 4,
         onTap: (_) => f.set(!checked),
         builder: (hovered, pressed) => ConstrainedBox(
@@ -986,7 +986,7 @@ Widget buildRadioGroup(BuildContext context, OpenUiNode node) {
     return Semantics(
       inMutuallyExclusiveGroup: true,
       checked: selected,
-      child: _Press(
+      child: Press(
         radius: variant == 'cards' ? 14 : (variant == 'pills' ? 999 : 4),
         onTap: (_) => f.set(o.value),
         builder: (hovered, pressed) {
@@ -1149,7 +1149,7 @@ Widget buildDatePicker(BuildContext context, OpenUiNode node) {
       button: true,
       label: _nonEmpty(label) ?? 'Date',
       value: current == null ? null : _formatDate(current),
-      child: _Press(
+      child: Press(
         radius: OpenUiTheme.radiusMd,
         onTap: (ctx) async {
           final first = min ?? DateTime(1900);

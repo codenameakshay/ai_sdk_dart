@@ -6,6 +6,7 @@ import 'package:ai_sdk_openui/ai_sdk_openui.dart';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:latlong2/latlong.dart' as ll;
 
@@ -167,10 +168,20 @@ const _glassShadow = [
   BoxShadow(color: Color(0x14000000), offset: Offset(0, 2), blurRadius: 12),
 ];
 
-class _StreetMapState extends State<StreetMap>
-    with SingleTickerProviderStateMixin {
+const _flyDuration = Duration(milliseconds: 920);
+
+class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
   final fm.MapController _controller = fm.MapController();
+  final _portal = OverlayPortalController();
+  final _mapKey = GlobalKey();
   late final AnimationController _line;
+  late final AnimationController _fly = AnimationController(
+    vsync: this,
+    duration: _flyDuration,
+  );
+  bool _expanded = false;
+  bool _userMoved = false;
+  Timer? _flyDone;
   final Map<int, Offset> _touches = {};
   String _group = 'all';
   bool _info = false;
@@ -229,6 +240,8 @@ class _StreetMapState extends State<StreetMap>
   void dispose() {
     _routeDebounce?.cancel();
     _hintTimer?.cancel();
+    _flyDone?.cancel();
+    _fly.dispose();
     _line.dispose();
     _controller.dispose();
     super.dispose();
@@ -272,9 +285,81 @@ class _StreetMapState extends State<StreetMap>
     _framed = signature;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _fit(const EdgeInsets.fromLTRB(72, 70, 72, 50), maxZoom: 13);
-      _drawLine();
+      if (_userMoved || MediaQuery.disableAnimationsOf(context)) {
+        if (!_userMoved) {
+          _fit(const EdgeInsets.fromLTRB(72, 70, 72, 50), maxZoom: 13);
+        }
+        _drawLine();
+        return;
+      }
+      // As the reference clears the line, no route shows until framing ends.
+      if (!_lineDrawn) _line.value = 0;
+      _flyTo(const EdgeInsets.fromLTRB(72, 70, 72, 50), maxZoom: 13);
+      _flyDone?.cancel();
+      _flyDone = Timer(_flyDuration + const Duration(milliseconds: 40), () {
+        if (mounted) _drawLine();
+      });
     });
+  }
+
+  /// The camera that fits the visible places, or null with none.
+  fm.MapCamera? _fitted(EdgeInsets padding, {required double maxZoom}) {
+    final points = [for (final p in _visible) p.point];
+    if (points.isEmpty) return null;
+    final camera = _controller.camera;
+    if (points.length == 1) {
+      return camera.withPosition(center: points.single, zoom: maxZoom);
+    }
+    return fm.CameraFit.coordinates(
+      coordinates: points,
+      padding: padding,
+      maxZoom: maxZoom,
+    ).fit(camera);
+  }
+
+  /// Flies to the fitted camera as MapLibre's fitBounds does.
+  void _flyTo(EdgeInsets padding, {required double maxZoom}) {
+    final target = _fitted(padding, maxZoom: maxZoom);
+    if (target == null) return;
+    final start = _controller.camera;
+    final curve = CurvedAnimation(parent: _fly, curve: Curves.easeInOut);
+    void step() {
+      final t = curve.value;
+      _controller.move(
+        ll.LatLng(
+          start.center.latitude +
+              (target.center.latitude - start.center.latitude) * t,
+          start.center.longitude +
+              (target.center.longitude - start.center.longitude) * t,
+        ),
+        start.zoom + (target.zoom - start.zoom) * t,
+      );
+    }
+
+    _fly
+      ..stop()
+      ..value = 0;
+    curve.addListener(step);
+    _fly.forward().whenCompleteOrCancel(() {
+      curve
+        ..removeListener(step)
+        ..dispose();
+    });
+  }
+
+  void _mapEvent(fm.MapEvent event) {
+    if (event is fm.MapEventMoveStart &&
+        (event.source == fm.MapEventSource.dragStart ||
+            event.source == fm.MapEventSource.multiFingerGestureStart)) {
+      _userMoved = true;
+      _fly.stop();
+    }
+  }
+
+  void _setExpanded(bool expanded) {
+    if (expanded == _expanded) return;
+    setState(() => _expanded = expanded);
+    expanded ? _portal.show() : _portal.hide();
   }
 
   /// Draws the route once, after framing; later changes update it in place.
@@ -291,19 +376,8 @@ class _StreetMapState extends State<StreetMap>
   }
 
   void _fit(EdgeInsets padding, {required double maxZoom}) {
-    final points = [for (final p in _visible) p.point];
-    if (points.isEmpty) return;
-    if (points.length == 1) {
-      _controller.move(points.single, maxZoom);
-      return;
-    }
-    _controller.fitCamera(
-      fm.CameraFit.coordinates(
-        coordinates: points,
-        padding: padding,
-        maxZoom: maxZoom,
-      ),
-    );
+    final target = _fitted(padding, maxZoom: maxZoom);
+    if (target != null) _controller.move(target.center, target.zoom);
   }
 
   void _zoom(double by) {
@@ -344,28 +418,6 @@ class _StreetMapState extends State<StreetMap>
     _hintTimer = Timer(const Duration(seconds: 1), () {
       if (mounted) setState(() => _hint = false);
     });
-  }
-
-  Future<void> _expand() {
-    final services = OpenUiScope.servicesOf(context);
-    return Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        fullscreenDialog: true,
-        builder: (_) => OpenUiScope(
-          services: services,
-          child: Scaffold(
-            appBar: AppBar(title: const Text('Map')),
-            body: StreetMap(
-              places: widget.places,
-              route: widget.route,
-              selection: widget.selection,
-              streaming: widget.streaming,
-              height: double.infinity,
-            ),
-          ),
-        ),
-      ),
-    );
   }
 
   Widget _filter(OpenUiTheme theme, List<String> categories) => Semantics(
@@ -508,6 +560,7 @@ class _StreetMapState extends State<StreetMap>
         initialZoom: visible.isEmpty ? 1 : 10.5,
         backgroundColor: theme.mapWater,
         interactionOptions: fm.InteractionOptions(flags: flags),
+        onMapEvent: _mapEvent,
         onMapReady: () {
           _ready = true;
           _frame();
@@ -547,7 +600,10 @@ class _StreetMapState extends State<StreetMap>
                 child: _Pin(
                   place: p,
                   selected: selected == p.label,
-                  onTap: () => widget.selection.set(p.label),
+                  onTap: () {
+                    widget.selection.set(p.label);
+                    _setExpanded(false);
+                  },
                 ),
               ),
           ],
@@ -559,224 +615,274 @@ class _StreetMapState extends State<StreetMap>
           ),
       ],
     );
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final requested = (widget.height ?? 400).clamp(200.0, 720.0);
-        // Phones get a shorter map so it never fills the whole screen.
-        final height = widget.height == double.infinity
-            ? constraints.maxHeight
-            : math.min(
-                requested,
-                math.max(280.0, MediaQuery.sizeOf(context).width * 0.82),
-              );
-        return Semantics(
-          container: true,
-          label: 'Map',
-          child: SizedBox(
-            height: height,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(OpenUiTheme.radius2xl),
-              child: Stack(
-                children: [
-                  Positioned.fill(
-                    child: Listener(
-                      onPointerDown: _touchDown,
-                      onPointerMove: _touchMove,
-                      onPointerUp: _touchUp,
-                      onPointerCancel: _touchUp,
-                      child: map,
-                    ),
-                  ),
-                  if (_hint)
-                    const Positioned.fill(
-                      child: IgnorePointer(
-                        child: ColoredBox(
-                          color: Color(0x66000000),
-                          child: Center(
-                            child: Text(
-                              'Use two fingers to move the map',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 20,
-                              ),
-                            ),
-                          ),
-                        ),
+    final requested = (widget.height ?? 400).clamp(200.0, 720.0);
+    // Phones get a shorter map so it never fills the whole screen.
+    final height = math.min(
+      requested,
+      math.max(280.0, MediaQuery.sizeOf(context).width * 0.82),
+    );
+    final surface = KeyedSubtree(
+      key: _mapKey,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(OpenUiTheme.radius2xl),
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: Listener(
+                onPointerDown: _touchDown,
+                onPointerMove: _touchMove,
+                onPointerUp: _touchUp,
+                onPointerCancel: _touchUp,
+                child: map,
+              ),
+            ),
+            if (_hint)
+              const Positioned.fill(
+                child: IgnorePointer(
+                  child: ColoredBox(
+                    color: Color(0x66000000),
+                    child: Center(
+                      child: Text(
+                        'Use two fingers to move the map',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.white, fontSize: 20),
                       ),
                     ),
-                  Positioned(
-                    top: 12,
-                    left: 12,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      spacing: 8,
-                      children: [
-                        if (categories.length > 1) _filter(theme, categories),
-                        SizedBox.square(
-                          dimension: 34,
-                          child: _Glass(
-                            circle: true,
-                            tooltip: 'Show every place',
-                            onTap: () => _fit(
+                  ),
+                ),
+              ),
+            Positioned(
+              top: 12,
+              left: 12,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                spacing: 8,
+                children: [
+                  if (categories.length > 1) _filter(theme, categories),
+                  SizedBox.square(
+                    dimension: 34,
+                    child: _Glass(
+                      circle: true,
+                      tooltip: 'Show every place',
+                      onTap: () => MediaQuery.disableAnimationsOf(context)
+                          ? _fit(
+                              const EdgeInsets.fromLTRB(34, 55, 40, 35),
+                              maxZoom: 14,
+                            )
+                          : _flyTo(
                               const EdgeInsets.fromLTRB(34, 55, 40, 35),
                               maxZoom: 14,
                             ),
-                            child: Glyph(
-                              'navigation',
-                              size: 22,
-                              color: theme.ink,
-                            ),
-                          ),
-                        ),
-                        SizedBox.square(
-                          dimension: 34,
-                          child: _Glass(
-                            circle: true,
-                            tooltip: 'About this map',
-                            onTap: () => setState(() => _info = !_info),
-                            child: Glyph('info', size: 18, color: theme.ink),
-                          ),
-                        ),
-                      ],
+                      child: Glyph('navigation', size: 22, color: theme.ink),
                     ),
                   ),
-                  if (widget.height != double.infinity)
-                    Positioned(
-                      top: 12,
-                      right: 12,
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(minHeight: 28),
-                        child: _Glass(
-                          onTap: _expand,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 4,
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            spacing: 6,
-                            children: [
-                              Text(
-                                'Expand',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  height: 1.5,
-                                  fontWeight: FontWeight.w500,
-                                  color: theme.ink,
-                                ),
-                              ),
-                              Glyph('expand', size: 14, color: theme.ink),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  Positioned(
-                    right: 10,
-                    bottom: 10,
-                    child: DecoratedBox(
-                      decoration: const BoxDecoration(
-                        borderRadius: BorderRadius.all(Radius.circular(10)),
-                        boxShadow: _glassShadow,
-                      ),
-                      child: Material(
-                        color: theme.glass,
-                        clipBehavior: Clip.antiAlias,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          side: BorderSide(color: theme.glassRing),
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            _zoomButton(theme, 'Zoom in', 'plus', 1),
-                            _zoomButton(theme, 'Zoom out', 'minus', -1),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  if (_info)
-                    Positioned(
-                      top: 56,
-                      left: 12,
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 275),
-                        child: _Card(
-                          child: Text(
-                            'Drag to explore and use + and − to zoom. Select a place to highlight it.$routeNote',
-                            style: TextStyle(
-                              fontSize: 12,
-                              height: 1.5,
-                              color: theme.muted,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  if (routeKind == 'overview')
-                    Positioned(
-                      bottom: 22,
-                      left: 12,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: theme.canvas.withValues(alpha: 0.92),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 7,
-                            vertical: 2,
-                          ),
-                          child: Text(
-                            'Route overview',
-                            style: TextStyle(
-                              fontSize: 10,
-                              height: 1.6,
-                              color: theme.muted,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  if (tilesFailed)
-                    Positioned(
-                      bottom: 28,
-                      left: 12,
-                      child: Semantics(
-                        liveRegion: true,
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 275),
-                          child: _Card(
-                            child: Text(
-                              'Map tiles are temporarily unavailable. The places are still shown.',
-                              style: TextStyle(
-                                fontSize: 12,
-                                height: 1.5,
-                                color: theme.muted,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  Positioned(
-                    left: 0,
-                    top: 0,
-                    child: Semantics(
-                      container: true,
-                      liveRegion: true,
-                      label: routeStatus,
-                      child: const SizedBox.shrink(),
+                  SizedBox.square(
+                    dimension: 34,
+                    child: _Glass(
+                      circle: true,
+                      tooltip: 'About this map',
+                      onTap: () => setState(() => _info = !_info),
+                      child: Glyph('info', size: 18, color: theme.ink),
                     ),
                   ),
                 ],
               ),
             ),
-          ),
-        );
+            Positioned(
+              top: 12,
+              right: 12,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 28),
+                child: _Glass(
+                  onTap: () => _setExpanded(!_expanded),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    spacing: 6,
+                    children: [
+                      Text(
+                        _expanded ? 'Collapse' : 'Expand',
+                        style: TextStyle(
+                          fontSize: 12,
+                          height: 1.5,
+                          fontWeight: FontWeight.w500,
+                          color: theme.ink,
+                        ),
+                      ),
+                      Glyph('expand', size: 14, color: theme.ink),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              right: 10,
+              bottom: 10,
+              child: DecoratedBox(
+                decoration: const BoxDecoration(
+                  borderRadius: BorderRadius.all(Radius.circular(10)),
+                  boxShadow: _glassShadow,
+                ),
+                child: Material(
+                  color: theme.glass,
+                  clipBehavior: Clip.antiAlias,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    side: BorderSide(color: theme.glassRing),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _zoomButton(theme, 'Zoom in', 'plus', 1),
+                      _zoomButton(theme, 'Zoom out', 'minus', -1),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            if (_info)
+              Positioned(
+                top: 56,
+                left: 12,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 275),
+                  child: _Card(
+                    child: Text(
+                      'Drag to explore and use + and − to zoom. Select a place to highlight it.$routeNote',
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 1.5,
+                        color: theme.muted,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            if (routeKind == 'overview')
+              Positioned(
+                bottom: 22,
+                left: 12,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: theme.canvas.withValues(alpha: 0.92),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 2,
+                    ),
+                    child: Text(
+                      'Route overview',
+                      style: TextStyle(
+                        fontSize: 10,
+                        height: 1.6,
+                        color: theme.muted,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            if (tilesFailed)
+              Positioned(
+                bottom: 28,
+                left: 12,
+                child: Semantics(
+                  liveRegion: true,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 275),
+                    child: _Card(
+                      child: Text(
+                        'Map tiles are temporarily unavailable. The places are still shown.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          height: 1.5,
+                          color: theme.muted,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            Positioned(
+              left: 0,
+              top: 0,
+              child: Semantics(
+                container: true,
+                liveRegion: true,
+                label: routeStatus,
+                child: const SizedBox.shrink(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    return OverlayPortal(
+      controller: _portal,
+      overlayChildBuilder: (context) => _overlay(context, theme, surface),
+      child: Semantics(
+        container: true,
+        label: 'Map',
+        child: SizedBox(height: height, child: _expanded ? null : surface),
+      ),
+    );
+  }
+
+  Widget _overlay(BuildContext context, OpenUiTheme theme, Widget surface) {
+    final inset = MediaQuery.sizeOf(context).width <= 520 ? 12.0 : 24.0;
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _setExpanded(false);
       },
+      child: Stack(
+        children: [
+          ModalBarrier(
+            color: theme.canvas.withValues(alpha: 0.9),
+            dismissible: false,
+          ),
+          Positioned.fill(
+            left: inset,
+            top: inset,
+            right: inset,
+            bottom: inset,
+            child: CallbackShortcuts(
+              bindings: {
+                const SingleActivator(LogicalKeyboardKey.escape): () =>
+                    _setExpanded(false),
+              },
+              child: Focus(
+                autofocus: true,
+                child: Semantics(
+                  scopesRoute: true,
+                  namesRoute: true,
+                  explicitChildNodes: true,
+                  label: 'Map',
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(
+                        OpenUiTheme.radius2xl,
+                      ),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color(0x2E000000),
+                          offset: Offset(0, 12),
+                          blurRadius: 64,
+                        ),
+                      ],
+                    ),
+                    child: surface,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

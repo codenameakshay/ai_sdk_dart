@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart' as ll;
@@ -34,6 +36,13 @@ List<OpenUiElement> _markers(String program, {bool streaming = false}) {
   addTearDown(session.dispose);
   final map = session.root!.props.elements('children').first;
   return map.props.elements('markers');
+}
+
+/// Waits out the camera's fly to the places (920ms), then the route
+/// draw-out (760ms) that starts after it.
+Future<void> _settle(WidgetTester tester) async {
+  await tester.pump(const Duration(milliseconds: 1000));
+  await tester.pump(const Duration(milliseconds: 800));
 }
 
 Future<Pumped> _pump(
@@ -249,6 +258,7 @@ void main() {
 
     testWidgets('tapping a pin sets the bound \$selected', (tester) async {
       final p = await _pump(tester, _sf);
+      await _settle(tester);
       expect(p.session.state[r'$stop'], 'Ferry Building');
       await tester.tap(find.text('Coit Tower'));
       await tester.pump();
@@ -466,6 +476,7 @@ void main() {
 
     testWidgets('Show every place re-fits the camera', (tester) async {
       await _pump(tester, _sf);
+      await _settle(tester);
       final controller = fm.MapController.maybeOf(
         tester.element(find.byType(fm.MarkerLayer)),
       )!;
@@ -474,7 +485,7 @@ void main() {
       expect(find.text('Coit Tower'), findsNothing);
       await tester.tap(_button('Show every place'));
       await tester.pump();
-      await tester.pump();
+      await _settle(tester);
       expect(find.text('Coit Tower'), findsOneWidget);
       expect(find.text('Golden Gate Bridge'), findsOneWidget);
     });
@@ -531,6 +542,7 @@ void main() {
         expect(asked, [
           [(lat: 10.0, lng: 20.0), (lat: 11.0, lng: 21.0)],
         ]);
+        await _settle(tester);
         final line = _lines(tester).single;
         expect(line.points, hasLength(3));
         expect(line.points[1].latitude, 10.4);
@@ -690,49 +702,116 @@ void main() {
 
   group('Map Expand', () {
     testWidgets(
-      'pushes a full-screen map that shares the selection, and Close returns',
+      'expands in place over the page with the same live map, and a pin '
+      'tap collapses it',
       (tester) async {
         final p = await _pumpAbove(tester, _sf);
-        expect(find.text('Expand'), findsOneWidget);
+        await _settle(tester);
+        final before = tester.state(find.byType(fm.FlutterMap));
         await tester.tap(find.text('Expand'));
         await tester.pump();
-        await tester.pump(const Duration(milliseconds: 500));
-        expect(find.byType(AppBar), findsOneWidget);
-        expect(
-          find.descendant(of: find.byType(AppBar), matching: find.text('Map')),
-          findsOneWidget,
-        );
-        expect(
-          find.text('Expand'),
-          findsNothing,
-          reason: 'the expanded map has no Expand button',
-        );
+        expect(find.text('Collapse'), findsOneWidget);
+        expect(find.text('Expand'), findsNothing);
         expect(find.byType(fm.FlutterMap), findsOneWidget);
         expect(
-          tester.getSize(find.byType(fm.FlutterMap)).height,
-          greaterThan(450),
-          reason: 'fills the page, not 400',
+          tester.state(find.byType(fm.FlutterMap)),
+          same(before),
+          reason: 'the map moves into the overlay; it is not a copy',
+        );
+        expect(find.byType(ModalBarrier), findsWidgets);
+        expect(
+          tester.getSize(find.byType(fm.FlutterMap)),
+          const Size(800 - 48, 600 - 48),
         );
 
-        await tester.pump();
         await tester.tap(find.text('Coit Tower'));
         await tester.pump();
         expect(p.session.state[r'$stop'], 'Coit Tower');
-
-        await tester.tap(find.byType(CloseButton));
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 500));
-        expect(find.byType(AppBar), findsNothing);
         expect(find.text('Expand'), findsOneWidget);
+        expect(tester.getSize(find.byType(fm.FlutterMap)).height, 400);
       },
     );
+
+    testWidgets('Escape and Collapse return the map to the page', (
+      tester,
+    ) async {
+      await _pumpAbove(tester, _sf);
+      await tester.tap(find.text('Expand'));
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      expect(find.text('Expand'), findsOneWidget);
+      await tester.tap(find.text('Expand'));
+      await tester.pump();
+      await tester.tap(find.text('Collapse'));
+      await tester.pump();
+      expect(find.text('Expand'), findsOneWidget);
+    });
 
     testWidgets('the expanded map keeps mapTiles: null', (tester) async {
       await _pump(tester, _sf);
       await tester.tap(find.text('Expand'));
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 500));
       expect(find.byType(fm.TileLayer), findsNothing);
+    });
+
+    testWidgets('a drag before framing keeps the camera where the user left it', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      const program =
+          'root = Col([Map([MapMarker("A place", 10, 20), MapMarker("B place", 11, 21)])])';
+      final p = await _pump(tester, program, streaming: true);
+      final controller = fm.MapController.maybeOf(
+        tester.element(find.byType(fm.MarkerLayer)),
+      )!;
+      await tester.timedDrag(
+        find.byType(fm.FlutterMap),
+        const Offset(-120, 0),
+        const Duration(milliseconds: 300),
+      );
+      await tester.pump();
+      final dragged = controller.camera.center;
+      expect(dragged, isNot(const ll.LatLng(10, 20)));
+      p.session.update(program, streaming: false);
+      await tester.pump();
+      await _settle(tester);
+      expect(controller.camera.center, dragged);
+      debugDefaultTargetPlatformOverride = null;
+    });
+  });
+
+  group('Map framing', () {
+    testWidgets('the camera flies to the places over 920ms', (tester) async {
+      await _pump(tester, _sf);
+      final controller = fm.MapController.maybeOf(
+        tester.element(find.byType(fm.MarkerLayer)),
+      )!;
+      final start = controller.camera.zoom;
+      await tester.pump(const Duration(milliseconds: 460));
+      final middle = controller.camera.zoom;
+      await _settle(tester);
+      final end = controller.camera.zoom;
+      expect(end, isNot(closeTo(start, 0.01)));
+      expect((middle - start).abs(), greaterThan(0.01));
+      expect((end - middle).abs(), greaterThan(0.01));
+    });
+
+    testWidgets('with reduced motion the camera jumps to the frame', (
+      tester,
+    ) async {
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(disableAnimations: true);
+      addTearDown(
+        tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+      );
+      await _pump(tester, _sf);
+      final controller = fm.MapController.maybeOf(
+        tester.element(find.byType(fm.MarkerLayer)),
+      )!;
+      final framed = controller.camera.zoom;
+      await _settle(tester);
+      expect(controller.camera.zoom, framed);
     });
   });
 
@@ -775,6 +854,7 @@ void main() {
       'shows the starting point and updates it when a pin is tapped',
       (tester) async {
         final p = await _pump(tester, galleryProgram('map'));
+        await _settle(tester);
         expect(p.session.issues, isEmpty);
         expect(find.textContaining('Ferry Building'), findsWidgets);
         await tester.tap(find.text('Coit Tower'));

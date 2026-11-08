@@ -165,6 +165,7 @@ void main() {
           _lines(tester).single.points.last,
           isNot(const ll.LatLng(11, 21)),
         );
+        await tester.pump(const Duration(milliseconds: 1000));
         await tester.pump(const Duration(milliseconds: 800));
         final drawn = _lines(tester).single.points.last;
         expect(drawn, const ll.LatLng(11, 21));

@@ -7,6 +7,7 @@ export 'package:ai_sdk_openui/intelligent_ui.dart';
 
 export 'src/components/builders.dart' show intelligentUiBuilders;
 export 'src/components/glyph.dart' show Glyph;
+export 'src/form_validation.dart' show OpenUiFormValidation;
 export 'src/services.dart'
     show LatLng, MapTiles, OpenUiScope, OpenUiServices, esriStreetTiles;
 export 'src/theme.dart' show OpenUiTheme;

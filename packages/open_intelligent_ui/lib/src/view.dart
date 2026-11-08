@@ -1,6 +1,7 @@
 import 'package:ai_sdk_openui/ai_sdk_openui.dart';
 import 'package:flutter/material.dart';
 
+import 'form_validation.dart';
 import 'services.dart';
 import 'theme.dart';
 
@@ -84,11 +85,15 @@ class _OpenUiViewState extends State<OpenUiView> {
     final root = session.root;
     if (root == null) return const SizedBox.shrink();
     final loading = session.isQueryLoading;
-    final content = _RuntimeScope(
-      session: session,
-      builders: widget.builders,
-      emit: (event) => _emit(context, event),
-      child: OpenUiElementView(element: root),
+    final theme = OpenUiTheme.of(context);
+    final content = DefaultTextStyle.merge(
+      style: TextStyle(fontFamily: theme.fontFamily, color: theme.ink),
+      child: _RuntimeScope(
+        session: session,
+        builders: widget.builders,
+        emit: (event) => _emit(context, event),
+        child: OpenUiElementView(element: root),
+      ),
     );
     return Stack(
       children: [
@@ -146,11 +151,44 @@ class _RuntimeScope extends InheritedWidget {
 }
 
 class _FormScope extends InheritedWidget {
-  const _FormScope({required this.name, required super.child});
+  const _FormScope({
+    required this.name,
+    required this.validation,
+    required super.child,
+  });
   final String name;
+  final OpenUiFormValidation validation;
 
   @override
-  bool updateShouldNotify(_FormScope old) => name != old.name;
+  bool updateShouldNotify(_FormScope old) =>
+      name != old.name || !identical(validation, old.validation);
+}
+
+/// Owns one Form's [OpenUiFormValidation] for as long as the Form is mounted.
+class _FormHost extends StatefulWidget {
+  const _FormHost({required this.name, required this.child});
+  final String name;
+  final Widget child;
+
+  @override
+  State<_FormHost> createState() => _FormHostState();
+}
+
+class _FormHostState extends State<_FormHost> {
+  final _validation = OpenUiFormValidation();
+
+  @override
+  void dispose() {
+    _validation.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => _FormScope(
+    name: widget.name,
+    validation: _validation,
+    child: widget.child,
+  );
 }
 
 int _nextFieldId = 0;
@@ -228,6 +266,10 @@ final class OpenUiNode {
   String? get formName =>
       _context.dependOnInheritedWidgetOfExactType<_FormScope>()?.name;
 
+  /// The enclosing Form's validation, if any.
+  OpenUiFormValidation? get formValidation =>
+      _context.dependOnInheritedWidgetOfExactType<_FormScope>()?.validation;
+
   /// Renders a value: an element, text, a number (as JavaScript prints it),
   /// or a list of them (flattened).
   List<Widget> render(Object? value) => [..._render(value)];
@@ -275,7 +317,7 @@ final class OpenUiNode {
 
   /// Puts [child] in a Form scope named after this element.
   Widget form(Widget child) =>
-      _FormScope(name: element.statementId ?? _generatedId, child: child);
+      _FormHost(name: element.statementId ?? _generatedId, child: child);
 
   /// Copies [text] with the host's clipboard.
   Future<void> copy(String text) => services.copyText(text);

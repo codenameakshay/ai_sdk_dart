@@ -30,7 +30,7 @@ Color? parseCssColor(String input) {
     final v = double.tryParse(
       p.endsWith('%') ? p.substring(0, p.length - 1) : p,
     );
-    if (v == null) return null;
+    if (v == null || !v.isFinite) return null;
     return p.endsWith('%') ? v / 100 * scale : v;
   }
 
@@ -49,7 +49,7 @@ Color? parseCssColor(String input) {
   }
   final h = double.tryParse(parts[0].replaceAll('deg', ''));
   final sat = number(parts[1], 1), light = number(parts[2], 1);
-  if (h == null || sat == null || light == null) return null;
+  if (h == null || !h.isFinite || sat == null || light == null) return null;
   final hue = (h % 360) / 360,
       sl = sat.clamp(0.0, 1.0),
       l = light.clamp(0.0, 1.0);

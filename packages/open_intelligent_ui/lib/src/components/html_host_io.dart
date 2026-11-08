@@ -36,13 +36,15 @@ class _NativePageState extends State<_NativePage> {
       'IuiHeight',
       onMessageReceived: (m) {
         final h = clampHeight(m.message);
-        if (h != null) widget.onHeight(h);
+        if (mounted && h != null) widget.onHeight(h);
       },
     )
     ..setNavigationDelegate(
       NavigationDelegate(
         onNavigationRequest: (request) =>
-            _loaded ? NavigationDecision.prevent : NavigationDecision.navigate,
+            !_loaded && request.url == 'about:blank'
+            ? NavigationDecision.navigate
+            : NavigationDecision.prevent,
         onPageFinished: (_) => _loaded = true,
       ),
     )
@@ -93,6 +95,16 @@ class _NativeYouTubeState extends State<_NativeYouTube> {
     ..loadRequest(
       Uri.parse('https://www.youtube-nocookie.com/embed/${widget.id}'),
     );
+
+  @override
+  void didUpdateWidget(_NativeYouTube old) {
+    super.didUpdateWidget(old);
+    if (old.id != widget.id) {
+      _controller.loadRequest(
+        Uri.parse('https://www.youtube-nocookie.com/embed/${widget.id}'),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) => WebViewWidget(controller: _controller);

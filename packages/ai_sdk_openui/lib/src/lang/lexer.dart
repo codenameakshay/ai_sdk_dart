@@ -246,6 +246,7 @@ String _decodeDoubleQuoted(String json, String raw) {
 num _parseNumberLiteral(String text) {
   final d = double.tryParse(text);
   if (d == null) return double.nan;
+  if (d == 0 && d.isNegative) return d;
   return d == d.truncateToDouble() && d.abs() < 9007199254740992
       ? d.toInt()
       : d;

@@ -260,8 +260,11 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
       copyWith(ink: ink, muted: _alpha(ink, 0.72));
 
   /// Spacing counted in 4px steps.
-  static double? space(Object? value) =>
-      value is num && value.isFinite ? math.max(0, value.toDouble()) * 4 : null;
+  static double? space(Object? value) {
+    if (value is! num || !value.isFinite) return null;
+    final space = math.max(0.0, value.toDouble()) * 4;
+    return space.isFinite ? space : null;
+  }
 
   /// A length: px numbers or numeric strings. Percent lengths come back as
   /// fractions in [fraction].
@@ -274,6 +277,7 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
     final m = RegExp(r'^(\d+(?:\.\d+)?)(px|%)?$').firstMatch(s);
     if (m == null) return (px: null, fraction: null);
     final n = double.parse(m.group(1)!);
+    if (!n.isFinite) return (px: null, fraction: null);
     return m.group(2) == '%'
         ? (px: null, fraction: n / 100)
         : (px: n, fraction: null);

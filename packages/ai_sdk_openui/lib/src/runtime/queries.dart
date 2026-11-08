@@ -185,34 +185,51 @@ final class QueryManager {
         args is Map ? args.cast<String, Object?>() : const {},
       );
       if (_disposed) return;
-      final current = _queries[statementId];
-      if (current == null || current.cacheKey != cacheKey) return;
+      if (!identical(_cache[cacheKey], entry) ||
+          !_queries.values.any((q) => q.cacheKey == cacheKey)) {
+        return;
+      }
       entry.data = data;
-      current
-        ..everFetched = true
-        ..error = null;
-      final prev = current.prevCacheKey;
-      if (prev != null && prev != cacheKey) {
-        current.prevCacheKey = null;
-        _cleanup(prev);
+      for (final current in _queries.values.where(
+        (q) => q.cacheKey == cacheKey,
+      )) {
+        current
+          ..everFetched = true
+          ..error = null;
+        final prev = current.prevCacheKey;
+        if (prev != null && prev != cacheKey) {
+          current.prevCacheKey = null;
+          _cleanup(prev);
+        }
       }
     } catch (err) {
-      final current = _queries[statementId];
-      if (current != null && current.cacheKey == cacheKey) {
-        current.error = _error(statementId, toolName, err, mutation: false);
+      if (!_disposed && identical(_cache[cacheKey], entry)) {
+        for (final current in _queries.values.where(
+          (q) => q.cacheKey == cacheKey,
+        )) {
+          current.error = _error(
+            current.node.statementId,
+            toolName,
+            err,
+            mutation: false,
+          );
+        }
       }
     } finally {
       entry.inFlight = false;
-      final current = _queries[statementId];
-      if (!_disposed) {
-        if (current != null && current.cacheKey == cacheKey) {
+      if (!_disposed && identical(_cache[cacheKey], entry)) {
+        String? refetch;
+        for (final current in _queries.values.where(
+          (q) => q.cacheKey == cacheKey,
+        )) {
           current.loading = false;
-          if (_rebuild()) _notify();
           if (current.needsRefetch) {
             current.needsRefetch = false;
-            unawaited(_fetch(current.cacheKey, statementId));
+            refetch ??= current.node.statementId;
           }
         }
+        if (_rebuild()) _notify();
+        if (refetch != null) unawaited(_fetch(cacheKey, refetch));
       }
     }
   }
@@ -253,6 +270,7 @@ final class QueryManager {
       }
       final q = _queries[node.statementId]!;
       final entry = _cache[cacheKey];
+      q.loading = entry?.inFlight ?? false;
       if (_call != null &&
           !(entry?.settled ?? false) &&
           !(entry?.inFlight ?? false)) {
@@ -262,7 +280,7 @@ final class QueryManager {
       if (interval != q.refreshSeconds) {
         q.timer?.cancel();
         q.timer = null;
-        if (interval > 0) {
+        if (interval > 0 && (interval * 1000).isFinite) {
           q.timer = Timer.periodic(
             Duration(milliseconds: (interval * 1000).round()),
             (_) {
@@ -302,10 +320,8 @@ final class QueryManager {
       if (existing == null) {
         _mutations[sid] = _Mutation(tool);
       } else if (existing.toolName != tool) {
-        existing
-          ..toolName = tool
-          ..result = {'status': 'idle', 'data': null, 'error': null}
-          ..error = null;
+        _mutations[sid] = _Mutation(tool)
+          ..result = {'status': 'idle', 'data': null, 'error': null};
       }
     }
     if (_rebuild()) _notify();
@@ -331,13 +347,21 @@ final class QueryManager {
     var ok = false;
     try {
       final data = await call(m.toolName, args);
-      if (_disposed || gen != _generation) return false;
+      if (_disposed ||
+          gen != _generation ||
+          !identical(_mutations[statementId], m)) {
+        return false;
+      }
       m
         ..result = {'status': 'success', 'data': data}
         ..error = null;
       ok = true;
     } catch (err) {
-      if (_disposed || gen != _generation) return false;
+      if (_disposed ||
+          gen != _generation ||
+          !identical(_mutations[statementId], m)) {
+        return false;
+      }
       m
         ..result = {'status': 'error', 'error': '$err'}
         ..error = _error(statementId, m.toolName, err, mutation: true);

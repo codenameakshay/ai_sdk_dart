@@ -199,6 +199,44 @@ void main() {
       expect(await d.ask('https://evil.test/'), NavigationDecision.prevent);
     });
 
+    testWidgets('blocks external navigation before the page finishes loading', (
+      tester,
+    ) async {
+      final platform = _install();
+      await pumpProgram(tester, 'root = Col([HtmlView("<p>hi</p>")])');
+      final delegate = platform.controllers.single.delegate!;
+      expect(
+        await delegate.ask('https://evil.test/'),
+        NavigationDecision.prevent,
+      );
+      expect(
+        await delegate.ask('javascript:alert(1)'),
+        NavigationDecision.prevent,
+      );
+      expect(await delegate.ask('about:blank'), NavigationDecision.navigate);
+      delegate.onFinished!('about:blank');
+      expect(await delegate.ask('about:blank'), NavigationDecision.prevent);
+    });
+
+    testWidgets('ignores height messages after the view is removed', (
+      tester,
+    ) async {
+      final platform = _install();
+      final p = await pumpProgram(
+        tester,
+        'root = Col([HtmlView("<p>hi</p>")])',
+      );
+      final report = platform.controllers.single.channels['IuiHeight']!;
+      p.session.update('root = Col([Text("gone")])', streaming: false);
+      await tester.pump();
+      expect(
+        () => report(const JavaScriptMessage(message: '500')),
+        returnsNormally,
+      );
+      expect(find.text('gone'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('new html reloads the page and allows its first load again', (
       tester,
     ) async {
@@ -280,6 +318,30 @@ void main() {
         expect(p.opened, isEmpty);
       },
     );
+
+    testWidgets('updates the embedded video when its id changes', (
+      tester,
+    ) async {
+      final platform = _install();
+      final p = await pumpProgram(tester, 'root = Col([YouTube("$id")])');
+      final controller = platform.controllers.single;
+      p.session.update(
+        'root = Col([YouTube("a-b_c-d_e-f")])',
+        streaming: false,
+      );
+      await tester.pump();
+      expect(platform.controllers, hasLength(1));
+      expect(controller.requests, [
+        Uri.parse('https://www.youtube-nocookie.com/embed/$id'),
+        Uri.parse('https://www.youtube-nocookie.com/embed/a-b_c-d_e-f'),
+      ]);
+      p.session.update(
+        'root = Col([YouTube("a-b_c-d_e-f", "New title")])',
+        streaming: false,
+      );
+      await tester.pump();
+      expect(controller.requests, hasLength(2));
+    });
 
     testWidgets('may navigate only inside YouTube over https', (tester) async {
       final platform = _install();

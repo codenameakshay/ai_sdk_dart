@@ -219,7 +219,7 @@ final class OpenUiSession {
       final persisted = <String, Object?>{};
       for (final MapEntry(:key, :value) in _initialState.entries) {
         if (key.startsWith(r'$')) {
-          persisted[key] = value;
+          if (!_store.has(key)) persisted[key] = value;
         } else if (!_store.has(key)) {
           _store.set(key, value);
         }
@@ -358,7 +358,13 @@ final class OpenUiSession {
         );
       });
     }
-    return FieldState._(_fieldValue(formName, name) ?? bound, (value) {
+    final raw = formName == null ? null : _store.get(formName);
+    final hasValue = formName == null
+        ? _store.has(name)
+        : raw is Map && raw.containsKey(name);
+    return FieldState._(hasValue ? _fieldValue(formName, name) : bound, (
+      value,
+    ) {
       final wrapped = {'value': value, 'componentType': componentType};
       if (formName == null) {
         _store.set(name, wrapped);
@@ -396,7 +402,7 @@ final class OpenUiSession {
     String? formName,
     required void Function(ActionEvent event) emit,
   }) async {
-    if (_disposed) return;
+    if (_disposed || _streaming) return;
     ActionEvent event(
       String type,
       Map<String, Object?> params, [
@@ -431,6 +437,7 @@ final class OpenUiSession {
       return;
     }
     for (final step in plan.steps) {
+      if (_disposed || _streaming) return;
       switch (step) {
         case RunStep(:final statementId, :final refType):
           if (refType == RuntimeRefType.mutation) {

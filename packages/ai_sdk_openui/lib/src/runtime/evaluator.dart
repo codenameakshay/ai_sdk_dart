@@ -146,17 +146,17 @@ Object? evaluate(Ast node, EvaluationContext ctx, [IsReactiveProp? reactive]) {
           if (l is String || r is String) {
             return Js.string(l ?? '') + Js.string(r ?? '');
           }
-          return Js.toNumber(l) + Js.toNumber(r);
+          return Js.toNumber(l).toDouble() + Js.toNumber(r).toDouble();
         case '-':
-          return Js.toNumber(l) - Js.toNumber(r);
+          return Js.toNumber(l).toDouble() - Js.toNumber(r).toDouble();
         case '*':
-          return Js.toNumber(l) * Js.toNumber(r);
+          return Js.toNumber(l).toDouble() * Js.toNumber(r).toDouble();
         case '/':
           final d = Js.toNumber(r);
           return d == 0 ? 0 : Js.toNumber(l) / d;
         case '%':
           final d = Js.toNumber(r);
-          return d == 0 ? 0 : Js.toNumber(l).remainder(d);
+          return d == 0 ? 0 : Js.toNumber(l).toDouble().remainder(d.toDouble());
         case '==':
           return Js.looseEquals(l, r);
         case '!=':
@@ -173,7 +173,7 @@ Object? evaluate(Ast node, EvaluationContext ctx, [IsReactiveProp? reactive]) {
       return null;
     case UnaryOpNode(:final op, :final operand):
       if (op == '!') return !Js.truthy(evaluate(operand, ctx));
-      if (op == '-') return -Js.toNumber(evaluate(operand, ctx));
+      if (op == '-') return -Js.toNumber(evaluate(operand, ctx)).toDouble();
       return null;
     case TernaryNode(:final condition, :final then, :final otherwise):
       return Js.truthy(evaluate(condition, ctx))

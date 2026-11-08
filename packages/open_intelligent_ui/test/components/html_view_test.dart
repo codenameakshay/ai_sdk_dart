@@ -248,7 +248,7 @@ void main() {
     testWidgets('a fixed height under 80 is raised to 80', (tester) async {
       await pumpProgram(tester, 'root = Col([HtmlView("<p>a</p>", 10)])');
       expect(tester.getSize(_page).height, 80);
-      tester.takeException();
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('a small fixed height lays out without overflow', (

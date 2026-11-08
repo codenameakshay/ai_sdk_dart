@@ -36,7 +36,7 @@ abstract final class Js {
         'o' => 8,
         _ => 2,
       };
-      return int.tryParse(radix.group(2)!, radix: base)?.toDouble() ??
+      return BigInt.tryParse(radix.group(2)!, radix: base)?.toDouble() ??
           double.nan;
     }
     if (!RegExp(r'^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$').hasMatch(s)) {
@@ -62,8 +62,7 @@ abstract final class Js {
     num() => value.toDouble(),
     String() => parseNumber(value),
     bool() => value ? 1 : 0,
-    List() when value.isEmpty => 0,
-    List() when value.length == 1 => number(value.first),
+    List() => parseNumber(string(value)),
     _ => double.nan,
   };
 

@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:ai_sdk_openui/src/lang/ast.dart';
 import 'package:ai_sdk_openui/src/lang/parser.dart';
+import 'package:ai_sdk_openui/src/runtime/evaluator.dart';
+import 'package:ai_sdk_openui/src/lang/validation.dart';
 import 'package:test/test.dart';
 
 /// A small library: `Card(title*, subtitle)`, `Row(gap* = 8)`,
@@ -685,5 +687,451 @@ void main() {
       ).push(r'root = Stack([Card($na', complete: true);
       expect(r.stateDeclarations.keys, [r'$na']);
     });
+  });
+
+  // Ported from lang-core 1.0.0 parser/__tests__/parser.test.ts, case for case.
+  group('lang-core parser cases', () {
+    final refSchema = CompiledSchema.fromJsonSchema({
+      r'$defs': {
+        'Stack': {
+          'properties': {'children': <String, Object?>{}},
+          'required': ['children'],
+        },
+        'Title': {
+          'properties': {'text': <String, Object?>{}},
+          'required': ['text'],
+        },
+        'Table': {
+          'properties': {
+            'columns': <String, Object?>{},
+            'rows': <String, Object?>{},
+          },
+          'required': ['columns', 'rows'],
+        },
+      },
+    });
+    ParseResult parse(String input) => parseProgram(input, refSchema);
+    List<ValidationError> errors(String input) => parse(input).meta.errors;
+    List<String> codes(String input) => [
+      for (final e in errors(input)) e.code.wire,
+    ];
+    List<Object?> children(ParseResult r) =>
+        r.root!.props['children']! as List<Object?>;
+    String? titleText(ParseResult r) {
+      final kids = r.root?.props['children'] as List<Object?>?;
+      final first = kids == null || kids.isEmpty ? null : kids.first;
+      return first is ElementNode ? first.props['text'] as String? : null;
+    }
+
+    group('unknown-component', () {
+      test('reports when component name is not in schema', () {
+        final result = parse('root = DataTable("col")');
+        expect(result.meta.errors, hasLength(1));
+        expect(result.meta.errors.single.code, ValidationCode.unknownComponent);
+        expect(result.meta.errors.single.component, 'DataTable');
+      });
+
+      test('drops unknown component from tree (returns null)', () {
+        expect(parse('root = DataTable("col")').root, isNull);
+      });
+
+      test('reports all unknown components in a tree', () {
+        expect(
+          codes('root = Stack([Ghost("a")])\n'),
+          contains('unknown-component'),
+        );
+      });
+
+      test('does not report for known component names', () {
+        expect(
+          codes('root = Stack(["hello"])'),
+          isNot(contains('unknown-component')),
+        );
+        expect(parse('root = Stack(["hello"])').meta.errors, isEmpty);
+      });
+    });
+
+    group('excess-args', () {
+      test('reports excess-args error but still renders with valid args', () {
+        final result = parse('root = Title("hello", "extra")');
+        expect(
+          codes('root = Title("hello", "extra")'),
+          contains('excess-args'),
+        );
+        expect(result.root!.props['text'], 'hello');
+      });
+
+      test('excess-args message lists count', () {
+        final excess = errors(
+          'root = Title("hello", "extra", "more")',
+        ).firstWhere((e) => e.code == ValidationCode.excessArgs);
+        expect(excess.message, contains('2 excess dropped'));
+      });
+
+      test('does not report when arg count matches param count', () {
+        expect(codes('root = Title("hello")'), isNot(contains('excess-args')));
+      });
+
+      test('does not report when fewer args than params', () {
+        expect(codes('root = Table([], [])'), isNot(contains('excess-args')));
+      });
+    });
+
+    group('unresolved references', () {
+      test('tracks unresolved refs in meta.unresolved (one-shot)', () {
+        expect(parse('root = Stack([tbl])').meta.unresolved, contains('tbl'));
+      });
+
+      test('does not produce errors for unresolved refs', () {
+        expect(parse('root = Stack([tbl])').meta.errors, isEmpty);
+      });
+
+      test('clears unresolved when ref is defined', () {
+        expect(
+          parse('root = Stack([tbl])\ntbl = Title("hello")').meta.unresolved,
+          isEmpty,
+        );
+      });
+    });
+
+    group('unresolved references (streaming)', () {
+      test('tracks unresolved refs mid-stream without errors', () {
+        final mid = StreamParser(refSchema).push('root = Stack([tbl])\n');
+        expect(mid.meta.unresolved, contains('tbl'));
+        expect(mid.meta.errors, isEmpty);
+      });
+
+      test('resolves automatically when ref is defined in a later chunk', () {
+        final sp = StreamParser(refSchema)..push('root = Stack([tbl])\n');
+        expect(sp.push('tbl = Title("hello")\n').meta.unresolved, isEmpty);
+      });
+
+      test('keeps unresolved refs in meta.unresolved at end of stream', () {
+        final sp = StreamParser(refSchema)..push('root = Stack([tbl])\n');
+        final result = sp.getResult();
+        expect(result.meta.unresolved, contains('tbl'));
+        expect(result.meta.errors, isEmpty);
+      });
+    });
+
+    group('existing errors carry type and code', () {
+      test('missing-required has correct shape', () {
+        final result = parse('root = Stack()');
+        expect(result.meta.errors, hasLength(1));
+        expect(result.meta.errors.single.code, ValidationCode.missingRequired);
+        expect(result.meta.errors.single.component, 'Stack');
+      });
+
+      test('null-required has correct shape', () {
+        final result = parse('root = Stack(null)');
+        expect(result.meta.errors, hasLength(1));
+        expect(result.meta.errors.single.code, ValidationCode.nullRequired);
+        expect(result.meta.errors.single.component, 'Stack');
+      });
+    });
+
+    group('array null-dropping', () {
+      test('drops unresolved refs from children arrays', () {
+        final kids = children(
+          parse('root = Stack([missing, t1])\nt1 = Title("ok")'),
+        );
+        expect(kids, hasLength(1));
+        expect((kids.single! as ElementNode).typeName, 'Title');
+      });
+
+      test('drops invalid components (missing required props) from arrays', () {
+        final kids = children(
+          parse('root = Stack([bad, good])\nbad = Title()\ngood = Title("ok")'),
+        );
+        expect(kids, hasLength(1));
+        expect((kids.single! as ElementNode).props['text'], 'ok');
+      });
+
+      test('drops unknown components from arrays', () {
+        final kids = children(
+          parse('root = Stack([u, t1])\nu = Ghost("x")\nt1 = Title("ok")'),
+        );
+        expect(kids, hasLength(1));
+        expect((kids.single! as ElementNode).typeName, 'Title');
+      });
+
+      test('preserves null literals in arrays', () {
+        expect(children(parse('root = Stack([null, null])')), [null, null]);
+      });
+
+      test('streaming: unresolved refs fill in when defined later', () {
+        final sp = StreamParser(refSchema);
+        final p1 = sp.push('root = Stack([t1, t2])\nt1 = Title("first")\n');
+        expect(children(p1), hasLength(1));
+        final p2 = sp.push('t2 = Title("second")\n');
+        expect(children(p2), hasLength(2));
+      });
+    });
+
+    group('orphaned statements', () {
+      test('detects unreachable statements on complete parse', () {
+        final orphaned = parse(
+          'root = Stack([t1])\nt1 = Title("used")\norphan = Title("unused")',
+        ).meta.orphaned;
+        expect(orphaned, contains('orphan'));
+        expect(orphaned, isNot(contains('t1')));
+        expect(orphaned, isNot(contains('root')));
+      });
+
+      test('no orphans when all statements are reachable', () {
+        expect(
+          parse(
+            'root = Stack([t1, t2])\nt1 = Title("a")\nt2 = Title("b")',
+          ).meta.orphaned,
+          isEmpty,
+        );
+      });
+
+      test('orphaned computed during streaming too', () {
+        final p1 = StreamParser(refSchema).push(
+          'root = Stack([t1])\nt1 = Title("a")\norphan = Title("stray")\n',
+        );
+        expect(p1.meta.orphaned, contains('orphan'));
+        expect(p1.meta.orphaned, isNot(contains('t1')));
+      });
+
+      test('detects multiple orphaned statements', () {
+        expect(
+          parse(
+            'root = Stack([t1])\nt1 = Title("used")\na = Title("x")\nb = Title("y")',
+          ).meta.orphaned,
+          unorderedEquals(['a', 'b']),
+        );
+      });
+
+      test('deeply nested refs are not orphaned', () {
+        expect(
+          parse(
+            'root = Stack([t1])\nt1 = Table([col], rows)\ncol = Title("Name")\nrows = [["Alice"]]',
+          ).meta.orphaned,
+          isEmpty,
+        );
+      });
+    });
+
+    group('markdown fences and multiline comments in strings', () {
+      test('preserves js markdown fences inside strings', () {
+        final result = parse(
+          r'root = Title("```js\nconsole.log(\"Hello World\");\n```")',
+        );
+        expect(result.meta.errors, isEmpty);
+        expect(
+          result.root!.props['text'],
+          '```js\nconsole.log("Hello World");\n```',
+        );
+      });
+
+      test('preserves python fenced code blocks inside strings', () {
+        final result = parse(
+          r'''root = Title("```python\nprint('hi')\n```")''',
+        );
+        expect(result.meta.errors, isEmpty);
+        expect(result.root!.props['text'], "```python\nprint('hi')\n```");
+      });
+
+      test('preserves // inside multiline strings', () {
+        final result = parse(
+          'root = Title("\nHello // World\nhttps://example.com/\n")',
+        );
+        expect(result.meta.errors, isEmpty);
+        expect(
+          result.root!.props['text'],
+          '\nHello // World\nhttps://example.com/\n',
+        );
+      });
+
+      test('preserves # inside multiline strings', () {
+        final result = parse(
+          'root = Title("\nHello # World\nhttps://example.com/\n")',
+        );
+        expect(result.meta.errors, isEmpty);
+        expect(
+          result.root!.props['text'],
+          '\nHello # World\nhttps://example.com/\n',
+        );
+      });
+
+      test(
+        'does not treat apostrophes as string delimiters when stripping fences',
+        () {
+          final result = parse(
+            "Here's the code:\n\n```js\nroot = Title(\"hello\")\n```",
+          );
+          expect(result.meta.errors, isEmpty);
+          expect(result.root!.props['text'], 'hello');
+        },
+      );
+    });
+
+    group('redefined statement IDs', () {
+      const withNewline = 'root = Stack([a])\na = Title("x")\na = Title("y")\n';
+      const withoutNewline =
+          'root = Stack([a])\na = Title("x")\na = Title("y")';
+      String? pushAll(void Function(StreamParser sp) write) {
+        final sp = StreamParser(refSchema);
+        write(sp);
+        return titleText(sp.getResult());
+      }
+
+      test('parse() last-wins with and without a trailing newline', () {
+        expect(titleText(parse(withNewline)), 'y');
+        expect(titleText(parse(withoutNewline)), 'y');
+      });
+
+      test('stream parser last-wins for a single push, matching parse()', () {
+        expect(pushAll((sp) => sp.push(withNewline)), 'y');
+        expect(pushAll((sp) => sp.push(withoutNewline)), 'y');
+      });
+
+      test(
+        'stream parser last-wins line-by-line and character-by-character',
+        () {
+          expect(
+            pushAll((sp) {
+              for (final line in withNewline.split(RegExp('(?<=\n)'))) {
+                if (line.isNotEmpty) sp.push(line);
+              }
+            }),
+            'y',
+          );
+          expect(
+            pushAll((sp) {
+              for (final ch in withNewline.split('')) {
+                sp.push(ch);
+              }
+            }),
+            'y',
+          );
+          expect(
+            pushAll((sp) {
+              for (final ch in withoutNewline.split('')) {
+                sp.push(ch);
+              }
+            }),
+            'y',
+          );
+        },
+      );
+
+      test('stream parser last-wins across a two-chunk split', () {
+        expect(
+          pushAll(
+            (sp) => sp
+              ..push('root = Stack([a])\na = Title("x")\n')
+              ..push('a = Title("y")\n'),
+          ),
+          'y',
+        );
+        expect(
+          pushAll(
+            (sp) => sp
+              ..push('root = Stack([a])\na = Title("x")\n')
+              ..push('a = Title("y")'),
+          ),
+          'y',
+        );
+      });
+
+      test('stream parser last-wins via set(), matching the renderer path', () {
+        expect(titleText(StreamParser(refSchema).set(withoutNewline)), 'y');
+      });
+
+      test(
+        'an incomplete pending redefinition does not clobber a completed statement',
+        () {
+          final sp = StreamParser(refSchema)
+            ..push('root = Stack([a])\na = Title("x")\n');
+          expect(titleText(sp.push('a = Title("y')), 'x');
+          expect(titleText(sp.push('")\n')), 'y');
+        },
+      );
+    });
+  });
+
+  // Ported from lang-core 1.0.0 parser/__tests__/entry.test.ts.
+  group('lang-core entry rule cases', () {
+    final entrySchema = CompiledSchema.fromJsonSchema({
+      r'$defs': {
+        'Card': {
+          'properties': {'children': <String, Object?>{}},
+          'required': ['children'],
+        },
+        'Title': {
+          'properties': {'text': <String, Object?>{}},
+          'required': ['text'],
+        },
+      },
+    });
+    List<String> codes(ParseResult r) => [
+      for (final e in r.meta.errors) e.code.wire,
+    ];
+
+    test(
+      'falls back to a first root-component statement, after \$state, with a no-root warning',
+      () {
+        final r = parseProgram(
+          '\$t = 1\npage = Card([t])\nt = Title("x")',
+          entrySchema,
+          rootName: 'Card',
+        );
+        expect([r.root!.typeName, r.root!.statementId], ['Card', 'page']);
+        expect(codes(r), ['no-root']);
+        expect(r.meta.errors.single.isWarning, isTrue);
+      },
+    );
+
+    test(
+      'falls back to a later root-component statement when children come first',
+      () {
+        final r = parseProgram(
+          't = Title("x")\npage = Card([t])',
+          entrySchema,
+          rootName: 'Card',
+        );
+        expect([r.root!.typeName, r.root!.statementId], ['Card', 'page']);
+        expect(r.meta.orphaned, isEmpty);
+        expect(codes(r), ['no-root']);
+        expect(r.meta.errors.single.isWarning, isTrue);
+      },
+    );
+
+    test('renders nothing and reports no orphans when there is no entry', () {
+      final r = parseProgram('t = Title("x")', entrySchema, rootName: 'Card');
+      expect(r.root, isNull);
+      expect(r.meta.orphaned, isEmpty);
+      expect(codes(r), ['no-root']);
+      expect(r.meta.errors.single.isWarning, isFalse);
+      expect(codes(parseProgram('page = Card([])', entrySchema)), ['no-root']);
+    });
+
+    test('evaluates a ternary entry at runtime', () {
+      final r = parseProgram(
+        '\$t = true\nroot = \$t ? a : b\na = Title("A")\nb = Title("B")',
+        entrySchema,
+      );
+      expect(r.meta.errors, isEmpty);
+      final picked = evaluateRoot(
+        r,
+        EvaluationContext(getState: (_) => false, resolveRef: (_) => null),
+        (_, _) => false,
+        [],
+      );
+      expect([picked!.typeName, picked.props['text']], ['Title', 'B']);
+    });
+
+    test(
+      'reports an unknown @Name call as unknown-function and keeps the statement',
+      () {
+        final r = parseProgram('root = Title("p" + @Foo(1))', entrySchema);
+        expect(codes(r), ['unknown-function']);
+        final text = r.root!.props['text']! as BinOpNode;
+        expect(text.right, isA<NullNode>());
+      },
+    );
   });
 }

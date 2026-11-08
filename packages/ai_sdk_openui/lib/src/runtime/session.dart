@@ -406,11 +406,14 @@ final class OpenUiSession {
       for (final q in result?.queryStatements ?? const <QueryStatementInfo>[])
         queryNode(q),
     ]);
-    _queries.registerMutations({
+    _queries.registerMutations([
       for (final m
           in result?.mutationStatements ?? const <MutationStatementInfo>[])
-        m.statementId: Js.string(eval(m.toolAst) ?? ''),
-    });
+        MutationNode(
+          statementId: m.statementId,
+          toolName: Js.string(eval(m.toolAst) ?? ''),
+        ),
+    ]);
   }
 
   void _evaluateIfDirty() {

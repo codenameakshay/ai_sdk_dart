@@ -169,7 +169,9 @@ void main() {
   test('a failed Mutation keeps its error result and reports it', () async {
     final manager = QueryManager((_, _) async => throw Exception('down'));
     addTearDown(manager.dispose);
-    manager.registerMutations({'m': 't'});
+    manager.registerMutations([
+      const MutationNode(statementId: 'm', toolName: 't'),
+    ]);
     expect(manager.getMutationResult('m'), {'status': 'idle'});
     expect(manager.getResult('m'), isNull);
 
@@ -195,7 +197,9 @@ void main() {
       return ++queryCalls;
     });
     addTearDown(manager.dispose);
-    manager.registerMutations({'m': 'save'});
+    manager.registerMutations([
+      const MutationNode(statementId: 'm', toolName: 'save'),
+    ]);
     manager.evaluateQueries([node('a')]);
     await settle();
     expect(queryCalls, 1);

@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import '../lang/parser.dart';
-import '../runtime/builtins.dart';
 import 'prompt.dart';
 import 'schema.dart';
 
@@ -313,19 +312,6 @@ final class OpenUiLibrary {
             for (final a in actions)
               a.name: PromptEntry(signature(a.name, a.params), a.description),
           },
-          builtinFunctionLines: [
-            for (final b in builtinFunctionSpecs)
-              functionLine(
-                PromptEntry(
-                  signature(b.name, b.params, b.returns),
-                  b.description,
-                ),
-              ),
-          ],
-          builtinSteps: {
-            for (final s in builtinStepSpecs)
-              s.name: PromptEntry(signature(s.name, s.params), s.description),
-          },
           preamble: options.preamble,
           bindings: options.bindings,
           toolCalls: options.toolCalls,
@@ -352,6 +338,13 @@ final class OpenUiLibrary {
   ParseReport parse(String program) =>
       ParseReport._(parseProgram(program, compiled, rootName: rootName));
 }
+
+/// lang-core `generateSystemPrompt` for a library: [OpenUiLibrary.systemPrompt].
+/// For OpenUI Cloud's config block use `cloudSystemPrompt`.
+String generateSystemPrompt(
+  OpenUiLibrary library, [
+  PromptOptions options = const PromptOptions(),
+]) => library.systemPrompt(options);
 
 /// What a server needs to know about a program without running it.
 final class ParseReport {

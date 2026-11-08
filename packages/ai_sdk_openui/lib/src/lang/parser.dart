@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../runtime/builtins.dart';
 import 'ast.dart';
 import 'js.dart';
@@ -158,7 +160,7 @@ final class MutationStatement extends Statement {
   final CompNode expr;
 }
 
-final class QueryStatementInfo {
+final class QueryStatementInfo implements JsFields {
   const QueryStatementInfo({
     required this.statementId,
     this.toolAst,
@@ -175,9 +177,20 @@ final class QueryStatementInfo {
   final Ast? refreshAst;
   final List<String>? deps;
   final bool complete;
+
+  @override
+  Map<String, Object?> get jsFields => {
+    'statementId': statementId,
+    'toolAST': toolAst,
+    'argsAST': argsAst,
+    'defaultsAST': defaultsAst,
+    'refreshAST': refreshAst,
+    'deps': ?deps,
+    'complete': complete,
+  };
 }
 
-final class MutationStatementInfo {
+final class MutationStatementInfo implements JsFields {
   const MutationStatementInfo({
     required this.statementId,
     this.toolAst,
@@ -186,6 +199,13 @@ final class MutationStatementInfo {
   final String statementId;
   final Ast? toolAst;
   final Ast? argsAst;
+
+  @override
+  Map<String, Object?> get jsFields => {
+    'statementId': statementId,
+    'toolAST': toolAst,
+    'argsAST': argsAst,
+  };
 }
 
 final class ParseMeta {
@@ -218,6 +238,26 @@ final class ParseResult {
   final Map<String, Object?> stateDeclarations;
   final List<QueryStatementInfo> queryStatements;
   final List<MutationStatementInfo> mutationStatements;
+
+  /// lang-core's `ParseResult` as JSON, as `JSON.stringify` writes it.
+  Map<String, Object?> toJson() =>
+      jsonDecode(
+            Js.stringify({
+              'root': root,
+              'rootExpression': ?rootExpression,
+              'meta': {
+                'incomplete': meta.incomplete,
+                'unresolved': meta.unresolved,
+                'orphaned': meta.orphaned,
+                'statementCount': meta.statementCount,
+                'errors': meta.errors,
+              },
+              'stateDeclarations': stateDeclarations,
+              'queryStatements': queryStatements,
+              'mutationStatements': mutationStatements,
+            }),
+          )
+          as Map<String, Object?>;
 
   static ParseResult empty({bool incomplete = true}) => ParseResult(
     root: null,
@@ -934,6 +974,11 @@ final class Parser {
   ParseResult parse(String input) =>
       parseProgram(input, _schema, rootName: _rootName);
 }
+
+/// lang-core `parse`: one complete (or partial) program against a compiled
+/// schema (`CompiledSchema.fromJsonSchema(library.toJsonSchema())`).
+ParseResult parse(String input, CompiledSchema schema, [String? rootName]) =>
+    parseProgram(input, schema, rootName: rootName);
 
 /// lang-core `createParser`; pass `library.toJsonSchema()`.
 Parser createParser(JsonSchema schema, {String? rootName}) =>

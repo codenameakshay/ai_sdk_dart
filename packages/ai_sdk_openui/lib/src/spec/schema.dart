@@ -431,6 +431,11 @@ String signature(String name, Map<String, Schema> params, [Schema? returns]) {
   return returns == null ? sig : '$sig → ${typeAnnotation(returns)}';
 }
 
+/// lang-core `buildSignature`: a component's prompt signature, such as
+/// `Card(title: string, subtitle?: string)`.
+String buildSignature(String componentName, Map<String, Schema> props) =>
+    signature(componentName, props);
+
 /// For `extend`: the component union [schema] is, or holds as its list item, when one option names a [known] component.
 Schema? slotUnion(Schema schema, Set<String> known) => switch (schema) {
   _List(:final item) => slotUnion(item, known),

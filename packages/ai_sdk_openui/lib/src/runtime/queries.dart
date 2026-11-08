@@ -10,6 +10,23 @@ import 'mcp.dart';
 typedef ToolCaller =
     Future<Object?> Function(String name, Map<String, Object?> args);
 
+/// lang-core `ToolProvider`: what a [QueryManager] calls tools with.
+typedef ToolProvider = ToolCaller;
+
+/// lang-core `MutationResult`: `{status: "idle" | "loading" | "success" | "error", data?, error?}`.
+typedef MutationResult = Map<String, Object?>;
+
+/// lang-core `MutationNode`: a Mutation statement and the tool it runs.
+final class MutationNode {
+  const MutationNode({required this.statementId, required this.toolName});
+  final String statementId;
+  final String toolName;
+}
+
+/// lang-core `createQueryManager`.
+QueryManager createQueryManager(ToolProvider? toolProvider) =>
+    QueryManager(toolProvider);
+
 /// Thrown by a [ToolCaller] that has no tool of that name (lang-core `ToolNotFoundError`).
 final class ToolNotFoundError implements Exception {
   const ToolNotFoundError(this.toolName, [this.availableTools = const []]);
@@ -189,7 +206,7 @@ final class QueryManager {
   }
 
   /// The last result of a Mutation, or null when [statementId] is not one.
-  Map<String, Object?>? getMutationResult(String statementId) =>
+  MutationResult? getMutationResult(String statementId) =>
       _mutations[statementId]?.result;
 
   /// Whether the Query [statementId] is loading.
@@ -396,7 +413,8 @@ final class QueryManager {
     }
   }
 
-  void registerMutations(Map<String, String> toolsById) {
+  void registerMutations(List<MutationNode> nodes) {
+    final toolsById = {for (final n in nodes) n.statementId: n.toolName};
     _mutations.removeWhere((sid, _) => !toolsById.containsKey(sid));
     for (final MapEntry(key: sid, value: tool) in toolsById.entries) {
       final existing = _mutations[sid];

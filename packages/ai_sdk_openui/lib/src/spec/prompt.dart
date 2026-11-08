@@ -1,5 +1,8 @@
 import 'dart:convert';
 
+import '../runtime/builtins.dart';
+import 'schema.dart';
+
 /// One line of the prompt: a component, function or action signature.
 final class PromptEntry {
   const PromptEntry(this.signature, [this.description]);
@@ -36,8 +39,8 @@ final class PromptSpec {
     this.groups = const [],
     this.functions = const {},
     this.actions = const {},
-    required this.builtinFunctionLines,
-    required this.builtinSteps,
+    this.builtinFunctionLines,
+    this.builtinSteps,
     this.preamble,
     this.bindings,
     this.toolCalls,
@@ -58,10 +61,12 @@ final class PromptSpec {
   final Map<String, PromptEntry> actions;
 
   /// `@Count(array: any[]) → number — Returns array length`, in order.
-  final List<String> builtinFunctionLines;
+  /// Null lists the built-in functions.
+  final List<String>? builtinFunctionLines;
 
   /// Built-in steps in prompt order (Run, ToAssistant, OpenUrl, Set, Reset).
-  final Map<String, PromptEntry> builtinSteps;
+  /// Null lists the built-in steps.
+  final Map<String, PromptEntry>? builtinSteps;
 
   final String? preamble;
   final bool? bindings;
@@ -230,7 +235,7 @@ List<MapEntry<String, PromptEntry>> _visibleSteps(
   required bool toolCalls,
   required bool bindings,
 }) => [
-  for (final e in spec.builtinSteps.entries)
+  for (final e in (spec.builtinSteps ?? _builtinSteps).entries)
     if (e.key == 'Run'
         ? toolCalls
         : (e.key == 'Set' || e.key == 'Reset')
@@ -574,6 +579,18 @@ String _componentSignatures(
   return lines.join('\n');
 }
 
+final List<String> _builtinFunctionLines = [
+  for (final b in builtinFunctionSpecs)
+    functionLine(
+      PromptEntry(signature(b.name, b.params, b.returns), b.description),
+    ),
+];
+
+final Map<String, PromptEntry> _builtinSteps = {
+  for (final s in builtinStepSpecs)
+    s.name: PromptEntry(signature(s.name, s.params), s.description),
+};
+
 /// lang-core `generatePrompt`.
 String generatePrompt(PromptSpec spec) {
   final root = spec.root;
@@ -606,7 +623,11 @@ String generatePrompt(PromptSpec spec) {
   if (spec.builtinFunctions ?? supportsExpressions) {
     parts.addAll([
       '',
-      _builtinFunctionsSection(spec.builtinFunctionLines, custom, toolCalls),
+      _builtinFunctionsSection(
+        spec.builtinFunctionLines ?? _builtinFunctionLines,
+        custom,
+        toolCalls,
+      ),
     ]);
   } else if (custom.isNotEmpty) {
     parts.addAll(['', '## Built-in Functions\n\n${custom.join('\n')}']);

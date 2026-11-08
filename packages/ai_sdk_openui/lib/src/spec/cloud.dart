@@ -32,15 +32,10 @@ String cloudSystemPrompt({
 }) {
   final Map<String, Object?> config;
   if (library != null) {
-    final issues = [
-      for (final group in library.groups)
-        for (final component in group.components)
-          if (!library.components.containsKey(component.typeName))
-            'Component group "${group.name}" references unknown component "${component.typeName}".',
-    ];
+    final issues = validateChatLibrary(library.toSpec());
     if (issues.isNotEmpty) {
       throw ArgumentError(
-        '[generateSystemPrompt] Invalid library: ${issues.join(' ')}',
+        '[generateSystemPrompt] Invalid library: ${issues.map((i) => i.message).join(' ')}',
       );
     }
     final spec = {...library.toSpec()}..remove('components');
@@ -58,6 +53,176 @@ String cloudSystemPrompt({
   return instructions != null && instructions.isNotEmpty
       ? '$block\n$instructions'
       : block;
+}
+
+/// lang-core `ChatLibraryIssue`: one structural problem of a library spec.
+final class ChatLibraryIssue {
+  const ChatLibraryIssue(this.code, this.message, [this.path]);
+
+  /// `invalid-shape`, `root-not-found`, `unresolved-ref`,
+  /// `unknown-group-component` or `invalid-required`.
+  final String code;
+  final String message;
+
+  /// Where, such as `$defs/Card/properties/children/items`.
+  final String? path;
+}
+
+final _refPattern = RegExp(r'^#/\$defs/(.+)$');
+
+/// lang-core `validateChatLibrary`: every structural issue of a library
+/// spec ([OpenUiLibrary.toSpec]) in one pass; empty when it is valid.
+List<ChatLibraryIssue> validateChatLibrary(Object? library) {
+  if (library is! Map) {
+    return const [
+      ChatLibraryIssue('invalid-shape', 'chatLibrary must be an object.'),
+    ];
+  }
+  final issues = <ChatLibraryIssue>[];
+  final root = library['root'];
+  if (library.containsKey('root') && (root is! String || root.isEmpty)) {
+    issues.add(
+      const ChatLibraryIssue(
+        'invalid-shape',
+        'chatLibrary.root, when present, must be a non-empty string.',
+        'root',
+      ),
+    );
+  }
+  final schema = library['schema'];
+  if (schema is! Map) {
+    issues.add(
+      const ChatLibraryIssue(
+        'invalid-shape',
+        r'chatLibrary.schema must be an object with a $defs map of component schemas.',
+        'schema',
+      ),
+    );
+    return issues;
+  }
+  final defs = schema[r'$defs'];
+  if (defs is! Map || defs.isEmpty) {
+    issues.add(
+      const ChatLibraryIssue(
+        'invalid-shape',
+        r'chatLibrary.schema.$defs must be a non-empty object keyed by component name.',
+        r'schema/$defs',
+      ),
+    );
+    return issues;
+  }
+  final defNames = {for (final k in defs.keys) '$k'};
+  if (root is String && root.isNotEmpty && !defNames.contains(root)) {
+    issues.add(
+      ChatLibraryIssue(
+        'root-not-found',
+        'Root component "$root" was not found in schema.\$defs. Available components: ${defNames.join(', ')}.',
+        'root',
+      ),
+    );
+  }
+  void collectRefs(Object? node, String path) {
+    if (node is List) {
+      for (var i = 0; i < node.length; i++) {
+        collectRefs(node[i], '$path/$i');
+      }
+      return;
+    }
+    if (node is! Map) return;
+    final ref = node[r'$ref'];
+    if (ref is String) {
+      final match = _refPattern.firstMatch(ref);
+      if (match == null || !defNames.contains(match[1])) {
+        issues.add(
+          ChatLibraryIssue(
+            'unresolved-ref',
+            'Unresolvable \$ref "$ref" at $path — refs must be "#/\$defs/<name>" pointing at a component in \$defs.',
+            path,
+          ),
+        );
+      }
+    }
+    for (final MapEntry(:key, :value) in node.entries) {
+      if (key != r'$ref') collectRefs(value, '$path/$key');
+    }
+  }
+
+  for (final MapEntry(key: name, value: def) in defs.entries) {
+    final defPath = '\$defs/$name';
+    if (def is! Map) {
+      issues.add(
+        ChatLibraryIssue(
+          'invalid-shape',
+          '$defPath must be an object component schema.',
+          defPath,
+        ),
+      );
+      continue;
+    }
+    final properties = def['properties'];
+    if (def.containsKey('properties') && properties is! Map) {
+      issues.add(
+        ChatLibraryIssue(
+          'invalid-shape',
+          '$defPath/properties must be an object.',
+          '$defPath/properties',
+        ),
+      );
+    }
+    final required = def['required'];
+    if (def.containsKey('required')) {
+      if (required is! List || required.any((r) => r is! String)) {
+        issues.add(
+          ChatLibraryIssue(
+            'invalid-required',
+            '$defPath/required must be an array of property names.',
+            '$defPath/required',
+          ),
+        );
+      } else {
+        final keys = properties is Map ? properties.keys.toSet() : <Object?>{};
+        for (final r in required) {
+          if (!keys.contains(r)) {
+            issues.add(
+              ChatLibraryIssue(
+                'invalid-required',
+                '$defPath lists required property "$r" that is not in properties.',
+                '$defPath/required',
+              ),
+            );
+          }
+        }
+      }
+    }
+    collectRefs(properties, '$defPath/properties');
+  }
+  final groups = library['componentGroups'];
+  for (final group in groups is List ? groups : const []) {
+    if (group is! Map ||
+        group['name'] is! String ||
+        group['components'] is! List) {
+      issues.add(
+        const ChatLibraryIssue(
+          'invalid-shape',
+          'Each componentGroups entry must be {name: string, components: string[], notes?: string[]}.',
+          'componentGroups',
+        ),
+      );
+      continue;
+    }
+    for (final comp in group['components'] as List) {
+      if (comp is! String || !defNames.contains(comp)) {
+        issues.add(
+          ChatLibraryIssue(
+            'unknown-group-component',
+            'Component group "${group['name']}" references unknown component "${Js.string(comp)}".',
+            'componentGroups',
+          ),
+        );
+      }
+    }
+  }
+  return issues;
 }
 
 Map<String, Object?>? _pickCloudOptions(CloudPromptOptions? options) {

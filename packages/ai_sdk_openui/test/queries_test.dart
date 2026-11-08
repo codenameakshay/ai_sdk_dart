@@ -566,4 +566,51 @@ void main() {
       expect(heard, 2);
     });
   });
+
+  // Ported from lang-core 1.0.0 runtime/__tests__/queryManager.test.ts, with a 10 ms interval for 5 s.
+  group('QueryManager refresh interval lifecycle', () {
+    QueryNode node(String id, Object? refresh) => QueryNode(
+      statementId: id,
+      toolName: 'get_data',
+      args: const {},
+      defaults: const {},
+      refreshInterval: refresh,
+    );
+
+    test(
+      're-creates the refresh timer after dispose and re-evaluate',
+      () async {
+        var calls = 0;
+        final manager = QueryManager((_, _) async {
+          calls++;
+          return {'ok': true};
+        })..evaluateQueries([node('q1', 0.01)]);
+        await settle();
+        manager
+          ..dispose()
+          ..activate()
+          ..evaluateQueries([node('q1', 0.01)]);
+        await settle();
+        final before = calls;
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+        expect(calls, greaterThan(before));
+        manager.dispose();
+      },
+    );
+
+    test('clears the timer when the interval is removed', () async {
+      var calls = 0;
+      final manager = QueryManager((_, _) async {
+        calls++;
+        return {'ok': true};
+      })..evaluateQueries([node('q1', 0.01)]);
+      await settle();
+      manager.evaluateQueries([node('q1', 0)]);
+      await settle();
+      final before = calls;
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      expect(calls, before);
+      manager.dispose();
+    });
+  });
 }

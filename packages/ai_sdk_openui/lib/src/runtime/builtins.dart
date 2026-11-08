@@ -1,16 +1,32 @@
+import 'dart:math' as math;
+
 import '../lang/js.dart';
 import '../spec/library.dart';
 import '../spec/schema.dart';
 
-/// lang-core `resolveField`: a dot path into an object.
+/// lang-core `resolveField`: a dot path into an object, list or string.
 Object? resolveField(Object? obj, String? path) {
   if (path == null || path.isEmpty || obj == null) return null;
+  if (!path.contains('.')) return _get(obj, path);
   Object? cur = obj;
   for (final p in path.split('.')) {
-    if (cur is! Map) return null;
-    cur = cur[p];
+    if (cur == null) return null;
+    cur = _get(cur, p);
   }
   return cur;
+}
+
+/// JavaScript `obj[key]` for runtime values.
+Object? _get(Object obj, String key) {
+  if (obj is Map) return obj[key];
+  if (obj is List || obj is String) {
+    final length = obj is List ? obj.length : (obj as String).length;
+    if (key == 'length') return length;
+    final i = int.tryParse(key);
+    if (i == null || i < 0 || i >= length || '$i' != key) return null;
+    return obj is List ? obj[i] : (obj as String)[i];
+  }
+  return null;
 }
 
 num _sum(List<Object?> xs) => xs.fold<num>(0, (a, b) => a + Js.toNumber(b));
@@ -57,15 +73,6 @@ num _whole(num n, double Function(double) f) {
   return d.isNaN || d.isInfinite ? d : f(d);
 }
 
-num _pow10(num d) {
-  var r = 1.0;
-  final n = d.toInt();
-  for (var i = 0; i < n.abs(); i++) {
-    r = n >= 0 ? r * 10 : r / 10;
-  }
-  return r;
-}
-
 Object? _sort(Map<String, Object?> a) {
   final list = a['array'];
   if (list is! List) return list;
@@ -106,17 +113,39 @@ Object? _filter(Map<String, Object?> a) {
   ];
 }
 
-/// `String.prototype.localeCompare` in English: letters compare without
-/// case first, and lowercase sorts before uppercase on a tie.
-// ponytail: ignores accents and ICU's punctuation weights.
+const _accented = 'ÀÁÂÃÄÅàáâãäåÇçÈÉÊËèéêëÌÍÎÏìíîïÑñÒÓÔÕÖØòóôõöøÙÚÛÜùúûüÝýÿ';
+const _base = 'AAAAAAaaaaaaCcEEEEeeeeIIIIiiiiNnOOOOOOooooooUUUUuuuuYyy';
+
+int _primary(String c) {
+  final folded = _accented.contains(c) ? _base[_accented.indexOf(c)] : c;
+  final lower = folded.toLowerCase().codeUnitAt(0);
+  final punctuation =
+      (lower >= 0x20 && lower <= 0x2F) ||
+      (lower >= 0x3A && lower <= 0x40) ||
+      (lower >= 0x5B && lower <= 0x60) ||
+      (lower >= 0x7B && lower <= 0x7E);
+  return punctuation ? lower : lower + 0x100;
+}
+
+/// `String.prototype.localeCompare` close to ICU root: letters compare without accents or case first
+/// (ASCII punctuation sorts before digits, digits before letters), then unaccented first, then lowercase first.
+// ponytail: folds Latin-1 letters only; ICU's order among punctuation, expansions such as ß and other
+// scripts are not modelled. Add a collation table if users sort such text.
 int localeCompare(String a, String b) {
-  final byLetter = a.toLowerCase().compareTo(b.toLowerCase());
-  if (byLetter != 0) return byLetter.sign;
-  for (var i = 0; i < a.length && i < b.length; i++) {
-    final x = a[i], y = b[i];
-    if (x != y) return x == x.toLowerCase() ? -1 : 1;
+  final n = math.min(a.length, b.length);
+  for (var i = 0; i < n; i++) {
+    final d = _primary(a[i]) - _primary(b[i]);
+    if (d != 0) return d.sign;
   }
-  return a.length.compareTo(b.length);
+  if (a.length != b.length) return a.length.compareTo(b.length);
+  for (var i = 0; i < n; i++) {
+    final x = _accented.contains(a[i]), y = _accented.contains(b[i]);
+    if (x != y) return x ? 1 : -1;
+  }
+  for (var i = 0; i < n; i++) {
+    if (a[i] != b[i]) return a[i] == a[i].toLowerCase() ? -1 : 1;
+  }
+  return 0;
 }
 
 Object? _lazy(Map<String, Object?> args) =>
@@ -214,7 +243,8 @@ final List<FunctionSpec> builtinFunctionSpecs = [
     params: {'number': S.number(), 'decimals': S.number().optional()},
     returns: S.number(),
     fn: (a) {
-      final factor = _pow10(
+      final factor = math.pow(
+        10,
         a['decimals'] != null ? Js.toNumber(a['decimals']) : 0,
       );
       return jsRound(Js.toNumber(a['number']) * factor) / factor;

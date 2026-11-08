@@ -43,6 +43,7 @@ final class PromptSpec {
     this.toolCalls,
     this.builtinFunctions,
     this.tools = const [],
+    this.toolNames = const [],
     this.examples = const [],
     this.toolExamples = const [],
     this.additionalRules = const [],
@@ -67,6 +68,9 @@ final class PromptSpec {
   final bool? toolCalls;
   final bool? builtinFunctions;
   final List<PromptTool> tools;
+
+  /// Tools listed by name only, without a signature.
+  final List<String> toolNames;
   final List<String> examples;
   final List<String> toolExamples;
   final List<String> additionalRules;
@@ -474,12 +478,13 @@ String _renderTool(PromptTool tool) {
   return line;
 }
 
-String _toolsSection(List<PromptTool> tools) {
+String _toolsSection(List<String> names, List<PromptTool> tools) {
   final lines = [
     '## Available Tools',
     '',
     "Use these with Query() for read operations or Mutation() for write operations. The LLM decides which is appropriate based on the tool's purpose.",
     '',
+    for (final name in names) '- $name',
     for (final t in tools) _renderTool(t),
   ];
   final withOutput = tools.where((t) => t.outputSchema != null).toList();
@@ -572,7 +577,8 @@ String _componentSignatures(
 /// lang-core `generatePrompt`.
 String generatePrompt(PromptSpec spec) {
   final root = spec.root;
-  final toolCalls = spec.toolCalls ?? spec.tools.isNotEmpty;
+  final hasTools = spec.tools.isNotEmpty || spec.toolNames.isNotEmpty;
+  final toolCalls = spec.toolCalls ?? hasTools;
   final bindings = spec.bindings ?? toolCalls;
   final supportsExpressions = toolCalls || bindings;
   final usesActionExpression = spec.components.values.any(
@@ -627,7 +633,9 @@ String generatePrompt(PromptSpec spec) {
   }
   if (toolCalls && bindings) parts.addAll(['', _interactiveFiltersSection]);
   if (toolCalls) parts.addAll(['', _toolWorkflowSection]);
-  if (spec.tools.isNotEmpty) parts.addAll(['', _toolsSection(spec.tools)]);
+  if (hasTools) {
+    parts.addAll(['', _toolsSection(spec.toolNames, spec.tools)]);
+  }
   parts.addAll([
     '',
     _streamingRules(

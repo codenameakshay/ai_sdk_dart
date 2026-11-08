@@ -61,7 +61,7 @@ final List<FunctionSpec> textFunctions = [
       return (a['list'] as List)
           .map((item) => read(item, field))
           .where((v) => v != null)
-          .map((v) => v is Map || v is List ? Js.stringify(v) : Js.string(v))
+          .map((v) => Js.isObject(v) ? Js.stringify(v) : Js.string(v))
           .join(sep);
     },
   ),

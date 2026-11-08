@@ -1,4 +1,9 @@
+import 'dart:convert';
+
+import 'package:ai_sdk_openui/src/lang/ast.dart';
 import 'package:ai_sdk_openui/src/lang/js.dart';
+import 'package:ai_sdk_openui/src/lang/lexer.dart';
+import 'package:ai_sdk_openui/src/runtime/evaluator.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -213,6 +218,98 @@ void main() {
     );
     expect(Js.stringify(1e21), '1e+21');
     expect(Js.stringify(Object()), 'null');
+  });
+
+  test('JSON.stringify prints numbers as JavaScript does', () {
+    expect(
+      Js.stringify([
+        3.0,
+        -0.0,
+        9007199254740992.0,
+        1e21,
+        123456789012345680000.0,
+        0.1,
+      ]),
+      '[3,0,9007199254740992,1e+21,123456789012345680000,0.1]',
+    );
+  });
+
+  test('String(number) of an int past 2^53 prints the nearest double', () {
+    expect(
+      Js.numberToString(int.parse('9007199254740993')),
+      '9007199254740992',
+    );
+  });
+
+  test('JSON.stringify writes an AST node as lang-core\'s object', () {
+    expect(
+      Js.stringify(
+        parseExpression(
+          tokenize(
+            r'@Foo(a.b, c[1], !d, e ? 1 : "s", [true, null], {k: $v}, $v = 2, -1)',
+          ),
+        ),
+      ),
+      r'{"k":"Comp","name":"Foo","args":[{"k":"Member","obj":{"k":"Ref","n":"a"},"field":"b"},{"k":"Index","obj":{"k":"Ref","n":"c"},"index":{"k":"Num","v":1}},{"k":"UnaryOp","op":"!","operand":{"k":"Ref","n":"d"}},{"k":"Ternary","cond":{"k":"Ref","n":"e"},"then":{"k":"Num","v":1},"else":{"k":"Str","v":"s"}},{"k":"Arr","els":[{"k":"Bool","v":true},{"k":"Null"}]},{"k":"Obj","entries":[["k",{"k":"StateRef","n":"$v"}]]},{"k":"Assign","target":"$v","value":{"k":"Num","v":2}},{"k":"Num","v":-1}],"fn":true}',
+    );
+  });
+
+  test(
+    'JSON.stringify writes refs, placeholders and bindings as lang-core does',
+    () {
+      expect(
+        Js.stringify([
+          const RuntimeRefNode('q', RuntimeRefType.query),
+          const PlaceholderNode('x'),
+          CompNode(
+            'Count',
+            const [ArrNode([])],
+            mappedProps: const {'array': ArrNode([])},
+          ),
+          const ReactiveAssign(r'$x', StateRefNode(r'$value')),
+          const ValueNode(1),
+        ]),
+        r'[{"k":"RuntimeRef","n":"q","refType":"query"},{"k":"Ph","n":"x"},'
+        r'{"k":"Comp","name":"Count","args":[{"k":"Arr","els":[]}],"mappedProps":{"array":{"k":"Arr","els":[]}}},'
+        r'{"__reactive":"assign","target":"$x","expr":{"k":"StateRef","n":"$value"}},'
+        r'{"k":"Value","v":1}]',
+      );
+    },
+  );
+
+  group('JavaScript key order', () {
+    test('an object lists array-index keys first, ascending', () {
+      expect(
+        Js.object(const [
+          MapEntry('b', 1),
+          MapEntry('1', 2),
+          MapEntry('a', 3),
+          MapEntry('0', 4),
+          MapEntry('4294967295', 5),
+          MapEntry('4294967294', 6),
+          MapEntry('01', 7),
+        ]).keys,
+        ['0', '1', '4294967294', 'b', 'a', '4294967295', '01'],
+      );
+    });
+
+    test('a repeated key keeps its first place and its last value', () {
+      expect(
+        Js.object(const [MapEntry('a', 1), MapEntry('b', 2), MapEntry('a', 3)]),
+        {'a': 3, 'b': 2},
+      );
+    });
+
+    test(
+      'normalize orders nested maps and, for JSON, makes whole numbers ints',
+      () {
+        final out = Js.normalize({
+          'b': 1.0,
+          '1': [2.0, -0.0, 0.5],
+        }, json: true);
+        expect(jsonEncode(out), '{"1":[2,0,0.5],"b":1}');
+      },
+    );
   });
 
   test('typeof', () {

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:ai_sdk_openui/ai_sdk_openui.dart';
 import 'package:test/test.dart';
 
@@ -450,5 +452,28 @@ void main() {
         expect(unfilled.single.formName, 'f');
       },
     );
+  });
+
+  group('values handed out are JSON values in JavaScript order', () {
+    test('state after arithmetic encodes whole numbers without .0', () async {
+      final s = open('root = Out(\$x, @Set(\$x, \$x + 2))\n\$x = 1');
+      await s.run(s.root!.props.action('action'), label: '', emit: (_) {});
+      expect(jsonEncode(s.state), '{"\$x":3}');
+    });
+
+    test('a negative zero in state encodes as 0', () async {
+      final s = open('root = Out(\$x, @Set(\$x, -\$x))\n\$x = 0');
+      await s.run(s.root!.props.action('action'), label: '', emit: (_) {});
+      expect(jsonEncode(s.state), '{"\$x":0}');
+    });
+
+    test('a @ToAssistant context', () async {
+      final s = open(
+        'root = Out(1, @ToAssistant("m", {n: \$x + 1, "1": 0}))\n\$x = 2',
+      );
+      final events = <ActionEvent>[];
+      await s.run(s.root!.props.action('action'), label: '', emit: events.add);
+      expect(jsonEncode(events.single.params['context']), '{"1":0,"n":3}');
+    });
   });
 }

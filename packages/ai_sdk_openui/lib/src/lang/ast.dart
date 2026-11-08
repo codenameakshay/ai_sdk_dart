@@ -1,6 +1,73 @@
+import 'js.dart';
+
 /// The OpenUI Lang 1.0 syntax tree, mirroring lang-core's `ASTNode`.
-sealed class Ast {
+sealed class Ast implements JsFields {
   const Ast();
+
+  /// lang-core's object for this node, such as `{k: "Num", v: 1}`.
+  @override
+  Map<String, Object?> get jsFields => switch (this) {
+    StrNode(:final value) => {'k': 'Str', 'v': value},
+    NumNode(:final value) => {'k': 'Num', 'v': value},
+    BoolNode(:final value) => {'k': 'Bool', 'v': value},
+    NullNode() => {'k': 'Null'},
+    ArrNode(:final elements) => {'k': 'Arr', 'els': elements},
+    ObjNode(:final entries) => {
+      'k': 'Obj',
+      'entries': [
+        for (final (k, v) in entries) <Object?>[k, v],
+      ],
+    },
+    CompNode(:final name, :final args, :final mappedProps, :final isAtCall) => {
+      'k': 'Comp',
+      'name': name,
+      'args': args,
+      'mappedProps': ?mappedProps,
+      if (isAtCall) 'fn': true,
+    },
+    RefNode(:final name) => {'k': 'Ref', 'n': name},
+    StateRefNode(:final name) => {'k': 'StateRef', 'n': name},
+    RuntimeRefNode(:final name, :final refType) => {
+      'k': 'RuntimeRef',
+      'n': name,
+      'refType': refType.name,
+    },
+    BinOpNode(:final op, :final left, :final right) => {
+      'k': 'BinOp',
+      'op': op,
+      'left': left,
+      'right': right,
+    },
+    UnaryOpNode(:final op, :final operand) => {
+      'k': 'UnaryOp',
+      'op': op,
+      'operand': operand,
+    },
+    TernaryNode(:final condition, :final then, :final otherwise) => {
+      'k': 'Ternary',
+      'cond': condition,
+      'then': then,
+      'else': otherwise,
+    },
+    MemberNode(:final object, :final field) => {
+      'k': 'Member',
+      'obj': object,
+      'field': field,
+    },
+    IndexNode(:final object, :final index) => {
+      'k': 'Index',
+      'obj': object,
+      'index': index,
+    },
+    AssignNode(:final target, :final value) => {
+      'k': 'Assign',
+      'target': target,
+      'value': value,
+    },
+    PlaceholderNode(:final name) => {'k': 'Ph', 'n': name},
+    // Port-only: a runtime value spliced into an @Each template.
+    ValueNode(:final value) => {'k': 'Value', 'v': value},
+  };
 }
 
 final class StrNode extends Ast {
@@ -207,20 +274,20 @@ Ast literalAst(Object? value) => switch (value) {
       }
       return (found: true, value: out);
     case ObjNode(:final entries):
-      final out = <String, Object?>{};
+      final out = <MapEntry<String, Object?>>[];
       for (final (k, e) in entries) {
         final lit = literalValue(e);
         if (!lit.found) return (found: false, value: null);
-        out[k] = lit.value;
+        out.add(MapEntry(k, lit.value));
       }
-      return (found: true, value: out);
+      return (found: true, value: Js.object(out));
     default:
       return (found: false, value: null);
   }
 }
 
 /// A component instance after materialization or evaluation.
-final class ElementNode {
+final class ElementNode implements JsFields {
   ElementNode({
     required this.typeName,
     required this.props,
@@ -234,6 +301,17 @@ final class ElementNode {
   final bool partial;
   final bool hasDynamicProps;
   String? statementId;
+
+  /// lang-core's `ElementNode` object.
+  @override
+  Map<String, Object?> get jsFields => {
+    'type': 'element',
+    'typeName': typeName,
+    'props': props,
+    'partial': partial,
+    'hasDynamicProps': hasDynamicProps,
+    'statementId': ?statementId,
+  };
 
   ElementNode withProps(Map<String, Object?> props) => ElementNode(
     typeName: typeName,

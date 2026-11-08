@@ -96,8 +96,14 @@ final List<FunctionSpec> listFunctions = [
       final setValue = a['setValue'];
       return [
         for (final item in a['list'] as List<Object?>)
-          item is Map && same(read(item, field), value)
-              ? {...item, setField: setValue}
+          (item is Map || item is JsFields) && same(read(item, field), value)
+              ? Js.object([
+                  ...(item is JsFields
+                          ? item.jsFields
+                          : (item as Map).cast<String, Object?>())
+                      .entries,
+                  MapEntry(setField, setValue),
+                ])
               : item,
       ];
     },
@@ -201,7 +207,7 @@ final List<FunctionSpec> listFunctions = [
     fn: (a) {
       final seen = <String>{};
       return (a['list'] as List<Object?>).where((item) {
-        final key = item is Map || item is List
+        final key = Js.isObject(item)
             ? 'o:${Js.stringify(item)}'
             : 'p:${Js.string(item)}';
         return seen.add(key);

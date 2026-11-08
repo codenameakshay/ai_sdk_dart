@@ -328,7 +328,7 @@ Object? _validateObject(
       out[key] = next;
     }
   }
-  return isInvalid ? invalid : out ?? value;
+  return isInvalid ? invalid : (out == null ? value : Js.ordered(out));
 }
 
 Object? _validateArray(

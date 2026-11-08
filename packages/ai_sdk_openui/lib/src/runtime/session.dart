@@ -265,7 +265,8 @@ final class OpenUiSession {
       final persisted = <String, Object?>{};
       _initializing = true;
       // initialState only fills keys the store lacks, so a re-parse never undoes user edits.
-      for (final MapEntry(:key, :value) in _initialState.entries) {
+      for (final MapEntry(:key, value: raw) in _initialState.entries) {
+        final value = Js.normalize(raw);
         if (key.startsWith(r'$')) {
           if (!_store.has(key)) persisted[key] = value;
         } else if (!_store.has(key)) {
@@ -495,10 +496,13 @@ final class OpenUiSession {
       _store.set(name, wrapped);
     } else {
       final raw = _store.get(formName);
-      _store.set(formName, {
-        if (raw is Map) ...raw.cast<String, Object?>(),
-        name: wrapped,
-      });
+      _store.set(
+        formName,
+        Js.object([
+          if (raw is Map) ...raw.cast<String, Object?>().entries,
+          MapEntry(name, wrapped),
+        ]),
+      );
     }
   }
 
@@ -511,7 +515,7 @@ final class OpenUiSession {
   Map<String, Object?> _formPayload(String? formName) {
     if (formName != null) {
       final raw = _store.get(formName);
-      if (raw is Map) return {formName: raw};
+      if (raw is Map) return {formName: Js.normalize(raw, json: true)};
     }
     return _store.snapshot;
   }
@@ -534,7 +538,7 @@ final class OpenUiSession {
       String message = '',
     ]) => ActionEvent(
       type: type,
-      params: params,
+      params: Js.normalize(params, json: true)! as Map<String, Object?>,
       humanFriendlyMessage: message,
       formState: _formPayload(formName),
       formName: formName,

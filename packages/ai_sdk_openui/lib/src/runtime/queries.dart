@@ -256,9 +256,13 @@ final class QueryManager {
     _rebuild();
     _notify();
     try {
-      final data = await call(
-        toolName,
-        args is Map ? args.cast<String, Object?>() : const {},
+      final data = Js.normalize(
+        await call(
+          toolName,
+          args is Map
+              ? Js.normalize(args, json: true)! as Map<String, Object?>
+              : const {},
+        ),
       );
       if (_disposed) return;
       if (!identical(_cache[cacheKey], entry) ||
@@ -427,7 +431,12 @@ final class QueryManager {
     _notify();
     var ok = false;
     try {
-      final data = await call(m.toolName, args);
+      final data = Js.normalize(
+        await call(
+          m.toolName,
+          Js.normalize(args, json: true)! as Map<String, Object?>,
+        ),
+      );
       if (_disposed ||
           gen != _generation ||
           !identical(_mutations[statementId], m)) {

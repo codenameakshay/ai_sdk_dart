@@ -1,4 +1,5 @@
 import 'package:ai_sdk_openui/ai_sdk_openui.dart';
+import 'package:ai_sdk_openui/lang_core.dart';
 import 'package:test/test.dart';
 
 import 'support/run.dart';
@@ -230,5 +231,142 @@ void main() {
       '@Sort orders text the way localeCompare does',
       () => expect(run('@Sort(["b", "B", "a"], "")').value, ['a', 'b', 'B']),
     );
+  });
+
+  // Expected values are what lang-core 1.0.0 gives in Node 26.
+  group('member and index access read what JavaScript reads', () {
+    test('a string index and a pluck of string indices', () {
+      expect(run('"abc".1').value, 'b');
+      expect(run('["ab", "cde"].1').value, ['b', 'd']);
+      expect(run('{a: "xyz"}.a.2').value, 'z');
+      expect(run('@Each(["ab", "cde"], "s", s.0)').value, ['a', 'c']);
+    });
+
+    test('the fields of a component', () {
+      expect(run('a.typeName', 'a = Out(5)').value, 'Out');
+      expect(run('a.props.value', 'a = Out(5)').value, 5);
+      expect(run('a.type', 'a = Out(5)').value, 'element');
+      expect(run('a.partial', 'a = Out(5)').value, false);
+      expect(run('a.hasDynamicProps', 'a = Out(5)').value, true);
+      expect(run('[a].typeName', 'a = Out(5)').value, ['Out']);
+    });
+
+    test('the steps of an action plan', () {
+      expect(run('@OpenUrl("u").steps.type').value, ['open_url']);
+      expect(run('Action([@OpenUrl("a"), @OpenUrl("b")]).steps.url').value, [
+        'a',
+        'b',
+      ]);
+      expect(run(r'@Set($x, 2).steps.0', r'$x = 1').value, [null]);
+    });
+
+    test('an index is a property key', () {
+      expect(run('"abc"[-0]').value, 'a');
+      expect(run('[1, 2, 3]["length"]').value, 1);
+    });
+  });
+
+  group('JSON of components and plans is lang-core\'s', () {
+    test('a component', () {
+      expect(
+        run('@Join([a])', 'a = Out(5)').value,
+        '{"type":"element","typeName":"Out","props":{"value":5},"partial":false,"hasDynamicProps":true}',
+      );
+      expect(
+        run('@Join([a])', 'a = Out(\$x)\n\$x = 3').value,
+        '{"type":"element","typeName":"Out","props":{"value":{"k":"StateRef","n":"\$x"}},"partial":false,"hasDynamicProps":true}',
+      );
+    });
+
+    test('plans and steps', () {
+      expect(
+        run(r'@Join(@Set($x, 2).steps)', r'$x = 1').value,
+        r'{"type":"set","target":"$x","valueAST":{"k":"Num","v":2}}',
+      );
+      expect(
+        run('@Join([@ToAssistant("m", {k: 1})])').value,
+        '{"steps":[{"type":"continue_conversation","message":"m","context":{"k":1}}]}',
+      );
+      expect(
+        run('@Join(@Run(q).steps)', 'q = Query("t", {})').value,
+        '{"type":"run","statementId":"q","refType":"query"}',
+      );
+      expect(
+        run(r'@Join(@Reset($x).steps)', r'$x = 1').value,
+        r'{"type":"reset","targets":["$x"]}',
+      );
+      expect(
+        run('@Join(@CopyToClipboard("t").steps)').value,
+        '{"type":"custom_action","name":"CopyToClipboard","params":{"text":"t"}}',
+      );
+    });
+  });
+
+  group('object keys enumerate in JavaScript order', () {
+    test('a literal and an evaluated object', () {
+      expect((run('{b: 1, "1": 2, a: 3, "0": 4}').value! as Map).keys, [
+        '0',
+        '1',
+        'b',
+        'a',
+      ]);
+      expect(
+        (run(r'{b: $x, "1": 2, a: 3, "0": 4}', r'$x = 1').value! as Map).keys,
+        ['0', '1', 'b', 'a'],
+      );
+    });
+
+    test('@Join and @Unique see the same order', () {
+      expect(
+        run(r'@Join([{b: $x, "1": 2}])', r'$x = 1').value,
+        '{"1":2,"b":1}',
+      );
+      expect(run('@Unique([{b: 1, "1": 2}, {"1": 2, b: 1}])').value, [
+        {'1': 2, 'b': 1},
+      ]);
+    });
+  });
+
+  group('an AST from parseExpression alone', () {
+    // lang-core runtime/__tests__/functions.test.ts: "take positional args from an AST made by parseExpression() alone".
+    final ctx = EvaluationContext(
+      getState: (_) => null,
+      resolveRef: (_) => null,
+      functions: {
+        'Percent': RuntimeFunction(
+          params: const {
+            'type': 'object',
+            'properties': {
+              'part': {'type': 'number'},
+              'total': {'type': 'number', 'default': 100},
+            },
+            'required': ['part', 'total'],
+          },
+          returns: const {'type': 'string'},
+          fn: (a) =>
+              '${((a['part']! as num) / (a['total']! as num) * 100).toStringAsFixed(1)}%',
+        ),
+      },
+      actions: const {
+        'Copy': {
+          'type': 'object',
+          'properties': {
+            't': {'type': 'string'},
+          },
+          'required': ['t'],
+        },
+      },
+    );
+    Object? evalSource(String src) =>
+        evaluate(parseExpression(tokenize(src)), ctx);
+
+    test('names the args of built-ins, steps, functions and actions', () {
+      expect(evalSource('@Sum([1, 2, 3])'), 6);
+      final plan = evalSource('@ToAssistant("hi")')! as ActionPlan;
+      expect((plan.steps.single as ToAssistantStep).message, 'hi');
+      expect(evalSource('@Percent(1, 4)'), '25.0%');
+      final copy = evalSource('@Copy("x")')! as ActionPlan;
+      expect((copy.steps.single as CustomStep).params, {'t': 'x'});
+    });
   });
 }

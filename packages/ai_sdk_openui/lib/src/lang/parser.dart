@@ -1,5 +1,6 @@
 import '../runtime/builtins.dart';
 import 'ast.dart';
+import 'js.dart';
 import 'lexer.dart';
 import 'statements.dart';
 import 'validation.dart';
@@ -494,9 +495,9 @@ Object? _materializeValue(Ast node, _Ctx ctx) {
       }
       return items;
     case ObjNode(:final entries):
-      return <String, Object?>{
-        for (final (k, v) in entries) k: _materializeValue(v, ctx),
-      };
+      return Js.object([
+        for (final (k, v) in entries) MapEntry(k, _materializeValue(v, ctx)),
+      ]);
     case CompNode(:final name, :final args):
       if (node.isAtCall && !_isRuntimeCall(name, ctx)) {
         pushIssue(ctx, name, '', const UnknownFunction());

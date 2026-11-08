@@ -10,6 +10,7 @@ import 'package:latlong2/latlong.dart' as ll;
 import '../services.dart';
 import '../theme.dart';
 import '../view.dart';
+import 'flex_row.dart';
 import 'glyph.dart';
 
 /// Shapes and pins live inside a Map, which draws them; alone they are nothing.
@@ -367,81 +368,97 @@ class _StreetMapState extends State<StreetMap> {
                     top: 12,
                     left: 12,
                     right: 12,
-                    child: Row(
+                    child: FlexRow(
+                      gap: 6,
                       children: [
                         if (categories.length > 1) ...[
-                          Flexible(
-                            child: ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 170),
-                              child: _Glass(
-                                child: DropdownButtonHideUnderline(
-                                  child: DropdownButton<String>(
-                                    value: _group,
-                                    isDense: true,
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      color: theme.ink,
-                                    ),
-                                    dropdownColor: theme.canvas,
-                                    items: [
-                                      const DropdownMenuItem(
-                                        value: 'all',
-                                        child: Text('All places'),
-                                      ),
-                                      for (final c in categories)
-                                        DropdownMenuItem(
-                                          value: c,
-                                          child: Text(c),
-                                        ),
-                                    ],
-                                    isExpanded: true,
-                                    onChanged: (v) {
-                                      setState(() => _group = v ?? 'all');
-                                      _syncRoute();
-                                      _frame();
-                                    },
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                        ],
-                        _Glass(
-                          tooltip: 'Show every place',
-                          onTap: () => _fit(
-                            const EdgeInsets.fromLTRB(34, 55, 40, 35),
-                            maxZoom: 14,
-                          ),
-                          child: Glyph(
-                            'navigation',
-                            size: 16,
-                            color: theme.ink,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        _Glass(
-                          tooltip: 'About this map',
-                          onTap: () => setState(() => _info = !_info),
-                          child: Glyph('info', size: 16, color: theme.ink),
-                        ),
-                        const Spacer(),
-                        if (widget.height != double.infinity)
-                          _Glass(
-                            onTap: _expand,
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  'Expand',
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 170),
+                            child: _Glass(
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton<String>(
+                                  value: _group,
+                                  isDense: true,
                                   style: TextStyle(
                                     fontSize: 13,
                                     color: theme.ink,
                                   ),
+                                  dropdownColor: theme.canvas,
+                                  items: [
+                                    const DropdownMenuItem(
+                                      value: 'all',
+                                      child: Text(
+                                        'All places',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    for (final c in categories)
+                                      DropdownMenuItem(
+                                        value: c,
+                                        child: Text(
+                                          c,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                  ],
+                                  isExpanded: true,
+                                  onChanged: (v) {
+                                    setState(() => _group = v ?? 'all');
+                                    _syncRoute();
+                                    _frame();
+                                  },
                                 ),
-                                const SizedBox(width: 6),
-                                Glyph('expand', size: 14, color: theme.ink),
-                              ],
+                              ),
+                            ),
+                          ),
+                        ],
+                        FlexRowItem(
+                          shrink: false,
+                          child: _Glass(
+                            tooltip: 'Show every place',
+                            onTap: () => _fit(
+                              const EdgeInsets.fromLTRB(34, 55, 40, 35),
+                              maxZoom: 14,
+                            ),
+                            child: Glyph(
+                              'navigation',
+                              size: 16,
+                              color: theme.ink,
+                            ),
+                          ),
+                        ),
+                        FlexRowItem(
+                          shrink: false,
+                          child: _Glass(
+                            tooltip: 'About this map',
+                            onTap: () => setState(() => _info = !_info),
+                            child: Glyph('info', size: 16, color: theme.ink),
+                          ),
+                        ),
+                        const FlexRowItem(
+                          spacer: true,
+                          child: SizedBox.shrink(),
+                        ),
+                        if (widget.height != double.infinity)
+                          FlexRowItem(
+                            shrink: false,
+                            child: _Glass(
+                              onTap: _expand,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    'Expand',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: theme.ink,
+                                    ),
+                                  ),
+                                  Glyph('expand', size: 14, color: theme.ink),
+                                ],
+                              ),
                             ),
                           ),
                       ],

@@ -10,11 +10,15 @@ class FlexRowItem extends ParentDataWidget<_FlexRowData> {
     super.key,
     this.grow = 0,
     this.spacer = false,
+    this.shrink = true,
     this.fixed,
     required super.child,
   });
   final double grow;
   final bool spacer;
+
+  /// CSS `flex-shrink`: false keeps the natural width when the row is short.
+  final bool shrink;
 
   /// A width from the row's width that neither grows nor shrinks
   /// (`flex: none`), like the media-row photo.
@@ -23,10 +27,14 @@ class FlexRowItem extends ParentDataWidget<_FlexRowData> {
   @override
   void applyParentData(RenderObject renderObject) {
     final data = renderObject.parentData! as _FlexRowData;
-    if (data.grow != grow || data.spacer != spacer || data.fixed != fixed) {
+    if (data.grow != grow ||
+        data.spacer != spacer ||
+        data.fixed != fixed ||
+        data.shrink != shrink) {
       data
         ..grow = grow
         ..spacer = spacer
+        ..shrink = shrink
         ..fixed = fixed;
       renderObject.parent?.markNeedsLayout();
     }
@@ -71,6 +79,7 @@ class FlexRow extends MultiChildRenderObjectWidget {
 class _FlexRowData extends ContainerBoxParentData<RenderBox> {
   double grow = 0;
   bool spacer = false;
+  bool shrink = true;
   double Function(double available)? fixed;
 }
 
@@ -146,12 +155,12 @@ class RenderFlexRow extends RenderBox
     }
     final shrinkable = [
       for (final (i, c) in children.indexed)
-        if (_data(c).fixed == null) natural[i],
+        if (_data(c).fixed == null && _data(c).shrink) natural[i],
     ].fold(0.0, (a, b) => a + b);
     final overflow = total - available;
     return [
       for (final (i, c) in children.indexed)
-        _data(c).fixed != null || shrinkable == 0
+        _data(c).fixed != null || !_data(c).shrink || shrinkable == 0
             ? natural[i]
             : math.max(0.0, natural[i] - overflow * natural[i] / shrinkable),
     ];

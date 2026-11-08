@@ -27,6 +27,7 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
     required this.glass,
     required this.glassHover,
     required this.glassRing,
+    required this.glassRingHover,
     required this.shadow,
     required this.shadowSmall,
     this.fontFamily,
@@ -53,6 +54,7 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
   final Color glass;
   final Color glassHover;
   final Color glassRing;
+  final Color glassRingHover;
   final List<BoxShadow> shadow;
   final List<BoxShadow> shadowSmall;
   final String? fontFamily;
@@ -132,6 +134,7 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
     glass: const Color(0xB3FDFDFD),
     glassHover: const Color(0xD9FDFDFD),
     glassRing: const Color(0xB3FFFFFF),
+    glassRingHover: const Color(0xD9FFFFFF),
     shadow: const [
       BoxShadow(color: Color(0x0F000000), blurRadius: 20, offset: Offset(0, 4)),
     ],
@@ -188,6 +191,7 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
     glass: const Color(0xB31C1C1E),
     glassHover: const Color(0xD128282A),
     glassRing: const Color(0x1FFFFFFF),
+    glassRingHover: const Color(0x2EFFFFFF),
     shadow: const [
       BoxShadow(color: Color(0x59000000), blurRadius: 20, offset: Offset(0, 4)),
     ],
@@ -266,21 +270,33 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
     return space.isFinite ? space : null;
   }
 
-  /// A length: px numbers or numeric strings. Percent lengths come back as
-  /// fractions in [fraction].
-  static ({double? px, double? fraction}) length(Object? value) {
+  /// A CSS length. Percent lengths come back as fractions in [fraction];
+  /// `em`, `rem`, `vh` and `vw` resolve against [fontSize] and [viewport].
+  static ({double? px, double? fraction}) length(
+    Object? value, {
+    double fontSize = 16,
+    Size? viewport,
+  }) {
     if (value is num && value.isFinite) {
       return (px: math.max(0, value.toDouble()), fraction: null);
     }
     if (value is! String) return (px: null, fraction: null);
-    final s = value.trim();
-    final m = RegExp(r'^(\d+(?:\.\d+)?)(px|%)?$').firstMatch(s);
+    final m = RegExp(
+      r'^(\d+(?:\.\d+)?)(px|%|em|rem|vh|vw|fr)?$',
+    ).firstMatch(value.trim());
     if (m == null) return (px: null, fraction: null);
     final n = double.parse(m.group(1)!);
     if (!n.isFinite) return (px: null, fraction: null);
-    return m.group(2) == '%'
-        ? (px: null, fraction: n / 100)
-        : (px: n, fraction: null);
+    final px = switch (m.group(2)) {
+      null || 'px' => n,
+      'em' => n * fontSize,
+      'rem' => n * 16,
+      'vh' when viewport != null => n / 100 * viewport.height,
+      'vw' when viewport != null => n / 100 * viewport.width,
+      _ => null,
+    };
+    if (m.group(2) == '%') return (px: null, fraction: n / 100);
+    return (px: px != null && px.isFinite ? px : null, fraction: null);
   }
 
   /// `sm`, `md`, `lg`, `xl`, `full` or px.
@@ -315,6 +331,7 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
     glass: glass,
     glassHover: glassHover,
     glassRing: glassRing,
+    glassRingHover: glassRingHover,
     shadow: shadow,
     shadowSmall: shadowSmall,
     fontFamily: fontFamily ?? this.fontFamily,
@@ -345,6 +362,7 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
       glass: c(glass, other.glass),
       glassHover: c(glassHover, other.glassHover),
       glassRing: c(glassRing, other.glassRing),
+      glassRingHover: c(glassRingHover, other.glassRingHover),
       shadow: BoxShadow.lerpList(shadow, other.shadow, t) ?? shadow,
       shadowSmall:
           BoxShadow.lerpList(shadowSmall, other.shadowSmall, t) ?? shadowSmall,

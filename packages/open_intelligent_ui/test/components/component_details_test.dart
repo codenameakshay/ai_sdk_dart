@@ -89,10 +89,12 @@ void main() {
         final mouse = await _mouse(tester);
         await mouse.moveTo(tester.getCenter(_arrow('Next')));
         await tester.pump();
+        await tester.pump(const Duration(milliseconds: 120));
         expect(_arrowFillArgb(tester, 'Next'), 0x0A030303);
 
         await mouse.moveTo(const Offset(1, 1));
         await tester.pump();
+        await tester.pump(const Duration(milliseconds: 120));
         expect(_arrowFillArgb(tester, 'Next'), 0xB3FDFDFD);
         debugDefaultTargetPlatformOverride = null;
       },

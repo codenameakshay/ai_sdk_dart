@@ -1,5 +1,10 @@
+import 'dart:math' as math;
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show OverflowBoxFit;
+import 'package:flutter/services.dart'
+    show PointerEnterEventListener, PointerExitEventListener;
 
 import '../services.dart';
 import '../theme.dart';
@@ -14,46 +19,146 @@ final _inline = RegExp(
   r'(`[^`\n]+`)|(\*\*[^*\n]+?\*\*|__[^_\n]+?__)|(~~[^~\n]+?~~)|(\*[^*\s][^*\n]*?\*|_[^_\s][^_\n]*?_)|(\[[^\]\n]+\]\([^)\s]+\))',
 );
 
+/// The link recognizers and the hovered link of one [InlineText].
+final class InlineLinks {
+  InlineLinks._(this._changed);
+  final VoidCallback _changed;
+  final _recognizers = <_LinkRecognizer>[];
+  var _used = 0;
+  int? _hovered;
+
+  TapGestureRecognizer _next(VoidCallback onTap) {
+    if (_used == _recognizers.length) _recognizers.add(_LinkRecognizer());
+    return _recognizers[_used++]..onTap = onTap;
+  }
+
+  void _hover(int? link) {
+    if (_hovered == link) return;
+    _hovered = link;
+    _changed();
+  }
+}
+
+final class _LinkRecognizer extends TapGestureRecognizer {
+  bool _disposed = false;
+
+  /// For tests: the recognizer was released with its text.
+  bool get isDisposed => _disposed;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+}
+
+/// A paragraph of inline Markdown that owns its links' tap recognizers;
+/// [spans] passes the [InlineLinks] it is given on to [inlineSpans].
+class InlineText extends StatefulWidget {
+  const InlineText(
+    this.spans, {
+    super.key,
+    this.textAlign,
+    this.style,
+    this.maxLines,
+    this.overflow,
+  });
+  final List<InlineSpan> Function(BuildContext context, InlineLinks links)
+  spans;
+  final TextAlign? textAlign;
+  final TextStyle? style;
+  final int? maxLines;
+  final TextOverflow? overflow;
+
+  @override
+  State<InlineText> createState() => _InlineTextState();
+}
+
+class _InlineTextState extends State<InlineText> {
+  late final InlineLinks _links = InlineLinks._(() {
+    if (mounted) setState(() {});
+  });
+
+  @override
+  void dispose() {
+    for (final r in _links._recognizers) {
+      r.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _links._used = 0;
+    final spans = widget.spans(context, _links);
+    while (_links._recognizers.length > _links._used) {
+      _links._recognizers.removeLast().dispose();
+    }
+    return Text.rich(
+      TextSpan(children: spans),
+      textAlign: widget.textAlign,
+      style: widget.style,
+      maxLines: widget.maxLines,
+      overflow: widget.overflow,
+    );
+  }
+}
+
+final class _Link {
+  const _Link(this.open, this.recognizer, this.onEnter, this.onExit);
+  final VoidCallback open;
+  final TapGestureRecognizer recognizer;
+  final PointerEnterEventListener onEnter;
+  final PointerExitEventListener onExit;
+}
+
 /// Inline Markdown as spans. Links open through [OpenUiServices.openUrl];
-/// a link that is not http(s) renders as its label.
+/// a link that is not http(s) renders as its label. [links] comes from an
+/// [InlineText], which disposes the link recognizers.
 List<InlineSpan> inlineSpans(
   String text,
   BuildContext context, {
+  required InlineLinks links,
   TextStyle? style,
 }) {
   final theme = OpenUiTheme.of(context);
   final services = OpenUiScope.servicesOf(context);
   final base = style ?? DefaultTextStyle.of(context).style;
+  var linkCount = 0;
 
-  List<InlineSpan> walk(String source, TextStyle current) {
+  List<InlineSpan> walk(String source, TextStyle current, _Link? link) {
     final out = <InlineSpan>[];
+    void plain(String s) => out.add(
+      link == null
+          ? TextSpan(text: s, style: current)
+          : TextSpan(
+              text: s,
+              style: current,
+              recognizer: link.recognizer,
+              mouseCursor: SystemMouseCursors.click,
+              onEnter: link.onEnter,
+              onExit: link.onExit,
+            ),
+    );
     var rest = source;
     while (rest.isNotEmpty) {
       final m = _inline.firstMatch(rest);
       if (m == null) {
-        out.add(TextSpan(text: rest, style: current));
+        plain(rest);
         break;
       }
-      if (m.start > 0) {
-        out.add(TextSpan(text: rest.substring(0, m.start), style: current));
-      }
+      if (m.start > 0) plain(rest.substring(0, m.start));
       final token = m[0]!;
       if (m[1] != null) {
         out.add(
-          TextSpan(
-            text: token.substring(1, token.length - 1),
-            style: current.copyWith(
-              fontFamily: theme.monoFontFamily,
-              fontSize: (current.fontSize ?? 14) * 0.88,
-              backgroundColor: theme.surface,
-            ),
-          ),
+          _code(token.substring(1, token.length - 1), current, theme, link),
         );
       } else if (m[2] != null) {
         out.addAll(
           walk(
             token.substring(2, token.length - 2),
-            current.copyWith(fontWeight: FontWeight.w600),
+            current.copyWith(fontWeight: OpenUiTheme.weightSemibold),
+            link,
           ),
         );
       } else if (m[3] != null) {
@@ -61,6 +166,7 @@ List<InlineSpan> inlineSpans(
           walk(
             token.substring(2, token.length - 2),
             current.copyWith(decoration: TextDecoration.lineThrough),
+            link,
           ),
         );
       } else if (m[4] != null) {
@@ -68,6 +174,7 @@ List<InlineSpan> inlineSpans(
           walk(
             token.substring(1, token.length - 1),
             current.copyWith(fontStyle: FontStyle.italic),
+            link,
           ),
         );
       } else {
@@ -75,25 +182,28 @@ List<InlineSpan> inlineSpans(
         final label = token.substring(1, close);
         final href = webUri(token.substring(close + 2, token.length - 1));
         if (href == null) {
-          out.addAll(walk(label, current));
+          out.addAll(walk(label, current, link));
         } else {
-          final linkStyle = current.copyWith(
-            decoration: TextDecoration.underline,
-            decorationColor: theme.borderStrong,
-          );
-          // ponytail: recognizers are not disposed; they hold no platform resources
-          final tap = TapGestureRecognizer()
-            ..onTap = () => services.openUrl(href);
-          // Leaves carry the recognizer: a tap resolves to the leaf span only.
-          out.addAll([
-            for (final s in walk(label, linkStyle).cast<TextSpan>())
-              TextSpan(
-                text: s.text,
-                style: s.style,
-                recognizer: tap,
-                mouseCursor: SystemMouseCursors.click,
+          final index = linkCount++;
+          void open() => services.openUrl(href);
+          final hovered = links._hovered == index;
+          out.addAll(
+            walk(
+              label,
+              current.copyWith(
+                decoration: TextDecoration.underline,
+                decorationColor: hovered
+                    ? current.color ?? theme.ink
+                    : theme.borderStrong,
               ),
-          ]);
+              _Link(
+                open,
+                links._next(open),
+                (_) => links._hover(index),
+                (_) => links._hover(null),
+              ),
+            ),
+          );
         }
       }
       rest = rest.substring(m.end);
@@ -101,7 +211,53 @@ List<InlineSpan> inlineSpans(
     return out;
   }
 
-  return walk(text, base);
+  return walk(text, base, null);
+}
+
+/// `.iui-code`: 1px 5px padding, 5px radius, surface fill, mono at 0.88em.
+/// The box sits on the text baseline; its height is the font's own, as a
+/// CSS inline background ignores line-height.
+InlineSpan _code(
+  String text,
+  TextStyle current,
+  OpenUiTheme theme,
+  _Link? link,
+) {
+  Widget box = DecoratedBox(
+    decoration: BoxDecoration(
+      color: theme.surface,
+      borderRadius: BorderRadius.circular(5),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      child: Text(
+        text,
+        style: TextStyle(
+          inherit: false,
+          color: current.color,
+          fontWeight: current.fontWeight,
+          fontStyle: current.fontStyle,
+          decoration: current.decoration,
+          decorationColor: current.decorationColor,
+          fontFamily: theme.monoFontFamily,
+          fontSize: (current.fontSize ?? 14) * 0.88,
+        ),
+      ),
+    ),
+  );
+  if (link != null) {
+    box = MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: link.onEnter,
+      onExit: link.onExit,
+      child: GestureDetector(onTap: link.open, child: box),
+    );
+  }
+  return WidgetSpan(
+    alignment: PlaceholderAlignment.baseline,
+    baseline: TextBaseline.alphabetic,
+    child: box,
+  );
 }
 
 sealed class _Block {
@@ -150,12 +306,29 @@ final _tableRule = RegExp(r'^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$');
 final _quote = RegExp(r'^\s*>');
 final _paragraphStop = RegExp(r'^(#{1,4})\s|^\s*```|^\s*>');
 
+/// `.iui-markdown ul, ol { padding-left: 1.4em }` at 16px.
+const _listIndent = 22.4;
+
+// The disc is Chrome's outside disc for Inter at 16px (list_marker.cc: a
+// (ascent·2/3+1)/2 = 5px dot, 18px left of the item, 9px under the text top),
+// on a 26.4px line with 3.2px half-leading.
+
 List<String> _cells(String line) => line
     .trim()
     .replaceAll(RegExp(r'^\||\|$'), '')
     .split('|')
     .map((c) => c.trim())
     .toList();
+
+/// Chrome's largest list ordinal (a 32-bit int).
+const _maxOrdinal = 0x7FFFFFFF;
+
+/// `<ol start={Number(n)}>` as Chrome reads it: a start past 2147483647 is
+/// not a valid integer, so the list counts from 1.
+int _start(String digits) {
+  final n = int.tryParse(digits);
+  return n != null && n <= _maxOrdinal ? n : 1;
+}
 
 List<_Block> _blocks(String source) {
   final lines = source.replaceAll(RegExp(r'\r\n?'), '\n').split('\n');
@@ -228,7 +401,7 @@ List<_Block> _blocks(String source) {
           break;
         }
       }
-      out.add(_ListBlock(ordered, ordered ? int.parse(item[2]!) : 1, items));
+      out.add(_ListBlock(ordered, ordered ? _start(item[2]!) : 1, items));
       continue;
     }
     final body = <String>[];
@@ -247,8 +420,21 @@ List<_Block> _blocks(String source) {
   return out;
 }
 
-/// Markdown prose as a column of blocks, styled as the reference's
-/// `.iui-markdown` (16/1.65, 12px between blocks, more air above headings).
+/// The space between two blocks: the rule's 20px margin below it plus the
+/// next block's margin above (flex items, so margins add).
+double _gap(_Block previous, _Block block) {
+  final below = previous is _Rule ? 20.0 : 0.0;
+  final above = switch (block) {
+    _ when previous is _Heading => 8.0,
+    _Heading() => 26.0,
+    _Rule() => 20.0,
+    _ListBlock() when previous is _Paragraph && !previous.quote => 6.0,
+    _ => 12.0,
+  };
+  return below + above;
+}
+
+/// Markdown prose as a column of blocks, spaced and styled as the reference's `.iui-markdown`.
 class MarkdownBlocks extends StatelessWidget {
   const MarkdownBlocks(this.text, {super.key});
   final String text;
@@ -265,19 +451,16 @@ class MarkdownBlocks extends StatelessWidget {
     final blocks = _blocks(text);
     final children = <Widget>[];
     for (final (index, block) in blocks.indexed) {
+      if (index == 0 && block is _Rule) {
+        children.add(const SizedBox(height: 20));
+      }
       if (index > 0) {
-        final previous = blocks[index - 1];
-        final gap = switch (block) {
-          _Heading() => 26.0,
-          _ListBlock() when previous is _Paragraph && !previous.quote => 6.0,
-          _ when previous is _Heading => 8.0,
-          _Rule() => 20.0,
-          _ when previous is _Rule => 20.0,
-          _ => 12.0,
-        };
-        children.add(SizedBox(height: gap));
+        children.add(SizedBox(height: _gap(blocks[index - 1], block)));
       }
       children.add(_block(context, block, base, theme));
+    }
+    if (blocks.isNotEmpty && blocks.last is _Rule) {
+      children.add(const SizedBox(height: 20));
     }
     return DefaultTextStyle(
       style: base,
@@ -295,8 +478,9 @@ class MarkdownBlocks extends StatelessWidget {
     TextStyle base,
     OpenUiTheme theme,
   ) {
-    Widget rich(String s, [TextStyle? style]) => Text.rich(
-      TextSpan(children: inlineSpans(s, context, style: style ?? base)),
+    Widget rich(String s, [TextStyle? style]) => InlineText(
+      (context, links) =>
+          inlineSpans(s, context, style: style ?? base, links: links),
     );
     switch (block) {
       case _Paragraph(:final text, quote: false):
@@ -317,7 +501,7 @@ class MarkdownBlocks extends StatelessWidget {
         );
       case _Heading(:final level, :final text):
         final style = base.copyWith(
-          fontWeight: FontWeight.w600,
+          fontWeight: OpenUiTheme.weightSemibold,
           fontSize: switch (level) {
             1 => 22,
             2 => 19,
@@ -361,29 +545,67 @@ class MarkdownBlocks extends StatelessWidget {
       case _Rule():
         return Divider(height: 1, thickness: 1, color: theme.border);
       case _ListBlock(:final ordered, :final start, :final items):
+        final marker = base.copyWith(
+          color: theme.muted,
+          fontWeight: ordered ? OpenUiTheme.weightMedium : null,
+          fontFeatures: ordered ? const [FontFeature.tabularFigures()] : null,
+        );
+        // An outside marker ends at the item's edge, its trailing space included.
+        final painter = TextPainter(
+          text: TextSpan(text: ' ', style: marker),
+          textDirection: TextDirection.ltr,
+          textScaler: MediaQuery.textScalerOf(context),
+        )..layout();
+        final space = math.min(painter.width, _listIndent);
+        painter.dispose();
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
+          spacing: 6,
           children: [
-            for (final (j, item) in items.indexed) ...[
-              if (j > 0) const SizedBox(height: 6),
+            for (final (j, item) in items.indexed)
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   SizedBox(
-                    width: 22,
-                    child: Text(
-                      ordered ? '${start + j}.' : '•',
-                      style: base.copyWith(
-                        color: theme.muted,
-                        fontWeight: ordered ? FontWeight.w500 : null,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
-                    ),
+                    width: _listIndent,
+                    child: ordered
+                        ? Padding(
+                            padding: EdgeInsets.only(right: space),
+                            child: OverflowBox(
+                              maxWidth: double.infinity,
+                              alignment: Alignment.topRight,
+                              fit: OverflowBoxFit.deferToChild,
+                              child: Text(
+                                '${math.min(start + j, _maxOrdinal)}.',
+                                style: marker,
+                                maxLines: 1,
+                                softWrap: false,
+                              ),
+                            ),
+                          )
+                        : Align(
+                            alignment: Alignment.topLeft,
+                            child: Padding(
+                              padding: const EdgeInsets.only(
+                                left: 5.4,
+                                top: 12.2,
+                              ),
+                              child: SizedBox.square(
+                                dimension: 5,
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: theme.muted,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
                   ),
+                  const SizedBox(width: 2),
                   Expanded(child: rich(item)),
                 ],
               ),
-            ],
           ],
         );
       case _TableBlock(:final head, :final rows):

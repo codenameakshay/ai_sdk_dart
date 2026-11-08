@@ -1,6 +1,7 @@
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
 import 'package:open_intelligent_ui/src/components/svg.dart';
@@ -35,6 +36,23 @@ Offset _apply(Matrix4 m, Offset p) => MatrixUtils.transformPoint(m, p);
 
 Matcher _near(Offset o) =>
     predicate<Offset>((p) => (p - o).distance < 1e-6, 'is near $o');
+
+List<Path> _paths(WidgetTester tester) {
+  final box = tester.renderObject<RenderCustomPaint>(
+    find
+        .byWidgetPredicate(
+          (w) => w is CustomPaint && w.painter is SvgScenePainter,
+        )
+        .first,
+  );
+  final canvas = TestRecordingCanvas();
+  box.paint(TestRecordingPaintingContext(canvas), Offset.zero);
+  return [
+    for (final c in canvas.invocations)
+      if (c.invocation.memberName == #drawPath)
+        c.invocation.positionalArguments.first as Path,
+  ];
+}
 
 void main() {
   group('parseTransform', () {
@@ -416,17 +434,47 @@ void main() {
       );
     });
 
-    testWidgets('a bad path, bad points and a bad path command are skipped', (
+    testWidgets(
+      'invalid characters and bad points are skipped; a cut-off path keeps its valid part',
+      (tester) async {
+        await _svg(
+          tester,
+          'Path("M 0 0 <script>"), Path("M 0 0 L"), Polygon("a,b c,d"), Polyline("1,2 x"), Circle(50, 50, 10)',
+        );
+        expect(_box(tester), paints..path(color: _ink(tester)));
+        final painter =
+            tester.widget<CustomPaint>(_scene).painter as SvgScenePainter;
+        expect(painter.scene, hasLength(2));
+      },
+    );
+
+    testWidgets('a path with an error draws up to the error', (tester) async {
+      await _svg(tester, 'Path("M 10 10 L 90 10 L 50", null, "faint", 2)');
+      expect(
+        _paths(tester).single.getBounds(),
+        const Rect.fromLTRB(10, 10, 90, 10),
+      );
+    });
+
+    testWidgets(
+      'points read like a browser: glued signs split, an odd count drops the last',
+      (tester) async {
+        await _svg(tester, 'Polyline("10-10 90,10 50")');
+        expect(
+          _paths(tester).single.getBounds(),
+          const Rect.fromLTRB(10, -10, 90, 10),
+        );
+      },
+    );
+
+    testWidgets('rx is clamped to half the height, not scaled with it', (
       tester,
     ) async {
-      await _svg(
-        tester,
-        'Path("M 0 0 <script>"), Path("M 0 0 L"), Polygon("a,b c,d"), Polyline("1,2 x"), Circle(50, 50, 10)',
-      );
-      expect(_box(tester), paints..path(color: _ink(tester)));
-      final painter =
-          tester.widget<CustomPaint>(_scene).painter as SvgScenePainter;
-      expect(painter.scene, hasLength(1));
+      await _svg(tester, 'Rect(10, 10, 80, 10, "info", null, null, null, 8)');
+      final path = _paths(tester).single;
+      // rx 8, ry 5: (12, 11.2) is outside the elliptical corner, inside a 5px round one.
+      expect(path.contains(const Offset(12, 11.2)), isFalse);
+      expect(path.contains(const Offset(50, 15)), isTrue);
     });
 
     testWidgets(

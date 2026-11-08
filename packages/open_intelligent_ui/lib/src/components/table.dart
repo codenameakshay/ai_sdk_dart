@@ -20,7 +20,7 @@ const _fixedComponents = {'Badge', 'Button', 'IconButton', 'Icon', 'Link'};
 TextStyle iuiTableHeadStyle(OpenUiTheme t) => TextStyle(
   fontSize: 13,
   height: 1.5,
-  fontWeight: FontWeight.w500,
+  fontWeight: OpenUiTheme.weightMedium,
   color: t.ink,
   fontFamily: t.fontFamily,
 );
@@ -92,14 +92,18 @@ class _IuiTableState extends State<IuiTable> {
           row: 0,
           col: c,
           kind: _Kind.header,
-          child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: h, vertical: 11),
-            child: DefaultTextStyle.merge(
-              style: iuiTableHeadStyle(
-                theme,
-              ).copyWith(fontFeatures: numeric(c) ? _tabular : null),
-              softWrap: false,
-              child: align(widget.head[c], c),
+          child: Semantics(
+            container: true,
+            role: SemanticsRole.columnHeader,
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: h, vertical: 11),
+              child: DefaultTextStyle.merge(
+                style: iuiTableHeadStyle(
+                  theme,
+                ).copyWith(fontFeatures: numeric(c) ? _tabular : null),
+                softWrap: false,
+                child: align(widget.head[c], c),
+              ),
             ),
           ),
         ),
@@ -164,14 +168,18 @@ class _IuiTableState extends State<IuiTable> {
       col: c,
       kind: kind,
       component: cell?.component,
-      child: Padding(
-        padding: padding,
-        child: DefaultTextStyle.merge(
-          style: iuiTableBodyStyle(
-            theme,
-          ).copyWith(fontFeatures: numeric ? _tabular : null),
-          softWrap: !numeric,
-          child: align(cell?.child ?? const SizedBox.shrink(), c),
+      child: Semantics(
+        container: true,
+        role: SemanticsRole.cell,
+        child: Padding(
+          padding: padding,
+          child: DefaultTextStyle.merge(
+            style: iuiTableBodyStyle(
+              theme,
+            ).copyWith(fontFeatures: numeric ? _tabular : null),
+            softWrap: !numeric,
+            child: align(cell?.child ?? const SizedBox.shrink(), c),
+          ),
         ),
       ),
     );
@@ -362,6 +370,87 @@ class RenderIuiTable extends RenderBox
     return null;
   }
 
+  final Map<int, SemanticsNode> _semanticRows = {};
+
+  @override
+  void describeSemanticsConfiguration(SemanticsConfiguration config) {
+    super.describeSemanticsConfiguration(config);
+    config
+      ..role = SemanticsRole.table
+      ..isSemanticBoundary = true
+      ..explicitChildNodes = true;
+  }
+
+  @override
+  void clearSemantics() {
+    super.clearSemantics();
+    _semanticRows.clear();
+  }
+
+  /// Rows are not render objects, so their nodes are made here: each cell's
+  /// node goes into the row whose band holds its top edge. Row nodes keep the
+  /// table's coordinates, so the cells' own transforms stay right.
+  @override
+  void assembleSemanticsNode(
+    SemanticsNode node,
+    SemanticsConfiguration config,
+    Iterable<SemanticsNode> children,
+  ) {
+    final rowCount = _rowTops.length - 1;
+    final cells = List.generate(rowCount, (_) => <SemanticsNode>[]);
+    for (final child in children) {
+      final shift = child.transform == null
+          ? Offset.zero
+          : MatrixUtils.getAsTranslation(child.transform!) ?? Offset.zero;
+      final top = child.rect.top + shift.dy;
+      var row = rowCount - 1;
+      while (row > 0 && _rowTops[row] > top + 0.5) {
+        row--;
+      }
+      if (row >= 0) cells[row].add(child);
+    }
+    node.updateWith(
+      config: config,
+      childrenInInversePaintOrder: [
+        for (var r = 0; r < rowCount; r++)
+          if (cells[r].isNotEmpty)
+            (_semanticRows[r] ??= SemanticsNode())
+              ..updateWith(
+                config: SemanticsConfiguration()
+                  ..role = SemanticsRole.row
+                  ..indexInParent = r,
+                childrenInInversePaintOrder: cells[r],
+              )
+              ..rect = Rect.fromLTRB(
+                0,
+                _rowTops[r],
+                size.width,
+                _rowTops[r + 1],
+              ),
+      ],
+    );
+  }
+
+  /// A cell's CSS min-content width, from Flutter's intrinsic widths. A
+  /// LayoutBuilder cannot report one: release builds count it as 0, and the
+  /// flag makes debug builds do the same instead of throwing.
+  double _minContent(RenderBox child) {
+    var checking = false;
+    assert(() {
+      checking = RenderObject.debugCheckingIntrinsics;
+      RenderObject.debugCheckingIntrinsics = true;
+      return true;
+    }());
+    try {
+      return child.getMinIntrinsicWidth(double.infinity);
+    } finally {
+      assert(() {
+        RenderObject.debugCheckingIntrinsics = checking;
+        return true;
+      }());
+    }
+  }
+
   ({double min, double max}) _measure(RenderBox child, _CellParentData data) {
     switch (data.kind) {
       case _Kind.header || _Kind.numeric:
@@ -369,16 +458,17 @@ class RenderIuiTable extends RenderBox
         return (min: w, max: w);
       case _Kind.text:
         return (
-          min: child.getMinIntrinsicWidth(double.infinity),
+          min: _minContent(child),
           max: child.getMaxIntrinsicWidth(double.infinity),
         );
       case _Kind.component:
-        // ponytail: component min-content is not measured; widen if tables squeeze charts
         child.layout(
           BoxConstraints(maxWidth: math.max(0, _availableWidth)),
           parentUsesSize: true,
         );
         final probe = child.size.width;
+        // `.iui-text`, `.iui-title` and `.iui-markdown` wrap anywhere, so their
+        // CSS min-content is about one glyph; Flutter's only breaks at words.
         return _fixedComponents.contains(data.component)
             ? (min: probe, max: probe)
             : (min: 2 * _horizontalPadding, max: probe);
@@ -553,13 +643,12 @@ IuiCell _cell(
   ),
   final num number => IuiCell(Text(_formatNumber(number))),
   _ => IuiCell(
-    Text.rich(
-      TextSpan(
-        children: inlineSpans(
-          value == null ? '' : jsString(value),
-          context,
-          style: style,
-        ),
+    InlineText(
+      (context, links) => inlineSpans(
+        value == null ? '' : jsString(value),
+        context,
+        style: style,
+        links: links,
       ),
     ),
   ),

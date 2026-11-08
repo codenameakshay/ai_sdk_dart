@@ -1,4 +1,6 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
 import 'package:open_intelligent_ui/src/components/play.dart'
@@ -128,6 +130,41 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
       expect(find.text('Back'), findsOneWidget);
+    });
+
+    testWidgets('takes keyboard focus and flips on Enter', (tester) async {
+      await pumpProgram(tester, 'root = Col([Flashcard("Front", "Back")])');
+      final handle = tester.ensureSemantics();
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(
+        tester.getSemantics(find.byType(Flashcard)),
+        isSemantics(isToggled: true),
+      );
+      handle.dispose();
+    });
+
+    testWidgets('hovering darkens both faces to the strong border', (
+      tester,
+    ) async {
+      await pumpProgram(tester, 'root = Col([Flashcard("Front", "Back")])');
+      Finder borders(Color color) => find.byWidgetPredicate(
+        (w) =>
+            w is Container &&
+            w.decoration is BoxDecoration &&
+            (w.decoration! as BoxDecoration).border == Border.all(color: color),
+        skipOffstage: false,
+      );
+      expect(borders(OpenUiTheme.light.border), findsNWidgets(2));
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      addTearDown(mouse.removePointer);
+      await mouse.moveTo(tester.getCenter(find.byType(Flashcard)));
+      await tester.pump();
+      expect(borders(OpenUiTheme.light.borderStrong), findsNWidgets(2));
     });
   });
 

@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
 
+import 'chat_demo.dart';
+
 /// A program from the reference gallery.
 final class GalleryProgram {
   const GalleryProgram({
@@ -140,6 +142,16 @@ class GalleryHome extends StatelessWidget {
             'Hand-written OpenUI Lang 1.0 programs rendered by this port with the Intelligent UI library: '
             '${intelligentUi.components.length} components and ${intelligentUi.functions.length} functions.',
           ),
+        ),
+        ListTile(
+          leading: const Icon(Icons.chat_bubble_outline),
+          title: const Text('Chat demo'),
+          subtitle: const Text(
+            'ChatController and AiChatScaffold with an offline model',
+          ),
+          onTap: () => Navigator.of(
+            context,
+          ).push(MaterialPageRoute<void>(builder: (_) => const ChatDemoPage())),
         ),
         SwitchListTile(
           title: const Text('Online services'),

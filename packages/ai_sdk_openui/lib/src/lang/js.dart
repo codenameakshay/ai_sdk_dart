@@ -82,8 +82,7 @@ abstract final class Js {
 
   /// JavaScript `Number.prototype.toString()`.
   static String numberToString(num value) {
-    if (value is int) return '$value';
-    final d = value as double;
+    final d = value.toDouble();
     if (d.isNaN) return 'NaN';
     if (d.isInfinite) return d > 0 ? 'Infinity' : '-Infinity';
     if (d == 0) return '0';
@@ -137,24 +136,46 @@ abstract final class Js {
   }
 
   /// `JSON.stringify` for runtime values (non-JSON values become null).
-  static String stringify(Object? value) => jsonEncode(_jsonSafe(value));
-
-  static Object? _jsonSafe(Object? value) => switch (value) {
-    null || String() || bool() => value,
-    num() when value.isNaN || value.isInfinite => null,
-    int() => value,
-    double()
-        when value == value.truncateToDouble() &&
-            value.abs() < 9007199254740992 =>
-      value.toInt(),
-    num() => value,
-    List() => [for (final v in value) _jsonSafe(v)],
-    Map() => {
-      for (final MapEntry(:key, :value) in value.entries)
-        '$key': _jsonSafe(value),
-    },
-    _ => null,
+  /// Numbers use JavaScript's spelling (`1e21` is `1e+21`, `2^53` has no
+  /// `.0`), and array-index keys come first in ascending order.
+  static String stringify(Object? value) => switch (value) {
+    null || String() || bool() => jsonEncode(value),
+    num() => _jsonNumber(value),
+    List() => '[${value.map(stringify).join(',')}]',
+    Map() =>
+      '{${_jsKeyOrder(value).map((e) => '${jsonEncode(e.key)}:${stringify(e.value)}').join(',')}}',
+    _ => 'null',
   };
+
+  static String _jsonNumber(num value) {
+    value = value.toDouble();
+    if (!value.isFinite) return 'null';
+    if (value == 0) return '0';
+    final text = value.toString();
+    return text.endsWith('.0') ? text.substring(0, text.length - 2) : text;
+  }
+
+  static Iterable<MapEntry<String, Object?>> _jsKeyOrder(Map value) {
+    final properties = <String, Object?>{
+      for (final e in value.entries) string(e.key): e.value,
+    };
+    final indexed = [
+      for (final e in properties.entries)
+        if (_arrayIndex(e.key) != null) e,
+    ]..sort((a, b) => _arrayIndex(a.key)!.compareTo(_arrayIndex(b.key)!));
+    return [
+      ...indexed,
+      for (final e in properties.entries)
+        if (_arrayIndex(e.key) == null) e,
+    ];
+  }
+
+  static int? _arrayIndex(String key) {
+    final index = int.tryParse(key);
+    return index != null && index >= 0 && index < 4294967295 && '$index' == key
+        ? index
+        : null;
+  }
 }
 
 /// JavaScript `String(value)`: how a program's value prints (`4` is "4").

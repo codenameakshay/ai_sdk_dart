@@ -222,4 +222,68 @@ void main() {
     expect(Js.typeOf(true), 'boolean');
     expect(Js.typeOf([1]), 'object');
   });
+
+  test('JSON.stringify spells large and small doubles like JavaScript', () {
+    expect(
+      Js.stringify([9007199254740992.0, 1e20, 1e21, 1e-6, 1e-7, -0.0, 2.5]),
+      '[9007199254740992,100000000000000000000,1e+21,0.000001,1e-7,0,2.5]',
+    );
+  });
+
+  test('JSON.stringify rounds integers to JavaScript Number precision', () {
+    expect(
+      Js.stringify([9007199254740993, 9223372036854775807]),
+      '[9007199254740992,9223372036854776000]',
+    );
+  });
+
+  test('JSON.stringify coerces map keys before ordering and overwriting', () {
+    expect(
+      Js.stringify({
+        'tail': true,
+        2.0: 'old',
+        '2': 'new',
+        -0.0: 'zero',
+        [1, 2]: {
+          null: ['nested'],
+        },
+        [
+          [9007199254740993],
+        ]: 'rounded',
+      }),
+      '{"0":"zero","2":"new","tail":true,"1,2":{"null":["nested"]},"9007199254740992":"rounded"}',
+    );
+  });
+
+  test(
+    'JSON.stringify escapes strings and keys, including lone surrogates',
+    () {
+      expect(
+        Js.stringify({
+          'quote"\\': [
+            '\b\t\n\f\r/\u2028\u2029',
+            String.fromCharCode(0xd800),
+            String.fromCharCode(0xdc00),
+            String.fromCharCodes([0xd83d, 0xde00]),
+          ],
+        }),
+        r'{"quote\"\\":["\b\t\n\f\r/'
+        '\u2028\u2029'
+        r'","\ud800","\udc00","😀"]}',
+      );
+    },
+  );
+
+  test('JSON.stringify puts array-index keys first, in order', () {
+    expect(
+      Js.stringify({
+        '2': 'b',
+        '1': 'a',
+        '01': 'c',
+        '4294967295': 'd',
+        '0': 'z',
+      }),
+      '{"0":"z","1":"a","2":"b","01":"c","4294967295":"d"}',
+    );
+  });
 }

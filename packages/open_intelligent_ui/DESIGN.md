@@ -69,6 +69,40 @@ model text ──► OpenUiSession.update(text, streaming)
 7. **Host services are injected.** `OpenUiServices` covers opening URLs, the clipboard, image search, street
    routing and map tiles. The package hard-codes none of the reference's `/api` routes.
 
+## Chat integration
+
+`package:open_intelligent_ui/chat.dart` is the adapter for `ai_sdk_flutter_ui`. It is a separate
+library so `ai_sdk_flutter_ui` does not depend on the map and web view packages. That package
+gained three generic hooks, and the adapter needs nothing else from it:
+
+```
+ChatController ── streamingMessageId ──► row id while streaming ═ committed ChatMessage.id
+      │                                         │
+      │ chatMessageBuilder(ChatMessage)         ▼
+      └──────────────────────────────► OpenUiChat: one OpenUiSession per id
+                                                │ @ToAssistant
+   sendMessage(actionUserMessage(event)) ◄──────┘
+   updateMessage(id, content + ]]>openui:context [state]) ◄── session.onStateUpdate
+```
+
+1. **One session per message id.** The streaming row gets the id that the answer commits under,
+   so `$state` typed while the answer streams carries over. Sessions of answers that leave the
+   transcript (reload, clear, a failed run) are disposed, which stops their Query timers.
+2. **Turns use the reference's envelope.** Messages are read and written with lang-core's
+   `parseMessage` and `buildMessage`. A `@ToAssistant` turn is react-ui's
+   `buildActionUserMessage`, ported as `actionUserMessage`:
+   `["User clicked: …", formState, context?]` after the message.
+3. **State lives in the transcript.** The chat prompt tells the model to start an edited page
+   from "that answer's context and form values", so, like react-ui, user edits are written into
+   the answer's `]]>openui:context` with `updateMessage`. Only user changes are written
+   (`onStateUpdate`, as in react-lang), and a restored message starts from its saved state.
+4. **Clicks while the chat is loading are ignored**, as the composer does.
+5. **An answer with no component after streaming shows as text.** The reference renders
+   nothing; text keeps a model's plain refusal readable.
+
+`ConversationChatController` keeps its transcript in the backend, so its `updateMessage`
+returns false and edits are not saved there.
+
 ## Hard widgets
 
 | Widget | Choice | Fallback |
@@ -162,6 +196,6 @@ MCP client auto-detection, and `console.warn` output.
 
 ## Follow-up work
 
-- Phase 2: `ai_sdk_flutter_ui` renders assistant messages through `OpenUiSession` and `OpenUiView`, keeps one
-  session per message, and sends `@ToAssistant` events (with form values) as the next user turn.
+- Saving edits for `ConversationChatController` transcripts needs a backend message update.
+- Host `ToolSet` tools as `OpenUiTool`s, if apps want one tool list for the agent and for Query.
 - The reference's coach (`/clash`) and chess libraries, as their own `ComponentSpec` sets.

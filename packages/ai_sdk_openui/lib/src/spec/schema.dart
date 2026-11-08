@@ -31,7 +31,14 @@ sealed class Schema {
   Schema nullable() => _copy(isNullable: true);
   Schema reactive() => _copy(isReactive: true);
   Schema tag(String name) => _copy(tagName: name);
+
+  /// Zod `.default(value)`: an omitted or null arg takes [value]. The JSON
+  /// Schema still requires it (Zod's output side); the prompt marks it optional.
+  Schema withDefault(Object value) => _Default(this, value);
 }
+
+/// Zod's optional marker in a prompt: `.optional()`, `.nullable()` or `.default()`.
+bool _marksOptional(Schema s) => s.isOptional || s.isNullable || s is _Default;
 
 abstract final class S {
   static Schema string() => const _Prim('string');
@@ -309,6 +316,33 @@ final class _StepRef extends Schema {
   );
 }
 
+final class _Default extends Schema {
+  const _Default(
+    this.inner,
+    this.value, {
+    super.isOptional,
+    super.isReactive,
+    super.tagName,
+    super.isNullable,
+  });
+  final Schema inner;
+  final Object value;
+  @override
+  Schema _copy({
+    bool? isOptional,
+    bool? isReactive,
+    String? tagName,
+    bool? isNullable,
+  }) => _Default(
+    inner,
+    value,
+    isOptional: isOptional ?? this.isOptional,
+    isReactive: isReactive ?? this.isReactive,
+    tagName: tagName ?? this.tagName,
+    isNullable: isNullable ?? this.isNullable,
+  );
+}
+
 /// Emits Zod v4 `toJSONSchema` output. [defs] collects referenced
 /// definitions in first-seen order; [resolveRef] supplies a ref's body.
 final class JsonSchemaEmitter {
@@ -347,6 +381,7 @@ final class JsonSchemaEmitter {
     },
     _Ref(:final name) => _ref(name),
     _StepRef(:final name, :final shape) => _stepRef(name, shape),
+    _Default(:final inner, :final value) => {'default': value, ...emit(inner)},
   };
 
   Map<String, Object?> emitObject(Map<String, Schema> shape) {
@@ -415,7 +450,8 @@ String _baseType(Schema s) {
     _Enum(:final values) => values.map((v) => '"$v"').join(' | '),
     _Literal(:final value) => '"$value"',
     _Object(:final shape) =>
-      '{${shape.entries.map((e) => '${e.key}${e.value.isOptional || e.value.isNullable ? '?' : ''}: ${typeAnnotation(e.value)}').join(', ')}}',
+      '{${shape.entries.map((e) => '${e.key}${_marksOptional(e.value) ? '?' : ''}: ${typeAnnotation(e.value)}').join(', ')}}',
+    _Default(:final inner) => _baseType(inner),
   };
 }
 
@@ -424,7 +460,7 @@ String signature(String name, Map<String, Schema> params, [Schema? returns]) {
   final fields = params.entries
       .map(
         (e) =>
-            '${e.key}${e.value.isOptional || e.value.isNullable ? '?' : ''}: ${typeAnnotation(e.value)}',
+            '${e.key}${_marksOptional(e.value) ? '?' : ''}: ${typeAnnotation(e.value)}',
       )
       .join(', ');
   final sig = '$name($fields)';
@@ -438,7 +474,7 @@ String buildSignature(String componentName, Map<String, Schema> props) =>
 
 /// For `extend`: the component union [schema] is, or holds as its list item, when one option names a [known] component.
 Schema? slotUnion(Schema schema, Set<String> known) => switch (schema) {
-  _List(:final item) => slotUnion(item, known),
+  _List(:final item) || _Default(inner: final item) => slotUnion(item, known),
   _Union(:final options)
       when options.any((o) => o is _Ref && known.contains(o.name)) =>
     schema,
@@ -488,6 +524,11 @@ Schema rebindComponents(
       case _List(:final item):
         final next = walk(item);
         return identical(next, item) ? s : _withFlags(_List(next), s);
+      case _Default(:final inner, :final value):
+        final next = walk(inner);
+        return identical(next, inner)
+            ? s
+            : _withFlags(_Default(next, value), s);
       case _Object(:final shape):
         final next = {for (final e in shape.entries) e.key: walk(e.value)};
         final unchanged = shape.keys.every((k) => identical(next[k], shape[k]));

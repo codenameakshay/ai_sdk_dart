@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:ai_sdk_openui/ai_sdk_openui.dart';
 import 'package:ai_sdk_openui/src/spec/schema.dart'
     show JsonSchemaEmitter, signature, typeAnnotation;
@@ -133,6 +135,26 @@ void main() {
     expect(sig, 'Chart(data: Record<string, string | number>[])');
   });
 
+  test(
+    'a default is emitted first and required, and the prompt marks it optional, as Zod does',
+    () {
+      final params = {
+        'name': S.string(),
+        'format': S.oneOf(['csv', 'pdf']).withDefault('csv'),
+      };
+      expect(
+        jsonEncode(_emit(S.object(params))),
+        '{"type":"object","properties":{"name":{"type":"string"},'
+        '"format":{"default":"csv","type":"string","enum":["csv","pdf"]}},'
+        '"required":["name","format"],"additionalProperties":false}',
+      );
+      expect(
+        signature('ExportFile', params),
+        'ExportFile(name: string, format?: "csv" | "pdf")',
+      );
+    },
+  );
+
   group('modifiers keep every other flag', () {
     final kinds = <String, Schema>{
       'string': S.string(),
@@ -144,6 +166,7 @@ void main() {
       'object': S.object({'a': S.string()}),
       'record': S.record(S.string(), S.number()),
       'ref': S.ref('Card'),
+      'default': S.string().withDefault('x'),
     };
     for (final MapEntry(:key, :value) in kinds.entries) {
       test(key, () {

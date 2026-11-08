@@ -1,4 +1,5 @@
 import 'package:ai_sdk_openui/ai_sdk_openui.dart';
+import 'package:ai_sdk_openui/lang_core.dart';
 import 'package:test/test.dart';
 
 final class _Spec implements ComponentSpec {
@@ -367,5 +368,32 @@ void main() {
       );
       expect(p, contains('- get_rows: `{"rows":[],"total":0}`'));
     });
+  });
+
+  group('lang-core prompt.test.ts cases', () {
+    test('renders a local prompt from a library', () {
+      final card = _Spec('Card', {'children': S.list(S.any())}, 'Root');
+      final prompt = generateSystemPrompt(
+        OpenUiLibrary(root: card, components: [card]),
+        const PromptOptions(bindings: true),
+      );
+      expect(prompt, contains('openui-lang'));
+      expect(prompt, contains('Card(children: '));
+      expect(prompt.startsWith(']]>openui:config\n'), isFalse);
+    });
+
+    test(
+      'without tools, names no Query and no library component outside the spec',
+      () {
+        final card = _Spec('Card', {'title': S.string()}, 'A card');
+        final prompt = generateSystemPrompt(
+          OpenUiLibrary(root: card, components: [card]),
+          const PromptOptions(bindings: true),
+        );
+        expect(prompt, contains('IMPORTANT @Each rule'));
+        expect(prompt, isNot(contains('Query')));
+        expect(prompt, isNot(contains('Col(')));
+      },
+    );
   });
 }

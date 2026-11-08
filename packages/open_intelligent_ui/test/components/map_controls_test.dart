@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:flutter_test/flutter_test.dart';
@@ -55,7 +56,11 @@ void main() {
       final controller = fm.MapController.maybeOf(
         tester.element(find.byType(fm.MarkerLayer)),
       )!;
-      expect(controller.camera.center, const ll.LatLng(30, 40));
+      final c = controller.camera;
+      final s =
+          c.projectAtZoom(const ll.LatLng(30, 40)) - c.projectAtZoom(c.center);
+      expect(s.dx, closeTo(0, 1e-6));
+      expect(s.dy, closeTo(10, 1e-6));
       expect(find.text('Collapse'), findsOneWidget);
       await tester.pumpWidget(const MaterialApp(home: Text('Replacement')));
       await tester.pump(const Duration(seconds: 2));
@@ -197,8 +202,9 @@ void main() {
   });
 
   group('Map zoom buttons', () {
-    testWidgets('Zoom in raises the camera zoom by one', (tester) async {
+    testWidgets('Zoom in eases one level in over 500ms', (tester) async {
       await _pump(tester, _sf);
+      await tester.pump(const Duration(seconds: 1));
       await tester.pump(const Duration(seconds: 1));
       final camera = fm.MapController.maybeOf(
         tester.element(find.byType(fm.MarkerLayer)),
@@ -206,21 +212,85 @@ void main() {
       final before = camera.camera.zoom;
       await tester.tap(find.byTooltip('Zoom in'));
       await tester.pump();
-      expect(camera.camera.zoom, before + 1);
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(camera.camera.zoom, greaterThan(before));
+      expect(camera.camera.zoom, lessThan(before + 1));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(camera.camera.zoom, closeTo(before + 1, 1e-9));
     });
+
+    testWidgets('Zoom out is disabled at the minimum zoom', (tester) async {
+      await _pump(tester, 'root = Col([Map([])])');
+      final camera = fm.MapController.maybeOf(
+        tester.element(find.byType(fm.MarkerLayer)),
+      )!;
+      camera.move(const ll.LatLng(20, 0), 1);
+      await tester.pump();
+      await tester.pump();
+      await tester.tap(find.byTooltip('Zoom out'));
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(camera.camera.zoom, 1);
+      final handle = tester.ensureSemantics();
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('Zoom out')),
+        isSemantics(isButton: true, hasEnabledState: true, isEnabled: false),
+      );
+      handle.dispose();
+    });
+
+    testWidgets(
+      'the zoom buttons show only while the map is hovered, tapped or focused',
+      (tester) async {
+        await _pump(tester, _sf);
+        double opacity() => tester
+            .widget<AnimatedOpacity>(
+              find
+                  .ancestor(
+                    of: find.byTooltip('Zoom in'),
+                    matching: find.byType(AnimatedOpacity),
+                  )
+                  .first,
+            )
+            .opacity;
+        expect(opacity(), 0);
+        final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        await mouse.addPointer(location: Offset.zero);
+        addTearDown(mouse.removePointer);
+        await mouse.moveTo(tester.getCenter(find.byType(fm.FlutterMap)));
+        await tester.pump();
+        expect(opacity(), 1);
+        await mouse.moveTo(Offset.zero);
+        await tester.pump();
+        expect(opacity(), 0);
+        await tester.tapAt(
+          tester.getTopLeft(find.byType(fm.FlutterMap)) +
+              const Offset(200, 300),
+        );
+        await tester.pump();
+        expect(opacity(), 1, reason: 'touch keeps :hover after a tap');
+        await tester.tapAt(const Offset(4, 4));
+        await tester.pump();
+        expect(opacity(), 0);
+        Focus.of(tester.element(find.text('Expand'))).requestFocus();
+        await tester.pump();
+        expect(opacity(), 1, reason: ':focus-within');
+        await tester.pump(const Duration(seconds: 1));
+      },
+    );
   });
 
   group('Map pin placement', () {
-    testWidgets('a single place puts its pin centre on the map centre', (
-      tester,
-    ) async {
-      await _pump(tester, 'root = Col([Map([MapMarker("Solo", 10, 20)])])');
-      await tester.pump(const Duration(seconds: 1));
-      final pin = tester.getCenter(find.text('1'));
-      final map = tester.getCenter(find.byType(fm.FlutterMap));
-      expect(pin.dx, closeTo(map.dx, 1));
-      expect(pin.dy, closeTo(map.dy, 1));
-    });
+    testWidgets(
+      'a single place sits 10px under the map centre, below the controls',
+      (tester) async {
+        await _pump(tester, 'root = Col([Map([MapMarker("Solo", 10, 20)])])');
+        await tester.pump(const Duration(seconds: 1));
+        final pin = tester.getCenter(find.text('1'));
+        final map = tester.getCenter(find.byType(fm.FlutterMap));
+        expect(pin.dx, closeTo(map.dx, 1));
+        expect(pin.dy, closeTo(map.dy + 10, 1));
+      },
+    );
   });
 
   group('Map controls on a phone', () {

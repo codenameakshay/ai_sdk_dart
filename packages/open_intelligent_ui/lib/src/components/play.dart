@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import '../theme.dart';
 import '../view.dart';
@@ -96,30 +97,69 @@ class _FlashcardState extends State<Flashcard> {
       toggled: _flipped,
       child: GestureDetector(
         onTap: () => setState(() => _flipped = !_flipped),
-        child: TweenAnimationBuilder<double>(
-          tween: Tween(end: _flipped ? 1 : 0),
-          duration: reduce ? Duration.zero : const Duration(milliseconds: 450),
-          curve: const Cubic(.3, .7, .3, 1),
-          builder: (context, t, _) {
-            final showBack = t >= 0.5;
-            final angle = t * math.pi;
-            return Transform(
-              alignment: Alignment.center,
-              transform: Matrix4.identity()
-                ..setEntry(3, 2, 1 / 900)
-                ..rotateY(showBack ? angle - math.pi : angle),
-              child: ExcludeSemantics(
-                excluding: false,
-                child: showBack
-                    ? side(widget.back, back: true)
-                    : side(widget.front, back: false),
-              ),
-            );
-          },
+        child: Stack(
+          children: [
+            _Ghost(child: side(widget.front, back: false)),
+            _Ghost(child: side(widget.back, back: true)),
+            Positioned.fill(child: _turning(side, reduce)),
+          ],
         ),
       ),
     );
   }
+
+  Widget _turning(
+    Widget Function(Widget, {required bool back}) side,
+    bool reduce,
+  ) => TweenAnimationBuilder<double>(
+    tween: Tween(end: _flipped ? 1 : 0),
+    duration: reduce ? Duration.zero : const Duration(milliseconds: 450),
+    curve: const Cubic(.3, .7, .3, 1),
+    builder: (context, t, _) {
+      final showBack = t >= 0.5;
+      final angle = t * math.pi;
+      return Transform(
+        alignment: Alignment.center,
+        transform: Matrix4.identity()
+          ..setEntry(3, 2, 1 / 900)
+          ..rotateY(showBack ? angle - math.pi : angle),
+        child: showBack
+            ? side(widget.back, back: true)
+            : side(widget.front, back: false),
+      );
+    },
+  );
+}
+
+/// Takes its child's size without painting it, hit testing it, reading it
+/// to screen readers or showing it to test finders: both flashcard faces
+/// share one grid cell, so the card is as tall as the taller face.
+class _Ghost extends SingleChildRenderObjectWidget {
+  const _Ghost({required super.child});
+
+  @override
+  RenderObject createRenderObject(BuildContext context) => _RenderGhost();
+
+  @override
+  SingleChildRenderObjectElement createElement() => _GhostElement(this);
+}
+
+class _GhostElement extends SingleChildRenderObjectElement {
+  _GhostElement(super.widget);
+
+  @override
+  void debugVisitOnstageChildren(ElementVisitor visitor) {}
+}
+
+class _RenderGhost extends RenderProxyBox {
+  @override
+  void paint(PaintingContext context, Offset offset) {}
+
+  @override
+  bool hitTest(BoxHitTestResult result, {required Offset position}) => false;
+
+  @override
+  void visitChildrenForSemantics(RenderObjectVisitor visitor) {}
 }
 
 /// `Celebration(when)`: confetti when `when` turns true after the program

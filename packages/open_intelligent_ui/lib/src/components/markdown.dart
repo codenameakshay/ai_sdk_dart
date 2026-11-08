@@ -123,7 +123,7 @@ List<InlineSpan> inlineSpans(
 }) {
   final theme = OpenUiTheme.of(context);
   final services = OpenUiScope.servicesOf(context);
-  final base = style ?? DefaultTextStyle.of(context).style;
+  final base = DefaultTextStyle.of(context).style.merge(style);
   var linkCount = 0;
 
   List<InlineSpan> walk(String source, TextStyle current, _Link? link) {

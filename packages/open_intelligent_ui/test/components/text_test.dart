@@ -161,6 +161,12 @@ void main() {
     expect(find.text('code'), findsOneWidget);
   });
 
+  testWidgets('inline code in Text takes the text colour', (tester) async {
+    await pumpProgram(tester, 'root = Col([Text("run `make test` now")])');
+    final code = tester.widget<Text>(find.text('make test'));
+    expect(code.style!.color, OpenUiTheme.light.ink);
+  });
+
   testWidgets('Text keeps line breaks from the model', (tester) async {
     await pumpProgram(tester, 'root = Col([Text("First line\\nSecond line")])');
     expect(find.text('First line\nSecond line'), findsOneWidget);

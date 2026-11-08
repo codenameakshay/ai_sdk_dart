@@ -69,6 +69,7 @@ class AiChatScaffold extends StatefulWidget {
     required this.controller,
     required this.agent,
     this.messageBuilder,
+    this.chatMessageBuilder,
     this.errorBuilder,
     this.approvalBuilder,
     this.statusBuilder,
@@ -87,6 +88,7 @@ class AiChatScaffold extends StatefulWidget {
     super.key,
     required this.conversationController,
     this.messageBuilder,
+    this.chatMessageBuilder,
     this.errorBuilder,
     this.approvalBuilder,
     this.statusBuilder,
@@ -113,6 +115,10 @@ class AiChatScaffold extends StatefulWidget {
 
   /// Optional custom row builder forwarded to [ChatMessageList].
   final ChatMessageBuilder? messageBuilder;
+
+  /// Optional row builder that receives each row's [ChatMessage], forwarded
+  /// to [ChatMessageList]. Takes precedence over [messageBuilder].
+  final ChatMessageEntryBuilder? chatMessageBuilder;
 
   /// Optional override for the inline error state.
   final ChatScaffoldErrorBuilder? errorBuilder;
@@ -188,6 +194,7 @@ class _AiChatScaffoldState extends State<AiChatScaffold> {
               ChatMessageList(
                 controller: _controller,
                 messageBuilder: widget.messageBuilder,
+                chatMessageBuilder: widget.chatMessageBuilder,
                 padding: widget.listPadding,
                 scrollController: _scrollController,
                 emptyState: widget.emptyState,
@@ -360,6 +367,7 @@ class _AiChatScaffoldState extends State<AiChatScaffold> {
 
   Widget? _buildMetadataFallback(BuildContext context) {
     if (widget.messageBuilder != null ||
+        widget.chatMessageBuilder != null ||
         _controller.status != ChatStatus.ready) {
       return null;
     }

@@ -171,6 +171,17 @@ class ChatController extends StreamingControllerBase {
   /// Empty string when not streaming.
   String get streamingContent => _streamBuffer.toString();
 
+  /// The [ChatMessage.id] the in-flight assistant message gets when it is
+  /// added to [chatMessages], by a finished turn or by [stop]. Null when no
+  /// request is in flight. Key per-message UI state for the streaming row by
+  /// this id so the state carries over to the committed message.
+  ///
+  /// The id is drawn from `generateId` on the first read, or when the message
+  /// is committed, so a run that is never read and never commits uses none.
+  String? get streamingMessageId =>
+      activeRequestId == null ? null : _streamingMessageId ??= _generateId();
+  String? _streamingMessageId;
+
   /// Text that streamed before the current error, so the UI can show or copy
   /// it. Empty unless [status] is [ChatStatus.error].
   ///
@@ -237,6 +248,7 @@ class ChatController extends StreamingControllerBase {
     _activeModel = null;
     _activeSubscription = null;
     _errorSubscription = null;
+    _streamingMessageId = null;
     _streamBuffer.clear();
     _streamingReasoning = '';
     abortSignal?.cancel();
@@ -254,10 +266,12 @@ class ChatController extends StreamingControllerBase {
     _errorSubscription = null;
     final model = _activeModel;
     _activeModel = null;
+    final streamingId = _streamingMessageId;
+    _streamingMessageId = null;
     if (commitPartial && _streamBuffer.isNotEmpty) {
       _entries.add(
         ChatMessage(
-          id: _generateId(),
+          id: streamingId ?? _generateId(),
           message: ModelMessage(
             role: ModelMessageRole.assistant,
             content: _streamBuffer.toString(),
@@ -300,6 +314,27 @@ class ChatController extends StreamingControllerBase {
     if (isDisposed) return;
     _entries.add(ChatMessage(id: _generateId(), message: message));
     notifyListenersSafely(immediate: true, content: true);
+  }
+
+  /// Replaces the message with [id] by [message], keeping the id and the
+  /// facts about its turn. Returns false, and changes nothing, when no message
+  /// has [id]. Use it to store per-message data in the transcript, such as UI
+  /// state that the model should see on the next turn.
+  bool updateMessage(String id, ModelMessage message) {
+    if (isDisposed) return false;
+    final index = _entries.indexWhere((entry) => entry.id == id);
+    if (index == -1) return false;
+    final entry = _entries[index];
+    _entries[index] = ChatMessage(
+      id: id,
+      message: message,
+      status: entry.status,
+      provider: entry.provider,
+      modelId: entry.modelId,
+      finishReason: entry.finishReason,
+    );
+    notifyListenersSafely(immediate: true, content: true);
+    return true;
   }
 
   /// Re-run generation using the current message list.
@@ -589,6 +624,8 @@ class ChatController extends StreamingControllerBase {
     _activeAbortSignal = null;
     final model = _activeModel;
     _activeModel = null;
+    final streamingId = _streamingMessageId;
+    _streamingMessageId = null;
     _lastUsage = usage ?? _lastUsage;
     _lastSources = mergeMetadata
         ? _mergeById(_lastSources, sources, (s) => '${s.id}|${s.url}')
@@ -626,7 +663,7 @@ class ChatController extends StreamingControllerBase {
     );
     _entries.add(
       ChatMessage(
-        id: _generateId(),
+        id: streamingId ?? _generateId(),
         message: assistantMessage,
         provider: model?.provider,
         modelId: model?.modelId,
@@ -672,6 +709,7 @@ class ChatController extends StreamingControllerBase {
     _activeSubscription = null;
     unawaited(_errorSubscription?.cancel());
     _errorSubscription = null;
+    _streamingMessageId = null;
     _error = err;
     _errorPartialContent = _streamBuffer.toString();
     _streamBuffer.clear();

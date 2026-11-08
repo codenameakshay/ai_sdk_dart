@@ -294,6 +294,80 @@ void main() {
       expect(find.text('custom:raw'), findsOneWidget);
     });
 
+    testWidgets('chatMessageBuilder keys the live row by its committed id', (
+      tester,
+    ) async {
+      var n = 0;
+      final controller = ChatController(generateId: () => 'm${++n}');
+      addTearDown(controller.dispose);
+      final agent = RecordingStreamAgent();
+
+      await tester.pumpWidget(
+        _wrap(
+          ChatMessageList(
+            controller: controller,
+            messageBuilder: (context, message, isStreaming) =>
+                const Text('unused'),
+            chatMessageBuilder: (context, entry, isStreaming) => Text(
+              '${entry.id}:${isStreaming ? 'live' : 'done'}:'
+              '${entry.message.content}',
+            ),
+          ),
+        ),
+      );
+
+      await controller.sendMessage(agent: agent, text: 'q');
+      agent.invocations.single.emitText('ans');
+      await pumpTesterUntil(
+        tester,
+        () => controller.streamingContent == 'ans',
+        step: const Duration(milliseconds: 10),
+      );
+      expect(find.text('m1:done:q'), findsOneWidget);
+      expect(find.text('m2:live:ans'), findsOneWidget);
+      expect(find.text('unused'), findsNothing);
+
+      await agent.invocations.single.finish(finalText: 'ans');
+      await pumpTesterUntil(
+        tester,
+        () => controller.status == ChatStatus.ready,
+        step: const Duration(milliseconds: 10),
+      );
+      await tester.pump();
+      expect(find.text('m2:done:ans'), findsOneWidget);
+    });
+
+    testWidgets('chatMessageBuilder marks a streaming conversation row live', (
+      tester,
+    ) async {
+      final backend = FakeConversationBackend(
+        initial: Conversation(
+          id: 'chat-1',
+          messages: [
+            ConversationMessage(
+              id: 'a-1',
+              role: ConversationRole.assistant,
+              status: ConversationMessageStatus.streaming,
+              parts: [TextPart(id: 'p1', text: 'par')],
+            ),
+          ],
+        ),
+      );
+      final chat = ConversationChatController(ConversationController(backend));
+      addTearDown(chat.dispose);
+
+      await tester.pumpWidget(
+        _wrap(
+          ChatMessageList(
+            controller: chat,
+            chatMessageBuilder: (context, entry, isStreaming) =>
+                Text('${entry.id}:${isStreaming ? 'live' : 'done'}'),
+          ),
+        ),
+      );
+      expect(find.text('a-1:live'), findsOneWidget);
+    });
+
     testWidgets('swapping the controller re-subscribes to the new one', (
       tester,
     ) async {

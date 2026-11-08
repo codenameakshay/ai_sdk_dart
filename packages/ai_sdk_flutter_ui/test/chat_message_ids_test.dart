@@ -488,4 +488,136 @@ void main() {
       expect(idsOf(chat), ['u-1', 'a-1', 'a-2']);
     });
   });
+
+  group('ChatController.streamingMessageId', () {
+    test('the streaming id becomes the committed message id', () async {
+      final c = ChatController(generateId: sequentialIds());
+      addTearDown(c.dispose);
+      final model = HoldingTextModel('hi');
+      expect(c.streamingMessageId, isNull);
+
+      unawaited(
+        c.sendMessage(
+          agent: ToolLoopAgent(model: model),
+          text: 'q',
+        ),
+      );
+      await pumpUntil(() => c.streamingContent.isNotEmpty);
+      final live = c.streamingMessageId;
+      expect(live, 'm2');
+      expect(c.streamingMessageId, live);
+
+      model.finish();
+      await pumpUntil(() => c.status == ChatStatus.ready);
+      expect(idsOf(c), ['m1', 'm2']);
+      expect(c.streamingMessageId, isNull);
+    });
+
+    test('stop commits the partial text under the streaming id', () async {
+      final c = ChatController(generateId: sequentialIds());
+      addTearDown(c.dispose);
+      final model = HoldingTextModel('part');
+      addTearDown(model.finish);
+
+      unawaited(
+        c.sendMessage(
+          agent: ToolLoopAgent(model: model),
+          text: 'q',
+        ),
+      );
+      await pumpUntil(() => c.streamingContent.isNotEmpty);
+      expect(c.streamingMessageId, 'm2');
+      await c.stop();
+
+      expect(idsOf(c), ['m1', 'm2']);
+      expect(c.chatMessages[1].status, ConversationMessageStatus.interrupted);
+      expect(c.streamingMessageId, isNull);
+    });
+
+    test('a failed run drops its streaming id', () async {
+      final c = ChatController(generateId: sequentialIds());
+      addTearDown(c.dispose);
+      final model = HoldingTextModel('part');
+
+      unawaited(
+        c.sendMessage(
+          agent: ToolLoopAgent(model: model),
+          text: 'q',
+        ),
+      );
+      await pumpUntil(() => c.streamingContent.isNotEmpty);
+      expect(c.streamingMessageId, 'm2');
+      model.fail(StateError('drop'));
+      await pumpUntil(() => c.status == ChatStatus.error);
+
+      expect(c.streamingMessageId, isNull);
+      expect(idsOf(c), ['m1']);
+    });
+  });
+
+  group('ChatController.updateMessage', () {
+    test('replaces the message and keeps its id and metadata', () async {
+      final c = ChatController(generateId: sequentialIds());
+      addTearDown(c.dispose);
+      await c.sendMessage(
+        agent: _textAgent(text: 'hi', provider: 'p', modelId: 'm'),
+        text: 'q',
+      );
+      await pumpUntil(() => c.status == ChatStatus.ready);
+      var notified = 0;
+      c.addListener(() => notified++);
+
+      const next = ModelMessage(
+        role: ModelMessageRole.assistant,
+        content: 'hi!',
+      );
+      expect(c.updateMessage('m2', next), isTrue);
+      await pumpUntil(() => notified > 0);
+
+      expect(idsOf(c), ['m1', 'm2']);
+      expect(identical(c.messages[1], next), isTrue);
+      expect(c.chatMessages[1].provider, 'p');
+      expect(c.chatMessages[1].modelId, 'm');
+      expect(c.chatMessages[1].finishReason, LanguageModelV4FinishReason.stop);
+    });
+
+    test('returns false for an unknown id or after dispose', () {
+      final c = ChatController(
+        generateId: sequentialIds(),
+        initialMessages: const [
+          ModelMessage(role: ModelMessageRole.user, content: 'a'),
+        ],
+      );
+      const next = ModelMessage(role: ModelMessageRole.user, content: 'b');
+      expect(c.updateMessage('nope', next), isFalse);
+      c.dispose();
+      expect(c.updateMessage('m1', next), isFalse);
+    });
+
+    test('a conversation controller keeps its backend transcript', () {
+      final backend = FakeConversationBackend(
+        initial: Conversation(
+          id: 'chat-1',
+          messages: [
+            ConversationMessage(
+              id: 'u-1',
+              role: ConversationRole.user,
+              parts: [TextPart(id: 'p1', text: 'hi')],
+            ),
+          ],
+        ),
+      );
+      final chat = ConversationChatController(ConversationController(backend));
+      addTearDown(chat.dispose);
+
+      expect(
+        chat.updateMessage(
+          'u-1',
+          const ModelMessage(role: ModelMessageRole.user, content: 'x'),
+        ),
+        isFalse,
+      );
+      expect(chat.messages.single.content, 'hi');
+    });
+  });
 }

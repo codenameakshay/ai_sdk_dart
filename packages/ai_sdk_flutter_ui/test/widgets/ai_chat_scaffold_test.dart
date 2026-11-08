@@ -987,5 +987,27 @@ void main() {
         expect(find.text('second'), findsOneWidget);
       },
     );
+
+    testWidgets('forwards chatMessageBuilder to the list', (tester) async {
+      final controller = ChatController(
+        generateId: () => 'seed-id',
+        initialMessages: const [
+          ModelMessage(role: ModelMessageRole.user, content: 'seed'),
+        ],
+      );
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(
+        _wrap(
+          AiChatScaffold(
+            controller: controller,
+            agent: textAgent('unused'),
+            chatMessageBuilder: (context, entry, isStreaming) =>
+                Text('entry:${entry.id}:${entry.message.content}'),
+          ),
+        ),
+      );
+      expect(find.text('entry:seed-id:seed'), findsOneWidget);
+    });
   });
 }

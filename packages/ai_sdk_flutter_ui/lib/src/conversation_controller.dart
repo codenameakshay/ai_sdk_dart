@@ -223,6 +223,10 @@ class ConversationChatController extends ChatController {
   @override
   String get streamingContent => '';
 
+  /// Always false: the conversation backend owns the transcript.
+  @override
+  bool updateMessage(String id, ModelMessage message) => false;
+
   @override
   List<LanguageModelV4ToolApprovalRequestPart> get pendingApprovalRequests =>
       _pendingApprovals();

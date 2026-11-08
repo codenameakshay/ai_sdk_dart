@@ -1,3 +1,4 @@
+// ignore_for_file: implementation_imports
 import 'package:flutter/cupertino.dart' show CupertinoDatePicker;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -5,7 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
-import 'package:open_intelligent_ui/src/css_color.dart' show CssGradient;
+import 'package:open_intelligent_ui_core/src/css_color.dart' show CssGradient;
 
 import '../support/pump.dart';
 

@@ -32,6 +32,7 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
     required this.glassRingHover,
     required this.shadow,
     required this.shadowSmall,
+    // ponytail: the umbrella package bundles this family; without it Flutter falls back to the platform font. Pass fontFamily to choose.
     this.fontFamily = 'packages/open_intelligent_ui/Inter',
     String? monoFontFamily,
   }) : faint = faint ?? muted,

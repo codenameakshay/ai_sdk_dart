@@ -12,12 +12,25 @@ output must work unchanged, so every component name, argument order, option valu
 ## Packages
 
 ```
-packages/ai_sdk_openui         pure Dart, no Flutter
-  ai_sdk_openui.dart           the language: schema DSL, library, session, elements, events
-  intelligent_ui.dart          the library: IuiComponent, intelligentUi, chatPrompt, dashboardPrompt, demoTools
-packages/open_intelligent_ui   Flutter; depends on ai_sdk_openui and re-exports it
-  open_intelligent_ui.dart     OpenUiView, OpenUiPreview, OpenUiScope, OpenUiServices, OpenUiTheme
+packages/ai_sdk_openui              pure Dart, no Flutter
+  ai_sdk_openui.dart                the language: schema DSL, library, session, elements, events
+  intelligent_ui.dart               the library: IuiComponent, intelligentUi, optionalIuiComponents,
+                                    intelligentUiWithout, chatPrompt, chatPromptFor, dashboardPrompt, demoTools
+packages/open_intelligent_ui_core   Flutter; no map, web view, TeX or chat dependency
+  open_intelligent_ui_core.dart     OpenUiView, OpenUiPreview, OpenUiScope, OpenUiServices, OpenUiTheme,
+                                    openUiCoreBuilders, composeBuilders, intelligentUiFor
+  components.dart                   OutlineGlyph, Photo, for builder and plugin authors
+  lucide.dart                       lucideIconResolver (the lucide set; loaded only when imported)
+packages/open_intelligent_ui_maps   Map, MapMarker, OsrmStreetRoute (flutter_map)
+packages/open_intelligent_ui_web    HtmlView, YouTube (webview_flutter)
+packages/open_intelligent_ui_math   Math (flutter_math_fork)
+packages/open_intelligent_ui_chat   OpenUiChat, OpenUiUserMessage (ai_sdk_flutter_ui)
+packages/open_intelligent_ui        umbrella: re-exports the packages above, bundles Inter, opens links
+                                    in the browser, adds chat.dart and Wikimedia photo search
 ```
+
+The umbrella keeps its name, so existing imports still work. Each plugin depends on the core and on one
+heavy dependency set. Lucide is a library inside the core, not a package.
 
 `OpenUiView` takes react-lang's Renderer slots as widgets: `OpenUiContent`, `OpenUiQueryLoading`, `OpenUiQueryError`
 and `OpenUiRetry`, plus a `queryLoader`. `OpenUiView.queryOf` gives the query state, including `isRetrying`.
@@ -75,6 +88,25 @@ model text ──► OpenUiSession.update(text, streaming)
    message as content, `["User clicked: msg", formState, context?]` as context.
 7. **Host services are injected.** `OpenUiServices` covers opening URLs, the clipboard, image search, street
    routing and map tiles. The package hard-codes none of the reference's `/api` routes.
+8. **The umbrella keeps its name; the renderer moves to `open_intelligent_ui_core`.** Every existing import,
+   `intelligentUiBuilders`, `OpenUiView(...)`, `chat.dart`, Inter and the icons keep working with no host change,
+   so 3.1.0 is a minor release. All tests stay in the umbrella, which can import every plugin.
+9. **Specs stay in `ai_sdk_openui`; the library is derived from the builders.** A plugin is a
+   `Map<String, OpenUiBuilder>`. `intelligentUiFor(builders)` removes each optional component the builders cannot
+   draw (Math, Map, MapMarker, YouTube, HtmlView). With every plugin it returns `intelligentUi` itself, so the spec
+   and prompt goldens do not move. `chatPromptFor(library)` drops the "Pick the medium" clauses for missing
+   components. No `OpenUiPlugin` class: a builder map and one derive function cover it.
+10. **Icons come from a resolver.** `OpenUiServices.icons` draws a name. Lookup order: `services.icons`, then
+    the 13 built-in glyphs in the core (lucide's outlines, copied verbatim), then nothing. The full lucide set is
+    a library inside the core, `package:open_intelligent_ui_core/lucide.dart`, which provides `lucideIconResolver`.
+    Only a file that imports it pulls in its 318 KB of path data.
+11. **Defaults come through `fallbackServices`.** `OpenUiView.fallbackServices` fills whatever the nearest
+    `OpenUiScope` leaves unset (`OpenUiServices.orElse`), and `OpenUiScope` is an `InheritedTheme`, so routes keep
+    the services. The umbrella's view passes Lucide icons and a `url_launcher` `openUrl`, so the core has no
+    `url_launcher`. With no `openUrl` function, links do nothing.
+12. **Inter stays in the umbrella.** The core's default font family is `packages/open_intelligent_ui/Inter`. With
+    the umbrella it resolves to Inter. Without it, Flutter uses the platform font. `fontFamily: null` inherits the
+    host font.
 
 ## Chat integration
 

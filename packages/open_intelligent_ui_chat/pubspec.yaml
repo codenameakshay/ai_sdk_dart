@@ -1,0 +1,18 @@
+name: open_intelligent_ui_chat
+description: "OpenUiChat and OpenUiUserMessage: Open Intelligent UI answers in an ai_sdk_flutter_ui chat."
+version: 3.1.0
+homepage: https://github.com/codenameakshay/ai_sdk_dart
+repository: https://github.com/codenameakshay/ai_sdk_dart
+resolution: workspace
+
+environment:
+  sdk: ^3.11.1
+  flutter: ">=3.41.3"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  ai_sdk_dart: ^3.1.0
+  ai_sdk_flutter_ui: ^3.1.0
+  ai_sdk_openui: ^3.1.0
+  open_intelligent_ui_core: ^3.1.0

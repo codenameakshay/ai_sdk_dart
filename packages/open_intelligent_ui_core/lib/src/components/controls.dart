@@ -336,7 +336,7 @@ class IuiButton extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    if (isLucideIcon(icon)) ...[
+                    if (Glyph.has(context, icon)) ...[
                       Glyph(icon!, size: size == 'sm' ? 14 : 16, color: color),
                       const SizedBox(width: 7),
                     ],

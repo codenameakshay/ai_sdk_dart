@@ -1,11 +1,12 @@
+// ignore_for_file: implementation_imports
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
-import 'package:open_intelligent_ui/src/css_color.dart';
-import 'package:open_intelligent_ui/src/view.dart' show webUri;
+import 'package:open_intelligent_ui_core/src/css_color.dart';
+import 'package:open_intelligent_ui_core/src/view.dart' show webUri;
 
 import 'support/pump.dart';
 
@@ -298,7 +299,7 @@ void main() {
       expect((set.arguments as Map)['text'], 'to clipboard');
     });
 
-    testWidgets('the default open launches the url outside the app', (
+    testWidgets('the umbrella view launches urls outside the app by default', (
       tester,
     ) async {
       final calls = <MethodCall>[];
@@ -315,7 +316,14 @@ void main() {
           null,
         ),
       );
-      await const OpenUiServices().openUrl(Uri.parse('https://a.test/x'));
+      await const OpenUiServices().openUrl(Uri.parse('https://a.test/core'));
+      expect(calls, isEmpty);
+      final session = OpenUiSession(intelligentUi);
+      addTearDown(session.dispose);
+      await OpenUiView(
+        session: session,
+        builders: intelligentUiBuilders,
+      ).fallbackServices.openUrl(Uri.parse('https://a.test/x'));
       final launch = calls.singleWhere((c) => c.method == 'launch');
       expect((launch.arguments as Map)['url'], 'https://a.test/x');
     });

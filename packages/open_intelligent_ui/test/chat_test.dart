@@ -1,3 +1,4 @@
+// ignore_for_file: implementation_imports
 import 'dart:async';
 
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
@@ -8,7 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_intelligent_ui/chat.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart' show ActionEvent;
-import 'package:open_intelligent_ui/src/chat.dart' show formFields;
+import 'package:open_intelligent_ui_chat/src/chat.dart' show formFields;
 
 /// A model whose answers the test streams by hand, one call at a time.
 final class _HandModel extends LanguageModelV4 {

@@ -1,12 +1,9 @@
-import 'package:ai_sdk_openui/ai_sdk_openui.dart';
 import 'package:flutter/material.dart';
 
-import '../theme.dart';
-import '../view.dart';
-import 'glyph.dart';
+import 'package:open_intelligent_ui_core/open_intelligent_ui_core.dart';
+import 'package:open_intelligent_ui_core/components.dart';
 import 'html_document.dart';
 import 'html_host.dart' as host;
-import 'media.dart';
 
 /// `HtmlView(html, height?, title?)`: a sandboxed page for games and canvas.
 Widget buildHtmlView(BuildContext context, OpenUiNode node) {

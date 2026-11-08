@@ -1,3 +1,4 @@
+// ignore_for_file: implementation_imports
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -6,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
-import 'package:open_intelligent_ui/src/css_color.dart';
+import 'package:open_intelligent_ui_core/src/css_color.dart';
 
 import '../support/pump.dart';
 

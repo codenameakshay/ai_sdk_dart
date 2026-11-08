@@ -1,10 +1,10 @@
+// ignore_for_file: implementation_imports
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
-import 'package:open_intelligent_ui/src/components/html_document.dart';
-import 'package:open_intelligent_ui/src/components/html_view.dart'
-    show HtmlPage;
-import 'package:open_intelligent_ui/src/components/media.dart' show Photo;
+import 'package:open_intelligent_ui_web/src/html_document.dart';
+import 'package:open_intelligent_ui_web/src/html_view.dart' show HtmlPage;
+import 'package:open_intelligent_ui_core/src/components/media.dart' show Photo;
 
 import '../gallery_fixture.dart';
 import '../support/pump.dart';

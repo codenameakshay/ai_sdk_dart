@@ -1,3 +1,4 @@
+// ignore_for_file: implementation_imports
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -6,9 +7,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
-import 'package:open_intelligent_ui/src/components/media.dart'
+import 'package:open_intelligent_ui_core/src/components/media.dart'
     show MediaRowSlot;
-import 'package:open_intelligent_ui/src/view.dart' show resetFieldIds;
+import 'package:open_intelligent_ui_core/src/view.dart' show resetFieldIds;
 
 import 'support/pump.dart';
 

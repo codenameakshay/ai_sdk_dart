@@ -1,6 +1,7 @@
+// ignore_for_file: implementation_imports
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:open_intelligent_ui/src/components/flex_row.dart';
+import 'package:open_intelligent_ui_core/src/components/flex_row.dart';
 
 const _a = Key('a');
 const _b = Key('b');

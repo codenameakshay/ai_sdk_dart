@@ -1,3 +1,4 @@
+// ignore_for_file: implementation_imports
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -8,7 +9,7 @@ import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
-import 'package:open_intelligent_ui/src/components/map.dart'
+import 'package:open_intelligent_ui_maps/src/map.dart'
     show flyPath, pinEmoji, placesOf;
 
 import '../gallery_fixture.dart';

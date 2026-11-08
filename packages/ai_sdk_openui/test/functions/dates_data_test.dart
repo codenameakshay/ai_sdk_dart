@@ -309,13 +309,13 @@ void main() {
     test('is dropped with an error, so its default applies', () {
       final style = run('@FormatDate("2026-10-09", "fancy")');
       expect(style.value, 'Oct 9, 2026');
-      expect(style.issues.join(), contains('one of'));
+      expect(style.parseErrors.join(), contains('one of'));
       final how = run('@GroupBy($_rows, "region", "amount", "median")');
       expect(how.value, [
         {'key': 'West', 'value': 17},
         {'key': 'East', 'value': 5},
       ]);
-      expect(how.issues, hasLength(1));
+      expect(how.parseErrors, hasLength(1));
     });
   });
 
@@ -330,7 +330,7 @@ void main() {
         'median': 2,
         'stdev': 1,
       });
-      expect(result.issues.join(), contains('expects number'));
+      expect(result.runtimeErrors.join(), contains('expects number'));
     });
   });
 }

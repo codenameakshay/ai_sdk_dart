@@ -193,7 +193,7 @@ void main() {
     test('report a parse error for a wrong literal and evaluate to null', () {
       final result = run('@Take("abc", 1)');
       expect(result.value, isNull);
-      expect(result.issues.join(), matches(RegExp('expects array')));
+      expect(result.parseErrors.join(), matches(RegExp('expects array')));
     });
 
     test('evaluate to null when a \$variable holds the wrong type', () {
@@ -201,7 +201,7 @@ void main() {
         r'$xs': 'not a list',
       });
       expect(result.value, isNull);
-      expect(result.issues.join(), matches(RegExp('expects array')));
+      expect(result.runtimeErrors.join(), matches(RegExp('expects array')));
     });
   });
 }

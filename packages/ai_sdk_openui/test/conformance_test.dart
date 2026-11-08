@@ -1,3 +1,7 @@
+// Reads fixture files with dart:io, which the web platforms lack.
+@TestOn('vm')
+library;
+
 import 'dart:async';
 import 'dart:convert';
 

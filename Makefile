@@ -68,7 +68,7 @@ ifdef GOOGLE_API_KEY
 endif
 
 .PHONY: all get run run-web run-advanced run-advanced-web run-basic run-mcp \
-        test test-examples analyze format format-check dry-run publish help \
+        test test-web test-examples analyze format format-check dry-run publish help \
         coverage coverage-check benchmark catalog-check test-mcp-reference
 
 all: help
@@ -117,12 +117,16 @@ run-mcp:
 ## Run tests across all packages and examples
 test:
 	$(DART) test tool/
-	$(DART) test $(foreach p,$(DART_PKGS),packages/$(p)/test/)
+	TZ=UTC $(DART) test $(foreach p,$(DART_PKGS),packages/$(p)/test/)
 	$(FLUTTER) test $(foreach p,$(FLUTTER_PKGS),packages/$(p)/)
 	$(DART) --enable-asserts run $(DART_APP)/test/client_lifetime_test.dart
 	$(FLUTTER) test $(FLUTTER_APP)/test/ $(ADVANCED_APP)/test/ $(GALLERY_APP)/test/
 	$(FLUTTER) test --dart-define=OPENAI_API_KEY=fixture --dart-define=ANTHROPIC_API_KEY=fixture --dart-define=GOOGLE_API_KEY=fixture $(ADVANCED_APP)/test/provider_lifecycle_test.dart $(ADVANCED_APP)/test/media_page_lifetime_test.dart $(ADVANCED_APP)/test/media_picker_lifetime_test.dart
 	$(DART) test $(DART_EXAMPLES)/test/
+
+## Run the OpenUI engine's tests compiled to JavaScript, as Flutter web runs them (needs Node)
+test-web:
+	cd packages/ai_sdk_openui && TZ=UTC $(DART) test -p node
 
 ## Run the example tests only (CI pairs this with coverage-check)
 test-examples:
@@ -190,6 +194,7 @@ help:
 	@echo "  make run-basic         Run Dart CLI example"
 	@echo "  make run-mcp           Run the MCP CLI demo (works without a key)"
 	@echo "  make test              Run all package tests"
+	@echo "  make test-web          Run the OpenUI engine tests on dart2js (Node)"
 	@echo "  make test-examples     Run the example app tests only"
 	@echo "  make analyze           Run dart analyze across all packages"
 	@echo "  make format            Format all Dart source files"

@@ -37,6 +37,8 @@ workspace:
   - packages/ai_sdk_mistral
   - packages/ai_sdk_groq
   - packages/ai_sdk_ollama
+  - packages/ai_sdk_openui
+  - packages/open_intelligent_ui
   - examples/basic
   - examples/flutter_chat
   - examples/advanced_app

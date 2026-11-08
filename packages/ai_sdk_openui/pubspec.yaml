@@ -1,0 +1,16 @@
+name: ai_sdk_openui
+description: OpenUI Lang 1.0 in pure Dart (parser, evaluator, state, queries, prompt generator) and the Open Intelligent UI component library spec.
+version: 3.1.0
+homepage: https://github.com/codenameakshay/ai_sdk_dart
+repository: https://github.com/codenameakshay/ai_sdk_dart
+resolution: workspace
+
+environment:
+  sdk: ^3.11.1
+
+dependencies:
+  intl: ^0.20.2
+
+dev_dependencies:
+  lints: ^6.1.0
+  test: ^1.25.0

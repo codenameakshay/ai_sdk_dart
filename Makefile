@@ -34,8 +34,8 @@ DART_EXAMPLES := examples/remote_backend
 # since publish order matters (dependencies before dependents).
 DART_PKGS    := ai_sdk_telemetry ai_sdk_remote ai_sdk_realtime ai_sdk_conversation ai_sdk_json_schema ai_sdk_dart ai_sdk_provider ai_sdk_openai_compatible ai_sdk_openai \
                 ai_sdk_anthropic ai_sdk_google ai_sdk_azure ai_sdk_cohere ai_sdk_groq \
-                ai_sdk_mistral ai_sdk_ollama ai_sdk_mcp
-FLUTTER_PKGS := ai_sdk_flutter_ui
+                ai_sdk_mistral ai_sdk_ollama ai_sdk_mcp ai_sdk_openui
+FLUTTER_PKGS := ai_sdk_flutter_ui open_intelligent_ui
 PUBLISH_PKGS := ai_sdk_provider ai_sdk_openai_compatible ai_sdk_openai ai_sdk_anthropic \
                 ai_sdk_google ai_sdk_azure ai_sdk_cohere ai_sdk_groq ai_sdk_mistral \
                 ai_sdk_ollama ai_sdk_dart ai_sdk_json_schema ai_sdk_conversation ai_sdk_remote ai_sdk_mcp ai_sdk_telemetry

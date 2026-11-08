@@ -87,8 +87,11 @@ class _Response extends Stream<List<int>> implements HttpClientResponse {
 
 typedef _Search = Future<List<Uri>> Function(String query);
 
-OpenUiServices _services(_Search search) =>
-    OpenUiServices(searchImages: search, mapTiles: null);
+OpenUiServices _services(_Search search) => OpenUiServices(
+  searchImages: search,
+  mapTiles: null,
+  imageLoader: networkImages,
+);
 
 Finder get _emptyGlyph =>
     find.byWidgetPredicate((w) => w is Glyph && w.name == 'image');

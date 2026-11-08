@@ -47,3 +47,7 @@
 - `package:open_intelligent_ui/chat.dart`: `OpenUiChat` renders answers in
   `ai_sdk_flutter_ui` chats, and `OpenUiUserMessage` shows `@ToAssistant` turns with their form
   values. The example has an offline chat demo.
+- Behaviour change: no network by default. Map tiles and images no longer load until you allow them:
+  `OpenUiServices(mapTiles: esriStreetTiles, imageLoader: networkImages)`, or allow a few hosts with
+  `imageLoader: allowImageHosts(['upload.wikimedia.org'])`. A blocked image shows the photo placeholder.
+  The README's Network section lists every place that can reach the network.

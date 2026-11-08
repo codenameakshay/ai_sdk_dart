@@ -46,6 +46,7 @@ Future<Pumped> pumpProgram(
               copyText: (text) async => copied.add(text),
               openUrl: (url) async => opened.add(url),
               mapTiles: null,
+              imageLoader: networkImages,
             ),
         child: Scaffold(
           body: SingleChildScrollView(

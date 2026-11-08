@@ -1,0 +1,60 @@
+import 'dart:ui' as ui;
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart';
+
+import 'image_fetch_stub.dart'
+    if (dart.library.io) 'image_fetch_io.dart'
+    if (dart.library.js_interop) 'image_fetch_web.dart'
+    as image_fetch;
+
+/// Loads an HTTP image without following redirects.
+@immutable
+class AllowlistedImageProvider extends ImageProvider<AllowlistedImageProvider> {
+  /// Creates an image provider for [uri] at the given display [scale].
+  const AllowlistedImageProvider(this.uri, {this.scale = 1.0});
+
+  /// The image URL to fetch.
+  final Uri uri;
+
+  /// The image's display scale.
+  final double scale;
+
+  @override
+  Future<AllowlistedImageProvider> obtainKey(
+    ImageConfiguration configuration,
+  ) => SynchronousFuture<AllowlistedImageProvider>(this);
+
+  @override
+  ImageStreamCompleter loadImage(
+    AllowlistedImageProvider key,
+    ImageDecoderCallback decode,
+  ) => MultiFrameImageStreamCompleter(
+    codec: _loadAsync(key, decode),
+    scale: key.scale,
+    informationCollector: () => <DiagnosticsNode>[
+      ErrorDescription('Image URL: ${key.uri}'),
+    ],
+  );
+
+  Future<ui.Codec> _loadAsync(
+    AllowlistedImageProvider key,
+    ImageDecoderCallback decode,
+  ) async {
+    final bytes = await image_fetch.fetchImageBytes(key.uri);
+    if (bytes.isEmpty) throw StateError('Image response was empty: ${key.uri}');
+    return decode(await ui.ImmutableBuffer.fromUint8List(bytes));
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is AllowlistedImageProvider &&
+      other.uri == uri &&
+      other.scale == scale;
+
+  @override
+  int get hashCode => Object.hash(uri, scale);
+
+  @override
+  String toString() => 'AllowlistedImageProvider("$uri", scale: $scale)';
+}

@@ -100,15 +100,47 @@ class _PhotoState extends State<Photo> {
   String? _searched;
   List<Uri>? _found;
   Timer? _debounce;
+  Future<List<Uri>> Function(String query)? _searchService;
+  OpenUiImageLoader? _imageLoader;
+  int _searchGeneration = 0;
+  int _imageLoaderGeneration = 0;
+  bool _servicesInitialized = false;
 
   Uri? get _src => webUri(widget.src);
   String get _alt => widget.query.trim();
+  ImageProvider? _load(Uri u) =>
+      OpenUiScope.servicesOf(context).imageLoader?.call(u);
   bool get _needSearch =>
-      (_src == null || _failed.contains(_src)) && _alt.length > 2;
+      (_src == null || _failed.contains(_src) || _load(_src!) == null) &&
+      _alt.length > 2;
+
+  ({Uri url, ImageProvider image})? _firstLoadable(Iterable<Uri> candidates) {
+    for (final u in candidates) {
+      if (_failed.contains(u)) continue;
+      final image = _load(u);
+      if (image != null) return (url: u, image: image);
+    }
+    return null;
+  }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final services = OpenUiScope.servicesOf(context);
+    if (_servicesInitialized) {
+      if (!identical(services.searchImages, _searchService)) {
+        _searchGeneration++;
+        _searched = null;
+        _found = null;
+      }
+      if (!identical(services.imageLoader, _imageLoader)) {
+        _imageLoaderGeneration++;
+        _failed.clear();
+      }
+    }
+    _servicesInitialized = true;
+    _searchService = services.searchImages;
+    _imageLoader = services.imageLoader;
     _schedule();
   }
 
@@ -119,15 +151,20 @@ class _PhotoState extends State<Photo> {
   }
 
   void _schedule() {
+    _debounce?.cancel();
+    _debounce = null;
     final services = OpenUiScope.servicesOf(context);
     if (!_needSearch || services.searchImages == null || _searched == _alt) {
       return;
     }
-    _debounce?.cancel();
     final query = _alt;
+    final searchGeneration = _searchGeneration;
     _debounce = Timer(const Duration(milliseconds: 500), () async {
       final found = await _search(services, query);
-      if (mounted && _alt == query) {
+      if (mounted &&
+          _alt == query &&
+          searchGeneration == _searchGeneration &&
+          identical(_searchService, services.searchImages)) {
         setState(() {
           _searched = query;
           _found = found;
@@ -148,9 +185,9 @@ class _PhotoState extends State<Photo> {
     final services = OpenUiScope.servicesOf(context);
     final found = _searched == _alt ? _found : null;
     final candidates = [?_src, ...?found];
-    final current = candidates.where((u) => !_failed.contains(u)).firstOrNull;
+    final loaded = _firstLoadable(candidates);
     final settled =
-        current == null &&
+        loaded == null &&
         (!_needSearch || services.searchImages == null || found != null);
     final ratio = MediaRowSlot.of(context)
         ? 4 / 3
@@ -162,10 +199,12 @@ class _PhotoState extends State<Photo> {
     final radius = theme.radiusOf(widget.radius ?? 'lg') ?? theme.radii.lg;
     final reduce = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
     final Widget content;
-    if (current != null) {
-      content = Image.network(
-        current.toString(),
-        key: ValueKey(current),
+    if (loaded != null) {
+      final url = loaded.url;
+      final imageLoaderGeneration = _imageLoaderGeneration;
+      content = Image(
+        image: loaded.image,
+        key: ValueKey(url),
         fit: widget.fit == 'contain' ? BoxFit.contain : BoxFit.cover,
         semanticLabel: _alt,
         frameBuilder: (context, child, frame, sync) {
@@ -188,8 +227,10 @@ class _PhotoState extends State<Photo> {
         },
         errorBuilder: (context, error, stack) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) {
-              setState(() => _failed.add(current));
+            if (mounted &&
+                imageLoaderGeneration == _imageLoaderGeneration &&
+                identical(_imageLoader, services.imageLoader)) {
+              setState(() => _failed.add(url));
               _schedule();
             }
           });

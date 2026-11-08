@@ -74,8 +74,13 @@ class _GalleryAppState extends State<GalleryApp> {
   @override
   Widget build(BuildContext context) {
     final services = _online
-        ? OpenUiServices(searchImages: _search.call, streetRoute: _route.call)
-        : const OpenUiServices(mapTiles: null);
+        ? OpenUiServices(
+            searchImages: _search.call,
+            streetRoute: _route.call,
+            mapTiles: esriStreetTiles,
+            imageLoader: networkImages,
+          )
+        : const OpenUiServices();
     return MaterialApp(
       title: 'Open Intelligent UI',
       debugShowCheckedModeBanner: false,

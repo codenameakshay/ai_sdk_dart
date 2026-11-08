@@ -52,10 +52,25 @@ import 'package:open_intelligent_ui_core/lucide.dart';
 final services = OpenUiServices(icons: lucideIconResolver);
 ```
 
+## Network
+
+Nothing reaches the network until the host allows it. The core makes no calls of its own. Each row names
+a place that can, and how to turn it on.
+
+| Where | Touches the network when | Off by default | How to opt in |
+|---|---|---|---|
+| Image, SearchImage, YouTube thumbnail (`Photo`) | `imageLoader` returns a provider | yes (`imageLoader: null`) | `imageLoader: networkImages`, or `allowImageHosts(['example.com'])` |
+| Map tiles (`Map` is in `open_intelligent_ui_maps`) | `mapTiles` is set | yes (`mapTiles: null`) | `mapTiles: esriStreetTiles`, or your own `MapTiles` |
+| Street routes (`OsrmStreetRoute` in `open_intelligent_ui_maps`) | `streetRoute` is set | yes | `streetRoute: OsrmStreetRoute().call` |
+| Photo search | `searchImages` is set | yes | a host function, such as `WikimediaImageSearch().call` from the umbrella |
+| `@OpenUrl`, Link, Markdown links, map attribution, YouTube fallback card | the user taps, and the URL goes to `openUrl` | yes: nothing opens without `openUrl` | pass `openUrl`, such as `launchUrl` |
+| HtmlView, YouTube (web package) | HtmlView's page may load scripts from cdn.jsdelivr.net, unpkg.com, cdnjs.cloudflare.com and esm.sh, and fonts from fonts.googleapis.com and fonts.gstatic.com; YouTube embeds load from www.youtube-nocookie.com | not in the core | depend on `open_intelligent_ui_web`, or leave it out to keep them off |
+| Flutter web engine | CanvasKit and fallback fonts load from Google's CDN | no | build with `--no-web-resources-cdn` (an engine flag, not this package's) |
+
 ## Services and fallbacks
 
 - `OpenUiServices` carries host hooks: `openUrl`, `copyText`, `searchImages`, `streetRoute`, `mapTiles`,
-  `embedReferrer` and `icons`.
+  `imageLoader`, `embedReferrer` and `icons`.
 - `openUrl` does nothing without a host function. Pass one, such as `url_launcher`, to open links.
 - `OpenUiScope` gives services to a subtree. `OpenUiView.fallbackServices` fills whatever the nearest
   scope leaves unset. `OpenUiServices.orElse(fallback)` merges two sets the same way.

@@ -20,10 +20,18 @@ final library = intelligentUiFor(builders);
 final session = OpenUiSession(library)..update(textSoFar, streaming: true);
 
 OpenUiScope(
-  services: OpenUiServices(streetRoute: OsrmStreetRoute().call),
+  services: OpenUiServices(
+    mapTiles: esriStreetTiles, // optional: draws street tiles
+    streetRoute: OsrmStreetRoute().call, // optional: follows streets
+  ),
   child: OpenUiView(session: session, builders: builders),
 );
 ```
+
+Map tiles are off by default, so a map draws only its markers and route. Pass `mapTiles: esriStreetTiles`
+to draw Esri's street tiles from server.arcgisonline.com, or your own `MapTiles` with light and dark URL
+templates. Without `streetRoute` a route draws straight segments; `OsrmStreetRoute` routes through
+router.project-osrm.org.
 
 The library from `intelligentUiFor` lists `Map` and `MapMarker`, so `library.systemPrompt(chatPromptFor(library))`
 tells the model they exist.

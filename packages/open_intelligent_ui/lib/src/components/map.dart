@@ -1027,6 +1027,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                               child: _Glass(
                                 circle: true,
                                 tooltip: 'About this map',
+                                expanded: _info,
                                 onTap: () => setState(() => _info = !_info),
                                 child: Glyph(
                                   'info',
@@ -1048,6 +1049,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                         child: ConstrainedBox(
                           constraints: const BoxConstraints(minHeight: 28),
                           child: _Glass(
+                            expanded: _expanded,
                             onTap: () => _setExpanded(!_expanded),
                             padding: const EdgeInsets.symmetric(
                               horizontal: 10,
@@ -1327,12 +1329,16 @@ class _Glass extends StatefulWidget {
     required this.child,
     this.onTap,
     this.tooltip,
+    this.expanded,
     this.circle = false,
     this.padding = EdgeInsets.zero,
   });
   final Widget child;
   final VoidCallback? onTap;
   final String? tooltip;
+
+  /// `aria-expanded`: null for a control that opens nothing.
+  final bool? expanded;
   final bool circle;
   final EdgeInsetsGeometry padding;
 
@@ -1380,11 +1386,16 @@ class _GlassState extends State<_Glass> {
         ),
       ),
     );
+    box = MergeSemantics(
+      child: Semantics(
+        button: true,
+        expanded: widget.expanded,
+        label: widget.tooltip,
+        child: box,
+      ),
+    );
     if (widget.tooltip != null) {
-      box = Tooltip(
-        message: widget.tooltip!,
-        child: Semantics(button: true, label: widget.tooltip, child: box),
-      );
+      box = Tooltip(message: widget.tooltip!, child: box);
     }
     return box;
   }

@@ -322,6 +322,35 @@ void main() {
       handle.dispose();
     });
 
+    testWidgets(
+      'Expand and About this map are buttons with an expanded state',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        await _pump(tester, _sf);
+        expect(
+          tester.getSemantics(find.bySemanticsLabel('Expand')),
+          isSemantics(isButton: true, isExpanded: false),
+        );
+        expect(
+          tester.getSemantics(find.bySemanticsLabel('About this map')),
+          isSemantics(isButton: true, isExpanded: false),
+        );
+        await tester.tap(find.bySemanticsLabel('About this map'));
+        await tester.pump();
+        expect(
+          tester.getSemantics(find.bySemanticsLabel('About this map')),
+          isSemantics(isButton: true, isExpanded: true),
+        );
+        await tester.tap(find.text('Expand'));
+        await tester.pumpAndSettle();
+        expect(
+          tester.getSemantics(find.bySemanticsLabel('Collapse')),
+          isSemantics(isButton: true, isExpanded: true),
+        );
+        handle.dispose();
+      },
+    );
+
     testWidgets('an unbound Map still selects (its own field)', (tester) async {
       await _pump(
         tester,

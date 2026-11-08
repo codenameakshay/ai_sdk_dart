@@ -26,3 +26,4 @@ export 'src/runtime/session.dart'
         OpenUiSession,
         Props;
 export 'src/lang/js.dart' show jsString;
+export 'src/message.dart' show OpenUiMessage;

@@ -150,6 +150,7 @@ final class OpenUiSession {
     this.library, {
     List<OpenUiTool> tools = const [],
     Map<String, Object?> initialState = const {},
+    this.onStateUpdate,
   }) : _tools = {for (final t in tools) t.name: t},
        _initialState = initialState,
        _parser = StreamParser(library.compiled, rootName: library.rootName) {
@@ -180,6 +181,11 @@ final class OpenUiSession {
   }
 
   final OpenUiLibrary library;
+
+  /// Called with [state] after a change the store did not make itself while
+  /// starting up: a field edit, a `$binding` write or an `@Set`. Mirrors
+  /// react-lang's `onStateUpdate`; persist [state] here.
+  final void Function(Map<String, Object?> state)? onStateUpdate;
   final Map<String, OpenUiTool> _tools;
   final Map<String, Object?> _initialState;
   final StreamParser _parser;
@@ -217,6 +223,7 @@ final class OpenUiSession {
     if (key != _storeKey) {
       _storeKey = key;
       final persisted = <String, Object?>{};
+      _initializing = true;
       for (final MapEntry(:key, :value) in _initialState.entries) {
         if (key.startsWith(r'$')) {
           if (!_store.has(key)) persisted[key] = value;
@@ -224,7 +231,6 @@ final class OpenUiSession {
           _store.set(key, value);
         }
       }
-      _initializing = true;
       _store.initialize(result.stateDeclarations, persisted);
       _initializing = false;
     }
@@ -270,6 +276,7 @@ final class OpenUiSession {
     }
     _syncQueries();
     _onChange();
+    onStateUpdate?.call(_store.snapshot);
   }
 
   void _onChange() {

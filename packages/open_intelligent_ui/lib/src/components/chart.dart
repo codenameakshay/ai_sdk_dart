@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:ai_sdk_openui/ai_sdk_openui.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
+import 'package:flutter/rendering.dart';
 import 'package:intl/intl.dart' show NumberFormat;
 
 import '../theme.dart';
@@ -19,6 +21,41 @@ num _num(Object? v) {
 }
 
 String _label(ChartRow row, String x) => row[x] == null ? '' : jsString(row[x]);
+
+/// SVG `rx`: one radius for both axes, each clamped to half the side.
+Radius _svgRadius(Rect rect, double r) => Radius.elliptical(
+  math.min(r, rect.width / 2),
+  math.min(r, rect.height / 2),
+);
+
+/// `toFixed(1)`, as the reference writes path points.
+double _fixed1(double v) => double.parse(v.toStringAsFixed(1));
+
+/// `.iui-chart-tick`: faint 11px tabular figures in the theme font.
+TextStyle chartTickStyle(OpenUiTheme theme) => TextStyle(
+  fontSize: 11,
+  color: theme.faint,
+  fontFamily: theme.fontFamily,
+  fontFeatures: const [FontFeature.tabularFigures()],
+);
+
+/// `.iui-chart-category`: muted 12px in the theme font.
+TextStyle chartCategoryStyle(OpenUiTheme theme) =>
+    TextStyle(fontSize: 12, color: theme.muted, fontFamily: theme.fontFamily);
+
+/// An area's fill: a top-to-bottom gradient over the area's own bounding
+/// box (SVG objectBoundingBox), stop-opacity times the color's alpha.
+({Rect rect, List<Color> colors}) areaFill(
+  Path area,
+  Color color, {
+  required bool stacked,
+}) => (
+  rect: area.getBounds(),
+  colors: [
+    color.withValues(alpha: color.a * (stacked ? 0.5 : 0.24)),
+    color.withValues(alpha: color.a * (stacked ? 0.3 : 0.02)),
+  ],
+);
 
 /// The reference's `makeFormat`: compact axis ticks ("$2B"), two-decimal
 /// tooltips ("$1.24B"), percent values like 45.
@@ -157,7 +194,9 @@ Widget buildChart(BuildContext context, OpenUiNode node) {
   if (spec == null) return const SizedBox(height: 240);
   final pie = spec.type == 'pie' || spec.type == 'donut';
   return Semantics(
-    label: '${spec.type} chart of ${spec.series.join(', ')} by ${spec.x}',
+    label: pie
+        ? '${spec.type} chart of ${spec.series.firstOrNull ?? 'values'} by ${spec.x}'
+        : '${spec.type} chart of ${spec.series.join(', ')} by ${spec.x}',
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -231,44 +270,125 @@ class _PlotChartState extends State<_PlotChart> {
         final geometry = spec.type == 'scatter'
             ? _ScatterGeometry(spec, width)
             : _CartesianGeometry(spec, width);
-        void hoverAt(Offset p) {
-          final hit = geometry.hit(p);
+        void move(Offset p) {
+          final hit = geometry.hit(p, _hover);
           if (hit != _hover) setState(() => _hover = hit);
+        }
+
+        void leave() {
+          if (_hover != null) setState(() => _hover = null);
         }
 
         final tip = _hover == null ? null : geometry.tooltip(_hover!, theme);
         return MouseRegion(
-          onHover: (e) => hoverAt(e.localPosition),
-          onExit: (_) => setState(() => _hover = null),
-          child: GestureDetector(
-            onTapDown: (d) => hoverAt(d.localPosition),
-            onHorizontalDragUpdate: (d) => hoverAt(d.localPosition),
-            child: SizedBox(
-              height: spec.height,
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Positioned.fill(
-                    child: CustomPaint(
-                      painter: _PlotPainter(geometry, theme, _hover),
+          onExit: (_) => leave(),
+          child: Listener(
+            behavior: HitTestBehavior.opaque,
+            onPointerHover: (e) => move(e.localPosition),
+            onPointerMove: (e) => move(e.localPosition),
+            // A touch enters a scatter dot as it lands (pointerenter).
+            onPointerDown: (e) {
+              if (geometry is _ScatterGeometry) move(e.localPosition);
+            },
+            // A finger leaves the chart as it lifts (pointerleave).
+            onPointerUp: (e) {
+              if (e.kind != PointerDeviceKind.mouse) leave();
+            },
+            onPointerCancel: (_) => leave(),
+            child: GestureDetector(
+              // touch-action: pan-y; a sideways drag stays on the chart.
+              onHorizontalDragUpdate: (_) {},
+              child: SizedBox(
+                height: spec.height,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Positioned.fill(
+                      child: CustomPaint(
+                        painter: _PlotPainter(geometry, theme, _hover),
+                      ),
                     ),
-                  ),
-                  if (tip != null)
-                    Positioned(
-                      left:
-                          (tip.anchor.dx.clamp(70, math.max(70, width - 70)) -
-                                  70)
-                              .toDouble(),
-                      top: tip.anchor.dy,
-                      child: _Tooltip(title: tip.title, lines: tip.lines),
-                    ),
-                ],
+                    if (tip != null)
+                      Positioned.fill(
+                        child: LayoutBuilder(
+                          builder: (context, box) => CustomSingleChildLayout(
+                            delegate: _TipLayout(tip.anchor),
+                            child: _ShrinkToFit(
+                              available: box.maxWidth - tip.anchor.dx,
+                              child: _Tooltip(
+                                title: tip.title,
+                                lines: tip.lines,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
           ),
         );
       },
     );
+  }
+}
+
+/// `position: absolute; left; top; transform: translateX(-50%)` with a
+/// shrink-to-fit width of at least 110 (border-box).
+class _TipLayout extends SingleChildLayoutDelegate {
+  const _TipLayout(this.anchor);
+  final Offset anchor;
+
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints constraints) =>
+      const BoxConstraints(minWidth: 110);
+
+  @override
+  Offset getPositionForChild(Size size, Size childSize) =>
+      Offset(anchor.dx - childSize.width / 2, anchor.dy);
+
+  @override
+  bool shouldRelayout(_TipLayout old) => old.anchor != anchor;
+}
+
+/// CSS shrink-to-fit: the max-content width, narrowed to [available] but
+/// never below the min-content width.
+class _ShrinkToFit extends SingleChildRenderObjectWidget {
+  const _ShrinkToFit({required this.available, required super.child});
+  final double available;
+
+  @override
+  _RenderShrinkToFit createRenderObject(BuildContext context) =>
+      _RenderShrinkToFit(available);
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderShrinkToFit render) =>
+      render.available = available;
+}
+
+class _RenderShrinkToFit extends RenderProxyBox {
+  _RenderShrinkToFit(this._available);
+  double _available;
+
+  set available(double value) {
+    if (value == _available) return;
+    _available = value;
+    markNeedsLayout();
+  }
+
+  @override
+  void performLayout() {
+    final box = child!;
+    final width = math.min(
+      math.max(box.getMinIntrinsicWidth(double.infinity), _available),
+      box.getMaxIntrinsicWidth(double.infinity),
+    );
+    box.layout(
+      constraints.tighten(width: constraints.constrainWidth(width)),
+      parentUsesSize: true,
+    );
+    size = box.size;
   }
 }
 
@@ -281,48 +401,55 @@ class _Tooltip extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = OpenUiTheme.of(context);
     return IgnorePointer(
-      child: Container(
-        constraints: const BoxConstraints(minWidth: 140),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: theme.canvas,
-          border: Border.all(color: theme.border),
-          borderRadius: BorderRadius.circular(OpenUiTheme.radiusLg),
-          boxShadow: theme.shadow,
-        ),
-        child: DefaultTextStyle(
-          style: TextStyle(fontSize: 12, color: theme.muted),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                title,
-                style: TextStyle(fontWeight: FontWeight.w600, color: theme.ink),
-              ),
-              for (final (color, name, value) in lines) ...[
-                const SizedBox(height: 3),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (color != null) ...[
-                      _Dot(color),
-                      const SizedBox(width: 6),
-                    ],
-                    Text(name),
-                    const SizedBox(width: 8),
-                    Text(
-                      value,
-                      style: TextStyle(
-                        color: theme.ink,
-                        fontWeight: FontWeight.w500,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
-                    ),
-                  ],
+      child: IntrinsicWidth(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: theme.canvas,
+            border: Border.all(color: theme.border),
+            borderRadius: BorderRadius.circular(OpenUiTheme.radiusLg),
+            boxShadow: theme.shadow,
+          ),
+          child: DefaultTextStyle.merge(
+            style: TextStyle(fontSize: 12, color: theme.muted),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              spacing: 3,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontWeight: OpenUiTheme.weightSemibold,
+                    color: theme.ink,
+                  ),
                 ),
+                for (final (color, name, value) in lines)
+                  Row(
+                    children: [
+                      if (color != null) ...[
+                        _Dot(color),
+                        const SizedBox(width: 6),
+                      ],
+                      if (name.isNotEmpty) ...[
+                        Expanded(child: Text(name)),
+                        const SizedBox(width: 6 + 8),
+                      ] else ...[
+                        const Spacer(),
+                        const SizedBox(width: 8),
+                      ],
+                      Text(
+                        value,
+                        style: TextStyle(
+                          color: theme.ink,
+                          fontWeight: OpenUiTheme.weightMedium,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ],
+                  ),
               ],
-            ],
+            ),
           ),
         ),
       ),
@@ -340,7 +467,7 @@ sealed class _Geometry {
   _Geometry(this.spec, this.width);
   final ChartSpec spec;
   final double width;
-  ({int i, int si})? hit(Offset p);
+  ({int i, int si})? hit(Offset p, ({int i, int si})? current);
   _Tip tooltip(({int i, int si}) hover, OpenUiTheme theme);
 }
 
@@ -401,7 +528,7 @@ final class _CartesianGeometry extends _Geometry {
   double base(int i, int si) => stacked && si > 0 ? tops[i][si - 1] : 0;
 
   @override
-  ({int i, int si})? hit(Offset p) {
+  ({int i, int si})? hit(Offset p, ({int i, int si})? current) {
     final i = ((p.dx - pad.left) / band).floor();
     return i >= 0 && i < spec.rows.length ? (i: i, si: 0) : null;
   }
@@ -410,7 +537,7 @@ final class _CartesianGeometry extends _Geometry {
   _Tip tooltip(({int i, int si}) hover, OpenUiTheme theme) {
     final row = spec.rows[hover.i];
     return (
-      anchor: Offset(xAt(hover.i), pad.top),
+      anchor: Offset(math.min(math.max(xAt(hover.i), 70), width - 70), pad.top),
       title: _label(row, spec.x),
       lines: [
         for (final (si, s) in spec.series.indexed)
@@ -460,19 +587,14 @@ final class _ScatterGeometry extends _Geometry {
   );
 
   @override
-  ({int i, int si})? hit(Offset p) {
-    ({int i, int si})? best;
-    var bestD = 12.0;
-    for (var si = 0; si < spec.series.length; si++) {
-      for (var i = 0; i < spec.rows.length; i++) {
-        final d = (point(i, si) - p).distance;
-        if (d < bestD) {
-          bestD = d;
-          best = (i: i, si: si);
-        }
+  ({int i, int si})? hit(Offset p, ({int i, int si})? current) {
+    for (var si = spec.series.length - 1; si >= 0; si--) {
+      for (var i = spec.rows.length - 1; i >= 0; i--) {
+        final r = (current == (i: i, si: si) ? 6.5 : 5.0) + 0.75;
+        if ((point(i, si) - p).distance <= r) return (i: i, si: si);
       }
     }
-    return best;
+    return current;
   }
 
   @override
@@ -483,7 +605,7 @@ final class _ScatterGeometry extends _Geometry {
       ..maximumFractionDigits = 2;
     return (
       anchor: Offset(
-        px(_num(row[spec.x]).toDouble()),
+        math.min(math.max(px(_num(row[spec.x]).toDouble()), 70), width - 70),
         math.max(0, py(_num(row[s]).toDouble()) - 70),
       ),
       title: name != null ? jsString(row[name]) : s,
@@ -544,11 +666,7 @@ class _PlotPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final tick = TextStyle(
-      fontSize: 11,
-      color: theme.faint,
-      fontFeatures: const [FontFeature.tabularFigures()],
-    );
+    final tick = chartTickStyle(theme);
     final grid = Paint()
       ..color = theme.border
       ..strokeWidth = 1;
@@ -573,7 +691,7 @@ class _PlotPainter extends CustomPainter {
               canvas,
               _label(spec.rows[i], spec.x),
               Offset(c.xAt(i), spec.height - 6),
-              TextStyle(fontSize: 12, color: theme.muted),
+              chartCategoryStyle(theme),
               anchor: 'middle',
             );
           }
@@ -673,11 +791,11 @@ class _PlotPainter extends CustomPainter {
             inner,
             math.max(0, base - top),
           );
-          final radius = si == spec.series.length - 1
-              ? const Radius.circular(4)
-              : Radius.zero;
           canvas.drawRRect(
-            RRect.fromRectAndCorners(rect, topLeft: radius, topRight: radius),
+            RRect.fromRectAndRadius(
+              rect,
+              _svgRadius(rect, si == spec.series.length - 1 ? 4 : 0),
+            ),
             Paint()..color = theme.chart[si % 6],
           );
         }
@@ -693,7 +811,7 @@ class _PlotPainter extends CustomPainter {
           (c.y(0) - c.y(v)).abs(),
         );
         canvas.drawRRect(
-          RRect.fromRectAndRadius(rect, const Radius.circular(4)),
+          RRect.fromRectAndRadius(rect, _svgRadius(rect, 4)),
           Paint()..color = theme.chart[si % 6],
         );
       }
@@ -708,26 +826,28 @@ class _PlotPainter extends CustomPainter {
       final points = [
         for (var i = 0; i < n; i++) Offset(c.xAt(i), c.y(c.top(i, si))),
       ];
+      final path = [
+        for (final p in points) Offset(_fixed1(p.dx), _fixed1(p.dy)),
+      ];
       if (spec.type == 'area' && n > 1) {
         final under = [
-          for (var i = n - 1; i >= 0; i--) Offset(c.xAt(i), c.y(c.base(i, si))),
+          for (var i = n - 1; i >= 0; i--)
+            Offset(_fixed1(c.xAt(i)), _fixed1(c.y(c.base(i, si)))),
         ];
-        final area = Path()..addPolygon([...points, ...under], true);
+        final area = Path()..addPolygon([...path, ...under], true);
+        final fill = areaFill(area, color, stacked: c.stacked);
         canvas.drawPath(
           area,
           Paint()
             ..shader = LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [
-                color.withValues(alpha: c.stacked ? 0.5 : 0.24),
-                color.withValues(alpha: c.stacked ? 0.3 : 0.02),
-              ],
-            ).createShader(Rect.fromLTWH(0, c.pad.top, g.width, c.h)),
+              colors: fill.colors,
+            ).createShader(fill.rect),
         );
       }
       canvas.drawPath(
-        Path()..addPolygon(points, false),
+        Path()..addPolygon(path, false),
         Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = 2.2
@@ -783,31 +903,30 @@ class _PieChart extends StatelessWidget {
         final legend = Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
+          spacing: 9,
           children: [
             for (final (i, item) in items.indexed)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 3),
-                child: Row(
-                  children: [
-                    _Dot(theme.chart[i % 6]),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        item.label,
-                        style: TextStyle(fontSize: 13, color: theme.ink),
-                      ),
+              Row(
+                children: [
+                  _Dot(theme.chart[i % 6]),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      item.label,
+                      style: TextStyle(fontSize: 13, color: theme.ink),
                     ),
-                    Text(
-                      '${jsString((item.value / total * 1000).round() / 10)}%',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: theme.ink,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '${jsString((item.value / total * 1000).round() / 10)}%',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: OpenUiTheme.weightMedium,
+                      color: theme.ink,
+                      fontFeatures: const [FontFeature.tabularFigures()],
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
           ],
         );
@@ -821,14 +940,19 @@ class _PieChart extends StatelessWidget {
             ),
           ),
         );
-        return width < 420
-            ? Column(children: [chart, const SizedBox(height: 16), legend])
-            : Row(
+        // .iui-pie: flex-wrap with a 24 gap; the legend's basis is 160.
+        return size + 24 + 160 <= width
+            ? Row(
                 children: [
                   chart,
                   const SizedBox(width: 24),
                   Expanded(child: legend),
                 ],
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [chart, const SizedBox(height: 24), legend],
               );
       },
     );
@@ -878,7 +1002,7 @@ class _PiePainter extends CustomPainter {
         }
       }
       canvas.drawPath(path, Paint()..color = color);
-      if (sweep < math.pi * 2 - 1e-6 && sweep > 0) {
+      if (sweep < math.pi * 2 - 1e-6) {
         canvas.drawPath(
           path,
           Paint()

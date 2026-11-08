@@ -48,6 +48,18 @@ final class RunResult {
   /// Parser, runtime and query issues.
   List<String> get issues => _session.issues;
 
+  /// The parser's messages: the reference's `parseErrors`.
+  List<String> get parseErrors => [
+    for (final e in _session.errors)
+      if (e.source == OpenUiErrorSource.parser) e.message,
+  ];
+
+  /// Evaluation messages: the reference's `runtimeErrors`.
+  List<String> get runtimeErrors => [
+    for (final e in _session.errors)
+      if (e.source == OpenUiErrorSource.runtime) e.message,
+  ];
+
   /// The `action` prop as evaluated: a plan, or nested lists of plans from `@Each`.
   Object? get actions => _root?.props['action'];
 

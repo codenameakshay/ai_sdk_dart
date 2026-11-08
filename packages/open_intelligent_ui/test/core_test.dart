@@ -121,7 +121,7 @@ void main() {
       expect(t.inkOn('#000000'), const Color(0xFFFFFFFF));
       expect(t.inkOn('#0285ff'), const Color(0xFFFFFFFF));
       expect(t.inkOn('#fde68a'), const Color(0xFF0D0D0D));
-      expect(t.inkOn('transparent'), const Color(0xFFFFFFFF));
+      expect(t.inkOn('transparent'), isNull);
       for (final token in [
         'ink',
         'success',
@@ -526,6 +526,103 @@ void main() {
       );
     });
 
+    testWidgets('a queryLoader replaces the default spinner', (tester) async {
+      final done = Completer<Object?>();
+      final session =
+          OpenUiSession(
+            intelligentUi,
+            tools: [OpenUiTool(name: 'slow', call: (_) => done.future)],
+          )..update(
+            'root = Col([Text("n=" + q.n)])\nq = Query("slow", {}, {n: 0})',
+            streaming: false,
+          );
+      addTearDown(session.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: OpenUiView(
+            session: session,
+            builders: intelligentUiBuilders,
+            queryLoader: const Text('fetching'),
+          ),
+        ),
+      );
+      expect(find.text('fetching'), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      done.complete({'n': 1});
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('fetching'), findsNothing);
+      expect(find.text('n=1'), findsOneWidget);
+    });
+
+    testWidgets('slots show a Query failure, retry it, and report retrying', (
+      tester,
+    ) async {
+      final answers = <Completer<Object?>>[];
+      final session =
+          OpenUiSession(
+            intelligentUi,
+            tools: [
+              OpenUiTool(
+                name: 't',
+                call: (_) {
+                  final answer = Completer<Object?>();
+                  answers.add(answer);
+                  return answer.future;
+                },
+              ),
+            ],
+          )..update(
+            'root = Col([Text("n=" + q.n)])\nq = Query("t", {}, {n: 0})',
+            streaming: false,
+          );
+      addTearDown(session.dispose);
+      late OpenUiQueryState query;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: OpenUiView(
+            session: session,
+            builders: intelligentUiBuilders,
+            child: Builder(
+              builder: (context) {
+                query = OpenUiView.queryOf(context);
+                return const Column(
+                  children: [
+                    OpenUiQueryError(child: Text('failed')),
+                    OpenUiRetry(child: Text('Retry')),
+                    OpenUiQueryLoading(child: Text('loading')),
+                    OpenUiContent(),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      expect(find.text('loading'), findsOneWidget);
+      expect(find.text('n=0'), findsOneWidget);
+
+      answers[0].completeError(Exception('down'));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('failed'), findsOneWidget);
+      expect(find.text('loading'), findsNothing);
+      expect(find.text('n=0'), findsNothing);
+
+      await tester.tap(find.text('Retry'));
+      await tester.pump();
+      expect(answers, hasLength(2));
+      expect(query.isRetrying, isTrue);
+      expect(find.text('loading'), findsNothing);
+
+      answers[1].complete({'n': 7});
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('failed'), findsNothing);
+      expect(find.text('n=7'), findsOneWidget);
+      expect(query.isRetrying, isFalse);
+    });
+
     testWidgets('swapping the session listens to the new one only', (
       tester,
     ) async {
@@ -643,6 +740,36 @@ void main() {
       expect(find.byType(OpenUiElementView), findsOneWidget);
       expect(find.byType(Text), findsNothing);
     });
+
+    testWidgets('a builder that throws reports a render-error to onError', (
+      tester,
+    ) async {
+      final reports = <List<Map<String, Object?>>>[];
+      final session = OpenUiSession(
+        intelligentUi,
+        onError: (errors) => reports.add([for (final e in errors) e.toJson()]),
+      )..update('root = Col([Text("a")])', streaming: false);
+      addTearDown(session.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: OpenUiView(
+            session: session,
+            builders: (_) =>
+                (_, _) => throw StateError('never good'),
+          ),
+        ),
+      );
+      expect(tester.takeException(), isA<StateError>());
+      await tester.pump();
+      expect(reports.last, [
+        {
+          'source': 'runtime',
+          'code': 'render-error',
+          'component': 'Col',
+          'message': 'Component Col render failed: never good',
+        },
+      ]);
+    });
   });
 
   group('OpenUiNode', () {
@@ -695,5 +822,51 @@ void main() {
       expect(hasAction, isFalse);
       expect(form, isNull);
     });
+
+    testWidgets(
+      'a node reads Query loading and another form, and sets a default after the frame',
+      (tester) async {
+        late bool loading;
+        late Object? city;
+        Widget probe(BuildContext context, OpenUiNode node) {
+          loading = node.isQueryLoading;
+          city = node.fieldValue('City', formName: 'billing');
+          node.setDefaultValue('Zip', '4000');
+          return const SizedBox.shrink();
+        }
+
+        final session =
+            OpenUiSession(
+              intelligentUi,
+              tools: [
+                OpenUiTool(
+                  name: 'slow',
+                  call: (_) => Completer<Object?>().future,
+                ),
+              ],
+              initialState: {
+                'billing': {
+                  'City': {'value': 'Porto'},
+                },
+              },
+            )..update(
+              'root = Col([Text("x")])\nq = Query("slow", {}, 0)',
+              streaming: false,
+            );
+        addTearDown(session.dispose);
+        expect(session.state.containsKey('Zip'), isFalse);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: OpenUiView(
+              session: session,
+              builders: (name) => name == 'Col' ? probe : null,
+            ),
+          ),
+        );
+        expect(loading, isTrue);
+        expect(city, 'Porto');
+        expect(session.state['Zip'], {'value': '4000'});
+      },
+    );
   });
 }

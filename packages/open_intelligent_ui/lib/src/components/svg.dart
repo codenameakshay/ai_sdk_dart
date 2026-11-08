@@ -238,20 +238,20 @@ SvgPaint _paintOf(
   );
 }
 
-List<Offset>? _pointList(Object? v) {
+/// SVG points, read with the path grammar ("M" then coordinate pairs), so
+/// "10-20" is two numbers and a bad number or odd count keeps the points
+/// before it, as browsers draw them.
+Path? _pointsPath(Object? v, {required bool close}) {
   final s = _ok(v, _points);
   if (s == null) return null;
-  final numbers = s
-      .trim()
-      .split(RegExp(r'[\s,]+'))
-      .where((x) => x.isNotEmpty)
-      .map(double.tryParse)
-      .toList();
-  if (numbers.any((x) => x == null)) return null;
-  return [
-    for (var i = 0; i + 1 < numbers.length; i += 2)
-      Offset(numbers[i]!, numbers[i + 1]!),
-  ];
+  final path = Path();
+  try {
+    writeSvgPathDataToPath('M$s', _PathProxy(path));
+  } on StateError {
+    // The points before the error still draw.
+  }
+  if (close) path.close();
+  return path;
 }
 
 SvgShape? _shape(OpenUiElement e, OpenUiTheme theme, Color ink) {
@@ -279,10 +279,16 @@ SvgShape? _shape(OpenUiElement e, OpenUiTheme theme, Color ink) {
       );
     case 'Rect':
       final rect = Rect.fromLTWH(v('x'), v('y'), pos('width'), pos('height'));
-      final rx = _n(p['rx']);
+      final rx = math.max(0.0, _n(p['rx']) ?? 0);
       return _PathShape(
         Path()..addRRect(
-          RRect.fromRectAndRadius(rect, Radius.circular(math.max(0, rx ?? 0))),
+          RRect.fromRectAndRadius(
+            rect,
+            Radius.elliptical(
+              math.min(rx, rect.width / 2),
+              math.min(rx, rect.height / 2),
+            ),
+          ),
         ),
         _paintOf(p, theme, ink, filled: true),
       );
@@ -299,17 +305,16 @@ SvgShape? _shape(OpenUiElement e, OpenUiTheme theme, Color ink) {
       final path = Path();
       try {
         writeSvgPathDataToPath(d, _PathProxy(path));
-      } on Object {
-        return null;
+      } on StateError {
+        // Browsers draw a path up to its first error.
       }
       return _PathShape(
         path,
         _paintOf(p, theme, ink, filled: p['fill'] != null),
       );
     case 'Polyline' || 'Polygon':
-      final points = _pointList(p['points']);
-      if (points == null) return null;
-      final path = Path()..addPolygon(points, e.typeName == 'Polygon');
+      final path = _pointsPath(p['points'], close: e.typeName == 'Polygon');
+      if (path == null) return null;
       return _PathShape(
         path,
         _paintOf(p, theme, ink, filled: e.typeName == 'Polygon'),
@@ -330,9 +335,9 @@ SvgShape? _shape(OpenUiElement e, OpenUiTheme theme, Color ink) {
         _n(p['size']) ?? 12,
         p.string('anchor') ?? 'start',
         switch (p.string('weight')) {
-          'semibold' => FontWeight.w600,
-          'medium' => FontWeight.w500,
-          _ => FontWeight.w400,
+          'semibold' => OpenUiTheme.weightSemibold,
+          'medium' => OpenUiTheme.weightMedium,
+          _ => OpenUiTheme.weightNormal,
         },
         theme.fontFamily,
         SvgPaint(fill: _color(p['fill'], theme, ink) ?? ink),

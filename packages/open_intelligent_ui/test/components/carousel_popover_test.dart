@@ -1,10 +1,15 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
 
 import '../support/pump.dart';
+
+const _five =
+    'root = Col([c])\n'
+    'c = Carousel([Text("One"), Text("Two"), Text("Three"), Text("Four"), Text("Five")])';
 
 Finder _card(int index) => find
     .byWidgetPredicate(
@@ -142,6 +147,48 @@ void main() {
       expect(_arrow('Previous'), findsNothing);
       debugDefaultTargetPlatformOverride = null;
     });
+
+    testWidgets(
+      'an arrow takes keyboard focus, pages on Enter and frosts what is behind it',
+      variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+      (tester) async {
+        await pumpProgram(tester, _five);
+        await tester.pumpAndSettle();
+        expect(
+          find.descendant(
+            of: _arrow('Next'),
+            matching: find.byType(BackdropFilter),
+          ),
+          findsOneWidget,
+        );
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+        expect(_horizontalPixels(tester), closeTo(480, 0.5));
+      },
+    );
+
+    testWidgets(
+      'reduced motion turns off the arrow fade',
+      variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+      (tester) async {
+        tester.platformDispatcher.accessibilityFeaturesTestValue =
+            const FakeAccessibilityFeatures(disableAnimations: true);
+        addTearDown(
+          tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+        );
+        await pumpProgram(tester, _five);
+        await tester.pumpAndSettle();
+        final fade = tester.widget<AnimatedContainer>(
+          find.descendant(
+            of: _arrow('Next'),
+            matching: find.byType(AnimatedContainer),
+          ),
+        );
+        expect(fade.duration, Duration.zero);
+      },
+    );
   });
 
   group('Popover', () {
@@ -336,5 +383,49 @@ void main() {
         ]);
       },
     );
+
+    testWidgets('the trigger takes keyboard focus and opens on Enter', (
+      tester,
+    ) async {
+      await pumpProgram(tester, 'root = Col([Popover("Term", "Meaning")])');
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(find.text('Meaning'), findsOneWidget);
+    });
+
+    testWidgets('the trigger stays on one line; its text wraps beside the icon', (
+      tester,
+    ) async {
+      _usePhoneSize(tester);
+      final long = 'word ' * 30;
+      await pumpProgram(
+        tester,
+        'root = Col([Popover([Text("$long"), Icon("info", "sm")], "Meaning")])',
+      );
+      expect(
+        tester.getCenter(find.byType(Glyph)).dy,
+        closeTo(tester.getCenter(find.textContaining('word')).dy, 0.5),
+      );
+      // The text takes the row less the icon and gap (350px), not half of it.
+      expect(
+        tester.getSize(find.textContaining('word')).width,
+        greaterThan(300),
+      );
+    });
+
+    testWidgets('the open panel is a dialog', (tester) async {
+      final handle = tester.ensureSemantics();
+      await pumpProgram(tester, 'root = Col([Popover("Term", "Meaning")])');
+      await tester.tap(find.text('Term'));
+      await tester.pumpAndSettle();
+      var node = tester.getSemantics(find.text('Meaning'));
+      while (node.role != SemanticsRole.dialog && node.parent != null) {
+        node = node.parent!;
+      }
+      expect(node.role, SemanticsRole.dialog);
+      handle.dispose();
+    });
   });
 }

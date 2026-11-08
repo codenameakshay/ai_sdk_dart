@@ -7,6 +7,11 @@ import 'dart:convert';
 /// JavaScript has one numeric type, so `int` and `double` are interchangeable
 /// here and every helper treats them alike.
 abstract final class Js {
+  /// `typeof value === "object"` for a value that is not null: a list, a
+  /// map, or one of lang-core's objects ([JsFields]).
+  static bool isObject(Object? value) =>
+      value is List || value is Map || value is JsFields;
+
   static String typeOf(Object? value) => switch (value) {
     null => 'object',
     String() => 'string',
@@ -82,10 +87,14 @@ abstract final class Js {
 
   /// JavaScript `Number.prototype.toString()`.
   static String numberToString(num value) {
+    // 0 first: on the web -0.0 is an int and would print as "-0.0".
+    if (value == 0) return '0';
+    if (value is int && value >= -_maxSafe && value <= _maxSafe) {
+      return '$value';
+    }
     final d = value.toDouble();
     if (d.isNaN) return 'NaN';
     if (d.isInfinite) return d > 0 ? 'Infinity' : '-Infinity';
-    if (d == 0) return '0';
     // Dart prints the shortest round-trip digits, as JavaScript does, and
     // writes integral doubles below 1e21 out in full with a ".0".
     final s = d.toString();
@@ -102,11 +111,11 @@ abstract final class Js {
     if (b is bool) return looseEquals(a, b ? 1 : 0);
     if (a is num && b is String) return a == parseNumber(b);
     if (a is String && b is num) return parseNumber(a) == b;
-    if (a is List || a is Map) {
+    if (isObject(a)) {
       if (b is String || b is num) return looseEquals(string(a), b);
       return identical(a, b);
     }
-    if (b is List || b is Map) return looseEquals(a, string(b));
+    if (isObject(b)) return looseEquals(a, string(b));
     return identical(a, b);
   }
 
@@ -135,48 +144,144 @@ abstract final class Js {
     return strictEquals(a, b);
   }
 
-  /// `JSON.stringify` for runtime values (non-JSON values become null).
-  /// Numbers use JavaScript's spelling (`1e21` is `1e+21`, `2^53` has no
-  /// `.0`), and array-index keys come first in ascending order.
-  static String stringify(Object? value) => switch (value) {
-    null || String() || bool() => jsonEncode(value),
-    num() => _jsonNumber(value),
-    List() => '[${value.map(stringify).join(',')}]',
-    Map() =>
-      '{${_jsKeyOrder(value).map((e) => '${jsonEncode(e.key)}:${stringify(e.value)}').join(',')}}',
-    _ => 'null',
-  };
-
-  static String _jsonNumber(num value) {
-    value = value.toDouble();
-    if (!value.isFinite) return 'null';
-    if (value == 0) return '0';
-    final text = value.toString();
-    return text.endsWith('.0') ? text.substring(0, text.length - 2) : text;
+  /// `JSON.stringify` for runtime values: numbers print as JavaScript prints
+  /// them (`3`, `0` for -0, `1e+21`), non-finite numbers and values with no
+  /// JSON form are null, and elements, plans and AST nodes are the plain
+  /// objects lang-core makes.
+  static String stringify(Object? value) {
+    final out = StringBuffer();
+    _writeJson(value, out);
+    return out.toString();
   }
 
-  static Iterable<MapEntry<String, Object?>> _jsKeyOrder(Map value) {
-    final properties = <String, Object?>{
-      for (final e in value.entries) string(e.key): e.value,
-    };
-    final indexed = [
-      for (final e in properties.entries)
-        if (_arrayIndex(e.key) != null) e,
-    ]..sort((a, b) => _arrayIndex(a.key)!.compareTo(_arrayIndex(b.key)!));
-    return [
-      ...indexed,
-      for (final e in properties.entries)
-        if (_arrayIndex(e.key) == null) e,
+  static void _writeJson(Object? value, StringBuffer out) {
+    switch (value) {
+      case String():
+        out.write(jsonEncode(value));
+      case num() when value.isFinite:
+        out.write(numberToString(value));
+      case bool():
+        out.write(value);
+      case JsFields():
+        _writeJson(value.jsFields, out);
+      case List():
+        out.write('[');
+        for (var i = 0; i < value.length; i++) {
+          if (i > 0) out.write(',');
+          _writeJson(value[i], out);
+        }
+        out.write(']');
+      case Map():
+        out.write('{');
+        var first = true;
+        final map = value is Map<String, Object?>
+            ? ordered(value)
+            : object([
+                for (final MapEntry(:key, value: v) in value.entries)
+                  MapEntry(string(key), v),
+              ]);
+        for (final MapEntry(:key, value: v) in map.entries) {
+          if (!first) out.write(',');
+          first = false;
+          out
+            ..write(jsonEncode(key))
+            ..write(':');
+          _writeJson(v, out);
+        }
+        out.write('}');
+      default:
+        out.write('null');
+    }
+  }
+
+  static const _maxSafe = 9007199254740992;
+
+  static final _arrayIndex = RegExp(r'^(?:0|[1-9][0-9]{0,9})$');
+
+  /// Whether [key] is an array index ("0" to "4294967294"), which JavaScript
+  /// lists before every other key of an object.
+  static bool isArrayIndex(String key) =>
+      _arrayIndex.hasMatch(key) && int.parse(key) < 4294967295;
+
+  /// [map] in JavaScript's key order: array-index keys ascending, then the
+  /// rest in insertion order. [map] itself when it is already in that order.
+  static Map<String, Object?> ordered(Map<String, Object?> map) {
+    final indices = [
+      for (final k in map.keys)
+        if (isArrayIndex(k)) int.parse(k),
     ];
+    if (indices.isEmpty) return map;
+    indices.sort();
+    final keys = [
+      for (final i in indices) '$i',
+      for (final k in map.keys)
+        if (!isArrayIndex(k)) k,
+    ];
+    var i = 0;
+    if (map.keys.every((k) => k == keys[i++])) return map;
+    return {for (final k in keys) k: map[k]};
   }
 
-  static int? _arrayIndex(String key) {
-    final index = int.tryParse(key);
-    return index != null && index >= 0 && index < 4294967295 && '$index' == key
-        ? index
-        : null;
+  /// A JavaScript object of [entries]: a repeated key keeps its first place
+  /// and its last value, and keys are in [ordered] order.
+  static Map<String, Object?> object(
+    Iterable<MapEntry<String, Object?>> entries,
+  ) => ordered(Map.fromEntries(entries));
+
+  /// A copy of [value] with every map in JavaScript key order. With [json],
+  /// integral doubles up to 2^53 also become ints (-0 becomes 0), so a
+  /// plain `jsonEncode` prints them as `JSON.stringify` does.
+  static Object? normalize(Object? value, {bool json = false}) =>
+      switch (value) {
+        double()
+            when json &&
+                value.isFinite &&
+                value == value.truncateToDouble() &&
+                value.abs() <= _maxSafe =>
+          value == 0 ? 0 : value.toInt(),
+        List() => [for (final v in value) normalize(v, json: json)],
+        Map() => object([
+          for (final MapEntry(:key, value: v) in value.entries)
+            MapEntry(string(key), normalize(v, json: json)),
+        ]),
+        _ => value,
+      };
+
+  /// JavaScript `obj[key]` on a runtime value: a map's own entry, a list's
+  /// or string's `length` and canonical indices, and the fields lang-core's
+  /// element, plan, step, binding and AST objects have. Members a JavaScript
+  /// value inherits (`toString`, `__proto__`) are not data and read as null.
+  static Object? property(Object? obj, String key) {
+    switch (obj) {
+      case Map():
+        return obj[key];
+      case List():
+        if (key == 'length') return obj.length;
+        return isArrayIndex(key) && int.parse(key) < obj.length
+            ? obj[int.parse(key)]
+            : null;
+      case String():
+        if (key == 'length') return obj.length;
+        return isArrayIndex(key) && int.parse(key) < obj.length
+            ? obj[int.parse(key)]
+            : null;
+      case JsFields():
+        return obj.jsFields[key];
+    }
+    return null;
   }
+}
+
+/// A Dart object that is a plain object in lang-core: an element, an action
+/// plan or step, a binding or an AST node. [Js.property] reads its fields
+/// and [Js.stringify] writes them.
+abstract interface class JsFields {
+  /// Its own properties, in lang-core's order; absent ones are left out.
+  Map<String, Object?> get jsFields;
 }
 
 /// JavaScript `String(value)`: how a program's value prints (`4` is "4").
 String jsString(Object? value) => Js.string(value);
+
+/// JavaScript `Number(value)`: NaN when [value] does not read as a number.
+double jsNumber(Object? value) => Js.number(value);

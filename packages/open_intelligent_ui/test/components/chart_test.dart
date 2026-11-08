@@ -4,7 +4,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
 import 'package:open_intelligent_ui/src/components/chart.dart'
-    show chartFormat, niceStep;
+    show areaFill, chartCategoryStyle, chartFormat, chartTickStyle, niceStep;
 
 import '../gallery_fixture.dart';
 import '../support/pump.dart';
@@ -70,6 +70,18 @@ Future<String> _label(WidgetTester tester, String chart) async {
 }
 
 double _plotHeight(WidgetTester tester) => tester.getSize(_plot).height;
+
+/// A mouse over the app, removed at the end of the test.
+Future<TestGesture> _mouse(WidgetTester tester) async {
+  final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+  await mouse.addPointer(location: Offset.zero);
+  addTearDown(mouse.removePointer);
+  return mouse;
+}
+
+Finder _tipBox(String title) => find
+    .ancestor(of: find.text(title), matching: find.byType(IntrinsicWidth))
+    .first;
 
 const _rows3 =
     '[{m: "Jan", a: 10, b: 20}, {m: "Feb", a: 30, b: 5}, {m: "Mar", a: 20, b: 40}]';
@@ -334,18 +346,39 @@ void main() {
     });
 
     testWidgets(
-      'a tap shows the tooltip with the row and its formatted value',
+      'hovering a bar shows the tooltip with the row and its formatted value',
       (tester) async {
         await pumpProgram(
           tester,
           'root = Col([Chart("bar", $_rows3, "m", ["a"], "currency")])',
         );
         expect(find.text('Feb'), findsNothing);
-        await tester.tapAt(_global(tester, _bars(tester)[1].center));
+        final mouse = await _mouse(tester);
+        await mouse.moveTo(_global(tester, _bars(tester)[1].center));
         await tester.pump();
         expect(find.text('Feb'), findsOneWidget);
         expect(find.text(r'$30'), findsOneWidget);
         expect(find.text('Jan'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'a tooltip on the right-most bar keeps a wide value inside its box',
+      (tester) async {
+        await pumpProgram(
+          tester,
+          'root = Col([Chart("bar", [{m: "Jan", a: 10}, {m: "Feb", a: 1240000000}], "m", ["a"], "currency")])',
+        );
+        final mouse = await _mouse(tester);
+        await mouse.moveTo(_global(tester, _bars(tester)[1].center));
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+        final box = tester.getSize(_tipBox('Feb'));
+        expect(box.width, greaterThan(110));
+        expect(
+          box.width,
+          greaterThanOrEqualTo(tester.getSize(find.text(r'$1.24B')).width),
+        );
       },
     );
 
@@ -356,13 +389,14 @@ void main() {
           tester,
           'root = Col([Chart("bar", $_rows3, "m", ["a", "b"])])',
         );
-        await tester.tapAt(_global(tester, _bars(tester)[0].center));
+        final mouse = await _mouse(tester);
+        await mouse.moveTo(_global(tester, _bars(tester)[0].center));
         await tester.pump();
         expect(find.text('Jan'), findsOneWidget);
         expect(find.text('a'), findsNWidgets(2), reason: 'legend and tooltip');
         expect(find.text('10'), findsOneWidget);
         expect(find.text('20'), findsOneWidget);
-        await tester.tapAt(_global(tester, _bars(tester)[4].center));
+        await mouse.moveTo(_global(tester, _bars(tester)[4].center));
         await tester.pump();
         expect(find.text('Jan'), findsNothing);
         expect(find.text('Mar'), findsOneWidget);
@@ -404,14 +438,100 @@ void main() {
       await tester.pump();
       expect(find.text('Mar'), findsOneWidget);
       await gesture.up();
+      await tester.pump();
+      expect(
+        find.text('Mar'),
+        findsNothing,
+        reason: 'a finger leaves as it lifts',
+      );
     });
 
-    testWidgets('a tap outside every band shows nothing', (tester) async {
+    testWidgets('a touch that does not move shows no tooltip', (tester) async {
       await pumpProgram(
         tester,
         'root = Col([Chart("bar", $_rows3, "m", ["a"])])',
       );
-      await tester.tapAt(_global(tester, const Offset(5, 100)));
+      await tester.tapAt(_global(tester, _bars(tester)[0].center));
+      await tester.pump();
+      expect(find.text('Jan'), findsNothing);
+    });
+
+    testWidgets(
+      'the tooltip is at least 110 wide, centred on the bar, 10 below the top',
+      (tester) async {
+        await pumpProgram(
+          tester,
+          'root = Col([Chart("bar", $_rows3, "m", ["a"])])',
+        );
+        final mouse = await _mouse(tester);
+        await mouse.moveTo(_global(tester, _bars(tester)[0].center));
+        await tester.pump();
+        final plot = tester.getRect(_plot);
+        final box = tester.getRect(_tipBox('Jan'));
+        // Ticks "0".."30": left pad 2 * 6.4 + 12 = 24.8; band (768 - 28.8) / 3; xAt(0) = 148.
+        expect(box.width, 110);
+        expect(box.center.dx, closeTo(plot.left + 148, 1e-9));
+        expect(box.top, closeTo(plot.top + 10, 1e-9));
+        expect(
+          tester.getTopRight(find.text('10')).dx,
+          closeTo(box.right - 13, 1e-9),
+        );
+      },
+    );
+
+    testWidgets('near the right edge the tooltip centre stops 70 from it', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(300, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await pumpProgram(
+        tester,
+        'root = Col([Chart("bar", $_rows3, "m", ["a"])])',
+      );
+      final mouse = await _mouse(tester);
+      await mouse.moveTo(_global(tester, _bars(tester)[2].center));
+      await tester.pump();
+      final plot = tester.getRect(_plot);
+      expect(
+        tester.getRect(_tipBox('Mar')).center.dx,
+        closeTo(plot.left + 268 - 70, 1e-9),
+      );
+    });
+
+    testWidgets('only the top stacked bar is rounded, on all four corners', (
+      tester,
+    ) async {
+      await pumpProgram(
+        tester,
+        'root = Col([Chart("bar", $_rows3, "m", ["a", "b"], null, null, true)])',
+      );
+      final bars = _bars(tester);
+      expect(bars[0].tlRadius, Radius.zero);
+      expect(bars[1].tlRadius, const Radius.circular(4));
+      expect(bars[1].blRadius, const Radius.circular(4));
+    });
+
+    testWidgets(
+      'a bar shorter than 8 keeps 4px wide corners and halves their height',
+      (tester) async {
+        await pumpProgram(
+          tester,
+          'root = Col([Chart("bar", [{m: "a", v: 100}, {m: "b", v: 1}], "m", ["v"])])',
+        );
+        final short = _bars(tester)[1];
+        expect(short.height, lessThan(8));
+        expect(short.tlRadius, Radius.elliptical(4, short.height / 2));
+      },
+    );
+
+    testWidgets('a pointer outside every band shows nothing', (tester) async {
+      await pumpProgram(
+        tester,
+        'root = Col([Chart("bar", $_rows3, "m", ["a"])])',
+      );
+      final mouse = await _mouse(tester);
+      await mouse.moveTo(_global(tester, const Offset(5, 100)));
       await tester.pump();
       for (final m in ['Jan', 'Feb', 'Mar']) {
         expect(find.text(m), findsNothing);
@@ -556,7 +676,8 @@ void main() {
       );
       expect(_dots(tester), isEmpty);
       final box = tester.renderObject<RenderBox>(_plot);
-      await tester.tapAt(box.localToGlobal(Offset(box.size.width * 0.5, 100)));
+      final mouse = await _mouse(tester);
+      await mouse.moveTo(box.localToGlobal(Offset(box.size.width * 0.5, 100)));
       await tester.pump();
       expect(_dots(tester), hasLength(2));
     });
@@ -570,7 +691,8 @@ void main() {
         );
         final lines = _calls(tester, #drawLine).length;
         final dot = _dots(tester)[2];
-        await tester.tapAt(_global(tester, dot));
+        final mouse = await _mouse(tester);
+        await mouse.moveTo(_global(tester, dot));
         await tester.pump();
         expect(find.text('Feb'), findsOneWidget);
         expect(find.text('30%'), findsOneWidget);
@@ -582,6 +704,54 @@ void main() {
         expect(_dots(tester), hasLength(6));
       },
     );
+  });
+
+  group('line and area rounding', () {
+    testWidgets(
+      'line points are rounded to 0.1 like the reference path, dots are not',
+      (tester) async {
+        tester.view.physicalSize = const Size(801, 600);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        await pumpProgram(
+          tester,
+          'root = Col([Chart("line", $_rows3, "m", ["a"])])',
+        );
+        // Plot 769 wide: xAt(0) = 24.8 + (769 - 28.8) / 6 = 148.1666...
+        final line =
+            _calls(tester, #drawPath).single.positionalArguments.first as Path;
+        expect(
+          line.getBounds().left,
+          closeTo(148.2, 1e-4),
+          reason: 'Path stores float32',
+        );
+        expect(_dots(tester).first.dx, closeTo(24.8 + (769 - 28.8) / 6, 1e-9));
+      },
+    );
+
+    test(
+      'an area gradient spans the area itself, its stops times the color alpha',
+      () {
+        final area = Path()..addRect(const Rect.fromLTWH(0, 50, 100, 30));
+        final fill = areaFill(area, const Color(0x80336699), stacked: false);
+        expect(fill.rect, const Rect.fromLTWH(0, 50, 100, 30));
+        expect(fill.colors[0].a, closeTo(0x80 / 255 * 0.24, 1e-6));
+        expect(fill.colors[1].a, closeTo(0x80 / 255 * 0.02, 1e-6));
+        final stacked = areaFill(area, const Color(0xFF336699), stacked: true);
+        expect(stacked.colors.map((c) => c.a), [
+          closeTo(0.5, 1e-6),
+          closeTo(0.3, 1e-6),
+        ]);
+      },
+    );
+
+    test('axis text uses the theme font', () {
+      expect(chartTickStyle(_light).fontFamily, _light.fontFamily);
+      expect(chartTickStyle(_light).fontSize, 11);
+      expect(chartTickStyle(_light).color, _light.faint);
+      expect(chartCategoryStyle(_light).fontFamily, _light.fontFamily);
+      expect(chartCategoryStyle(_light).color, _light.muted);
+    });
   });
 
   group('scatter charts', () {
@@ -612,13 +782,14 @@ void main() {
     });
 
     testWidgets(
-      'a tap near a point shows the row name, its x and its formatted value',
+      'hovering a dot shows the row name, its x and its formatted value',
       (tester) async {
         await pumpProgram(
           tester,
           'root = Col([Chart("scatter", $data, "h", ["w"], "currency")])',
         );
-        await tester.tapAt(_global(tester, _dots(tester)[2]));
+        final mouse = await _mouse(tester);
+        await mouse.moveTo(_global(tester, _dots(tester)[2]));
         await tester.pump();
         expect(find.text('Bo'), findsOneWidget);
         expect(find.text('170'), findsOneWidget);
@@ -628,9 +799,10 @@ void main() {
       },
     );
 
-    testWidgets('a tap far from every point shows nothing', (tester) async {
+    testWidgets('a pointer far from every dot shows nothing', (tester) async {
       await pumpProgram(tester, 'root = Col([Chart("scatter", $data)])');
-      await tester.tapAt(_global(tester, const Offset(2, 2)));
+      final mouse = await _mouse(tester);
+      await mouse.moveTo(_global(tester, const Offset(2, 2)));
       await tester.pump();
       expect(find.text('Ann'), findsNothing);
       expect(find.text('Bo'), findsNothing);
@@ -643,7 +815,8 @@ void main() {
         tester,
         'root = Col([Chart("scatter", [{x: 1, y: 2}, {x: 3, y: 5}])])',
       );
-      await tester.tapAt(_global(tester, _dots(tester)[0]));
+      final mouse = await _mouse(tester);
+      await mouse.moveTo(_global(tester, _dots(tester)[0]));
       await tester.pump();
       expect(find.text('y'), findsNWidgets(2), reason: 'title and value line');
     });
@@ -660,13 +833,46 @@ void main() {
       expect(find.text('q'), findsOneWidget);
     });
 
+    testWidgets('a dot tooltip stays until the pointer leaves the chart', (
+      tester,
+    ) async {
+      await pumpProgram(tester, 'root = Col([Chart("scatter", $data)])');
+      final mouse = await _mouse(tester);
+      await mouse.moveTo(_global(tester, _dots(tester)[0]));
+      await tester.pump();
+      expect(find.text('Ann'), findsOneWidget);
+      await mouse.moveTo(_global(tester, const Offset(2, 2)));
+      await tester.pump();
+      expect(
+        find.text('Ann'),
+        findsOneWidget,
+        reason: 'leaving a dot keeps it',
+      );
+      await mouse.moveTo(Offset.zero);
+      await tester.pump();
+      expect(find.text('Ann'), findsNothing);
+    });
+
+    testWidgets('a touch on a dot shows its tooltip until the finger lifts', (
+      tester,
+    ) async {
+      await pumpProgram(tester, 'root = Col([Chart("scatter", $data)])');
+      final g = await tester.startGesture(_global(tester, _dots(tester)[0]));
+      await tester.pump();
+      expect(find.text('Ann'), findsOneWidget);
+      await g.up();
+      await tester.pump();
+      expect(find.text('Ann'), findsNothing);
+    });
+
     testWidgets('hovering a scatter dot makes it larger', (tester) async {
       await pumpProgram(tester, 'root = Col([Chart("scatter", $data)])');
       final before = _calls(
         tester,
         #drawCircle,
       ).map((c) => c.positionalArguments[1] as double).toSet();
-      await tester.tapAt(_global(tester, _dots(tester)[0]));
+      final mouse = await _mouse(tester);
+      await mouse.moveTo(_global(tester, _dots(tester)[0]));
       await tester.pump();
       final after = _calls(
         tester,
@@ -807,6 +1013,75 @@ void main() {
         greaterThan(tester.getBottomLeft(_pie).dy),
       );
       expect(tester.getSize(_pie).width, closeTo((300 - 32) * 0.62, 1));
+      expect(tester.getTopLeft(_pie).dx, 16);
+      expect(
+        tester.getTopLeft(find.text('Walking')).dy,
+        tester.getBottomLeft(_pie).dy + 24,
+      );
+    });
+
+    testWidgets('from 384 wide the legend sits beside a 200 pie', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(432, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await pumpProgram(tester, pieProgram);
+      expect(tester.getSize(_pie), const Size(200, 200));
+      expect(tester.getTopLeft(find.text('Walking')).dx, 16 + 200 + 24 + 8 + 8);
+      expect(tester.getTopRight(find.text('52%')).dx, 16 + 400);
+      expect(
+        tester.getTopLeft(find.text('Transit')).dy -
+            tester.getBottomLeft(find.text('Walking')).dy,
+        9,
+      );
+    });
+
+    testWidgets(
+      'below 384 wide the pie wraps: pie at the start, legend 24 below',
+      (tester) async {
+        tester.view.physicalSize = const Size(392, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        await pumpProgram(tester, pieProgram);
+        expect(tester.getSize(_pie), const Size(200, 200));
+        expect(tester.getTopLeft(_pie).dx, 16);
+        expect(
+          tester.getTopLeft(find.text('Walking')).dy,
+          tester.getBottomLeft(_pie).dy + 24,
+        );
+      },
+    );
+
+    testWidgets('a zero slice strokes a canvas-colored spoke', (tester) async {
+      await pumpProgram(
+        tester,
+        'root = Col([Chart("pie", [{k: "a", v: 1}, {k: "b", v: 1}, {k: "c", v: 0}], "k", ["v"])])',
+      );
+      expect(_pathColors(tester, finder: _pie), [
+        _light.chart[0].toARGB32(),
+        _light.canvas.toARGB32(),
+        _light.chart[1].toARGB32(),
+        _light.canvas.toARGB32(),
+        _light.chart[2].toARGB32(),
+        _light.canvas.toARGB32(),
+      ]);
+    });
+
+    testWidgets('a pie is labelled by its first series, or "values"', (
+      tester,
+    ) async {
+      expect(
+        await _label(
+          tester,
+          'Chart("pie", [{k: "a", v: 1, w: 2}], "k", ["v", "w"])',
+        ),
+        'pie chart of v by k',
+      );
+      expect(
+        await _label(tester, 'Chart("pie", [{k: "a"}], "k", [])'),
+        'pie chart of values by k',
+      );
     });
   });
 
@@ -830,13 +1105,14 @@ void main() {
     );
 
     testWidgets(
-      'a tap on a bar shows the currency values, and the control switches type',
+      'hovering a bar shows the currency values, and the control switches type',
       (tester) async {
         tester.view.physicalSize = const Size(1170, 2532);
         tester.view.devicePixelRatio = 3;
         addTearDown(tester.view.reset);
         final p = await pumpProgram(tester, galleryProgram('chart'));
-        await tester.tapAt(_global(tester, _bars(tester)[4].center));
+        final mouse = await _mouse(tester);
+        await mouse.moveTo(_global(tester, _bars(tester)[4].center));
         await tester.pump();
         expect(find.text('2030'), findsOneWidget);
         expect(find.text(r'$1.24B'), findsOneWidget);

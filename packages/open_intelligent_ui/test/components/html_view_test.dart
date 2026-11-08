@@ -86,6 +86,62 @@ void main() {
       expect(parent, isNot(contains('IuiHeight')));
       expect(parent, contains('ResizeObserver'));
     });
+
+    test('the web page is the reference document byte for byte', () {
+      expect(
+        htmlViewDocument('<p>x</p>', dark: false, report: HeightReport.parent),
+        '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\' https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com https://esm.sh; style-src \'unsafe-inline\' https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com https://esm.sh https://fonts.googleapis.com; font-src https://fonts.gstatic.com data:; img-src data: blob: https:; media-src data: blob:; connect-src https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com https://esm.sh; frame-src \'none\'; form-action \'none\'; base-uri \'none\'"><meta name="viewport" content="width=device-width,initial-scale=1"><style>:root{color-scheme:light}html,body{margin:0}body{font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}</style><script>(function(){var last=0;function send(){var h=Math.ceil(document.documentElement.getBoundingClientRect().height);if(Math.abs(h-last)>1){last=h;parent.postMessage({type:"iui-html-view-height",height:h},"*")}}addEventListener("message",function(e){if(e.source===parent&&e.data==="iui-html-view-measure"){last=0;send()}});addEventListener("load",send);new ResizeObserver(send).observe(document.documentElement);send()})()</script><p>x</p>',
+      );
+    });
+
+    test(
+      'a native page runs only with an opaque origin, before the reporter and the model',
+      () {
+        final doc = htmlViewDocument(
+          '<p id=m>',
+          dark: false,
+          report: HeightReport.channel,
+        );
+        final guard = doc.indexOf(
+          'if(self.origin!=="null"){document.write("<plaintext hidden>");return}',
+        );
+        expect(guard, greaterThan(doc.indexOf('Content-Security-Policy')));
+        expect(guard, lessThan(doc.indexOf('IuiHeight.postMessage')));
+        expect(
+          doc.indexOf('IuiHeight.postMessage'),
+          lessThan(doc.indexOf('<p id=m>')),
+        );
+      },
+    );
+
+    test(
+      'a native page sees storage, cookies and dialogs as a sandboxed frame does',
+      () {
+        final doc = htmlViewDocument(
+          '',
+          dark: false,
+          report: HeightReport.channel,
+        );
+        for (final part in [
+          'deny(window,"localStorage")',
+          'deny(window,"sessionStorage")',
+          'deny(Document.prototype,"cookie")',
+          'deny(Navigator.prototype,"serviceWorker")',
+          'stub(window,"indexedDB",',
+          'stub(window,"caches",',
+          'stub(Navigator.prototype,"storage",',
+          'put(window,"BroadcastChannel",class BroadcastChannel extends EventTarget',
+          'put(window,"open",function(){return null})',
+          'put(window,"alert",function(){})',
+          'put(window,"confirm",function(){return false})',
+          'put(window,"prompt",function(){return null})',
+          "The document is sandboxed and lacks the 'allow-same-origin' flag.",
+          'd.configurable=false',
+        ]) {
+          expect(doc, contains(part), reason: part);
+        }
+      },
+    );
   });
 
   group('clampHeight', () {

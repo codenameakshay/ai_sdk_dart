@@ -28,7 +28,9 @@ List<Object?> _mapField(List<Object?> rows, String field, List<num> values) {
   if (field.isEmpty) return values;
   final out = <Object?>[];
   for (var i = 0; i < rows.length; i++) {
-    out.add({..._spread(rows[i]), field: values[i]});
+    out.add(
+      Js.object([..._spread(rows[i]).entries, MapEntry(field, values[i])]),
+    );
   }
   return out;
 }
@@ -39,6 +41,7 @@ Map<String, Object?> _spread(Object? row) => switch (row) {
   Map() => row.cast<String, Object?>(),
   List() => {for (var i = 0; i < row.length; i++) '$i': row[i]},
   String() => {for (var i = 0; i < row.length; i++) '$i': row[i]},
+  JsFields() => row.jsFields,
   _ => const {},
 };
 
@@ -143,13 +146,15 @@ final List<FunctionSpec> dataFunctions = [
       final out = <Map<String, Object?>>[];
       for (final e in groups(rows, a['rowKey'] as String).entries) {
         final row = <String, Object?>{'key': e.key};
+        // JavaScript assigns the columns: a __proto__ column sets no key.
         for (final col in cols) {
-          row[col] = 0;
+          if (col != '__proto__') row[col] = 0;
         }
         for (final c in groups(e.value, colKey).entries) {
-          row[Js.string(c.key)] = aggregate(c.value, field, how);
+          final col = Js.string(c.key);
+          if (col != '__proto__') row[col] = aggregate(c.value, field, how);
         }
-        out.add(row);
+        out.add(Js.ordered(row));
       }
       return out;
     },

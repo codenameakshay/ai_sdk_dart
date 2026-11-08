@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
+import 'package:open_intelligent_ui/src/components/flex_row.dart';
+import 'package:open_intelligent_ui/src/css_color.dart' show CssGradient;
 
 import '../support/pump.dart';
 
@@ -109,12 +111,14 @@ void main() {
       expect(_gap(tester, 'a', 'b'), closeTo(8, 0.5));
     });
 
-    testWidgets('a Spacer in a column renders nothing', (tester) async {
+    testWidgets('a Spacer in a gap column has a gap on each side', (
+      tester,
+    ) async {
       await pumpProgram(
         tester,
         'root = Col([a, Spacer(), b], 2)\na = Text("a")\nb = Text("b")',
       );
-      expect(_gap(tester, 'a', 'b'), closeTo(8, 0.5));
+      expect(_gap(tester, 'a', 'b'), closeTo(16, 0.5));
     });
 
     testWidgets('a divider between children keeps its 4px margins', (
@@ -174,6 +178,26 @@ void main() {
         DefaultTextStyle.of(tester.element(find.text('hi'))).textAlign,
         TextAlign.center,
       );
+    });
+    testWidgets('a Spacer in a flow column takes the margin on both sides', (
+      tester,
+    ) async {
+      await pumpProgram(
+        tester,
+        'root = Col([a, Spacer(), b])\na = Text("a")\nb = Text("b")',
+      );
+      expect(_gap(tester, 'a', 'b'), closeTo(48, 0.5));
+    });
+
+    testWidgets('a Button and a Badge stay at the start of a centred column', (
+      tester,
+    ) async {
+      await pumpProgram(
+        tester,
+        'root = Col([Button("Go"), Badge("New"), Text("a much longer line of text")], null, "center")',
+      );
+      expect(_rect(tester, 'Go').left, closeTo(_left + 16 + 1, 0.5));
+      expect(_rect(tester, 'New').left, closeTo(_left + 10, 0.5));
     });
   });
 
@@ -393,6 +417,25 @@ void main() {
       final box = tester.getRect(_colored(OpenUiTheme.light.surface));
       expect(box.right, closeTo(_rect(tester, 'b').left - 8, 0.5));
     });
+    testWidgets(
+      'a Button stays centred in a top-aligned row and keeps its width',
+      (tester) async {
+        _phoneWidth(tester);
+        final long = 'word ' * 40;
+        await pumpProgram(
+          tester,
+          'root = Row([t, Button("Continue")], null, "start")\nt = Text("$long")',
+        );
+        expect(
+          tester.getSize(find.text('Continue')).width,
+          closeTo(8 * (14 + 0.25), 0.5),
+        );
+        expect(
+          _rect(tester, 'Continue').center.dy,
+          closeTo(tester.getRect(find.byType(FlexRow)).center.dy, 0.5),
+        );
+      },
+    );
   });
 
   group('Box', () {
@@ -648,7 +691,7 @@ void main() {
       expect(_gap(tester, 'x', 'y'), closeTo(8, 0.5));
     });
 
-    testWidgets('column wrap keeps children in one run with no gap by default', (
+    testWidgets('a wrapping column box without a gap flows like a column', (
       tester,
     ) async {
       await pumpProgram(
@@ -657,7 +700,7 @@ void main() {
         'a = Text("a")\n'
         'b = Text("b")',
       );
-      expect(_gap(tester, 'a', 'b'), closeTo(0, 0.5));
+      expect(_gap(tester, 'a', 'b'), closeTo(12, 0.5));
     });
 
     testWidgets('column wrap honors gap', (tester) async {
@@ -678,6 +721,47 @@ void main() {
         'b = Text("b")',
       );
       expect(_rect(tester, 'b').top, closeTo(_rect(tester, 'a').top, 1));
+    });
+    testWidgets('a fixed-height box lets taller content overflow, unclipped', (
+      tester,
+    ) async {
+      await pumpProgram(
+        tester,
+        'root = Box([a, b], null, 2, null, "surface", null, null, null, 20)\na = Text("a")\nb = Text("b")',
+      );
+      final box = tester.getRect(_colored(OpenUiTheme.light.surface));
+      expect(box.height, closeTo(20, 0.5));
+      expect(_rect(tester, 'b').bottom, greaterThan(box.bottom));
+      expect(
+        find.descendant(
+          of: find.byType(OpenUiElementView).first,
+          matching: find.byType(ClipRect),
+        ),
+        findsNothing,
+      );
+    });
+
+    testWidgets('a gradient background paints the box', (tester) async {
+      await pumpProgram(
+        tester,
+        'root = Box([t], null, null, null, "linear-gradient(90deg, #000000, #ffffff)")\nt = Text("g")',
+      );
+      expect(_decorated((d) => d.gradient is CssGradient), findsOneWidget);
+      expect(_inkOf(tester, 'g'), OpenUiTheme.light.ink);
+    });
+
+    testWidgets('a photo box in a media row keeps its height, not its width', (
+      tester,
+    ) async {
+      await pumpProgram(
+        tester,
+        'root = Row([p, Text("Tram 28")])\n'
+        'p = Box([Image("https://example.com/a.jpg", "Tram")], null, null, null, "surface", null, null, 300, 90)',
+      );
+      expect(
+        tester.getSize(_colored(OpenUiTheme.light.surface)),
+        const Size(200, 90),
+      );
     });
   });
 
@@ -877,6 +961,13 @@ void main() {
       );
       expect(_gap(tester, 'Head', 'body'), closeTo(8, 0.5));
     });
+    testWidgets(
+      'a Spacer first in a card stops the next title being the card title',
+      (tester) async {
+        await pumpProgram(tester, 'root = Card([Spacer(), Title("Head")])');
+        expect(tester.widget<Text>(find.text('Head')).style!.fontSize, 17);
+      },
+    );
   });
 
   group('Divider and Spacer', () {
@@ -914,12 +1005,14 @@ void main() {
       expect(_gap(tester, 'a', 'b'), closeTo(24, 0.5));
     });
 
-    testWidgets('a Spacer is left out of the form', (tester) async {
+    testWidgets('a Spacer in a form takes a field gap on each side', (
+      tester,
+    ) async {
       await pumpProgram(
         tester,
         'root = Form([a, Spacer(), b])\na = Text("a")\nb = Text("b")',
       );
-      expect(_gap(tester, 'a', 'b'), closeTo(24, 0.5));
+      expect(_gap(tester, 'a', 'b'), closeTo(48, 0.5));
     });
 
     testWidgets('a trailing button sits 40px below the field above it', (
@@ -993,6 +1086,23 @@ void main() {
         expect(_rect(tester, 'b').right, closeTo(_right, 0.5));
       },
     );
+    testWidgets('a wrapping row lets a Spacer and flex boxes grow', (
+      tester,
+    ) async {
+      await pumpProgram(
+        tester,
+        'root = Col([r, s])\n'
+        'r = Row([Text("a"), Spacer(), Text("b")], null, null, null, true)\n'
+        's = Row([x, y], null, null, null, true)\n'
+        'x = Box([Text("x")], null, null, null, "surface", null, null, null, null, 1)\n'
+        'y = Box([Text("y")], null, null, null, "border", null, null, null, null, 1)',
+      );
+      expect(_rect(tester, 'b').right, closeTo(_right, 0.5));
+      expect(
+        tester.getSize(_colored(OpenUiTheme.light.surface)).width,
+        closeTo((_right - _left - 8) / 2, 0.5),
+      );
+    });
   });
 
   group('Spacer alone', () {

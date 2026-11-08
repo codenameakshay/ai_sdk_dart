@@ -313,4 +313,128 @@ void main() {
       ),
     );
   });
+
+  group('lang-core extend.test.ts cases', () {
+    test('slots a component that nests its new parent into Stack', () {
+      final panel = _C('Panel', {'body': S.ref('Stack')});
+      final ext = base.extend(
+        LibraryExtension(
+          addComponents: [
+            ComponentAddition(panel, slots: ['Stack']),
+          ],
+        ),
+      );
+      expect(
+        ext.parse('root = Stack([Panel(Stack([Text("x")]))])').errors,
+        isEmpty,
+      );
+      final defs = ext.toJsonSchema()[r'$defs'] as Map;
+      expect(defs.keys.toList()..sort(), [
+        'Card',
+        'Image',
+        'Panel',
+        'Stack',
+        'Text',
+      ]);
+      expect(
+        (defs['Panel'] as Map)['properties'],
+        containsPair('body', {r'$ref': r'#/$defs/Stack'}),
+      );
+    });
+
+    test('rebinds a self-recursive component to itself', () {
+      final tree = _C('Tree', {
+        'children': S.list(S.union([S.ref('Tree'), S.ref('Text')])),
+      });
+      final lib = OpenUiLibrary(root: tree, components: [tree, text]).extend(
+        LibraryExtension(
+          overrideComponents: [
+            _C('Text', {'value': S.string()}),
+          ],
+        ),
+      );
+      final defs = lib.toJsonSchema()[r'$defs'] as Map;
+      expect(defs.keys.toList()..sort(), ['Text', 'Tree']);
+      expect(
+        (defs['Tree'] as Map)['properties'],
+        containsPair('children', {
+          'type': 'array',
+          'items': {
+            'anyOf': [
+              {r'$ref': r'#/$defs/Tree'},
+              {r'$ref': r'#/$defs/Text'},
+            ],
+          },
+        }),
+      );
+      expect(
+        (defs['Text'] as Map)['properties'],
+        containsPair('value', {'type': 'string'}),
+      );
+    });
+
+    test('replaces every member of a slot in one call', () {
+      final list = _C('Stack', {
+        'items': S.list(S.union([S.ref('Text'), S.ref('Image')])),
+      });
+      final lib = OpenUiLibrary(root: list, components: [list, text, image])
+          .extend(
+            LibraryExtension(
+              removeComponents: ['Text', 'Image'],
+              addComponents: [
+                ComponentAddition(
+                  _C('Video', {'url': S.string()}),
+                  slots: ['Stack'],
+                ),
+              ],
+            ),
+          );
+      expect(_sig(lib, 'Stack'), 'Stack(items: (Video)[])');
+    });
+
+    test('adds once when two slots name the same prop', () {
+      final ext = base.extend(
+        LibraryExtension(
+          addComponents: [
+            ComponentAddition(video, slots: ['Card.children', 'Card']),
+          ],
+        ),
+      );
+      expect(
+        _sig(ext, 'Card'),
+        'Card(children: (Text | Image | Video)[], footer?: Text)',
+      );
+    });
+
+    test('adds functions and actions; a derived library has no id', () {
+      final percent = FunctionSpec(
+        'Percent',
+        description: 'a / b',
+        params: {'a': S.number(), 'b': S.number()},
+        fn: (a) => (a['a']! as num) / (a['b']! as num),
+      );
+      final copy = ActionSpec('Copy', description: 'copy', params: {});
+      final withId = OpenUiLibrary(
+        root: stack,
+        components: [stack, card, text, image],
+        id: 'base',
+      );
+      final ext = withId.extend(
+        LibraryExtension(addFunctions: [percent], addActions: [copy]),
+      );
+      expect(ext.systemPrompt(), contains('@Percent(a: number, b: number)'));
+      expect(ext.actions.map((a) => a.name), contains('Copy'));
+      expect(ext.id, isNull);
+      expect(
+        () => ext.extend(LibraryExtension(addFunctions: [percent])),
+        throwsA(
+          isA<ArgumentError>().having(
+            (e) => e.message,
+            'message',
+            contains('"Percent" collides'),
+          ),
+        ),
+      );
+    });
+  });
 }

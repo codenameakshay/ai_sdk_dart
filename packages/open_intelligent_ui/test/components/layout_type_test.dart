@@ -33,7 +33,7 @@ void main() {
     final head = _style(tester, 'Head');
     expect(head.fontSize, 14);
     expect(head.height, closeTo(20 / 14, 1e-9));
-    expect(head.fontWeight, FontWeight.w500);
+    expect(head.fontWeight, OpenUiTheme.weightMedium);
     final body = _style(tester, 'body');
     expect(body.fontSize, 15);
     expect(body.height, closeTo(22 / 15, 1e-9));

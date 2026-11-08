@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:ai_sdk_openui/ai_sdk_openui.dart';
 import 'package:ai_sdk_openui/intelligent_ui.dart';
@@ -183,14 +184,7 @@ void main() {
         );
         final form = child(s.root!);
         final input = form.props.elements('children')[0];
-        s
-            .field(
-              'Name',
-              input.props['value'],
-              formName: 'f',
-              componentType: 'Input',
-            )
-            .set('Ana');
+        s.field('Name', input.props['value'], formName: 'f').set('Ana');
         final events = <ActionEvent>[];
         await s.run(
           form.props.elements('children')[1].props.action('action'),
@@ -205,7 +199,7 @@ void main() {
         expect(events.single.formName, 'f');
         expect(events.single.formState, {
           'f': {
-            'Name': {'value': 'Ana', 'componentType': 'Input'},
+            'Name': {'value': 'Ana'},
           },
         });
       },
@@ -369,4 +363,35 @@ void main() {
       expect((thirty.last as Map)['date'], '2026-11-08');
     },
   );
+
+  group('data comes in with JavaScript key order', () {
+    test('a tool result, and tool args go out as JSON', () async {
+      Map<String, Object?>? sent;
+      final s = session(
+        'root = Col([Text(@Join([q]))])\nq = Query("t", {n: \$x * 2}, {})\n\$x = 1.5',
+        tools: [
+          OpenUiTool(
+            name: 't',
+            call: (args) async {
+              sent = args;
+              return {'b': 1, '1': 2};
+            },
+          ),
+        ],
+      );
+      await settle();
+      expect(jsonEncode(sent), '{"n":3}');
+      expect(child(s.root!).props['text'], '{"1":2,"b":1}');
+    });
+
+    test('initial state', () {
+      final s = session(
+        'root = Col([Text(@Join([\$m]))])\n\$m = {}',
+        state: {
+          r'$m': {'b': 1, '1': 2},
+        },
+      );
+      expect(child(s.root!).props['text'], '{"1":2,"b":1}');
+    });
+  });
 }

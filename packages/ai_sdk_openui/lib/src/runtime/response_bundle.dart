@@ -1,12 +1,21 @@
 import 'dart:convert';
 
 import '../lang/message.dart';
+import 'collation.dart';
+
+/// react-lang `ResponseMetadata`: what OpenUI Cloud says about a response.
+final class ResponseMetadata {
+  const ResponseMetadata({this.name});
+
+  /// The content marker's `?name=`, when the response is framed.
+  final String? name;
+}
 
 /// react-lang's reading of an OpenUI Cloud response: the program, its scripts, and whether it may run.
 final class ResponseBundle {
   const ResponseBundle({
     required this.program,
-    this.metadata = const {},
+    this.metadata = const ResponseMetadata(),
     this.scripts = const {},
     this.complete = true,
     this.isBundle = false,
@@ -16,8 +25,7 @@ final class ResponseBundle {
 
   final String program;
 
-  /// `name` when the response is framed and its content marker has `?name=`.
-  final Map<String, String> metadata;
+  final ResponseMetadata metadata;
   final Set<String> scripts;
   final bool complete;
   final bool isBundle;
@@ -70,10 +78,9 @@ ResponseBundle parseResponseBundle(
   final error = section && scripts == null ? 'Invalid scripts bundle' : null;
   return ResponseBundle(
     program: program,
-    metadata: {
-      if (framed && message.attributes.containsKey('name'))
-        'name': message.attributes['name']!,
-    },
+    metadata: ResponseMetadata(
+      name: framed ? message.attributes['name'] : null,
+    ),
     scripts: scripts?.names ?? const {},
     complete: error == null && (message.end || !streaming || !framed),
     isBundle: true,
@@ -148,11 +155,21 @@ _Scripts? _readScripts(String header, String payload) {
       if (name is! String || name.isEmpty || code is! String) return null;
       if (!names.add(name)) return null;
     }
-    final sorted = [
-      for (final script in values)
-        {'name': script['name'], 'code': script['code']},
-    ]..sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
-    return _Scripts(names, jsonEncode(sorted));
+    final sorted =
+        [
+          for (final (index, script) in values.indexed)
+            (index, {'name': script['name'], 'code': script['code']}),
+        ]..sort((a, b) {
+          final order = localeCompare(
+            a.$2['name'] as String,
+            b.$2['name'] as String,
+          );
+          return order != 0 ? order : a.$1 - b.$1;
+        });
+    return _Scripts(
+      names,
+      jsonEncode([for (final (_, script) in sorted) script]),
+    );
   } on FormatException {
     return null;
   }

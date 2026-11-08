@@ -169,4 +169,44 @@ void main() {
     );
     expect(table.size.height, 0);
   });
+
+  testWidgets('a Text cell breaks its long word, like overflow-wrap: anywhere', (
+    tester,
+  ) async {
+    _phone(tester);
+    final note = List.filled(60, 'word').join(' ');
+    await pumpProgram(
+      tester,
+      'root = Col([Table(["Item", "Notes"], [[Text("Supercalifragilistic"), "$note"]])])',
+    );
+    // Column 1: its 77px header, plus its share (289 of 4483.5) of the
+    // 198.75px the column minimums leave in the 366px table.
+    expect(
+      tester.getTopLeft(find.text('Notes')).dx -
+          tester.getTopLeft(find.text('Item')).dx,
+      closeTo(77 + 198.75 * 289 / 4483.5, 1e-9),
+    );
+    expect(
+      tester.getSize(find.text('Supercalifragilistic')).height,
+      greaterThan(2 * 14 * 1.5),
+    );
+  });
+
+  testWidgets('a table reads as a table of rows, column headers and cells', (
+    tester,
+  ) async {
+    final handle = tester.ensureSemantics();
+    await pumpProgram(
+      tester,
+      'root = Col([Table(["Name", "Age"], [["Ana", 31]])])',
+    );
+    final head = tester.getSemantics(find.text('Name'));
+    expect(head.role, SemanticsRole.columnHeader);
+    expect(head.parent!.role, SemanticsRole.row);
+    expect(head.parent!.parent!.role, SemanticsRole.table);
+    final cell = tester.getSemantics(find.text('Ana'));
+    expect(cell.role, SemanticsRole.cell);
+    expect(cell.parent!.indexInParent, 1);
+    handle.dispose();
+  });
 }

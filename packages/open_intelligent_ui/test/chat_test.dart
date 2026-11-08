@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
+import 'package:ai_sdk_openui/ai_sdk_openui.dart' show buildActionUserMessage;
 import 'package:ai_sdk_provider/ai_sdk_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -588,7 +589,7 @@ void main() {
     });
   });
 
-  group('actionUserMessage', () {
+  group('buildActionUserMessage', () {
     test('sends the message with the click and form state', () {
       const event = ActionEvent(
         type: ActionEvent.continueConversation,
@@ -601,7 +602,7 @@ void main() {
         formName: 'prefs',
       );
       expect(
-        actionUserMessage(event),
+        buildActionUserMessage(event),
         ']]>openui:content\nTailor my Lisbon trip\n]]>openui:context\n'
         '["User clicked: Tailor my Lisbon trip",'
         '{"prefs":{"pace":{"value":"Packed","componentType":"RadioGroup"}}}]',
@@ -617,7 +618,7 @@ void main() {
         humanFriendlyMessage: 'Show details',
       );
       expect(
-        actionUserMessage(event),
+        buildActionUserMessage(event),
         ']]>openui:content\nShow details\n]]>openui:context\n'
         '["User clicked: Show details",{},{"orderId":42}]',
       );
@@ -630,7 +631,7 @@ void main() {
         humanFriendlyMessage: 'Continue',
       );
       expect(
-        actionUserMessage(event),
+        buildActionUserMessage(event),
         ']]>openui:content\nContinue\n]]>openui:context\n'
         '["User clicked: Continue",{},null]',
       );
@@ -639,7 +640,7 @@ void main() {
     test('drops the content line when there is no message', () {
       const event = ActionEvent(type: ActionEvent.continueConversation);
       expect(
-        actionUserMessage(event),
+        buildActionUserMessage(event),
         '\n]]>openui:context\n["User clicked: ",{}]',
       );
     });

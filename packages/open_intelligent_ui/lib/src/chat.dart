@@ -145,7 +145,7 @@ final class OpenUiChat {
   void _send(ActionEvent event) {
     if (_disposed || controller.isLoading) return;
     unawaited(
-      controller.sendMessage(agent: agent, text: actionUserMessage(event)),
+      controller.sendMessage(agent: agent, text: buildActionUserMessage(event)),
     );
   }
 
@@ -185,22 +185,6 @@ final class OpenUiChat {
       return true;
     });
   }
-}
-
-/// The user turn that a `continue_conversation` [event] sends, as react-ui's
-/// `buildActionUserMessage` writes it: the message, then
-/// `["User clicked: …", formState, context?]`.
-String actionUserMessage(ActionEvent event) {
-  final message = event.humanFriendlyMessage;
-  final built = buildMessage(
-    content: message,
-    context: [
-      'User clicked: $message',
-      event.formState,
-      if (event.params.containsKey('context')) event.params['context'],
-    ],
-  );
-  return message.isNotEmpty ? built : built.substring(built.indexOf('\n') + 1);
 }
 
 /// Replaces the saved context without dropping Cloud scripts or framing.

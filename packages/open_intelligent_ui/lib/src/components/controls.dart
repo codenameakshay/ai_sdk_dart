@@ -1,10 +1,20 @@
 import 'dart:math' as math;
 
 import 'package:ai_sdk_openui/ai_sdk_openui.dart';
+import 'package:ai_sdk_openui/intelligent_ui.dart' show formatDecimal;
+import 'package:flutter/cupertino.dart'
+    show
+        CupertinoButton,
+        CupertinoDatePicker,
+        CupertinoDatePickerMode,
+        showCupertinoModalPopup;
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart' show SemanticsRole;
+import 'package:flutter/services.dart';
 
 import '../theme.dart';
 import '../view.dart';
+import 'block_slot.dart' show PressableScope;
 import 'flex_row.dart';
 import 'glyph.dart';
 
@@ -12,7 +22,7 @@ typedef _Choice = ({String value, String label, String? description});
 
 TextStyle _text(
   OpenUiTheme theme, {
-  required double size,
+  double? size,
   Color? color,
   FontWeight? weight,
   double? height,
@@ -28,7 +38,7 @@ TextStyle _text(
 );
 
 TextStyle _labelStyle(OpenUiTheme theme) =>
-    _text(theme, size: 14, weight: FontWeight.w500, height: 1.4);
+    _text(theme, size: 14, weight: OpenUiTheme.weightMedium, height: 1.4);
 
 String? _nonEmpty(String? value) =>
     value == null || value.isEmpty ? null : value;
@@ -36,16 +46,19 @@ String? _nonEmpty(String? value) =>
 FieldState _field(OpenUiNode node, String prop, String? label) =>
     node.field(prop, name: _nonEmpty(label));
 
+/// A labelled field; like a wrapping `<label>`, the label names the field.
 Widget _labeled(OpenUiTheme theme, String? label, Widget child) {
   if (_nonEmpty(label) == null) return child;
-  return Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Text(label!, style: _labelStyle(theme)),
-      const SizedBox(height: 8),
-      child,
-    ],
+  return MergeSemantics(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(label!, style: _labelStyle(theme)),
+        const SizedBox(height: 8),
+        child,
+      ],
+    ),
   );
 }
 
@@ -75,26 +88,16 @@ List<_Choice> _choices(List<Object?> raw) {
 String _plain(Object? value) => value == null ? '' : jsString(value);
 
 /// `toLocaleString("en-US", {maximumFractionDigits: 2})`.
-String _numberText(double value) {
-  final fixed = value.toStringAsFixed(2);
-  final negative = fixed.startsWith('-');
-  final parts = (negative ? fixed.substring(1) : fixed).split('.');
-  final grouped = parts[0].replaceAllMapped(
-    RegExp(r'\B(?=(\d{3})+$)'),
-    (_) => ',',
-  );
-  final fraction = parts[1].replaceFirst(RegExp(r'0+$'), '');
-  return '${negative ? '-' : ''}$grouped${fraction.isEmpty ? '' : '.$fraction'}';
-}
+String _numberText(double value) =>
+    formatDecimal(value, minFraction: 0, maxFraction: 2);
 
 String _textOf(BuildContext context) {
   final parts = <String>[];
   void visit(Element element) {
     final widget = element.widget;
+    if (widget is Glyph) return;
     if (widget is RichText) {
-      if (widget.text.style?.fontFamily?.contains('IuiLucide') != true) {
-        parts.add(widget.text.toPlainText());
-      }
+      parts.add(widget.text.toPlainText());
       return;
     }
     element.visitChildren(visit);
@@ -105,19 +108,27 @@ String _textOf(BuildContext context) {
   return text.substring(0, math.min(120, text.length));
 }
 
-/// Hover, press and keyboard focus for a tappable surface.
-class _Press extends StatefulWidget {
-  const _Press({required this.builder, required this.onTap, this.radius = 999});
+/// Hover, press and keyboard focus for a tappable surface: Enter and Space
+/// activate it, and keyboard focus draws a 2px ink ring 3px outside it.
+class Press extends StatefulWidget {
+  const Press({
+    super.key,
+    required this.builder,
+    required this.onTap,
+    this.radius = 999,
+    this.focusNode,
+  });
 
   final Widget Function(bool hovered, bool pressed) builder;
   final void Function(BuildContext context)? onTap;
   final double radius;
+  final FocusNode? focusNode;
 
   @override
-  State<_Press> createState() => _PressState();
+  State<Press> createState() => _PressState();
 }
 
-class _PressState extends State<_Press> {
+class _PressState extends State<Press> {
   bool _hover = false;
   bool _down = false;
   bool _focus = false;
@@ -127,6 +138,7 @@ class _PressState extends State<_Press> {
     final enabled = widget.onTap != null;
     final theme = OpenUiTheme.of(context);
     return FocusableActionDetector(
+      focusNode: widget.focusNode,
       enabled: enabled,
       mouseCursor: enabled
           ? SystemMouseCursors.click
@@ -184,119 +196,198 @@ Color _brighten(Color c, double factor) => Color.from(
   blue: math.min(1, c.b * factor),
 );
 
+/// The selected tile's check: the reference's own 12px mark
+/// (`M2.5 6.2l2.3 2.3 4.7-5`, stroke 1.8), not lucide's.
+final class _CheckMark extends CustomPainter {
+  const _CheckMark(this.color);
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) => canvas.drawPath(
+    Path()
+      ..moveTo(2.5, 6.2)
+      ..lineTo(4.8, 8.5)
+      ..lineTo(9.5, 3.5),
+    Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.8
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round,
+  );
+
+  @override
+  bool shouldRepaint(_CheckMark old) => old.color != color;
+}
+
+const _buttonFade = Duration(milliseconds: 150);
+
+/// `.iui-button`, the reference's pill button, for Button and Timer. Its
+/// background, border and text colour ease over 150ms, as in CSS.
+class IuiButton extends StatelessWidget {
+  const IuiButton({
+    super.key,
+    required this.label,
+    this.icon,
+    this.variant = 'solid',
+    this.tone,
+    this.size = 'md',
+    this.onTap,
+  });
+
+  final String label;
+  final String? icon;
+
+  /// `solid`, `outline`, `soft` or `ghost`.
+  final String variant;
+
+  /// `danger` or `success`; anything else is the ink.
+  final String? tone;
+
+  /// `sm`, `md` or `lg`.
+  final String size;
+
+  /// Null shows the button disabled.
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = OpenUiTheme.of(context);
+    final enabled = onTap != null;
+    final toneColor = switch (tone) {
+      'danger' || 'success' => theme.status[tone],
+      _ => null,
+    };
+    final (minHeight, padding, fontSize) = switch (size) {
+      'sm' => (
+        32.0,
+        const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+        13.0,
+      ),
+      'lg' => (
+        44.0,
+        const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
+        15.0,
+      ),
+      _ => (
+        36.0,
+        const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+        14.0,
+      ),
+    };
+    return Semantics(
+      container: true,
+      button: true,
+      enabled: enabled,
+      child: Press(
+        onTap: enabled ? (_) => onTap!() : null,
+        builder: (hovered, pressed) {
+          final overlay = pressed
+              ? theme.pressed
+              : hovered
+              ? theme.hover
+              : null;
+          Color? background;
+          Color foreground = toneColor ?? theme.ink;
+          Color? border;
+          EdgeInsets pad = padding;
+          switch (variant) {
+            case 'outline':
+              background = Color.alphaBlend(
+                overlay ?? const Color(0x00000000),
+                theme.canvas,
+              );
+              border = theme.border;
+            case 'soft':
+              background = hovered || pressed ? theme.pressed : theme.surface;
+            case 'ghost':
+              background = overlay;
+              pad = padding.copyWith(left: 10, right: 10);
+            default:
+              if (toneColor != null) {
+                background = hovered && !pressed
+                    ? _brighten(toneColor, 1.08)
+                    : toneColor;
+                foreground = theme.brightness == Brightness.dark
+                    ? const Color(0xFF121212)
+                    : const Color(0xFFFFFFFF);
+              } else {
+                background = hovered && !pressed ? theme.inkHover : theme.ink;
+                foreground = theme.onInk;
+              }
+          }
+          return Opacity(
+            opacity: enabled ? 1 : 0.4,
+            child: AnimatedContainer(
+              duration: _buttonFade,
+              curve: Curves.ease,
+              constraints: BoxConstraints(minHeight: minHeight),
+              padding: pad,
+              decoration: BoxDecoration(
+                color: background,
+                border: Border.all(color: border ?? const Color(0x00000000)),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: TweenAnimationBuilder<Color?>(
+                tween: ColorTween(end: foreground),
+                duration: _buttonFade,
+                curve: Curves.ease,
+                builder: (context, color, _) => Row(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (isLucideIcon(icon)) ...[
+                      Glyph(icon!, size: size == 'sm' ? 14 : 16, color: color),
+                      const SizedBox(width: 7),
+                    ],
+                    Flexible(
+                      child: Text(
+                        label,
+                        softWrap: false,
+                        overflow: TextOverflow.ellipsis,
+                        style: _text(
+                          theme,
+                          size: fontSize,
+                          color: color,
+                          weight: OpenUiTheme.weightMedium,
+                          height: 1.2,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
 Widget buildButton(BuildContext context, OpenUiNode node) {
-  final theme = node.theme;
   final label = node.props['label'] == null
       ? ''
       : jsString(node.props['label']);
-  final variant = node.props.string('variant') ?? 'solid';
-  final tone = node.props.string('color');
-  final size = node.props.string('size') ?? 'md';
-  final icon = node.props.string('icon');
   final enabled = node.props.boolean('disabled') != true && !node.isStreaming;
-  final toneColor = switch (tone) {
-    'danger' || 'success' => theme.status[tone],
-    _ => null,
-  };
-  final (minHeight, padding, fontSize) = switch (size) {
-    'sm' => (
-      32.0,
-      const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-      13.0,
-    ),
-    'lg' => (
-      44.0,
-      const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
-      15.0,
-    ),
-    _ => (36.0, const EdgeInsets.symmetric(vertical: 8, horizontal: 16), 14.0),
-  };
-  final button = _Press(
+  final button = IuiButton(
+    label: label,
+    icon: node.props.string('icon'),
+    variant: node.props.string('variant') ?? 'solid',
+    tone: node.props.string('color'),
+    size: node.props.string('size') ?? 'md',
     onTap: enabled
-        ? (_) => node.run('action', label: label, sendLabel: true)
+        ? () => node.run('action', label: label, sendLabel: true)
         : null,
-    builder: (hovered, pressed) {
-      final overlay = pressed
-          ? theme.pressed
-          : hovered
-          ? theme.hover
-          : null;
-      Color? background;
-      Color foreground = toneColor ?? theme.ink;
-      Color? border;
-      EdgeInsets pad = padding;
-      switch (variant) {
-        case 'outline':
-          background = Color.alphaBlend(
-            overlay ?? const Color(0x00000000),
-            theme.canvas,
-          );
-          border = theme.border;
-        case 'soft':
-          background = hovered || pressed ? theme.pressed : theme.surface;
-        case 'ghost':
-          background = overlay;
-          pad = padding.copyWith(left: 10, right: 10);
-        default:
-          if (toneColor != null) {
-            background = hovered && !pressed
-                ? _brighten(toneColor, 1.08)
-                : toneColor;
-            foreground = theme.brightness == Brightness.dark
-                ? const Color(0xFF121212)
-                : const Color(0xFFFFFFFF);
-          } else {
-            background = hovered && !pressed ? theme.inkHover : theme.ink;
-            foreground = theme.onInk;
-          }
-      }
-      return Opacity(
-        opacity: enabled ? 1 : 0.4,
-        child: Container(
-          constraints: BoxConstraints(minHeight: minHeight),
-          padding: pad,
-          decoration: BoxDecoration(
-            color: background,
-            border: Border.all(color: border ?? const Color(0x00000000)),
-            borderRadius: BorderRadius.circular(999),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (icon != null) ...[
-                Glyph(icon, size: size == 'sm' ? 14 : 16, color: foreground),
-                const SizedBox(width: 7),
-              ],
-              Flexible(
-                child: Text(
-                  label,
-                  softWrap: false,
-                  overflow: TextOverflow.ellipsis,
-                  style: _text(
-                    theme,
-                    size: fontSize,
-                    color: foreground,
-                    weight: FontWeight.w500,
-                    height: 1.2,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    },
   );
-  final semantic = Semantics(button: true, enabled: enabled, child: button);
   if (node.props.boolean('block') == true) {
-    return SizedBox(width: double.infinity, child: semantic);
+    return SizedBox(width: double.infinity, child: button);
   }
   return Align(
     alignment: Alignment.centerLeft,
     widthFactor: 1,
     heightFactor: 1,
-    child: semantic,
+    child: button,
   );
 }
 
@@ -307,7 +398,7 @@ Widget buildIconButton(BuildContext context, OpenUiNode node) {
   final label = given ?? icon;
   final variant = node.props.string('variant') ?? 'outline';
   final enabled = !node.isStreaming;
-  Widget button = _Press(
+  Widget button = Press(
     onTap: enabled ? (_) => node.run('action', label: label) : null,
     builder: (hovered, pressed) {
       final overlay = pressed
@@ -334,7 +425,9 @@ Widget buildIconButton(BuildContext context, OpenUiNode node) {
       };
       return Opacity(
         opacity: enabled ? 1 : 0.4,
-        child: Container(
+        child: AnimatedContainer(
+          duration: _buttonFade,
+          curve: Curves.ease,
           width: 34,
           height: 34,
           alignment: Alignment.center,
@@ -354,6 +447,7 @@ Widget buildIconButton(BuildContext context, OpenUiNode node) {
     widthFactor: 1,
     heightFactor: 1,
     child: Semantics(
+      container: true,
       button: true,
       enabled: enabled,
       label: label,
@@ -370,14 +464,23 @@ Widget buildPressable(BuildContext context, OpenUiNode node) {
       OpenUiTheme.radius(node.props['radius']) ?? OpenUiTheme.radiusLg;
   final hasRow = node.props
       .elements('children')
-      .any((e) => e.typeName == 'Row');
-  final on = theme.inkOn(node.props['background']);
+      .any(
+        (e) =>
+            e.typeName == 'Row' ||
+            (e.typeName == 'Box' && e.props.string('direction') == 'row'),
+      );
+  final background = node.props['background'];
+  final on = theme.inkOn(background);
   final padding = OpenUiTheme.space(node.props.number('padding'));
   final shape = BorderRadius.circular(radius);
-  Widget content = Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    mainAxisSize: MainAxisSize.min,
-    children: node.children(),
+  final reduce = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+  final fade = reduce ? Duration.zero : const Duration(milliseconds: 120);
+  Widget content = PressableScope(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: node.children(),
+    ),
   );
   if (on != null) {
     content = Theme(
@@ -390,16 +493,19 @@ Widget buildPressable(BuildContext context, OpenUiNode node) {
   }
   final ring = selected && !hasRow;
   return Semantics(
+    container: true,
     button: true,
     enabled: !streaming,
-    selected: selected,
-    child: _Press(
+    toggled: node.props['selected'] is bool ? selected : null,
+    child: Press(
       radius: radius,
       onTap: streaming
           ? null
           : (ctx) => node.run('action', label: _textOf(ctx)),
       builder: (hovered, pressed) {
-        final scale = hasRow ? 1.0 : (pressed ? 0.98 : (hovered ? 1.01 : 1.0));
+        final scale = hasRow || reduce
+            ? 1.0
+            : (pressed ? 0.98 : (hovered ? 1.01 : 1.0));
         final overlay = pressed
             ? 0.08
             : hovered
@@ -407,28 +513,34 @@ Widget buildPressable(BuildContext context, OpenUiNode node) {
             : (ring ? 0.06 : 0.0);
         return AnimatedScale(
           scale: scale,
-          duration: const Duration(milliseconds: 120),
+          duration: fade,
+          curve: Curves.easeOut,
           child: Stack(
             children: [
-              Container(
+              AnimatedContainer(
+                duration: fade,
+                curve: Curves.easeOut,
                 padding: padding == null ? null : EdgeInsets.all(padding),
                 decoration: BoxDecoration(
-                  color: theme.bg(node.props['background']),
+                  color: theme.bg(background),
+                  gradient: theme.bgGradient(background),
                   borderRadius: shape,
                 ),
-                foregroundDecoration: ring
-                    ? BoxDecoration(
-                        borderRadius: shape,
-                        border: Border.all(
-                          color: theme.ink.withValues(alpha: 0.2),
-                        ),
-                      )
-                    : null,
+                foregroundDecoration: BoxDecoration(
+                  borderRadius: shape,
+                  border: Border.all(
+                    color: ring
+                        ? theme.ink.withValues(alpha: 0.2)
+                        : const Color(0x00000000),
+                  ),
+                ),
                 child: content,
               ),
               Positioned.fill(
                 child: IgnorePointer(
-                  child: DecoratedBox(
+                  child: AnimatedContainer(
+                    duration: fade,
+                    curve: Curves.easeOut,
                     decoration: BoxDecoration(
                       color: theme.ink.withValues(alpha: overlay),
                       borderRadius: shape,
@@ -448,7 +560,14 @@ Widget buildPressable(BuildContext context, OpenUiNode node) {
                       color: theme.ink,
                       shape: BoxShape.circle,
                     ),
-                    child: Glyph('check', size: 12, color: theme.onInk),
+                    child: CustomPaint(
+                      size: const Size.square(12),
+                      painter: _CheckMark(
+                        theme.brightness == Brightness.dark
+                            ? const Color(0xFF171717)
+                            : const Color(0xFFFFFFFF),
+                      ),
+                    ),
                   ),
                 ),
             ],
@@ -647,7 +766,14 @@ Widget buildSelect(BuildContext context, OpenUiNode node) {
             style: style,
             dropdownColor: theme.canvas,
             borderRadius: BorderRadius.circular(OpenUiTheme.radiusMd),
-            icon: Glyph('chevron-down', size: 16, color: theme.muted),
+            icon: Glyph(
+              'chevron-down',
+              size: 16,
+              strokeWidth: 2.4,
+              color: theme.brightness == Brightness.dark
+                  ? const Color(0xFFABABAB)
+                  : const Color(0xFF676767),
+            ),
             items: [
               for (final (i, o) in choices.indexed)
                 DropdownMenuItem(value: i, child: Text(o.label)),
@@ -660,6 +786,8 @@ Widget buildSelect(BuildContext context, OpenUiNode node) {
   );
 }
 
+const _segmentFade = Duration(milliseconds: 200);
+
 Widget buildSegmentedControl(BuildContext context, OpenUiNode node) {
   final theme = node.theme;
   final f = _field(node, 'value', null);
@@ -670,11 +798,14 @@ Widget buildSegmentedControl(BuildContext context, OpenUiNode node) {
   Widget segment(_Choice o) {
     final selected = o.value == value;
     return Semantics(
+      container: true,
       inMutuallyExclusiveGroup: true,
       checked: selected,
-      child: _Press(
+      child: Press(
         onTap: (_) => f.set(o.value),
-        builder: (hovered, pressed) => Container(
+        builder: (hovered, pressed) => AnimatedContainer(
+          duration: _segmentFade,
+          curve: Curves.ease,
           padding: EdgeInsets.symmetric(
             vertical: 6,
             horizontal: compact ? 11 : 14,
@@ -687,15 +818,22 @@ Widget buildSegmentedControl(BuildContext context, OpenUiNode node) {
             border: selected ? Border.all(color: theme.border) : null,
             boxShadow: selected ? theme.shadowSmall : null,
           ),
-          child: Text(
-            o.label,
-            softWrap: false,
-            style: _text(
-              theme,
-              size: 13,
-              height: 1.4,
-              color: selected || hovered ? theme.ink : theme.muted,
-              weight: selected ? FontWeight.w500 : null,
+          child: TweenAnimationBuilder<Color?>(
+            tween: ColorTween(
+              end: selected || hovered ? theme.ink : theme.muted,
+            ),
+            duration: _segmentFade,
+            curve: Curves.ease,
+            builder: (context, color, _) => Text(
+              o.label,
+              softWrap: false,
+              style: _text(
+                theme,
+                size: 13,
+                height: 1.4,
+                color: color,
+                weight: selected ? OpenUiTheme.weightMedium : null,
+              ),
             ),
           ),
         ),
@@ -735,13 +873,18 @@ Widget buildSegmentedControl(BuildContext context, OpenUiNode node) {
             ),
           ),
   );
+  final group = Semantics(
+    container: true,
+    role: SemanticsRole.radioGroup,
+    child: bar,
+  );
   return block
-      ? bar
+      ? group
       : Align(
           alignment: Alignment.centerLeft,
           widthFactor: 1,
           heightFactor: 1,
-          child: bar,
+          child: group,
         );
 }
 
@@ -754,10 +897,9 @@ Widget buildSlider(BuildContext context, OpenUiNode node) {
   final max = maxProp != null && maxProp > min ? maxProp : min + 100;
   final stepProp = node.props.number('step')?.toDouble();
   final step = stepProp != null && stepProp > 0 ? stepProp : 1.0;
-  final raw = f.value is num && (f.value as num).isFinite
-      ? (f.value as num).toDouble()
-      : null;
-  final value = raw == null ? min : raw.clamp(min, max).toDouble();
+  // `Number(field.value)`; null is an unset (undefined) field, so NaN.
+  final raw = f.value == null ? double.nan : jsNumber(f.value);
+  final value = raw.isFinite ? raw.clamp(min, max).toDouble() : min;
   final unit = node.props.string('unit') ?? '';
   final prefix = RegExp(r'^[$€£¥₹]').hasMatch(unit);
   String readoutOf(double v) =>
@@ -804,7 +946,7 @@ Widget buildSlider(BuildContext context, OpenUiNode node) {
                 theme,
                 size: 12,
                 height: 1.4,
-                weight: FontWeight.w500,
+                weight: OpenUiTheme.weightMedium,
                 tabular: true,
               ),
             ),
@@ -825,18 +967,23 @@ Widget buildSlider(BuildContext context, OpenUiNode node) {
             ),
             overlayShape: SliderComponentShape.noOverlay,
             tickMarkShape: SliderTickMarkShape.noTickMark,
-            trackShape: const RoundedRectSliderTrackShape(),
+            trackShape: const _RangeTrack(),
           ),
-          child: Slider(
-            min: min,
-            max: max,
-            value: value,
-            divisions: divisions,
-            semanticFormatterCallback: (v) => readoutOf(snap(v)),
-            onChanged: (v) {
-              final next = snap(v);
-              f.set(next == next.truncateToDouble() ? next.toInt() : next);
-            },
+          child: MergeSemantics(
+            child: Semantics(
+              label: label ?? 'Value',
+              child: Slider(
+                min: min,
+                max: max,
+                value: value,
+                divisions: divisions,
+                semanticFormatterCallback: (v) => readoutOf(snap(v)),
+                onChanged: (v) {
+                  final next = snap(v);
+                  f.set(next == next.truncateToDouble() ? next.toInt() : next);
+                },
+              ),
+            ),
           ),
         ),
       ),
@@ -859,16 +1006,19 @@ Widget buildSlider(BuildContext context, OpenUiNode node) {
                     for (final m in marks)
                       if (m.at <= 0.02)
                         Positioned(
-                          left: 0,
+                          top: -2,
+                          left: (box.maxWidth - 18) * m.at,
                           child: Text(m.label, softWrap: false, style: style),
                         )
                       else if (m.at >= 0.98)
                         Positioned(
-                          right: 0,
+                          top: -2,
+                          right: (box.maxWidth - 18) * (1 - m.at),
                           child: Text(m.label, softWrap: false, style: style),
                         )
                       else
                         Positioned(
+                          top: -2,
                           left: 9 + (box.maxWidth - 18) * m.at,
                           child: FractionalTranslation(
                             translation: const Offset(-0.5, 0),
@@ -883,6 +1033,62 @@ Widget buildSlider(BuildContext context, OpenUiNode node) {
         ),
     ],
   );
+}
+
+/// The reference's range input: a 24px pill across the full width, and a
+/// thumb whose centre travels from 12px in at one end to 12px in at the
+/// other (WebKit's 3px track border around the 18px thumb).
+final class _RangeTrack extends SliderTrackShape {
+  const _RangeTrack();
+
+  static const _height = 24.0;
+  static const _inset = 12.0;
+
+  @override
+  Rect getPreferredRect({
+    required RenderBox parentBox,
+    Offset offset = Offset.zero,
+    required SliderThemeData sliderTheme,
+    bool isEnabled = false,
+    bool isDiscrete = false,
+  }) => Rect.fromLTWH(
+    offset.dx + _inset,
+    offset.dy + (parentBox.size.height - _height) / 2,
+    parentBox.size.width - 2 * _inset,
+    _height,
+  );
+
+  @override
+  void paint(
+    PaintingContext context,
+    Offset offset, {
+    required RenderBox parentBox,
+    required SliderThemeData sliderTheme,
+    required Animation<double> enableAnimation,
+    required Offset thumbCenter,
+    Offset? secondaryOffset,
+    bool isEnabled = false,
+    bool isDiscrete = false,
+    required TextDirection textDirection,
+  }) {
+    final travel = getPreferredRect(
+      parentBox: parentBox,
+      offset: offset,
+      sliderTheme: sliderTheme,
+    );
+    context.canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTRB(
+          travel.left - _inset,
+          travel.top,
+          travel.right + _inset,
+          travel.bottom,
+        ),
+        const Radius.circular(_height / 2),
+      ),
+      Paint()..color = sliderTheme.inactiveTrackColor!,
+    );
+  }
 }
 
 Widget buildCheckbox(BuildContext context, OpenUiNode node) {
@@ -900,7 +1106,7 @@ Widget buildCheckbox(BuildContext context, OpenUiNode node) {
     child: Semantics(
       checked: checked,
       label: label,
-      child: _Press(
+      child: Press(
         radius: 4,
         onTap: (_) => f.set(!checked),
         builder: (hovered, pressed) => ConstrainedBox(
@@ -925,17 +1131,17 @@ Widget buildCheckbox(BuildContext context, OpenUiNode node) {
               ),
               const SizedBox(width: 9),
               Flexible(
-                child: Text(
-                  label,
-                  style:
-                      _text(
-                        theme,
-                        size: 16,
-                        color: done ? theme.muted : theme.ink,
-                      ).copyWith(
-                        decoration: done ? TextDecoration.lineThrough : null,
-                        decorationColor: done ? theme.muted : null,
-                      ),
+                child: TweenAnimationBuilder<Color?>(
+                  tween: ColorTween(end: done ? theme.muted : theme.ink),
+                  duration: const Duration(milliseconds: 150),
+                  curve: Curves.ease,
+                  builder: (context, color, _) => Text(
+                    label,
+                    style: _text(theme, color: color).copyWith(
+                      decoration: done ? TextDecoration.lineThrough : null,
+                      decorationColor: done ? color : null,
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -944,6 +1150,89 @@ Widget buildCheckbox(BuildContext context, OpenUiNode node) {
       ),
     ),
   );
+}
+
+final class _StepIntent extends Intent {
+  const _StepIntent(this.delta);
+  final int delta;
+}
+
+/// A native radio group's keys: arrows move the choice, wrapping around,
+/// and the focus with it; Tab stops only at the checked option.
+final class _RadioKeys extends StatefulWidget {
+  const _RadioKeys({
+    required this.count,
+    required this.selected,
+    required this.onSelect,
+    required this.builder,
+  });
+
+  final int count;
+  final int selected;
+  final ValueChanged<int> onSelect;
+  final Widget Function(List<FocusNode> nodes) builder;
+
+  @override
+  State<_RadioKeys> createState() => _RadioKeysState();
+}
+
+final class _RadioKeysState extends State<_RadioKeys> {
+  final List<FocusNode> _nodes = [];
+
+  @override
+  void dispose() {
+    for (final node in _nodes) {
+      node.dispose();
+    }
+    super.dispose();
+  }
+
+  void _step(_StepIntent intent) {
+    final from = _nodes.indexWhere((n) => n.hasFocus);
+    if (from < 0) return;
+    final to = (from + intent.delta) % widget.count;
+    widget.onSelect(to);
+    _nodes[to].requestFocus();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    while (_nodes.length < widget.count) {
+      _nodes.add(FocusNode());
+    }
+    if (_nodes.length > widget.count) {
+      final gone = _nodes.sublist(widget.count);
+      _nodes.removeRange(widget.count, _nodes.length);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        for (final node in gone) {
+          node.dispose();
+        }
+      });
+    }
+    final stop = widget.selected < 0 ? 0 : widget.selected;
+    for (final (i, node) in _nodes.indexed) {
+      node.skipTraversal = i != stop;
+    }
+    return Shortcuts(
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.arrowDown): _StepIntent(1),
+        SingleActivator(LogicalKeyboardKey.arrowRight): _StepIntent(1),
+        SingleActivator(LogicalKeyboardKey.arrowUp): _StepIntent(-1),
+        SingleActivator(LogicalKeyboardKey.arrowLeft): _StepIntent(-1),
+      },
+      child: Actions(
+        actions: {
+          _StepIntent: CallbackAction<_StepIntent>(
+            onInvoke: (intent) {
+              _step(intent);
+              return null;
+            },
+          ),
+        },
+        child: widget.builder(_nodes),
+      ),
+    );
+  }
 }
 
 Widget buildRadioGroup(BuildContext context, OpenUiNode node) {
@@ -958,7 +1247,7 @@ Widget buildRadioGroup(BuildContext context, OpenUiNode node) {
   };
   final choices = _choices(node.props.list('options'));
 
-  Widget option(_Choice o) {
+  Widget option(_Choice o, FocusNode focus) {
     final selected = o.value == value;
     final text = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -968,9 +1257,9 @@ Widget buildRadioGroup(BuildContext context, OpenUiNode node) {
           o.label,
           style: _text(
             theme,
-            size: variant == 'list' ? 16 : 15,
+            size: variant == 'list' ? null : 15,
             height: variant == 'list' ? null : 22 / 15,
-            weight: variant == 'cards' ? FontWeight.w500 : null,
+            weight: variant == 'cards' ? OpenUiTheme.weightMedium : null,
             color: variant == 'pills' && selected ? theme.onInk : theme.ink,
           ),
         ),
@@ -984,9 +1273,11 @@ Widget buildRadioGroup(BuildContext context, OpenUiNode node) {
       ],
     );
     return Semantics(
+      container: true,
       inMutuallyExclusiveGroup: true,
       checked: selected,
-      child: _Press(
+      child: Press(
+        focusNode: focus,
         radius: variant == 'cards' ? 14 : (variant == 'pills' ? 999 : 4),
         onTap: (_) => f.set(o.value),
         builder: (hovered, pressed) {
@@ -1025,7 +1316,9 @@ Widget buildRadioGroup(BuildContext context, OpenUiNode node) {
           }
           final cards = variant == 'cards';
           final ringWidth = cards && selected ? 2.0 : 1.0;
-          return Container(
+          return AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            curve: Curves.ease,
             constraints: const BoxConstraints(minHeight: 42),
             padding: cards
                 ? EdgeInsets.symmetric(
@@ -1050,60 +1343,60 @@ Widget buildRadioGroup(BuildContext context, OpenUiNode node) {
     );
   }
 
-  Widget options;
-  switch (variant) {
-    case 'pills':
-      options = Wrap(
-        spacing: OpenUiTheme.controlGap,
-        runSpacing: OpenUiTheme.controlGap,
-        children: [for (final o in choices) option(o)],
-      );
-    case 'cards':
-      options = LayoutBuilder(
-        builder: (context, box) {
-          const gap = OpenUiTheme.controlGap;
-          final columns = math.max(
-            1,
-            ((box.maxWidth + gap) / (200 + gap)).floor(),
-          );
-          final width = (box.maxWidth - gap * (columns - 1)) / columns;
-          final rows = [
-            for (var i = 0; i < choices.length; i += columns)
-              choices.sublist(i, math.min(i + columns, choices.length)),
-          ];
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (final (i, row) in rows.indexed) ...[
-                if (i > 0) const SizedBox(height: gap),
-                FlexRow(
-                  gap: gap,
-                  align: FlexAlign.stretch,
-                  children: [
-                    for (final o in row)
-                      FlexRowItem(fixed: (_) => width, child: option(o)),
-                  ],
-                ),
-              ],
+  Widget options(List<FocusNode> nodes) => switch (variant) {
+    'pills' => Wrap(
+      spacing: OpenUiTheme.controlGap,
+      runSpacing: OpenUiTheme.controlGap,
+      children: [for (final (i, o) in choices.indexed) option(o, nodes[i])],
+    ),
+    'cards' => LayoutBuilder(
+      builder: (context, box) {
+        const gap = OpenUiTheme.controlGap;
+        final columns = math.max(
+          1,
+          ((box.maxWidth + gap) / (200 + gap)).floor(),
+        );
+        final width = (box.maxWidth - gap * (columns - 1)) / columns;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var start = 0; start < choices.length; start += columns) ...[
+              if (start > 0) const SizedBox(height: gap),
+              FlexRow(
+                gap: gap,
+                align: FlexAlign.stretch,
+                children: [
+                  for (
+                    var i = start;
+                    i < math.min(start + columns, choices.length);
+                    i++
+                  )
+                    FlexRowItem(
+                      fixed: (_) => width,
+                      child: option(choices[i], nodes[i]),
+                    ),
+                ],
+              ),
             ],
-          );
-        },
-      );
-    default:
-      options = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (final (i, o) in choices.indexed) ...[
-            if (i > 0) const SizedBox(height: 2),
-            option(o),
           ],
+        );
+      },
+    ),
+    _ => Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final (i, o) in choices.indexed) ...[
+          if (i > 0) const SizedBox(height: 2),
+          option(o, nodes[i]),
         ],
-      );
-  }
+      ],
+    ),
+  };
   return Semantics(
     container: true,
+    role: SemanticsRole.radioGroup,
     label: label,
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1113,7 +1406,12 @@ Widget buildRadioGroup(BuildContext context, OpenUiNode node) {
           Text(label!, style: _labelStyle(theme)),
           const SizedBox(height: 10),
         ],
-        options,
+        _RadioKeys(
+          count: choices.length,
+          selected: choices.indexWhere((o) => o.value == value),
+          onSelect: (i) => f.set(choices[i].value),
+          builder: options,
+        ),
       ],
     ),
   );
@@ -1147,9 +1445,9 @@ Widget buildDatePicker(BuildContext context, OpenUiNode node) {
     label,
     Semantics(
       button: true,
-      label: _nonEmpty(label) ?? 'Date',
+      label: _nonEmpty(label) == null ? 'Date' : null,
       value: current == null ? null : _formatDate(current),
-      child: _Press(
+      child: Press(
         radius: OpenUiTheme.radiusMd,
         onTap: (ctx) async {
           final first = min ?? DateTime(1900);
@@ -1160,6 +1458,39 @@ Widget buildDatePicker(BuildContext context, OpenUiNode node) {
           var initial = current ?? DateTime(today.year, today.month, today.day);
           if (initial.isBefore(first)) initial = first;
           if (initial.isAfter(last)) initial = last;
+          if (Theme.of(ctx).platform == TargetPlatform.iOS) {
+            await showCupertinoModalPopup<void>(
+              context: ctx,
+              builder: (popup) => Container(
+                height: 260,
+                color: theme.canvas,
+                child: SafeArea(
+                  top: false,
+                  child: Column(
+                    children: [
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: CupertinoButton(
+                          onPressed: () => Navigator.pop(popup),
+                          child: const Text('Done'),
+                        ),
+                      ),
+                      Expanded(
+                        child: CupertinoDatePicker(
+                          mode: CupertinoDatePickerMode.date,
+                          initialDateTime: initial,
+                          minimumDate: first,
+                          maximumDate: last,
+                          onDateTimeChanged: (d) => f.set(_formatDate(d)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+            return;
+          }
           final picked = await showDatePicker(
             context: ctx,
             initialDate: initial,

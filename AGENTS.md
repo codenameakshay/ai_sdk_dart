@@ -40,6 +40,10 @@ is the source of truth for the ordinary package and example test matrix.
 The separate Flutter chat iOS E2E workflow runs the device integration target
 twice and retains screenshots and launch diagnostics.
 
+`ai_sdk_openui`'s date tests expect `TZ=UTC`, as the OpenUI reference pins it;
+`make test` and `tool/coverage.sh` set it, so set it yourself for a focused run.
+`make test-web` runs the same suite compiled to JavaScript on Node.
+
 ### Gotchas
 
 - `make test` runs every package and example test, and `make analyze` runs one

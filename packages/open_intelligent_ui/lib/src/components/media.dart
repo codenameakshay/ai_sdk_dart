@@ -152,10 +152,11 @@ class _PhotoState extends State<Photo> {
     final settled =
         current == null &&
         (!_needSearch || services.searchImages == null || found != null);
-    final ratio =
-        widget.aspectRatio != null &&
-            widget.aspectRatio! > 0.2 &&
-            widget.aspectRatio! < 5
+    final ratio = MediaRowSlot.of(context)
+        ? 4 / 3
+        : widget.aspectRatio != null &&
+              widget.aspectRatio! > 0.2 &&
+              widget.aspectRatio! < 5
         ? widget.aspectRatio!.toDouble()
         : 1.5;
     final radius =
@@ -177,7 +178,10 @@ class _PhotoState extends State<Photo> {
                 const _Shimmer(key: ValueKey('iui-shimmer')),
               AnimatedOpacity(
                 opacity: loaded ? 1 : 0,
-                duration: const Duration(milliseconds: 300),
+                duration: reduce
+                    ? Duration.zero
+                    : const Duration(milliseconds: 300),
+                curve: Curves.ease,
                 child: child,
               ),
             ],
@@ -198,7 +202,14 @@ class _PhotoState extends State<Photo> {
         label: _alt,
         image: true,
         child: settled
-            ? Center(child: Glyph('image', size: 26, color: theme.borderStrong))
+            ? Center(
+                child: Glyph(
+                  'image',
+                  size: 26,
+                  color: theme.borderStrong,
+                  strokeWidth: 1.5,
+                ),
+              )
             : reduce
             ? const SizedBox.expand()
             : const _Shimmer(key: ValueKey('iui-shimmer')),

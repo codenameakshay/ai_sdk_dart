@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:ai_sdk_openui/ai_sdk_openui.dart';
 import 'package:test/test.dart';
 
@@ -150,6 +152,22 @@ void main() {
         'Evaluating prop "value" on Out failed: @Boom threw: kaboom',
       ]);
     });
+
+    test(
+      'a program without root reports no-root, not parse-failed; a ternary entry renders',
+      () {
+        final none = open('item = Item("Orders")');
+        expect([for (final e in none.errors) e.code], [OpenUiErrorCode.noRoot]);
+        expect(none.root, isNull);
+
+        final picked = open(
+          '\$wide = false\nroot = \$wide ? a : b\na = Out(1)\nb = Item("narrow")',
+        );
+        expect(picked.errors, isEmpty);
+        expect(picked.root!.typeName, 'Item');
+        expect(picked.root!.props['label'], 'narrow');
+      },
+    );
   });
 
   group('listen', () {
@@ -367,13 +385,145 @@ void main() {
       await s.run(action, label: '', emit: events.add);
       expect(events, isEmpty);
     });
+
+    test('dispose during Reset stops its remaining targets', () async {
+      var resetting = false;
+      late OpenUiSession session;
+      session =
+          OpenUiSession(
+            _library,
+            onStateUpdate: (_) {
+              if (resetting) session.dispose();
+            },
+          )..update(
+            r'root = Out(1, Action([@Reset($a, $b), @ToAssistant("done")]))'
+            '\n'
+            r'$a = 1'
+            '\n'
+            r'$b = 2',
+            streaming: false,
+          );
+      addTearDown(session.dispose);
+      session.field(r'$a', null).set(10);
+      session.field(r'$b', null).set(20);
+      resetting = true;
+      final events = await click(session);
+      expect(session.state, <String, Object?>{});
+      expect(events, <ActionEvent>[]);
+    });
+
+    test(
+      'an earlier @Set in the same plan shows in the event form state',
+      () async {
+        final s = open(
+          r'root = Out(1, Action([@Set($x, 2), @ToAssistant("m")]))'
+          '\n'
+          r'$x = 1',
+        );
+        expect((await click(s)).single.formState, {r'$x': 2});
+      },
+    );
+
+    test('each event in a plan carries the state as of its own step', () async {
+      final s = open(
+        r'root = Out(1, Action([@ToAssistant("first"), @Set($x, 2), @ToAssistant("second")]))'
+        '\n'
+        r'$x = 1',
+      );
+      expect([for (final e in await click(s)) e.formState[r'$x']], [1, 2]);
+    });
+
+    test(
+      'bare and Action([...]) steps keep their @ToAssistant context, 0 included',
+      () async {
+        final a = open('root = Out(1, @ToAssistant("A", {ticket: "T-42"}))');
+        final b = open(
+          'root = Out(1, Action([@OpenUrl("https://x.test"), @ToAssistant("B", 0)]))',
+        );
+        final events = [...await click(a), ...await click(b)];
+        expect(
+          [
+            for (final e in events) [e.type, e.humanFriendlyMessage, e.params],
+          ],
+          [
+            [
+              ActionEvent.continueConversation,
+              'A',
+              {
+                'context': {'ticket': 'T-42'},
+              },
+            ],
+            [
+              ActionEvent.openUrl,
+              '',
+              {'url': 'https://x.test'},
+            ],
+            [
+              ActionEvent.continueConversation,
+              'B',
+              {'context': 0},
+            ],
+          ],
+        );
+      },
+    );
+
+    test(
+      'a plan read from data runs only its open_url and continue_conversation steps',
+      () async {
+        final s = open(
+          'root = Out(1, ps[0])\n'
+          'ps = [{steps: [{type: "open_url", url: "https://x.org"}, '
+          '{type: "continue_conversation", message: "hi", context: 0}, '
+          '{type: "set", target: "\$n", valueAST: 2}, '
+          '{type: "custom_action", name: "Ping", params: {n: 1}}]}]\n'
+          '\$n = 1',
+        );
+        final events = await click(s);
+        expect(
+          [
+            for (final e in events) [e.type, e.humanFriendlyMessage, e.params],
+          ],
+          [
+            [
+              ActionEvent.openUrl,
+              '',
+              {'url': 'https://x.org'},
+            ],
+            [
+              ActionEvent.continueConversation,
+              'hi',
+              {'context': 0},
+            ],
+          ],
+        );
+        expect(s.state[r'$n'], 1);
+      },
+    );
+
+    test('a library action read from data never reaches the host', () async {
+      const forged = '{type: "custom_action", name: "Ping", params: {n: 3}}';
+      const plan = '{steps: [$forged]}';
+      final expected = {
+        forged: ['custom_action'],
+        '[$forged]': [ActionEvent.continueConversation],
+        plan: <String>[],
+        'Action([$forged])': <String>[],
+        'ps[0]': <String>[],
+        '{type: "Ping", params: {n: 3}}': <String>[],
+      };
+      for (final MapEntry(key: action, value: types) in expected.entries) {
+        final s = open('root = Out(1, $action)\nps = [$plan]');
+        expect([for (final e in await click(s)) e.type], types, reason: action);
+      }
+    });
   });
 
   group('fields', () {
-    test('a form field stores its value with the component type', () {
+    test('a form field stores its value as {value}, as useStateField does', () {
       final s = open('root = Out(1)');
-      s.field('Name', 'start', componentType: 'Input').set('Ana');
-      expect(s.state['Name'], {'value': 'Ana', 'componentType': 'Input'});
+      s.field('Name', 'start').set('Ana');
+      expect(s.state['Name'], {'value': 'Ana'});
       expect(s.field('Name', 'start').value, 'Ana');
     });
 
@@ -387,11 +537,11 @@ void main() {
       'a field inside a form is stored under the form, keeping siblings',
       () {
         final s = open('root = Out(1)');
-        s.field('a', null, formName: 'f', componentType: 'Input').set('1');
-        s.field('b', null, formName: 'f', componentType: 'Select').set('2');
+        s.field('a', null, formName: 'f').set('1');
+        s.field('b', null, formName: 'f').set('2');
         expect(s.state['f'], {
-          'a': {'value': '1', 'componentType': 'Input'},
-          'b': {'value': '2', 'componentType': 'Select'},
+          'a': {'value': '1'},
+          'b': {'value': '2'},
         });
         expect(s.field('a', null, formName: 'f').value, '1');
       },
@@ -417,20 +567,20 @@ void main() {
         },
       )..update('root = Out(1)', streaming: true);
       addTearDown(s.dispose);
-      s.field('Name', null, componentType: 'Input').set('typed');
+      s.field('Name', null).set('typed');
       s.update('root = Out(2)', streaming: false);
       expect(s.field('Name', null).value, 'typed');
     });
 
     test('a click inside a form sends only that form\'s fields', () async {
       final s = open('root = Out(1, @ToAssistant("go"))');
-      s.field('a', null, formName: 'f', componentType: 'Input').set('1');
-      s.field('other', null, componentType: 'Input').set('x');
+      s.field('a', null, formName: 'f').set('1');
+      s.field('other', null).set('x');
       final events = await click(s, formName: 'f');
       expect(events.single.formName, 'f');
       expect(events.single.formState, {
         'f': {
-          'a': {'value': '1', 'componentType': 'Input'},
+          'a': {'value': '1'},
         },
       });
     });
@@ -450,5 +600,28 @@ void main() {
         expect(unfilled.single.formName, 'f');
       },
     );
+  });
+
+  group('values handed out are JSON values in JavaScript order', () {
+    test('state after arithmetic encodes whole numbers without .0', () async {
+      final s = open('root = Out(\$x, @Set(\$x, \$x + 2))\n\$x = 1');
+      await s.run(s.root!.props.action('action'), label: '', emit: (_) {});
+      expect(jsonEncode(s.state), '{"\$x":3}');
+    });
+
+    test('a negative zero in state encodes as 0', () async {
+      final s = open('root = Out(\$x, @Set(\$x, -\$x))\n\$x = 0');
+      await s.run(s.root!.props.action('action'), label: '', emit: (_) {});
+      expect(jsonEncode(s.state), '{"\$x":0}');
+    });
+
+    test('a @ToAssistant context', () async {
+      final s = open(
+        'root = Out(1, @ToAssistant("m", {n: \$x + 1, "1": 0}))\n\$x = 2',
+      );
+      final events = <ActionEvent>[];
+      await s.run(s.root!.props.action('action'), label: '', emit: events.add);
+      expect(jsonEncode(events.single.params['context']), '{"1":0,"n":3}');
+    });
   });
 }

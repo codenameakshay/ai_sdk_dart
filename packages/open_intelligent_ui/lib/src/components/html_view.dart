@@ -119,7 +119,10 @@ class _Unsupported extends StatelessWidget {
               Text(
                 title,
                 textAlign: TextAlign.center,
-                style: TextStyle(fontWeight: FontWeight.w600, color: theme.ink),
+                style: TextStyle(
+                  fontWeight: OpenUiTheme.weightSemibold,
+                  color: theme.ink,
+                ),
               ),
               const SizedBox(height: 4),
               Text(

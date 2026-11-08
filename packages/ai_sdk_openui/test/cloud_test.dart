@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:ai_sdk_openui/ai_sdk_openui.dart';
+import 'package:ai_sdk_openui/src/spec/cloud.dart' show validateChatLibrary;
 import 'package:test/test.dart';
 
 final class _C implements ComponentSpec {
@@ -223,6 +224,197 @@ void main() {
           ),
         ),
       );
+    });
+  });
+
+  // Messages are what lang-core 1.0.0's generateSystemPrompt({cloud: true, library}) throws in Node 26.
+  group('validateChatLibrary', () {
+    String messages(Object? spec) =>
+        [for (final i in validateChatLibrary(spec)) i.message].join(' ');
+
+    test('reports a missing root, an unknown required property and a bad ref', () {
+      expect(
+        messages({
+          'root': 'Missing',
+          'components': <String, Object?>{},
+          'schema': {
+            r'$defs': {
+              'Card': {
+                'properties': {
+                  'body': {r'$ref': r'#/$defs/Nope'},
+                },
+                'required': ['ghost'],
+              },
+            },
+          },
+        }),
+        r'Root component "Missing" was not found in schema.$defs. Available components: Card. '
+        r'$defs/Card lists required property "ghost" that is not in properties. '
+        r'Unresolvable $ref "#/$defs/Nope" at $defs/Card/properties/body — refs must be "#/$defs/<name>" pointing at a component in $defs.',
+      );
+    });
+
+    test('reports every malformed part in one pass', () {
+      expect(
+        messages({
+          'root': '',
+          'components': <String, Object?>{},
+          'schema': {
+            r'$defs': {
+              'A': 5,
+              'B': {'properties': <Object?>[], 'required': 'x'},
+              'C': {
+                'properties': {
+                  'p': {
+                    'items': [
+                      {r'$ref': 'bad'},
+                    ],
+                  },
+                },
+                'required': ['p', 2],
+              },
+            },
+          },
+          'componentGroups': [
+            {
+              'name': 'g',
+              'components': ['A', 'Z', 3],
+            },
+            {'name': 1},
+          ],
+        }),
+        r'chatLibrary.root, when present, must be a non-empty string. '
+        r'$defs/A must be an object component schema. '
+        r'$defs/B/properties must be an object. '
+        r'$defs/B/required must be an array of property names. '
+        r'$defs/C/required must be an array of property names. '
+        r'Unresolvable $ref "bad" at $defs/C/properties/p/items/0 — refs must be "#/$defs/<name>" pointing at a component in $defs. '
+        r'Component group "g" references unknown component "Z". '
+        r'Component group "g" references unknown component "3". '
+        r'Each componentGroups entry must be {name: string, components: string[], notes?: string[]}.',
+      );
+    });
+
+    test('stops at a schema that is not an object or has no defs', () {
+      expect(
+        messages({'root': 'A', 'schema': 5}),
+        r'chatLibrary.schema must be an object with a $defs map of component schemas.',
+      );
+      expect(
+        messages({
+          'root': 'A',
+          'schema': {r'$defs': <String, Object?>{}},
+        }),
+        r'chatLibrary.schema.$defs must be a non-empty object keyed by component name.',
+      );
+      expect(messages(5), 'chatLibrary must be an object.');
+    });
+
+    test('accepts a library spec', () {
+      expect(validateChatLibrary(_lib.toSpec()), isEmpty);
+    });
+  });
+
+  group('lang-core cloud.test.ts cases', () {
+    test(
+      'artifactTool with artifacts null enables every type, as with no options',
+      () {
+        expect(artifactTool(artifacts: null), {
+          'type': 'artifact',
+          'artifacts': [
+            {'artifact_type': 'slides', 'library_version': '0.1.0'},
+            {'artifact_type': 'report', 'library_version': '0.1.0'},
+          ],
+        });
+      },
+    );
+
+    test('mixed shorthand and object entries keep their order', () {
+      final entries =
+          (artifactTool(
+                    artifacts: [
+                      const ArtifactOption(
+                        ArtifactKind.slides,
+                        instruction: 'Use the corporate template.',
+                      ),
+                      const ArtifactOption(ArtifactKind.report),
+                    ],
+                  )['artifacts']
+                  as List)
+              .cast<Map<String, Object?>>();
+      expect(
+        [for (final a in entries) a['artifact_type']],
+        ['slides', 'report'],
+      );
+      expect(entries[0]['instruction'], 'Use the corporate template.');
+      expect(entries[1].containsKey('instruction'), isFalse);
+    });
+
+    test('every emitted artifact_type is Cloud-supported', () {
+      final entries =
+          (artifactTool(
+                    artifacts: [
+                      const ArtifactOption(ArtifactKind.slides),
+                      const ArtifactOption(ArtifactKind.report),
+                    ],
+                  )['artifacts']
+                  as List)
+              .cast<Map<String, Object?>>();
+      for (final a in entries) {
+        expect(['slides', 'report'], contains(a['artifact_type']));
+      }
+    });
+
+    test('libraryVersion override wins over the pinned constant', () {
+      expect(
+        artifactTool(
+          artifacts: [
+            const ArtifactOption(ArtifactKind.report, libraryVersion: '2.3.0'),
+          ],
+        ),
+        {
+          'type': 'artifact',
+          'artifacts': [
+            {'artifact_type': 'report', 'library_version': '2.3.0'},
+          ],
+        },
+      );
+    });
+
+    test('emitted keys are a subset of Cloud config keys', () {
+      const cloudKeys = [
+        'libraryVersion',
+        'customComponents',
+        'customActions',
+        'openrouterProvider',
+        'chatLibrary',
+        'systemPromptOptions',
+      ];
+      final json = cloudSystemPrompt(instructions: 'Be terse.').split('\n')[1];
+      for (final key in (jsonDecode(json) as Map).keys) {
+        expect(cloudKeys, contains(key));
+      }
+    });
+
+    test('emits the library under chatLibrary, dropping components', () {
+      final config = _decodeConfig(cloudSystemPrompt(library: _lib));
+      expect(config.keys, ['chatLibrary']);
+      expect((config['chatLibrary'] as Map).containsKey('components'), isFalse);
+    });
+
+    test('systemPromptOptions rides as a sibling key', () {
+      final config = _decodeConfig(
+        cloudSystemPrompt(
+          library: _lib,
+          promptOptions: const CloudPromptOptions(
+            preamble: 'You generate UI for Acme.',
+          ),
+        ),
+      );
+      expect(config.keys, ['chatLibrary', 'systemPromptOptions']);
+      expect(config['systemPromptOptions'], {
+        'preamble': 'You generate UI for Acme.',
+      });
     });
   });
 }

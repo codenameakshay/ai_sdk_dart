@@ -13,6 +13,7 @@ class FlexRowItem extends ParentDataWidget<_FlexRowData> {
     this.shrink = true,
     this.fixed,
     this.zeroBasis = false,
+    this.alignSelf,
     required super.child,
   });
   final double grow;
@@ -28,6 +29,9 @@ class FlexRowItem extends ParentDataWidget<_FlexRowData> {
   /// Starts from a zero basis, so [grow] alone sets the width (`flex: N 1 0%`).
   final bool zeroBasis;
 
+  /// CSS `align-self`: this child's cross-axis place, over the row's [FlexRow.align].
+  final FlexAlign? alignSelf;
+
   @override
   void applyParentData(RenderObject renderObject) {
     final data = renderObject.parentData! as _FlexRowData;
@@ -35,9 +39,11 @@ class FlexRowItem extends ParentDataWidget<_FlexRowData> {
         data.spacer != spacer ||
         data.fixed != fixed ||
         data.shrink != shrink ||
-        data.zeroBasis != zeroBasis) {
+        data.zeroBasis != zeroBasis ||
+        data.alignSelf != alignSelf) {
       data
         ..grow = grow
+        ..alignSelf = alignSelf
         ..spacer = spacer
         ..shrink = shrink
         ..zeroBasis = zeroBasis
@@ -64,22 +70,28 @@ class FlexRow extends MultiChildRenderObjectWidget {
     this.gap = 0,
     this.justify = FlexJustify.start,
     this.align = FlexAlign.center,
+    this.wrap = false,
     super.children,
   });
   final double gap;
   final FlexJustify justify;
   final FlexAlign align;
 
+  /// CSS `flex-wrap: wrap`: children that do not fit start a new line, [gap]
+  /// below; each line grows, shrinks and justifies on its own.
+  final bool wrap;
+
   @override
   RenderObject createRenderObject(BuildContext context) =>
-      RenderFlexRow(gap: gap, justify: justify, align: align);
+      RenderFlexRow(gap: gap, justify: justify, align: align, wrap: wrap);
 
   @override
   void updateRenderObject(BuildContext context, RenderFlexRow renderObject) =>
       renderObject
         ..gap = gap
         ..justify = justify
-        ..align = align;
+        ..align = align
+        ..wrap = wrap;
 }
 
 class _FlexRowData extends ContainerBoxParentData<RenderBox> {
@@ -87,6 +99,7 @@ class _FlexRowData extends ContainerBoxParentData<RenderBox> {
   bool spacer = false;
   bool shrink = true;
   bool zeroBasis = false;
+  FlexAlign? alignSelf;
   double Function(double available)? fixed;
 }
 
@@ -98,9 +111,11 @@ class RenderFlexRow extends RenderBox
     required double gap,
     required FlexJustify justify,
     required FlexAlign align,
+    bool wrap = false,
   }) : _gap = gap,
        _justify = justify,
-       _align = align;
+       _align = align,
+       _wrap = wrap;
 
   double _gap;
   set gap(double v) {
@@ -120,6 +135,13 @@ class RenderFlexRow extends RenderBox
   set align(FlexAlign v) {
     if (v == _align) return;
     _align = v;
+    markNeedsLayout();
+  }
+
+  bool _wrap;
+  set wrap(bool v) {
+    if (v == _wrap) return;
+    _wrap = v;
     markNeedsLayout();
   }
 
@@ -193,59 +215,108 @@ class RenderFlexRow extends RenderBox
                 .width,
   ];
 
+  FlexAlign _alignOf(RenderBox c) => _data(c).alignSelf ?? _align;
+
+  /// Child indexes per flex line: one line, or with [wrap] as many as it
+  /// takes for each line's natural widths and gaps to fit in [available].
+  List<List<int>> _lines(List<double> natural, double available) {
+    if (!_wrap) {
+      return [
+        [for (var i = 0; i < natural.length; i++) i],
+      ];
+    }
+    final lines = <List<int>>[];
+    var used = 0.0;
+    for (var i = 0; i < natural.length; i++) {
+      if (lines.isNotEmpty && used + _gap + natural[i] <= available) {
+        lines.last.add(i);
+        used += _gap + natural[i];
+      } else {
+        lines.add([i]);
+        used = natural[i];
+      }
+    }
+    return lines;
+  }
+
   @override
   void performLayout() {
     final children = _children;
     final available = constraints.maxWidth;
-    final widths = _widths(
-      children,
-      available,
-      _natural(children, available, dry: false),
-    );
-    var height = 0.0;
-    for (final (i, c) in children.indexed) {
-      c.layout(
-        BoxConstraints(minWidth: widths[i], maxWidth: widths[i]),
-        parentUsesSize: true,
-      );
-      height = math.max(height, c.size.height);
-    }
-    height = constraints.constrainHeight(height);
-    if (_align == FlexAlign.stretch) {
-      for (final (i, c) in children.indexed) {
+    final natural = _natural(children, available, dry: false);
+    var top = 0.0;
+    var widest = 0.0;
+    for (final (k, line) in _lines(natural, available).indexed) {
+      if (k > 0) top += _gap;
+      final kids = [for (final i in line) children[i]];
+      final widths = _widths(kids, available, [
+        for (final i in line) natural[i],
+      ]);
+      var height = 0.0;
+      for (final (i, c) in kids.indexed) {
         c.layout(
-          BoxConstraints.tightFor(width: widths[i], height: height),
+          BoxConstraints(minWidth: widths[i], maxWidth: widths[i]),
           parentUsesSize: true,
         );
+        height = math.max(height, c.size.height);
       }
-    }
-    final used =
-        widths.fold(0.0, (a, b) => a + b) +
-        _gap * math.max(0, children.length - 1);
-    final width = available.isFinite ? available : used;
-    final free = math.max(0.0, width - used);
-    var x = switch (_justify) {
-      FlexJustify.center => free / 2,
-      FlexJustify.end => free,
-      _ => 0.0,
-    };
-    final between = _justify == FlexJustify.between && children.length > 1
-        ? free / (children.length - 1)
-        : 0.0;
-    for (final c in children) {
-      final y = switch (_align) {
-        FlexAlign.start || FlexAlign.stretch => 0.0,
-        FlexAlign.end => height - c.size.height,
-        FlexAlign.center => (height - c.size.height) / 2,
+      if (!_wrap) height = constraints.constrainHeight(height);
+      for (final (i, c) in kids.indexed) {
+        if (_alignOf(c) == FlexAlign.stretch) {
+          c.layout(
+            BoxConstraints.tightFor(width: widths[i], height: height),
+            parentUsesSize: true,
+          );
+        }
+      }
+      final used =
+          widths.fold(0.0, (a, b) => a + b) +
+          _gap * math.max(0, kids.length - 1);
+      widest = math.max(widest, used);
+      final free = math.max(
+        0.0,
+        (available.isFinite ? available : used) - used,
+      );
+      var x = switch (_justify) {
+        FlexJustify.center => free / 2,
+        FlexJustify.end => free,
+        _ => 0.0,
       };
-      _data(c).offset = Offset(x, y);
-      x += c.size.width + _gap + between;
+      final between = _justify == FlexJustify.between && kids.length > 1
+          ? free / (kids.length - 1)
+          : 0.0;
+      for (final c in kids) {
+        final y = switch (_alignOf(c)) {
+          FlexAlign.start || FlexAlign.stretch => 0.0,
+          FlexAlign.end => height - c.size.height,
+          FlexAlign.center => (height - c.size.height) / 2,
+        };
+        _data(c).offset = Offset(x, top + y);
+        x += c.size.width + _gap + between;
+      }
+      top += height;
     }
-    size = constraints.constrain(Size(width, height));
+    size = constraints.constrain(
+      Size(available.isFinite ? available : widest, top),
+    );
   }
 
+  /// CSS min-content: the children's min-content widths and gaps added up,
+  /// or with [wrap] the widest of them.
   @override
-  double computeMinIntrinsicWidth(double height) => 0;
+  double computeMinIntrinsicWidth(double height) {
+    final widths = [
+      for (final c in _children)
+        _data(c).spacer
+            ? 0.0
+            : _data(c).fixed != null
+            ? _data(c).fixed!(0)
+            : c.getMinIntrinsicWidth(double.infinity),
+    ];
+    if (_wrap) return widths.fold(0.0, math.max);
+    return widths.fold(0.0, (a, b) => a + b) +
+        _gap * math.max(0, childCount - 1);
+  }
 
   @override
   double computeMaxIntrinsicWidth(double height) =>
@@ -267,23 +338,31 @@ class RenderFlexRow extends RenderBox
   @override
   Size computeDryLayout(BoxConstraints constraints) {
     final children = _children;
-    final widths = _widths(
-      children,
-      constraints.maxWidth,
-      _natural(children, constraints.maxWidth, dry: true),
-    );
-    var height = 0.0;
-    for (final (i, c) in children.indexed) {
-      height = math.max(
-        height,
-        c.getDryLayout(BoxConstraints.tightFor(width: widths[i])).height,
+    final available = constraints.maxWidth;
+    final natural = _natural(children, available, dry: true);
+    var top = 0.0;
+    var widest = 0.0;
+    for (final (k, line) in _lines(natural, available).indexed) {
+      if (k > 0) top += _gap;
+      final kids = [for (final i in line) children[i]];
+      final widths = _widths(kids, available, [
+        for (final i in line) natural[i],
+      ]);
+      var height = 0.0;
+      for (final (i, c) in kids.indexed) {
+        height = math.max(
+          height,
+          c.getDryLayout(BoxConstraints.tightFor(width: widths[i])).height,
+        );
+      }
+      widest = math.max(
+        widest,
+        widths.fold(0.0, (a, b) => a + b) + _gap * math.max(0, kids.length - 1),
       );
+      top += height;
     }
-    final used =
-        widths.fold(0.0, (a, b) => a + b) +
-        _gap * math.max(0, children.length - 1);
     return constraints.constrain(
-      Size(constraints.maxWidth.isFinite ? constraints.maxWidth : used, height),
+      Size(available.isFinite ? available : widest, top),
     );
   }
 

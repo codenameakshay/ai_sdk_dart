@@ -6,6 +6,7 @@ import 'package:flutter_math_fork/flutter_math.dart';
 
 import '../theme.dart';
 import '../view.dart';
+import 'controls.dart' show Press;
 import 'glyph.dart';
 
 String _str(Object? value) => value == null ? '' : jsString(value);
@@ -79,30 +80,42 @@ class _CodeBlockState extends State<_CodeBlock> {
                   ),
                 ),
                 Semantics(
+                  container: true,
                   button: true,
                   label: 'Copy code',
                   excludeSemantics: true,
-                  child: InkWell(
-                    onTap: _copy,
-                    borderRadius: BorderRadius.circular(6),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Glyph(
-                            _copied ? 'check' : 'copy',
-                            size: 14,
-                            color: theme.muted,
-                          ),
-                          const SizedBox(width: 5),
-                          Text(_copied ? 'Copied' : 'Copy', style: head),
-                        ],
-                      ),
-                    ),
+                  child: Press(
+                    radius: 6,
+                    onTap: (_) => _copy(),
+                    builder: (hovered, pressed) {
+                      final color = hovered ? theme.ink : theme.muted;
+                      return Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: hovered ? theme.hover : null,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Glyph(
+                              _copied ? 'check' : 'copy',
+                              size: 14,
+                              color: color,
+                              strokeWidth: 2,
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              _copied ? 'Copied' : 'Copy',
+                              style: head.copyWith(color: color),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
                   ),
                 ),
               ],

@@ -1,9 +1,11 @@
 import 'package:ai_sdk_openui/ai_sdk_openui.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart' show SemanticsRole;
 
 import '../theme.dart';
 import '../view.dart';
 import 'block_slot.dart';
+import 'controls.dart' show Press;
 import 'glyph.dart';
 import 'markdown.dart';
 
@@ -27,25 +29,26 @@ const _textSizes = <String, ({double size, double height})>{
 };
 
 const _weights = <String, FontWeight>{
-  'normal': FontWeight.w400,
-  'medium': FontWeight.w500,
-  'semibold': FontWeight.w600,
+  'normal': OpenUiTheme.weightNormal,
+  'medium': OpenUiTheme.weightMedium,
+  'semibold': OpenUiTheme.weightSemibold,
 };
 
 ({double fontSize, double height, double letterSpacing}) _titleMetrics(
-  String? size,
-) => switch (size) {
+  String? size, {
+  required bool compact,
+}) => switch (size) {
   'sm' => (fontSize: 15, height: 1.5, letterSpacing: 0),
-  'lg' => (fontSize: 21, height: 1.3, letterSpacing: -0.55),
+  'lg' => (fontSize: compact ? 19 : 21, height: 1.3, letterSpacing: -0.55),
   'xl' => (fontSize: 25, height: 1.2, letterSpacing: -0.8),
-  '2xl' => (fontSize: 32, height: 1.15, letterSpacing: -1),
-  '3xl' => (fontSize: 40, height: 1.1, letterSpacing: -1.4),
+  '2xl' => (fontSize: compact ? 28 : 32, height: 1.15, letterSpacing: -1),
+  '3xl' => (fontSize: compact ? 34 : 40, height: 1.1, letterSpacing: -1.4),
   _ => (fontSize: 17, height: 1.4, letterSpacing: -0.2),
 };
 
 TextStyle _textStyle(
   OpenUiTheme theme, {
-  required Color color,
+  Color? color,
   double? size,
   double? height,
   FontWeight? weight,
@@ -71,9 +74,15 @@ List<InlineSpan> _textSpans(
   BuildContext context,
   Object? value,
   TextStyle style,
+  InlineLinks links,
 ) {
   if (value is String) {
-    return inlineSpans(_preLine(value, dropSpace: true), context, style: style);
+    return inlineSpans(
+      _preLine(value, dropSpace: true),
+      context,
+      style: style,
+      links: links,
+    );
   }
   if (value is! List) return const [];
   final spans = <InlineSpan>[];
@@ -95,7 +104,7 @@ List<InlineSpan> _textSpans(
       if (text.isNotEmpty) {
         dropSpace = text.endsWith('\n') || text.endsWith(' ');
       }
-      spans.addAll(inlineSpans(text, context, style: style));
+      spans.addAll(inlineSpans(text, context, style: style, links: links));
     }
   }
   return spans;
@@ -115,8 +124,8 @@ Widget _richText(
   Object? value,
   TextStyle style, {
   int? maxLines,
-}) => Text.rich(
-  TextSpan(children: _textSpans(context, value, style)),
+}) => InlineText(
+  (context, links) => _textSpans(context, value, style, links),
   style: style,
   maxLines: maxLines,
   overflow: maxLines == null ? null : TextOverflow.ellipsis,
@@ -155,7 +164,10 @@ Widget buildTitle(BuildContext context, OpenUiNode node) {
   final theme = node.theme;
   final name = node.props.string('size');
   final slot = BlockSlot.of(context, node.element);
-  final base = _titleMetrics(name);
+  final base = _titleMetrics(
+    name,
+    compact: MediaQuery.sizeOf(context).width <= 640,
+  );
   final cardTitle =
       (name == null || name == 'sm' || name == 'md') &&
       _isCardTitle(context, slot);
@@ -163,10 +175,15 @@ Widget buildTitle(BuildContext context, OpenUiNode node) {
       (name == 'lg' || name == 'xl' || name == '2xl' || name == '3xl') &&
       _isCardSized(slot);
   final (fontSize, height, letterSpacing, weight) = cardTitle
-      ? (14.0, 20 / 14, base.letterSpacing, FontWeight.w500)
+      ? (14.0, 20 / 14, base.letterSpacing, OpenUiTheme.weightMedium)
       : cardSized
-      ? (18.0, 24 / 18, -0.3, FontWeight.w600)
-      : (base.fontSize, base.height, base.letterSpacing, FontWeight.w600);
+      ? (18.0, 24 / 18, -0.3, OpenUiTheme.weightSemibold)
+      : (
+          base.fontSize,
+          base.height,
+          base.letterSpacing,
+          OpenUiTheme.weightSemibold,
+        );
   final style = _textStyle(
     theme,
     color: theme.fg(node.props['color']) ?? theme.ink,
@@ -200,16 +217,19 @@ Widget buildText(BuildContext context, OpenUiNode node) {
       : subtitle
       ? (fontSize: 13.0, height: 18 / 13)
       : (fontSize: size?.size, height: size?.height ?? 1.6);
+  final struck = props.boolean('lineThrough') == true;
   final style = _textStyle(
     theme,
-    color: theme.fg(props['color']) ?? (subtitle ? theme.muted : theme.ink),
+    color:
+        theme.fg(props['color']) ??
+        (subtitle || (struck && PressableScope.of(context))
+            ? theme.muted
+            : null),
     size: metrics.fontSize,
     height: metrics.height,
     weight: _weights[props.string('weight')],
     fontStyle: props.boolean('italic') == true ? FontStyle.italic : null,
-    decoration: props.boolean('lineThrough') == true
-        ? TextDecoration.lineThrough
-        : null,
+    decoration: struck ? TextDecoration.lineThrough : null,
     fontFeatures: props.boolean('tabularNums') == true ? _tabular : null,
   );
   return _subtitleGap(
@@ -248,7 +268,7 @@ Widget buildLabel(BuildContext context, OpenUiNode node) {
       color: theme.ink,
       size: 14,
       height: 1.4,
-      weight: FontWeight.w500,
+      weight: OpenUiTheme.weightMedium,
     ),
   );
 }
@@ -267,7 +287,7 @@ Widget buildBadge(BuildContext context, OpenUiNode node) {
     heightFactor: 1,
     child: Container(
       constraints: const BoxConstraints(minHeight: 26),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+      padding: EdgeInsets.fromLTRB(isLucideIcon(icon) ? 8 : 10, 3, 10, 3),
       decoration: BoxDecoration(
         color: background ?? theme.badgeNeutralSoft,
         borderRadius: BorderRadius.circular(999),
@@ -275,7 +295,7 @@ Widget buildBadge(BuildContext context, OpenUiNode node) {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (lucideCodepoint(icon) != null) ...[
+          if (isLucideIcon(icon)) ...[
             Glyph(icon, size: 14, color: color),
             const SizedBox(width: 5),
           ],
@@ -289,7 +309,7 @@ Widget buildBadge(BuildContext context, OpenUiNode node) {
                 color: color,
                 size: 13,
                 height: 18 / 13,
-                weight: FontWeight.w500,
+                weight: OpenUiTheme.weightMedium,
               ),
             ),
           ),
@@ -303,72 +323,38 @@ Widget buildLink(BuildContext context, OpenUiNode node) {
   final text = node.props.string('text') ?? '';
   final uri = webUri(node.props['url']);
   if (uri == null) return Text(text);
-  return _Link(
-    label: text.isEmpty ? uri.host : text,
-    style: DefaultTextStyle.of(context).style,
-    restingDecoration: node.theme.borderStrong,
-    onTap: () => node.services.openUrl(uri),
-  );
-}
-
-final class _Link extends StatefulWidget {
-  const _Link({
-    required this.label,
-    required this.style,
-    required this.restingDecoration,
-    required this.onTap,
-  });
-
-  final String label;
-  final TextStyle style;
-  final Color restingDecoration;
-  final VoidCallback onTap;
-
-  @override
-  State<_Link> createState() => _LinkState();
-}
-
-class _LinkState extends State<_Link> {
-  bool _hovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final base = widget.style;
-    final style = base.copyWith(
-      decoration: TextDecoration.underline,
-      decorationColor: _hovered ? base.color : widget.restingDecoration,
-    );
-    return Semantics(
-      link: true,
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        onEnter: (_) => setState(() => _hovered = true),
-        onExit: (_) => setState(() => _hovered = false),
-        child: GestureDetector(
-          onTap: widget.onTap,
-          child: Text.rich(
-            TextSpan(
-              children: [
-                TextSpan(text: widget.label),
-                WidgetSpan(
-                  alignment: PlaceholderAlignment.middle,
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 2),
-                    child: Glyph(
-                      'arrow-up-right',
-                      size: (base.fontSize ?? 14) * 0.85,
-                      color: base.color,
-                    ),
-                  ),
+  final base = DefaultTextStyle.of(context).style;
+  final resting = node.theme.borderStrong;
+  return Semantics(
+    link: true,
+    child: Press(
+      radius: 0,
+      onTap: (_) => node.services.openUrl(uri),
+      builder: (hovered, pressed) => Text.rich(
+        TextSpan(
+          children: [
+            TextSpan(text: text.isEmpty ? uri.host : text),
+            WidgetSpan(
+              alignment: PlaceholderAlignment.middle,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 2),
+                child: Glyph(
+                  'arrow-up-right',
+                  size: (base.fontSize ?? 14) * 0.85,
+                  color: base.color,
+                  strokeWidth: 2,
                 ),
-              ],
+              ),
             ),
-            style: style,
-          ),
+          ],
+        ),
+        style: base.copyWith(
+          decoration: TextDecoration.underline,
+          decorationColor: hovered ? base.color : resting,
         ),
       ),
-    );
-  }
+    ),
+  );
 }
 
 /// Items of a List, flattened one level.
@@ -443,7 +429,7 @@ Widget _customMarker(OpenUiTheme theme, String marker) {
           color: theme.onInk,
           size: 12,
           height: 1,
-          weight: FontWeight.w500,
+          weight: OpenUiTheme.weightMedium,
           fontFeatures: _tabular,
         ),
       ),
@@ -477,8 +463,9 @@ Widget buildList(BuildContext context, OpenUiNode node) {
   final chips = customs.any((m) => m != null && _stepMarker.hasMatch(m));
   final hasColumn = !none || customs.any((m) => m != null);
   final bullet = !numbered && !none;
+  final compact = MediaQuery.sizeOf(context).width <= 640;
   final (columnWidth, gap) = wide
-      ? (76.0, timeline ? 24.0 : 16.0)
+      ? (compact ? 64.0 : 76.0, compact ? 20.0 : (timeline ? 24.0 : 16.0))
       : bullet && !timeline && !chips
       ? (14.0, 8.0)
       : (24.0, 12.0);
@@ -511,12 +498,23 @@ Widget buildList(BuildContext context, OpenUiNode node) {
     }
     final markerBox = mark == null
         ? null
+        : numbered && !textMarker
+        ? SizedBox.square(
+            dimension: 24,
+            child: custom == null
+                ? mark
+                : DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: theme.ink,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Center(child: mark),
+                  ),
+          )
         : SizedBox(
             height: fontSize * 1.55,
             child: Align(
-              alignment: (custom == null ? numbered : textMarker)
-                  ? Alignment.centerLeft
-                  : Alignment.center,
+              alignment: textMarker ? Alignment.centerLeft : Alignment.center,
               child: mark,
             ),
           );
@@ -538,32 +536,44 @@ Widget buildList(BuildContext context, OpenUiNode node) {
       ),
     );
     rows.add(
-      Stack(
-        children: [
-          if (connects)
-            Positioned(
-              left: wide ? 83 : 11.5,
-              top: 1.7 * fontSize,
-              bottom: 0.15 * fontSize,
-              width: 1,
-              child: ColoredBox(color: theme.borderStrong),
-            ),
-          row,
-          if (timeline && wide && textMarker)
-            Positioned(left: 80, top: 0.55 * fontSize, child: _ring(theme)),
-        ],
+      Semantics(
+        container: true,
+        role: SemanticsRole.listItem,
+        child: Stack(
+          children: [
+            if (connects)
+              Positioned(
+                left: wide ? (compact ? 73 : 83) : 11.5,
+                top: 1.7 * fontSize,
+                bottom: 0.15 * fontSize,
+                width: 1,
+                child: ColoredBox(color: theme.borderStrong),
+              ),
+            row,
+            if (timeline && wide && textMarker)
+              Positioned(
+                left: compact ? 70 : 80,
+                top: 0.55 * fontSize,
+                child: _ring(theme),
+              ),
+          ],
+        ),
       ),
     );
   }
 
-  return Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      for (final (k, row) in rows.indexed) ...[
-        if (k > 0 && !timeline) const SizedBox(height: 10),
-        row,
+  return Semantics(
+    container: true,
+    role: SemanticsRole.list,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final (k, row) in rows.indexed) ...[
+          if (k > 0 && !timeline) const SizedBox(height: 10),
+          row,
+        ],
       ],
-    ],
+    ),
   );
 }
 
@@ -582,7 +592,7 @@ Widget buildListItem(BuildContext context, OpenUiNode node) {
       _richText(
         context,
         props.string('title') ?? '',
-        TextStyle(fontWeight: inRich ? FontWeight.w500 : null),
+        TextStyle(fontWeight: inRich ? OpenUiTheme.weightMedium : null),
       ),
       if (description.isNotEmpty) ...[
         const SizedBox(height: 2),

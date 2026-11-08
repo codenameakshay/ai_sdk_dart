@@ -198,6 +198,29 @@ void main() {
       },
     );
 
+    test('disposing on mutation loading prevents its tool call', () async {
+      final calls = <String>[];
+      final events = <ActionEvent>[];
+      final s = open(
+        program,
+        tools: [
+          OpenUiTool(
+            name: 'save',
+            call: (_) async {
+              calls.add('save');
+              return 'saved';
+            },
+          ),
+        ],
+      );
+      s.listen(() {
+        if ((valueOf(s) as Map)['status'] == 'loading') s.dispose();
+      });
+      await click(s, events.add);
+      expect(calls, <String>[]);
+      expect(events, <ActionEvent>[]);
+    });
+
     test(
       'a new tool name resets the result to idle and clears the error',
       () async {
@@ -239,6 +262,32 @@ void main() {
   });
 
   group('Query', () {
+    test('disposing on query loading prevents its tool call', () async {
+      final calls = <String>[];
+      final reports = <List<OpenUiError>>[];
+      final s = OpenUiSession(
+        _library,
+        tools: [
+          OpenUiTool(
+            name: 't',
+            call: (_) async {
+              calls.add('t');
+              return 1;
+            },
+          ),
+        ],
+        onError: reports.add,
+      );
+      addTearDown(s.dispose);
+      s.listen(() {
+        if (s.isQueryLoading) s.dispose();
+      });
+      s.update('root = Out(q)\nq = Query("t", {}, 0)', streaming: false);
+      await settle();
+      expect(calls, <String>[]);
+      expect(reports, <List<OpenUiError>>[]);
+    });
+
     test(
       'does not fetch again while its data is settled or its fetch is in flight',
       () async {
@@ -393,19 +442,23 @@ void main() {
       },
     );
 
-    test('retryQueries does nothing when nothing failed', () async {
-      final gate = _Gate();
-      final s = open(
-        'root = Out(q)\nq = Query("t", {}, {n: 0})',
-        tools: [gate.tool('t')],
-      );
-      gate.answer(0, {'n': 1});
-      await settle();
-      s.retryQueries();
-      await settle();
-      expect(gate.calls, hasLength(1));
-      expect(valueOf(s), {'n': 1});
-    });
+    test(
+      'retryQueries with nothing failed fetches every Query again',
+      () async {
+        final gate = _Gate();
+        final s = open(
+          'root = Out(q)\nq = Query("t", {}, {n: 0})',
+          tools: [gate.tool('t')],
+        );
+        gate.answer(0, {'n': 1});
+        await settle();
+        s.retryQueries();
+        expect(gate.calls, hasLength(2));
+        gate.answer(1, {'n': 2});
+        await settle();
+        expect(valueOf(s), {'n': 2});
+      },
+    );
 
     test('retryQueries leaves a failed Mutation alone', () async {
       final gate = _Gate();
@@ -421,6 +474,41 @@ void main() {
       expect(gate.calls, hasLength(1));
       expect(s.issues, ['Mutation "t" failed: no']);
     });
+
+    test(
+      'statements sharing a failed fetch report one error and retry it once',
+      () async {
+        final gate = _Gate();
+        final s = open(
+          'root = Out([a, b])\na = Query("t", {}, 0)\nb = Query("t", {}, 0)',
+          tools: [gate.tool('t')],
+        );
+        expect(gate.calls, hasLength(1));
+        gate.fail(0, Exception('boom'));
+        await settle();
+        expect(
+          [for (final e in s.queryErrors) e.toJson()],
+          [
+            {
+              'source': 'query',
+              'code': 'tool-error',
+              'message': 'Query "t" failed: boom',
+              'statementId': 'a',
+              'component': 'Query',
+              'toolName': 't',
+            },
+          ],
+        );
+
+        s.retryQueries();
+        expect(gate.calls, hasLength(2));
+        gate.answer(1, 5);
+        await settle();
+        expect(valueOf(s), [5, 5]);
+        expect(s.queryErrors, isEmpty);
+        expect(gate.calls, hasLength(2));
+      },
+    );
 
     test(
       'args naming another statement read null, and every query is still fetched',
@@ -522,6 +610,24 @@ void main() {
       expect(manager.getResult('b'), 4);
     });
 
+    test(
+      'invalidate fetches a cache key that several statements share once',
+      () async {
+        var calls = 0;
+        final manager = QueryManager((name, args) async => ++calls)
+          ..evaluateQueries([node('a'), node('b')]);
+        addTearDown(manager.dispose);
+        await settle();
+        expect(calls, 1);
+
+        manager.invalidate();
+        await settle();
+        expect(calls, 2);
+        expect(manager.getResult('a'), 2);
+        expect(manager.getResult('b'), 2);
+      },
+    );
+
     test('invalidate skips ids it does not know', () async {
       var calls = 0;
       final manager = QueryManager((name, args) async => ++calls)
@@ -564,6 +670,53 @@ void main() {
       manager.invalidate();
       await settle();
       expect(heard, 2);
+    });
+  });
+
+  // Ported from lang-core 1.0.0 runtime/__tests__/queryManager.test.ts, with a 10 ms interval for 5 s.
+  group('QueryManager refresh interval lifecycle', () {
+    QueryNode node(String id, Object? refresh) => QueryNode(
+      statementId: id,
+      toolName: 'get_data',
+      args: const {},
+      defaults: const {},
+      refreshInterval: refresh,
+    );
+
+    test(
+      're-creates the refresh timer after dispose and re-evaluate',
+      () async {
+        var calls = 0;
+        final manager = QueryManager((_, _) async {
+          calls++;
+          return {'ok': true};
+        })..evaluateQueries([node('q1', 0.01)]);
+        await settle();
+        manager
+          ..dispose()
+          ..activate()
+          ..evaluateQueries([node('q1', 0.01)]);
+        await settle();
+        final before = calls;
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+        expect(calls, greaterThan(before));
+        manager.dispose();
+      },
+    );
+
+    test('clears the timer when the interval is removed', () async {
+      var calls = 0;
+      final manager = QueryManager((_, _) async {
+        calls++;
+        return {'ok': true};
+      })..evaluateQueries([node('q1', 0.01)]);
+      await settle();
+      manager.evaluateQueries([node('q1', 0)]);
+      await settle();
+      final before = calls;
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      expect(calls, before);
+      manager.dispose();
     });
   });
 }

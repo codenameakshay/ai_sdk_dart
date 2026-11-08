@@ -81,6 +81,9 @@ jobs:
       - name: Test packages with coverage (gate)
         run: make coverage-check DART=dart FLUTTER=flutter
 
+      - name: Test the OpenUI engine on dart2js
+        run: make test-web DART=dart
+
       - name: Test tooling
         run: dart test tool/
 

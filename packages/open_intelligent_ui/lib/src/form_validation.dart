@@ -40,11 +40,8 @@ final class OpenUiFormValidation extends ChangeNotifier {
     final errors = <String, String?>{};
     for (final entry in _fields.entries) {
       var value = entry.value.getValue();
-      if (value is Map &&
-          value.containsKey('value') &&
-          value.containsKey('componentType')) {
-        value = value['value'];
-      }
+      // A stored field is `{value}`, with `componentType` when a component gave one.
+      if (value is Map && value.containsKey('value')) value = value['value'];
       final error = validate(value, entry.value.rules);
       errors[entry.key] = error;
       if (error != null) allValid = false;

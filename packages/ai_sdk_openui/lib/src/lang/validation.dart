@@ -32,7 +32,7 @@ enum ValidationCode {
   final String wire;
 }
 
-final class ValidationError {
+final class ValidationError implements JsFields {
   const ValidationError({
     required this.code,
     required this.component,
@@ -48,6 +48,17 @@ final class ValidationError {
   final String message;
   final String? statementId;
   final bool isWarning;
+
+  /// lang-core's `ValidationError` object.
+  @override
+  Map<String, Object?> get jsFields => {
+    'code': code.wire,
+    'component': component,
+    'path': path,
+    'message': message,
+    'statementId': ?statementId,
+    if (isWarning) 'severity': 'warning',
+  };
 
   @override
   String toString() => message;
@@ -328,7 +339,7 @@ Object? _validateObject(
       out[key] = next;
     }
   }
-  return isInvalid ? invalid : out ?? value;
+  return isInvalid ? invalid : (out == null ? value : Js.ordered(out));
 }
 
 Object? _validateArray(

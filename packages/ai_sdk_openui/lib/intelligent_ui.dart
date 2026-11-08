@@ -7,3 +7,5 @@ export 'src/iui/components.dart' show IuiComponent;
 export 'src/iui/demo_tools.dart' show demoTools;
 export 'src/iui/actions.dart' show copyToClipboard;
 export 'src/iui/library.dart' show chatPrompt, dashboardPrompt, intelligentUi;
+
+export 'src/iui/functions/number_format.dart' show formatDecimal;

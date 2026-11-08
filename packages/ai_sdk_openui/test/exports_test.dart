@@ -54,4 +54,77 @@ void main() {
       '[openui] No handler for tool "t". Available: (none)',
     );
   });
+
+  test('the lang-core free functions and constants', () {
+    final r = parse(
+      'root = Col([Text("hi")])',
+      CompiledSchema.fromJsonSchema(_lib.toJsonSchema()),
+      'Col',
+    );
+    expect(r.root!.typeName, 'Col');
+    expect(actionSteps, {
+      'Run': 'run',
+      'ToAssistant': 'continue_conversation',
+      'OpenUrl': 'open_url',
+      'Set': 'set',
+      'Reset': 'reset',
+    });
+    expect(generateSystemPrompt(_lib), _lib.systemPrompt());
+    expect(
+      generatePrompt(
+        const PromptSpec(
+          root: 'Col',
+          components: {'Col': PromptEntry('Col(children: Text[])')},
+          toolCalls: true,
+        ),
+      ),
+      allOf(
+        contains('Col(children: Text[])'),
+        contains('@Count(array: any[])'),
+      ),
+    );
+    expect(
+      buildSignature('Card', {
+        'title': S.string(),
+        'subtitle': S.string().optional(),
+      }),
+      'Card(title: string, subtitle?: string)',
+    );
+    final manager = createQueryManager(
+      null,
+    )..registerMutations([const MutationNode(statementId: 'm', toolName: 't')]);
+    expect(manager.getMutationResult('m'), {'status': 'idle'});
+  });
+
+  test('resolveStateField binds a reactive field to the store', () {
+    final store = Store()..set(r'$n', 1);
+    final ctx = EvaluationContext(getState: store.get, resolveRef: (_) => null);
+    final bound = resolveStateField<Object?>(
+      'n',
+      const ReactiveAssign(
+        r'$n',
+        BinOpNode('+', StateRefNode(r'$value'), NumNode(1)),
+      ),
+      store,
+      ctx,
+      (_) => null,
+      (_, _) {},
+    );
+    expect([bound.value, bound.isReactive], [1, true]);
+    bound.setValue(4);
+    expect(store.get(r'$n'), 5);
+
+    final fields = <String, Object?>{'n': 'kept'};
+    final plain = resolveStateField<Object?>(
+      'n',
+      'default',
+      null,
+      null,
+      (name) => fields[name],
+      (name, value) => fields[name] = value,
+    );
+    expect([plain.value, plain.isReactive], ['kept', false]);
+    plain.setValue('new');
+    expect(fields['n'], 'new');
+  });
 }

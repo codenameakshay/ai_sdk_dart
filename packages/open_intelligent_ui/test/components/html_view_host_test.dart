@@ -1,6 +1,8 @@
 // webview_flutter_platform_interface is what webview_flutter builds on; a fake
 // platform from it is how a test supplies a web view.
 // ignore_for_file: depend_on_referenced_packages
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
@@ -10,12 +12,13 @@ import '../support/pump.dart';
 
 class _FakePlatform extends WebViewPlatform {
   final List<_FakeController> controllers = [];
+  Completer<void>? setup;
 
   @override
   PlatformWebViewController createPlatformWebViewController(
     PlatformWebViewControllerCreationParams params,
   ) {
-    final c = _FakeController(params);
+    final c = _FakeController(params)..setup = setup;
     controllers.add(c);
     return c;
   }
@@ -34,12 +37,20 @@ class _FakePlatform extends WebViewPlatform {
 class _FakeController extends PlatformWebViewController {
   _FakeController(super.params) : super.implementation();
 
+  Completer<void>? setup;
   final Map<String, void Function(JavaScriptMessage)> channels = {};
   final List<String> html = [];
+  final List<String?> baseUrls = [];
   final List<Uri> requests = [];
   JavaScriptMode? mode;
   _FakeDelegate? delegate;
   int cleared = 0;
+  void Function(PlatformWebViewPermissionRequest request)? onPermission;
+
+  @override
+  Future<void> setOnPlatformPermissionRequest(
+    void Function(PlatformWebViewPermissionRequest request) onPermissionRequest,
+  ) async => onPermission = onPermissionRequest;
 
   @override
   Future<void> setJavaScriptMode(JavaScriptMode javaScriptMode) async =>
@@ -49,17 +60,24 @@ class _FakeController extends PlatformWebViewController {
   Future<void> setBackgroundColor(Color color) async {}
 
   @override
-  Future<void> addJavaScriptChannel(JavaScriptChannelParams p) async =>
-      channels[p.name] = p.onMessageReceived;
+  Future<void> addJavaScriptChannel(JavaScriptChannelParams p) async {
+    await setup?.future;
+    channels[p.name] = p.onMessageReceived;
+  }
 
   @override
   Future<void> setPlatformNavigationDelegate(
     PlatformNavigationDelegate d,
-  ) async => delegate = d as _FakeDelegate;
+  ) async {
+    await setup?.future;
+    delegate = d as _FakeDelegate;
+  }
 
   @override
-  Future<void> loadHtmlString(String document, {String? baseUrl}) async =>
-      html.add(document);
+  Future<void> loadHtmlString(String document, {String? baseUrl}) async {
+    html.add(document);
+    baseUrls.add(baseUrl);
+  }
 
   @override
   Future<void> loadRequest(LoadRequestParams params) async =>
@@ -70,6 +88,16 @@ class _FakeController extends PlatformWebViewController {
 
   @override
   Future<void> clearCache() async => cleared++;
+}
+
+// ignore: must_be_immutable
+class _FakePermission extends PlatformWebViewPermissionRequest {
+  _FakePermission() : super(types: {WebViewPermissionResourceType.camera});
+  bool granted = false, denied = false;
+  @override
+  Future<void> grant() async => granted = true;
+  @override
+  Future<void> deny() async => denied = true;
 }
 
 class _FakeWidget extends PlatformWebViewWidget {
@@ -107,6 +135,74 @@ _FakePlatform _install() {
 // this stays inside this file.
 void main() {
   group('HtmlView with a web view', () {
+    testWidgets(
+      'waits for the height bridge and navigation policy before loading',
+      (tester) async {
+        final setup = Completer<void>();
+        final platform = _install()..setup = setup;
+        final p = await pumpProgram(
+          tester,
+          'root = Col([HtmlView("<p>one</p>")])',
+        );
+        final controller = platform.controllers.single;
+        expect(controller.html, <String>[]);
+        p.session.update(
+          'root = Col([HtmlView("<p>two</p>")])',
+          streaming: false,
+        );
+        await tester.pump();
+        expect(controller.html, <String>[]);
+        setup.complete();
+        await tester.pump();
+        expect(controller.channels.keys, ['IuiHeight']);
+        expect(controller.delegate, isNotNull);
+        expect(controller.html.length, 1);
+        expect(controller.html.single, contains('<p>two</p>'));
+      },
+    );
+
+    testWidgets('does not load a page removed before setup finishes', (
+      tester,
+    ) async {
+      final setup = Completer<void>();
+      final platform = _install()..setup = setup;
+      final p = await pumpProgram(
+        tester,
+        'root = Col([HtmlView("<p>hi</p>")])',
+      );
+      final controller = platform.controllers.single;
+      p.session.update('root = Col([Text("gone")])', streaming: false);
+      await tester.pump();
+      setup.complete();
+      await tester.pump();
+      expect(controller.html, <String>[]);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('the page loads with no base URL, so its origin is opaque', (
+      tester,
+    ) async {
+      final platform = _install();
+      await pumpProgram(tester, 'root = Col([HtmlView("<p>hi</p>")])');
+      expect(platform.controllers.single.baseUrls, [null]);
+      expect(
+        platform.controllers.single.html.single,
+        contains('if(self.origin!=="null")'),
+      );
+    });
+
+    testWidgets('camera, microphone and other permission requests are denied', (
+      tester,
+    ) async {
+      final platform = _install();
+      await pumpProgram(tester, 'root = Col([HtmlView("<p>hi</p>")])');
+      final request = _FakePermission();
+      platform.controllers.single.onPermission!(request);
+      await tester.pump();
+      expect(request.denied, isTrue);
+      expect(request.granted, isFalse);
+    });
+
     testWidgets(
       'loads the model page inside the security policy with JavaScript on',
       (tester) async {

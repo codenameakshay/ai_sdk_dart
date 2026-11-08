@@ -5,6 +5,9 @@ library;
 export 'src/lang/ast.dart'
     show
         Ast,
+        astFromJson,
+        isAstJson,
+        isElementNodeJson,
         ArrNode,
         AssignNode,
         BinOpNode,
@@ -27,8 +30,10 @@ export 'src/lang/ast.dart'
         ValueNode,
         walkAst;
 export 'src/lang/lexer.dart' show T, Token, parseExpression, tokenize;
+export 'src/lang/merge.dart' show mergeStatements;
 export 'src/lang/parser.dart'
     show
+        CompiledSchema,
         MutationStatementInfo,
         ParseMeta,
         ParseResult,
@@ -36,7 +41,8 @@ export 'src/lang/parser.dart'
         QueryStatementInfo,
         StreamParser,
         createParser,
-        createStreamingParser;
+        createStreamingParser,
+        parse;
 export 'src/lang/serialize.dart' show jsonToOpenUI;
 export 'src/lang/statements.dart' show RawStatement, autoClose, split;
 export 'src/lang/validation.dart'
@@ -58,8 +64,22 @@ export 'src/runtime/evaluator.dart'
         ToAssistantStep,
         evaluate,
         evaluateElementProps,
+        actionSteps,
         evaluateRoot,
         stripReactiveAssign;
 export 'src/runtime/queries.dart'
-    show QueryManager, QueryNode, QuerySnapshot, ToolCaller;
+    show
+        MutationNode,
+        MutationResult,
+        QueryManager,
+        QueryNode,
+        QuerySnapshot,
+        ToolCaller,
+        ToolProvider,
+        createQueryManager;
+export 'src/runtime/state_field.dart' show StateField, resolveStateField;
 export 'src/runtime/store.dart' show Store;
+export 'src/spec/library.dart' show generateSystemPrompt;
+export 'src/spec/prompt.dart'
+    show PromptEntry, PromptGroup, PromptSpec, PromptTool, generatePrompt;
+export 'src/spec/schema.dart' show buildSignature;

@@ -178,9 +178,9 @@ void main() {
       await click(s);
       expect(states.single, {r'$n': 2});
 
-      s.field('name', null, componentType: 'Input').set('x');
+      s.field('name', null).set('x');
       expect(states, hasLength(2));
-      expect(states.last['name'], {'value': 'x', 'componentType': 'Input'});
+      expect(states.last['name'], {'value': 'x'});
     },
   );
 
@@ -235,4 +235,136 @@ void main() {
       'Evaluating prop "value" on Out failed: @Boom threw: kaboom',
     ]);
   });
+
+  test(
+    'a component that fails to build is reported once through onError',
+    () async {
+      final reports = <List<Map<String, Object?>>>[];
+      final s = OpenUiSession(
+        _library,
+        onError: (errors) => reports.add([for (final e in errors) e.toJson()]),
+      );
+      addTearDown(s.dispose);
+      s.update('root = Out(1)', streaming: false);
+      expect(reports, [<Map<String, Object?>>[]]);
+
+      s.reportRenderError('Out', StateError('boom'));
+      expect(reports, hasLength(1));
+      await settle();
+      expect(reports.last, [
+        {
+          'source': 'runtime',
+          'code': 'render-error',
+          'component': 'Out',
+          'message': 'Component Out render failed: boom',
+        },
+      ]);
+
+      s.reportRenderError('Out', StateError('boom'));
+      await settle();
+      expect(reports, hasLength(2));
+
+      s.update('root = Out(2)', streaming: false);
+      expect(reports, hasLength(3));
+      expect(reports.last, isEmpty);
+
+      s.update('root = Out(3)', streaming: true);
+      expect(reports, hasLength(4));
+      s.reportRenderError('Out', StateError('late'));
+      await settle();
+      s.update('root = Out(3)', streaming: false);
+      expect(reports, hasLength(5));
+      expect(reports.last, isEmpty);
+    },
+  );
+
+  test(
+    'onParseResult hears each new parse, not a repeat of the same program',
+    () {
+      final results = <ParseResult?>[];
+      final s = OpenUiSession(_library, onParseResult: results.add);
+      addTearDown(s.dispose);
+      s.update('root = Out(1)', streaming: true);
+      s.update('root = Out(1)\n]]', streaming: true);
+      expect(results, hasLength(1));
+      s.update('root = Out(1)', streaming: false);
+      expect(results, hasLength(2));
+      expect(results.last!.root!.typeName, 'Out');
+    },
+  );
+
+  test('disposing from onParseResult stops initialization', () {
+    late OpenUiSession session;
+    final reports = <List<OpenUiError>>[];
+    session = OpenUiSession(
+      _library,
+      onParseResult: (_) => session.dispose(),
+      onError: reports.add,
+    );
+    addTearDown(session.dispose);
+    session.update('root = Out(1)\n\$value = 2', streaming: false);
+    expect(session.state, <String, Object?>{});
+    expect(reports, <List<OpenUiError>>[]);
+  });
+
+  test(
+    'swapped tools serve later calls; gaining or losing all tools refetches',
+    () async {
+      final s = open('root = Out(q)\nq = Query("t", {}, 0)');
+      expect(s.root!.props['value'], 0);
+
+      s.setTools([OpenUiTool(name: 't', call: (_) async => 'a')]);
+      await settle();
+      expect(s.root!.props['value'], 'a');
+
+      s.setTools([OpenUiTool(name: 't', call: (_) async => 'b')]);
+      expect(s.root!.props['value'], 'a');
+      s.retryQueries();
+      await settle();
+      expect(s.root!.props['value'], 'b');
+
+      s.setTools(const []);
+      expect(s.root!.props['value'], 0);
+    },
+  );
+
+  test('metadata names a framed response while it streams', () {
+    final s = open(
+      ']]>openui:content?name=Q3+report\nroot = Out(1)',
+      streaming: true,
+    );
+    expect(s.metadata.name, 'Q3 report');
+    expect(s.isGenerating, isTrue);
+    s.update('root = Out(1)', streaming: false);
+    expect(s.metadata.name, isNull);
+    expect(s.isGenerating, isFalse);
+  });
+
+  test('a stored message renders its content', () {
+    final s = open(
+      buildMessage(content: 'root = Out("hi")', context: [{}], end: true),
+    );
+    expect(s.root!.props['value'], 'hi');
+    expect(s.errors, isEmpty);
+  });
+
+  test(
+    'a truncated default streams to the full statement without reporting state',
+    () {
+      final states = <Map<String, Object?>>[];
+      final s = OpenUiSession(_library, onStateUpdate: states.add);
+      addTearDown(s.dispose);
+      s.update('root = Out(\$title)\n', streaming: true);
+      s.update(
+        'root = Out(\$title)\n\$title = "Quarterly rev',
+        streaming: true,
+      );
+      s.update(
+        'root = Out(\$title)\n\$title = "Quarterly revenue"\n',
+        streaming: true,
+      );
+      expect(s.root!.props['value'], 'Quarterly revenue');
+      expect(states, isEmpty);
+    },
+  );
 }

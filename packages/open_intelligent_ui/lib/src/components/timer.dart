@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../theme.dart';
 import '../view.dart';
-import 'glyph.dart';
+import 'controls.dart' show IuiButton;
 
 /// `Timer(seconds, label?)`: counts the bound seconds down to 0.
 Widget buildTimer(BuildContext context, OpenUiNode node) {
@@ -49,9 +49,8 @@ class _CountdownTimerState extends State<CountdownTimer> {
   int? _startedAt;
 
   int get _left {
-    final raw = widget.field.value;
-    final n = raw is num ? raw : num.tryParse('$raw');
-    return n != null && n.isFinite ? math.max(0, n.floor()) : 0;
+    final n = jsNumber(widget.field.value);
+    return n.isFinite ? math.max(0, n.floor()) : 0;
   }
 
   bool get _running => _ticker != null;
@@ -98,6 +97,7 @@ class _CountdownTimerState extends State<CountdownTimer> {
     final done = left == 0 && _startedAt != null;
     final label = widget.label;
     return Semantics(
+      container: true,
       label: label == null || label.isEmpty ? 'Timer' : label,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -115,23 +115,24 @@ class _CountdownTimerState extends State<CountdownTimer> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (label != null && label.isNotEmpty)
+                if (label != null && label.isNotEmpty) ...[
                   Text(
                     label,
                     style: TextStyle(
                       fontSize: 14,
                       height: 1.4,
-                      fontWeight: FontWeight.w500,
+                      fontWeight: OpenUiTheme.weightMedium,
                       color: theme.ink,
                     ),
                   ),
-                const SizedBox(height: 2),
+                  const SizedBox(height: 2),
+                ],
                 Text(
                   clock(left),
                   style: TextStyle(
                     fontSize: 32,
                     height: 1.1,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: OpenUiTheme.weightSemibold,
                     letterSpacing: -0.32,
                     fontFeatures: const [FontFeature.tabularFigures()],
                     color: done ? theme.status['success'] : theme.ink,
@@ -142,77 +143,25 @@ class _CountdownTimerState extends State<CountdownTimer> {
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _TimerButton(
+                IuiButton(
                   icon: _running ? 'pause' : 'play',
                   label: _running
                       ? 'Pause'
                       : (_startedAt == null || left == 0 ? 'Start' : 'Resume'),
-                  solid: true,
+                  size: 'sm',
                   onTap: widget.streaming || left == 0 ? null : _toggle,
                 ),
                 const SizedBox(width: 8),
-                _TimerButton(
+                IuiButton(
                   icon: 'rotate-ccw',
                   label: 'Reset',
-                  solid: false,
+                  variant: 'ghost',
+                  size: 'sm',
                   onTap: widget.streaming || _startedAt == null ? null : _reset,
                 ),
               ],
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _TimerButton extends StatelessWidget {
-  const _TimerButton({
-    required this.icon,
-    required this.label,
-    required this.solid,
-    required this.onTap,
-  });
-  final String icon;
-  final String label;
-  final bool solid;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = OpenUiTheme.of(context);
-    final fg = solid ? theme.onInk : theme.ink;
-    return Opacity(
-      opacity: onTap == null ? 0.4 : 1,
-      child: Material(
-        color: solid ? theme.ink : Colors.transparent,
-        shape: const StadiumBorder(),
-        child: InkWell(
-          onTap: onTap,
-          customBorder: const StadiumBorder(),
-          child: Container(
-            constraints: const BoxConstraints(minHeight: 32),
-            alignment: Alignment.center,
-            padding: EdgeInsets.symmetric(
-              horizontal: solid ? 12 : 10,
-              vertical: 6,
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Glyph(icon, size: 14, color: fg),
-                const SizedBox(width: 7),
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                    color: fg,
-                  ),
-                ),
-              ],
-            ),
-          ),
         ),
       ),
     );

@@ -1,13 +1,17 @@
 import 'dart:math' as math;
+import 'dart:ui' show ImageFilter;
 
 import 'package:ai_sdk_openui/ai_sdk_openui.dart';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show OverflowBoxFit;
+import 'package:flutter/semantics.dart' show SemanticsRole;
 import 'package:flutter/services.dart';
 
 import '../theme.dart';
 import '../view.dart';
 import 'block_slot.dart';
+import 'controls.dart' show Press;
 import 'flex_row.dart';
 import 'glyph.dart';
 import 'markdown.dart';
@@ -193,7 +197,18 @@ bool _fillsItem(OpenUiElement? element) => switch (element?.typeName) {
   _ => false,
 };
 
-final class _CarouselArrow extends StatefulWidget {
+/// `backdrop-filter: blur(12px) saturate(1.4)`.
+final _frost = ImageFilter.compose(
+  outer: const ColorFilter.matrix([
+    1.3148, -0.286, -0.0288, 0, 0, //
+    -0.0852, 1.114, -0.0288, 0, 0, //
+    -0.0852, -0.286, 1.3712, 0, 0, //
+    0, 0, 0, 1, 0,
+  ]),
+  inner: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+);
+
+final class _CarouselArrow extends StatelessWidget {
   const _CarouselArrow({
     required this.name,
     required this.label,
@@ -205,41 +220,46 @@ final class _CarouselArrow extends StatefulWidget {
   final VoidCallback onTap;
 
   @override
-  State<_CarouselArrow> createState() => _CarouselArrowState();
-}
-
-final class _CarouselArrowState extends State<_CarouselArrow> {
-  bool _hovering = false;
-
-  @override
   Widget build(BuildContext context) {
     final theme = OpenUiTheme.of(context);
+    final reduce = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
     return Semantics(
+      container: true,
       button: true,
-      label: widget.label,
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        onEnter: (_) => setState(() => _hovering = true),
-        onExit: (_) => setState(() => _hovering = false),
-        child: GestureDetector(
-          onTap: widget.onTap,
-          child: Container(
-            width: 34,
-            height: 34,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: _hovering ? theme.surface : theme.glass,
-              border: Border.all(color: theme.glassRing),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x14000000),
-                  blurRadius: 12,
-                  offset: Offset(0, 2),
+      label: label,
+      child: Press(
+        radius: 17,
+        onTap: (_) => onTap(),
+        builder: (hovered, pressed) => DecoratedBox(
+          decoration: const BoxDecoration(
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: Color(0x14000000),
+                blurRadius: 12,
+                offset: Offset(0, 2),
+              ),
+            ],
+          ),
+          child: ClipOval(
+            child: BackdropFilter(
+              filter: _frost,
+              child: AnimatedContainer(
+                duration: reduce
+                    ? Duration.zero
+                    : const Duration(milliseconds: 120),
+                curve: Curves.easeOut,
+                width: 34,
+                height: 34,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: hovered ? theme.surface : theme.glass,
+                  border: Border.all(color: theme.glassRing),
                 ),
-              ],
+                child: Glyph(name, size: 18, color: theme.ink, strokeWidth: 2),
+              ),
             ),
-            child: Glyph(widget.name, size: 18, color: theme.ink),
           ),
         ),
       ),
@@ -295,14 +315,31 @@ final class _SnapPhysics extends ScrollPhysics {
 Widget buildPopover(BuildContext context, OpenUiNode node) {
   final trigger = node.props['trigger'];
   final content = node.props['content'];
+  final parts = trigger is List
+      ? trigger.expand((p) => p is List ? p : [p]).toList()
+      : [trigger];
+  final row = Row(
+    mainAxisSize: MainAxisSize.min,
+    spacing: 4,
+    children: [
+      for (final part in parts)
+        for (final widget in node.render(part))
+          _keepsWidth(part) ? widget : Flexible(child: widget),
+    ],
+  );
   return _Popover(
     trigger: switch (trigger) {
       String() || num() => _inlineText(context, trigger),
-      _ => Wrap(
-        spacing: 4,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: node.render(trigger),
+      // `.iui-row > * { min-width: 0 }` can squeeze the trigger below its
+      // `flex: none` parts; they overflow it, as in CSS.
+      // ponytail: a squeezed trigger with text parts still reports overflow.
+      _ when parts.every(_keepsWidth) => OverflowBox(
+        maxWidth: double.infinity,
+        alignment: AlignmentDirectional.centerStart,
+        fit: OverflowBoxFit.deferToChild,
+        child: row,
       ),
+      _ => row,
     },
     content: switch (content) {
       String() || num() => _inlineText(context, content),
@@ -316,8 +353,15 @@ Widget buildPopover(BuildContext context, OpenUiNode node) {
   );
 }
 
-Widget _inlineText(BuildContext context, Object? value) =>
-    Text.rich(TextSpan(children: inlineSpans(jsString(value), context)));
+/// Trigger parts with CSS `flex: none`: they keep their width and the text
+/// beside them takes what is left.
+bool _keepsWidth(Object? part) =>
+    part is OpenUiElement &&
+    const {'Icon', 'Badge', 'Button', 'IconButton'}.contains(part.typeName);
+
+Widget _inlineText(BuildContext context, Object? value) => InlineText(
+  (context, links) => inlineSpans(jsString(value), context, links: links),
+);
 
 final class _Popover extends StatefulWidget {
   const _Popover({required this.trigger, required this.content});
@@ -333,7 +377,6 @@ final class _PopoverState extends State<_Popover> {
   final _controller = OverlayPortalController();
   final _triggerKey = GlobalKey();
   final _scrolls = <ScrollPosition>[];
-  bool _hovering = false;
   double _left = 0;
   double? _top;
   double? _bottom;
@@ -407,6 +450,8 @@ final class _PopoverState extends State<_Popover> {
               groupId: this,
               onTapOutside: (_) => _hide(),
               child: Semantics(
+                container: true,
+                role: SemanticsRole.dialog,
                 scopesRoute: true,
                 explicitChildNodes: true,
                 child: Focus(
@@ -439,7 +484,7 @@ final class _PopoverState extends State<_Popover> {
                       style: TextStyle(
                         fontFamily: theme.fontFamily,
                         fontSize: 14,
-                        fontWeight: FontWeight.w400,
+                        fontWeight: OpenUiTheme.weightNormal,
                         height: 1.5,
                         color: theme.ink,
                       ),
@@ -460,17 +505,12 @@ final class _PopoverState extends State<_Popover> {
           child: Semantics(
             button: true,
             expanded: _controller.isShowing,
-            child: MouseRegion(
-              cursor: SystemMouseCursors.click,
-              onEnter: (_) => setState(() => _hovering = true),
-              onExit: (_) => setState(() => _hovering = false),
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: _toggle,
-                child: DefaultTextStyle.merge(
-                  style: TextStyle(color: _hovering ? theme.muted : null),
-                  child: widget.trigger,
-                ),
+            child: Press(
+              radius: 4,
+              onTap: (_) => _toggle(),
+              builder: (hovered, pressed) => DefaultTextStyle.merge(
+                style: TextStyle(color: hovered ? theme.muted : null),
+                child: widget.trigger,
               ),
             ),
           ),
@@ -499,29 +539,27 @@ Widget buildQuote(BuildContext context, OpenUiNode node) {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text.rich(
-                    TextSpan(
-                      children: inlineSpans(
-                        text,
-                        context,
-                        style: TextStyle(
-                          fontSize: 16,
-                          height: 1.6,
-                          color: theme.ink,
-                        ),
+                  InlineText(
+                    (context, links) => inlineSpans(
+                      text,
+                      context,
+                      style: TextStyle(
+                        fontSize: 16,
+                        height: 1.6,
+                        color: theme.ink,
                       ),
+                      links: links,
                     ),
                   ),
                   if (cite != null && cite.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
-                      child: Text.rich(
-                        TextSpan(
-                          children: inlineSpans(
-                            cite,
-                            context,
-                            style: TextStyle(fontSize: 13, color: theme.muted),
-                          ),
+                      child: InlineText(
+                        (context, links) => inlineSpans(
+                          cite,
+                          context,
+                          style: TextStyle(fontSize: 13, color: theme.muted),
+                          links: links,
                         ),
                       ),
                     ),

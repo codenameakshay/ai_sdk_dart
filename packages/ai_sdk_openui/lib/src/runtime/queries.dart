@@ -10,6 +10,23 @@ import 'mcp.dart';
 typedef ToolCaller =
     Future<Object?> Function(String name, Map<String, Object?> args);
 
+/// lang-core `ToolProvider`: what a [QueryManager] calls tools with.
+typedef ToolProvider = ToolCaller;
+
+/// lang-core `MutationResult`: `{status: "idle" | "loading" | "success" | "error", data?, error?}`.
+typedef MutationResult = Map<String, Object?>;
+
+/// lang-core `MutationNode`: a Mutation statement and the tool it runs.
+final class MutationNode {
+  const MutationNode({required this.statementId, required this.toolName});
+  final String statementId;
+  final String toolName;
+}
+
+/// lang-core `createQueryManager`.
+QueryManager createQueryManager(ToolProvider? toolProvider) =>
+    QueryManager(toolProvider);
+
 /// Thrown by a [ToolCaller] that has no tool of that name (lang-core `ToolNotFoundError`).
 final class ToolNotFoundError implements Exception {
   const ToolNotFoundError(this.toolName, [this.availableTools = const []]);
@@ -148,13 +165,17 @@ final class QueryManager {
     final loading = <String>[];
     final refetching = <String>[];
     final errors = <OpenUiError>[];
+    // Statements on one cache key share its fetch, so its error is reported once.
+    final failedKeys = <String>{};
     for (final MapEntry(:key, :value) in _queries.entries) {
       data[key] = getResult(key);
       if (value.loading) {
         loading.add(key);
         if (value.everFetched) refetching.add(key);
       }
-      if (value.error != null) errors.add(value.error!);
+      if (value.error != null && failedKeys.add(value.cacheKey)) {
+        errors.add(value.error!);
+      }
     }
     for (final MapEntry(:key, :value) in _mutations.entries) {
       data[key] = value.result;
@@ -189,7 +210,7 @@ final class QueryManager {
   }
 
   /// The last result of a Mutation, or null when [statementId] is not one.
-  Map<String, Object?>? getMutationResult(String statementId) =>
+  MutationResult? getMutationResult(String statementId) =>
       _mutations[statementId]?.result;
 
   /// Whether the Query [statementId] is loading.
@@ -250,17 +271,27 @@ final class QueryManager {
     if (call == null || q == null) return;
     final toolName = q.node.toolName;
     final args = q.node.args;
+    final gen = _generation;
     final entry = _cache.putIfAbsent(cacheKey, _CacheEntry.new)
       ..inFlight = true;
-    q.loading = true;
+    for (final current in _queries.values.where(
+      (q) => q.cacheKey == cacheKey,
+    )) {
+      current.loading = true;
+    }
     _rebuild();
     _notify();
+    if (_disposed || gen != _generation) return;
     try {
-      final data = await call(
-        toolName,
-        args is Map ? args.cast<String, Object?>() : const {},
+      final data = Js.normalize(
+        await call(
+          toolName,
+          args is Map
+              ? Js.normalize(args, json: true)! as Map<String, Object?>
+              : const {},
+        ),
       );
-      if (_disposed) return;
+      if (_disposed || gen != _generation) return;
       if (!identical(_cache[cacheKey], entry) ||
           !_queries.values.any((q) => q.cacheKey == cacheKey)) {
         return;
@@ -280,7 +311,9 @@ final class QueryManager {
         }
       }
     } catch (err) {
-      if (!_disposed && identical(_cache[cacheKey], entry)) {
+      if (!_disposed &&
+          gen == _generation &&
+          identical(_cache[cacheKey], entry)) {
         for (final current in _queries.values.where(
           (q) => q.cacheKey == cacheKey,
         )) {
@@ -293,8 +326,10 @@ final class QueryManager {
         }
       }
     } finally {
-      entry.inFlight = false;
-      if (!_disposed && identical(_cache[cacheKey], entry)) {
+      if (!_disposed &&
+          gen == _generation &&
+          identical(_cache[cacheKey], entry)) {
+        entry.inFlight = false;
         String? refetch;
         for (final current in _queries.values.where(
           (q) => q.cacheKey == cacheKey,
@@ -382,8 +417,11 @@ final class QueryManager {
     final targets = statementIds.isEmpty
         ? _queries.keys.toList()
         : statementIds.where(_queries.containsKey).toList();
+    // One fetch serves every statement on a cache key.
+    final started = <String>{};
     for (final sid in targets) {
       final q = _queries[sid]!;
+      if (!started.add(q.cacheKey)) continue;
       if (_cache[q.cacheKey]?.inFlight ?? false) {
         q.needsRefetch = true;
       } else {
@@ -392,7 +430,8 @@ final class QueryManager {
     }
   }
 
-  void registerMutations(Map<String, String> toolsById) {
+  void registerMutations(List<MutationNode> nodes) {
+    final toolsById = {for (final n in nodes) n.statementId: n.toolName};
     _mutations.removeWhere((sid, _) => !toolsById.containsKey(sid));
     for (final MapEntry(key: sid, value: tool) in toolsById.entries) {
       final existing = _mutations[sid];
@@ -425,9 +464,19 @@ final class QueryManager {
     m.result = {'status': 'loading'};
     _rebuild();
     _notify();
+    if (_disposed ||
+        gen != _generation ||
+        !identical(_mutations[statementId], m)) {
+      return false;
+    }
     var ok = false;
     try {
-      final data = await call(m.toolName, args);
+      final data = Js.normalize(
+        await call(
+          m.toolName,
+          Js.normalize(args, json: true)! as Map<String, Object?>,
+        ),
+      );
       if (_disposed ||
           gen != _generation ||
           !identical(_mutations[statementId], m)) {
@@ -469,6 +518,9 @@ final class QueryManager {
         ..refreshInterval = 0
         ..loading = false
         ..needsRefetch = false;
+    }
+    for (final entry in _cache.values) {
+      entry.inFlight = false;
     }
     _mutations.clear();
   }

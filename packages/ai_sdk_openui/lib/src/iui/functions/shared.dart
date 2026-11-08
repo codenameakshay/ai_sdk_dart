@@ -61,26 +61,14 @@ abstract final class Impure {
   }
 }
 
-final _arrayIndex = RegExp(r'^(0|[1-9][0-9]*)$');
-
-/// Reads [field] from a row with dot paths; "" is the item itself.
+/// Reads [field] from a row with dot paths; "" is the item itself. Only
+/// objects are read into: a string has no fields here.
 Object? read(Object? item, String field) {
   if (field.isEmpty) return item;
   Object? cur = item;
   for (final key in field.split('.')) {
-    if (cur is Map) {
-      cur = cur[key];
-    } else if (cur is List) {
-      // An array reads its length and canonical indices ("1", not "01" or "+1").
-      if (key == 'length') {
-        cur = cur.length;
-      } else {
-        final i = _arrayIndex.hasMatch(key) ? int.tryParse(key) : null;
-        cur = i != null && i < cur.length ? cur[i] : null;
-      }
-    } else {
-      return null;
-    }
+    if (!Js.isObject(cur)) return null;
+    cur = Js.property(cur, key);
   }
   return cur;
 }
@@ -99,9 +87,11 @@ bool same(Object? a, Object? b) {
     }
     return true;
   }
-  if (a is Map && b is Map) {
-    return a.length == b.length &&
-        a.keys.every((k) => b.containsKey(k) && same(a[k], b[k]));
+  final x = a is JsFields ? a.jsFields : a;
+  final y = b is JsFields ? b.jsFields : b;
+  if (x is Map && y is Map) {
+    return x.length == y.length &&
+        x.keys.every((k) => y.containsKey(k) && same(x[k], y[k]));
   }
   return false;
 }

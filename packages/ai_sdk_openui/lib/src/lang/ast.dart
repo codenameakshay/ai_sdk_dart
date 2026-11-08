@@ -1,6 +1,75 @@
+import 'dart:convert';
+
+import 'js.dart';
+
 /// The OpenUI Lang 1.0 syntax tree, mirroring lang-core's `ASTNode`.
-sealed class Ast {
+sealed class Ast implements JsFields {
   const Ast();
+
+  /// lang-core's object for this node, such as `{k: "Num", v: 1}`.
+  @override
+  Map<String, Object?> get jsFields => switch (this) {
+    StrNode(:final value) => {'k': 'Str', 'v': value},
+    NumNode(:final value) => {'k': 'Num', 'v': value},
+    BoolNode(:final value) => {'k': 'Bool', 'v': value},
+    NullNode() => {'k': 'Null'},
+    ArrNode(:final elements) => {'k': 'Arr', 'els': elements},
+    ObjNode(:final entries) => {
+      'k': 'Obj',
+      'entries': [
+        for (final (k, v) in entries) <Object?>[k, v],
+      ],
+    },
+    CompNode(:final name, :final args, :final mappedProps, :final isAtCall) => {
+      'k': 'Comp',
+      'name': name,
+      'args': args,
+      'mappedProps': ?mappedProps,
+      if (isAtCall) 'fn': true,
+    },
+    RefNode(:final name) => {'k': 'Ref', 'n': name},
+    StateRefNode(:final name) => {'k': 'StateRef', 'n': name},
+    RuntimeRefNode(:final name, :final refType) => {
+      'k': 'RuntimeRef',
+      'n': name,
+      'refType': refType.name,
+    },
+    BinOpNode(:final op, :final left, :final right) => {
+      'k': 'BinOp',
+      'op': op,
+      'left': left,
+      'right': right,
+    },
+    UnaryOpNode(:final op, :final operand) => {
+      'k': 'UnaryOp',
+      'op': op,
+      'operand': operand,
+    },
+    TernaryNode(:final condition, :final then, :final otherwise) => {
+      'k': 'Ternary',
+      'cond': condition,
+      'then': then,
+      'else': otherwise,
+    },
+    MemberNode(:final object, :final field) => {
+      'k': 'Member',
+      'obj': object,
+      'field': field,
+    },
+    IndexNode(:final object, :final index) => {
+      'k': 'Index',
+      'obj': object,
+      'index': index,
+    },
+    AssignNode(:final target, :final value) => {
+      'k': 'Assign',
+      'target': target,
+      'value': value,
+    },
+    PlaceholderNode(:final name) => {'k': 'Ph', 'n': name},
+    // Port-only: a runtime value spliced into an @Each template.
+    ValueNode(:final value) => {'k': 'Value', 'v': value},
+  };
 }
 
 final class StrNode extends Ast {
@@ -124,6 +193,85 @@ final class ValueNode extends Ast {
   final Object? value;
 }
 
+const _astKinds = {
+  'Comp', 'Ref', 'StateRef', 'RuntimeRef', 'BinOp', 'UnaryOp', 'Ternary', //
+  'Member', 'Index', 'Assign', 'Str', 'Num', 'Bool', 'Null', 'Arr', 'Obj', 'Ph',
+};
+
+/// lang-core `isASTNode` for a JSON value: a map with a known `k`.
+bool isAstJson(Object? value) => value is Map && _astKinds.contains(value['k']);
+
+/// The node of lang-core's JSON form ([Ast.jsFields] as JSON).
+Ast astFromJson(Map<Object?, Object?> json) {
+  Ast child(Object? v) => astFromJson(v! as Map);
+  List<Ast> children(Object? v) => [for (final e in v! as List) child(e)];
+  return switch (json['k']) {
+    'Str' => StrNode(json['v']! as String),
+    'Num' => NumNode(json['v']! as num),
+    'Bool' => BoolNode(json['v']! as bool),
+    'Null' => const NullNode(),
+    'Arr' => ArrNode(children(json['els'])),
+    'Obj' => ObjNode([
+      for (final e in json['entries']! as List)
+        ((e as List)[0]! as String, child(e[1])),
+    ]),
+    'Comp' => CompNode(
+      json['name']! as String,
+      children(json['args']),
+      mappedProps: json['mappedProps'] == null
+          ? null
+          : {
+              for (final MapEntry(:key, :value)
+                  in (json['mappedProps']! as Map).entries)
+                '$key': child(value),
+            },
+      isAtCall: json['fn'] == true,
+    ),
+    'Ref' => RefNode(json['n']! as String),
+    'StateRef' => StateRefNode(json['n']! as String),
+    'RuntimeRef' => RuntimeRefNode(
+      json['n']! as String,
+      RuntimeRefType.values.byName(json['refType']! as String),
+    ),
+    'BinOp' => BinOpNode(
+      json['op']! as String,
+      child(json['left']),
+      child(json['right']),
+    ),
+    'UnaryOp' => UnaryOpNode(json['op']! as String, child(json['operand'])),
+    'Ternary' => TernaryNode(
+      child(json['cond']),
+      child(json['then']),
+      child(json['else']),
+    ),
+    'Member' => MemberNode(child(json['obj']), json['field']! as String),
+    'Index' => IndexNode(child(json['obj']), child(json['index'])),
+    'Assign' => AssignNode(json['target']! as String, child(json['value'])),
+    'Ph' => PlaceholderNode(json['n']! as String),
+    final k => throw ArgumentError.value(k, 'k', 'not an AST node kind'),
+  };
+}
+
+/// lang-core `isElementNode` for a JSON value.
+bool isElementNodeJson(Object? value) =>
+    value is Map &&
+    value['type'] == 'element' &&
+    value['typeName'] is String &&
+    value['props'] is Map &&
+    value['partial'] is bool;
+
+/// A prop value read back from JSON: elements and AST nodes become nodes.
+Object? _fromJsonValue(Object? v) => switch (v) {
+  Map() when isElementNodeJson(v) => ElementNode.fromJson(v),
+  Map() when isAstJson(v) => astFromJson(v),
+  Map() => Js.object([
+    for (final MapEntry(:key, :value) in v.entries)
+      MapEntry('$key', _fromJsonValue(value)),
+  ]),
+  List() => [for (final e in v) _fromJsonValue(e)],
+  _ => v,
+};
+
 bool isRuntimeExpr(Ast node) => switch (node) {
   StateRefNode() ||
   RuntimeRefNode() ||
@@ -207,20 +355,20 @@ Ast literalAst(Object? value) => switch (value) {
       }
       return (found: true, value: out);
     case ObjNode(:final entries):
-      final out = <String, Object?>{};
+      final out = <MapEntry<String, Object?>>[];
       for (final (k, e) in entries) {
         final lit = literalValue(e);
         if (!lit.found) return (found: false, value: null);
-        out[k] = lit.value;
+        out.add(MapEntry(k, lit.value));
       }
-      return (found: true, value: out);
+      return (found: true, value: Js.object(out));
     default:
       return (found: false, value: null);
   }
 }
 
 /// A component instance after materialization or evaluation.
-final class ElementNode {
+final class ElementNode implements JsFields {
   ElementNode({
     required this.typeName,
     required this.props,
@@ -229,11 +377,42 @@ final class ElementNode {
     this.statementId,
   });
 
+  /// An element from lang-core's JSON form ([isElementNodeJson]); props that
+  /// are element or AST objects become nodes. A missing `hasDynamicProps` is
+  /// true, as in lang-core.
+  factory ElementNode.fromJson(Map<Object?, Object?> json) {
+    if (!isElementNodeJson(json)) {
+      throw ArgumentError.value(json, 'json', 'not an ElementNode');
+    }
+    return ElementNode(
+      typeName: json['typeName']! as String,
+      props: _fromJsonValue(json['props'])! as Map<String, Object?>,
+      partial: json['partial']! as bool,
+      hasDynamicProps: json['hasDynamicProps'] != false,
+      statementId: json['statementId'] as String?,
+    );
+  }
+
   final String typeName;
   final Map<String, Object?> props;
   final bool partial;
   final bool hasDynamicProps;
   String? statementId;
+
+  /// lang-core's `ElementNode` object.
+  @override
+  Map<String, Object?> get jsFields => {
+    'type': 'element',
+    'typeName': typeName,
+    'props': props,
+    'partial': partial,
+    'hasDynamicProps': hasDynamicProps,
+    'statementId': ?statementId,
+  };
+
+  /// lang-core's JSON of this element, as `JSON.stringify` writes it.
+  Map<String, Object?> toJson() =>
+      jsonDecode(Js.stringify(this)) as Map<String, Object?>;
 
   ElementNode withProps(Map<String, Object?> props) => ElementNode(
     typeName: typeName,

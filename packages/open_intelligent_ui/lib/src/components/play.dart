@@ -5,6 +5,7 @@ import 'package:flutter/rendering.dart';
 
 import '../theme.dart';
 import '../view.dart';
+import 'controls.dart' show Press;
 import 'markdown.dart';
 
 /// `Flashcard(front, back, hint?)`: flips between its faces when tapped.
@@ -15,21 +16,20 @@ Widget buildFlashcard(BuildContext context, OpenUiNode node) {
           ? const TextStyle(
               fontSize: 16,
               height: 1.3,
-              fontWeight: FontWeight.w500,
+              fontWeight: OpenUiTheme.weightMedium,
             )
           : const TextStyle(
               fontSize: 21,
               height: 1.3,
-              fontWeight: FontWeight.w600,
+              fontWeight: OpenUiTheme.weightSemibold,
               letterSpacing: -0.4,
             );
-      return Text.rich(
-        TextSpan(
-          children: inlineSpans(
-            value,
-            context,
-            style: style.copyWith(color: node.theme.ink),
-          ),
+      return InlineText(
+        (context, links) => inlineSpans(
+          value,
+          context,
+          style: style.copyWith(color: node.theme.ink),
+          links: links,
         ),
         textAlign: TextAlign.center,
       );
@@ -67,37 +67,44 @@ class _FlashcardState extends State<Flashcard> {
   Widget build(BuildContext context) {
     final theme = OpenUiTheme.of(context);
     final reduce = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
-    Widget side(Widget child, {required bool back}) => Container(
-      constraints: const BoxConstraints(minHeight: 168),
-      padding: const EdgeInsets.fromLTRB(18, 20, 18, 30),
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: back ? theme.surface : theme.canvas,
-        border: Border.all(color: theme.border),
-        borderRadius: BorderRadius.circular(OpenUiTheme.radiusXl),
-      ),
-      child: Stack(
-        alignment: Alignment.center,
-        clipBehavior: Clip.none,
-        children: [
-          child,
-          if (!back)
-            Positioned(
-              bottom: -20,
-              child: Text(
-                widget.hint,
-                style: TextStyle(fontSize: 11, color: theme.faint),
-              ),
-            ),
-        ],
-      ),
-    );
     return Semantics(
+      container: true,
       button: true,
       toggled: _flipped,
-      child: GestureDetector(
-        onTap: () => setState(() => _flipped = !_flipped),
-        child: _turning(side, reduce),
+      child: Press(
+        radius: OpenUiTheme.radiusXl,
+        onTap: (_) => setState(() => _flipped = !_flipped),
+        builder: (hovered, pressed) {
+          Widget side(Widget child, {required bool back}) => Container(
+            constraints: const BoxConstraints(minHeight: 168),
+            padding: const EdgeInsets.fromLTRB(18, 20, 18, 30),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: back ? theme.surface : theme.canvas,
+              border: Border.all(
+                color: hovered ? theme.borderStrong : theme.border,
+              ),
+              borderRadius: BorderRadius.circular(OpenUiTheme.radiusXl),
+            ),
+            child: Stack(
+              alignment: Alignment.center,
+              clipBehavior: Clip.none,
+              children: [
+                child,
+                if (!back)
+                  Positioned(
+                    bottom: -20,
+                    child: Text(
+                      widget.hint,
+                      style: TextStyle(fontSize: 11, color: theme.faint),
+                    ),
+                  ),
+              ],
+            ),
+          );
+
+          return _turning(side, reduce);
+        },
       ),
     );
   }

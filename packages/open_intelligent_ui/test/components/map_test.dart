@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -7,7 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
 import 'package:open_intelligent_ui/src/components/map.dart'
-    show pinEmoji, placesOf;
+    show flyPath, pinEmoji, placesOf;
 
 import '../gallery_fixture.dart';
 import '../support/pump.dart';
@@ -115,7 +117,17 @@ void main() {
       expect(pinEmoji('☕'), '☕');
       expect(pinEmoji('🏛️'), '🏛️');
       expect(pinEmoji('  🌉 Bridge'), '🌉');
-      expect(pinEmoji('🇵🇹'), '🇵🇹');
+      expect(
+        pinEmoji('🇵🇹'),
+        isNull,
+        reason: 'regional indicators are not Extended_Pictographic',
+      );
+      expect(pinEmoji('\u{1FAE8}'), '\u{1FAE8}');
+      expect(pinEmoji('▪️'), '▪️');
+      expect(pinEmoji('⬀'), isNull);
+      expect(pinEmoji('⇿'), isNull);
+      expect(pinEmoji('#️⃣'), isNull);
+      expect(pinEmoji('👍🏽'), '👍🏽');
       expect(pinEmoji('©'), '©');
       expect(pinEmoji('Coffee'), isNull);
       expect(pinEmoji('A'), isNull);
@@ -255,6 +267,10 @@ void main() {
         reason: 'Coit Tower has no emoji, so its number',
       );
       expect(find.text('1'), findsNothing);
+      expect(
+        tester.widget<Text>(find.text('2')).style!.fontWeight,
+        OpenUiTheme.weightSemibold,
+      );
     });
 
     testWidgets('tapping a pin sets the bound \$selected', (tester) async {
@@ -305,6 +321,35 @@ void main() {
       );
       handle.dispose();
     });
+
+    testWidgets(
+      'Expand and About this map are buttons with an expanded state',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        await _pump(tester, _sf);
+        expect(
+          tester.getSemantics(find.bySemanticsLabel('Expand')),
+          isSemantics(isButton: true, isExpanded: false),
+        );
+        expect(
+          tester.getSemantics(find.bySemanticsLabel('About this map')),
+          isSemantics(isButton: true, isExpanded: false),
+        );
+        await tester.tap(find.bySemanticsLabel('About this map'));
+        await tester.pump();
+        expect(
+          tester.getSemantics(find.bySemanticsLabel('About this map')),
+          isSemantics(isButton: true, isExpanded: true),
+        );
+        await tester.tap(find.text('Expand'));
+        await tester.pumpAndSettle();
+        expect(
+          tester.getSemantics(find.bySemanticsLabel('Collapse')),
+          isSemantics(isButton: true, isExpanded: true),
+        );
+        handle.dispose();
+      },
+    );
 
     testWidgets('an unbound Map still selects (its own field)', (tester) async {
       await _pump(
@@ -418,6 +463,28 @@ void main() {
   });
 
   group('Map toolbar', () {
+    testWidgets(
+      'icons keep map.tsx\'s stroke widths; the pill text is medium',
+      (tester) async {
+        await _pump(tester, _sf);
+        double stroke(String name) => tester
+            .widget<Glyph>(
+              find.byWidgetPredicate((w) => w is Glyph && w.name == name),
+            )
+            .strokeWidth;
+        // 1.6 on a 16 grid at 14px, 1.6 on 24 at 22px, 1.5 on 20 at 18px and
+        // 1.6 on 20 at 14px, in Glyph's 24 grid.
+        expect(stroke('chevron-down'), 2.4);
+        expect(stroke('navigation'), 1.6);
+        expect(stroke('info'), 1.8);
+        expect(stroke('expand'), 1.92);
+        expect(
+          tester.widget<Text>(find.text('Expand')).style!.fontWeight,
+          OpenUiTheme.weightMedium,
+        );
+      },
+    );
+
     testWidgets('the info button toggles the help text, with a note on the route', (
       tester,
     ) async {
@@ -486,7 +553,8 @@ void main() {
       expect(find.text('Coit Tower'), findsNothing);
       await tester.tap(_button('Show every place'));
       await tester.pump();
-      await _settle(tester);
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pump();
       expect(find.text('Coit Tower'), findsOneWidget);
       expect(find.text('Golden Gate Bridge'), findsOneWidget);
     });
@@ -698,6 +766,112 @@ void main() {
         expect(_lines(tester).single.points, hasLength(4));
       },
     );
+
+    testWidgets('a pin takes keyboard focus; Enter and Space select it', (
+      tester,
+    ) async {
+      final p = await _pump(tester, _sf);
+      await _settle(tester);
+      FocusManager.instance.highlightStrategy =
+          FocusHighlightStrategy.alwaysTraditional;
+      addTearDown(
+        () => FocusManager.instance.highlightStrategy =
+            FocusHighlightStrategy.automatic,
+      );
+      Focus.of(tester.element(find.text('Coit Tower'))).requestFocus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(p.session.state[r'$stop'], 'Coit Tower');
+      final outline = find.byWidgetPredicate(
+        (w) =>
+            w is DecoratedBox &&
+            w.decoration is BoxDecoration &&
+            (w.decoration as BoxDecoration).color == null &&
+            (w.decoration as BoxDecoration).border?.top.width == 2,
+      );
+      final box = find
+          .ancestor(
+            of: find.text('Coit Tower'),
+            matching: find.byWidgetPredicate(
+              (w) => w is SizedBox && w.width == 160 && w.height == 52,
+            ),
+          )
+          .first;
+      expect(
+        tester.getRect(outline),
+        Rect.fromLTWH(
+          tester.getTopLeft(box).dx + 58,
+          tester.getTopLeft(box).dy - 5,
+          44,
+          62,
+        ),
+      );
+      Focus.of(tester.element(find.text('Golden Gate Bridge'))).requestFocus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.pump();
+      expect(p.session.state[r'$stop'], 'Golden Gate Bridge');
+    });
+
+    testWidgets('a new pin fades and scales in over 104ms', (tester) async {
+      await _pump(tester, _sf);
+      FadeTransition fade() => tester.widget<FadeTransition>(
+        find
+            .ancestor(
+              of: find.text('Coit Tower'),
+              matching: find.byType(FadeTransition),
+            )
+            .first,
+      );
+      final scale = tester.widget<ScaleTransition>(
+        find
+            .ancestor(
+              of: find.text('Coit Tower'),
+              matching: find.byType(ScaleTransition),
+            )
+            .first,
+      );
+      expect(scale.alignment, const Alignment(0, 17 / 26 - 1));
+      expect(fade().opacity.value, lessThan(1));
+      await tester.pump(const Duration(milliseconds: 104));
+      expect(fade().opacity.value, 1);
+      expect(scale.scale.value, 1);
+    });
+
+    testWidgets('with reduced motion pins appear at once', (tester) async {
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(disableAnimations: true);
+      addTearDown(
+        tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+      );
+      await _pump(tester, _sf);
+      expect(
+        tester
+            .widget<FadeTransition>(
+              find
+                  .ancestor(
+                    of: find.text('Coit Tower'),
+                    matching: find.byType(FadeTransition),
+                  )
+                  .first,
+            )
+            .opacity
+            .value,
+        1,
+      );
+    });
+
+    testWidgets('pin labels use Arial and carry the label as a hover title', (
+      tester,
+    ) async {
+      await _pump(tester, _sf);
+      final style = tester.widget<Text>(find.text('Coit Tower')).style!;
+      expect(style.fontFamily, 'Arial');
+      expect(style.fontFamilyFallback, ['Helvetica']);
+      expect(style.fontWeight, OpenUiTheme.weightSemibold);
+      expect(find.byTooltip('Coit Tower'), findsOneWidget);
+    });
   });
 
   group('Map Expand', () {
@@ -803,6 +977,299 @@ void main() {
       expect(controller.camera.center, dragged);
       debugDefaultTargetPlatformOverride = null;
     });
+
+    testWidgets(
+      'the expanded map hides the rest of the page from screen readers',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        await _pumpAbove(
+          tester,
+          _sf.replaceFirst(
+            'root = Col([map])',
+            'root = Col([Text("Before the map"), map])',
+          ),
+        );
+        expect(find.semantics.byLabel('Before the map').evaluate(), isNotEmpty);
+        await tester.tap(find.text('Expand'));
+        await tester.pump();
+        expect(find.semantics.byLabel('Before the map').evaluate(), isEmpty);
+        expect(find.semantics.byLabel('Coit Tower').evaluate(), isNotEmpty);
+        expect(find.semantics.byLabel('Collapse').evaluate(), hasLength(1));
+        await tester.tap(find.text('Collapse'));
+        await tester.pump();
+        expect(find.semantics.byLabel('Before the map').evaluate(), isNotEmpty);
+        handle.dispose();
+      },
+    );
+
+    testWidgets('a map removed while expanded takes its overlay with it', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      final p = await _pumpAbove(tester, _sf);
+      await tester.tap(find.text('Expand'));
+      await tester.pump();
+      p.session.update('root = Col([Text("No map")])', streaming: false);
+      await tester.pump();
+      await tester.pump();
+      expect(find.byType(fm.FlutterMap), findsNothing);
+      expect(find.semantics.byLabel('No map').evaluate(), isNotEmpty);
+      handle.dispose();
+    });
+
+    testWidgets('the info button works inside the expanded map', (
+      tester,
+    ) async {
+      await _pumpAbove(tester, _sf);
+      await tester.tap(find.text('Expand'));
+      await tester.pump();
+      await tester.tap(_button('About this map'));
+      await tester.pump();
+      expect(find.textContaining('Drag to explore'), findsOneWidget);
+    });
+
+    testWidgets('popping the expanded route from elsewhere collapses it', (
+      tester,
+    ) async {
+      await _pumpAbove(tester, _sf);
+      await tester.tap(find.text('Expand'));
+      await tester.pump();
+      Navigator.of(tester.element(find.text('Collapse'))).pop();
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Expand'), findsOneWidget);
+      expect(tester.getSize(find.byType(fm.FlutterMap)).height, 400);
+    });
+
+    testWidgets(
+      'the expanded map keeps Tab inside, in DOM order, and Escape returns focus to Expand',
+      (tester) async {
+        await _pumpAbove(
+          tester,
+          _sf.replaceFirst(
+            'root = Col([map])',
+            'root = Col([Button("Outside"), map])',
+          ),
+        );
+        await _settle(tester);
+        FocusNode node(Finder f) => Focus.of(tester.element(f));
+        final expand = node(find.text('Expand'));
+        expand.requestFocus();
+        await tester.pump();
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+        await tester.pump();
+        expect(find.text('Collapse'), findsOneWidget);
+        final order = [
+          for (final label in [
+            'Ferry Building',
+            'Coit Tower',
+            'Palace of Fine Arts',
+            'Golden Gate Bridge',
+          ])
+            node(find.text(label)),
+          node(find.byTooltip('Zoom in')),
+          node(find.byTooltip('Zoom out')),
+          isA<FocusNode>().having(
+            (n) => n.debugLabel,
+            'debugLabel',
+            'DropdownButton<String>',
+          ),
+          node(
+            find.byWidgetPredicate((w) => w is Glyph && w.name == 'navigation'),
+          ),
+          node(find.byWidgetPredicate((w) => w is Glyph && w.name == 'info')),
+          node(find.text('Collapse')),
+        ];
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+        expect(FocusManager.instance.primaryFocus!.debugLabel, 'FlutterMap');
+        for (final expected in order) {
+          await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+          await tester.pump();
+          expect(
+            FocusManager.instance.primaryFocus,
+            expected is FocusNode ? same(expected) : expected,
+          );
+        }
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+        expect(
+          FocusManager.instance.primaryFocus!.debugLabel,
+          'FlutterMap',
+          reason: 'wraps to the first',
+        );
+        await simulateKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await simulateKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.pump();
+        expect(
+          FocusManager.instance.primaryFocus,
+          same(order.last),
+          reason: 'Shift+Tab wraps to the last',
+        );
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pump();
+        await tester.pump();
+        expect(find.text('Expand'), findsOneWidget);
+        expect(FocusManager.instance.primaryFocus, same(expand));
+      },
+    );
+
+    testWidgets('glass controls blur what is behind them', (tester) async {
+      await _pump(tester, _sf);
+      expect(
+        find.ancestor(
+          of: find.text('Expand'),
+          matching: find.byType(BackdropFilter),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.ancestor(
+          of: find.byTooltip('Zoom in'),
+          matching: find.byType(BackdropFilter),
+        ),
+        findsOneWidget,
+      );
+    });
+  });
+
+  group('Map camera', () {
+    fm.MapController controllerOf(WidgetTester tester) =>
+        fm.MapController.maybeOf(tester.element(find.byType(fm.MarkerLayer)))!;
+
+    void reducedMotion(WidgetTester tester) {
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(disableAnimations: true);
+      addTearDown(
+        tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+      );
+    }
+
+    Offset shift(fm.MapCamera c, ll.LatLng p) =>
+        c.projectAtZoom(p) - c.projectAtZoom(c.center);
+
+    testWidgets(
+      'an empty map shows the world: lat 20, lng 0, MapLibre zoom 1',
+      (tester) async {
+        await _pump(tester, 'root = Col([Map([])])');
+        final c = controllerOf(tester).camera;
+        expect(c.center, const ll.LatLng(20, 0));
+        expect(c.zoom, 2);
+      },
+    );
+
+    testWidgets(
+      'the camera anchors on the first marker as soon as it streams in',
+      (tester) async {
+        final p = await _pump(
+          tester,
+          'root = Col([Map([MapMarker("A pl',
+          streaming: true,
+        );
+        final controller = controllerOf(tester);
+        expect(controller.camera.zoom, 2);
+        p.session.update(
+          'root = Col([Map([MapMarker("A place", 10, 20)])])',
+          streaming: true,
+        );
+        await tester.pump();
+        await tester.pump();
+        expect(controller.camera.center, const ll.LatLng(10, 20));
+        expect(controller.camera.zoom, 11.5);
+        p.session.update(
+          'root = Col([Map([MapMarker("A place", 10, 20), MapMarker("B place", 11, 21)])])',
+          streaming: false,
+        );
+        await tester.pump();
+        await _settle(tester);
+        await tester.pump(const Duration(milliseconds: 200));
+        final fit = fm.CameraFit.coordinates(
+          coordinates: const [ll.LatLng(10, 20), ll.LatLng(11, 21)],
+          padding: const EdgeInsets.fromLTRB(72, 70, 72, 50),
+          maxZoom: 14,
+        ).fit(controller.camera);
+        expect(controller.camera.zoom, closeTo(fit.zoom, 1e-6));
+        expect(
+          controller.camera.center.latitude,
+          closeTo(fit.center.latitude, 1e-6),
+        );
+      },
+    );
+
+    testWidgets(
+      'one place is framed at MapLibre zoom 13, 10px low for the controls',
+      (tester) async {
+        reducedMotion(tester);
+        await _pump(tester, 'root = Col([Map([MapMarker("Solo", 10, 20)])])');
+        final c = controllerOf(tester).camera;
+        expect(c.zoom, 14);
+        final s = shift(c, const ll.LatLng(10, 20));
+        expect(s.dx, closeTo(0, 1e-6));
+        expect(s.dy, closeTo(10, 1e-6));
+      },
+    );
+
+    testWidgets('Show every place frames one place at MapLibre zoom 14', (
+      tester,
+    ) async {
+      reducedMotion(tester);
+      await _pump(tester, 'root = Col([Map([MapMarker("Solo", 10, 20)])])');
+      final controller = controllerOf(tester);
+      controller.move(const ll.LatLng(0, 0), 3);
+      await tester.pump();
+      await tester.tap(_button('Show every place'));
+      await tester.pump();
+      expect(controller.camera.zoom, 15);
+      final s = shift(controller.camera, const ll.LatLng(10, 20));
+      expect(s.dx, closeTo(-3, 1e-6));
+      expect(s.dy, closeTo(10, 1e-6));
+    });
+
+    testWidgets('two places fit between the frame padding', (tester) async {
+      reducedMotion(tester);
+      await _pump(
+        tester,
+        'root = Col([Map([MapMarker("West", 0, -1), MapMarker("East", 0, 1)])])',
+      );
+      final w = tester.getSize(find.byType(fm.FlutterMap)).width;
+      // 2 degrees of longitude fill w - 144 pixels: 2/360 * 256 * 2^z = w - 144.
+      expect(
+        controllerOf(tester).camera.zoom,
+        closeTo(math.log((w - 144) * 360 / 512) / math.ln2, 1e-9),
+      );
+    });
+  });
+
+  group('flyPath', () {
+    test('a level pan arcs out and back like MapLibre', () {
+      final p = flyPath(w0: 768, u1: 1000, z0: 10, z1: 10, minZoom: 1)!;
+      expect(p.length, closeTo(1.529869440230, 1e-9));
+      expect(p.at(0.25).zoom, closeTo(9.480376921586, 1e-9));
+      expect(p.at(0.25).along, closeTo(0.188661126765, 1e-9));
+      expect(p.at(0.5).zoom, closeTo(9.277311468756, 1e-9));
+      expect(p.at(0.5).along, closeTo(0.5, 1e-9));
+      expect(p.at(1).zoom, 10);
+      expect(p.at(1).along, 1);
+    });
+
+    test('a zoom in place follows the exponential path', () {
+      final p = flyPath(w0: 768, u1: 0, z0: 10, z1: 12, minZoom: 1)!;
+      expect(p.length, closeTo(0.976263634591, 1e-9));
+      expect(p.at(0.5).zoom, closeTo(11, 1e-9));
+      expect(p.at(0.5).along, 0);
+    });
+
+    test('a zoom out while panning', () {
+      final p = flyPath(w0: 768, u1: 300, z0: 11.5, z1: 9, minZoom: 1)!;
+      expect(p.at(0.5).zoom, closeTo(10.239971006084, 1e-9));
+      expect(p.at(0.5).along, closeTo(0.150221104822, 1e-9));
+    });
+
+    test('no movement is no flight', () {
+      expect(flyPath(w0: 768, u1: 0, z0: 10, z1: 10, minZoom: 1), isNull);
+    });
   });
 
   group('Map framing', () {
@@ -902,7 +1369,15 @@ void main() {
           tester.widget<fm.TileLayer>(find.byType(fm.TileLayer)).urlTemplate,
           tiles.light,
         );
-        expect(find.byType(fm.RichAttributionWidget), findsOneWidget);
+        expect(find.byType(fm.RichAttributionWidget), findsNothing);
+        final credit = find.text('Tiles by Test');
+        expect(credit, findsOneWidget);
+        expect(tester.widget<Text>(credit).style!.fontSize, 8);
+        expect(
+          tester.getBottomLeft(credit),
+          tester.getBottomLeft(find.byType(fm.FlutterMap)) +
+              const Offset(4, -1),
+        );
         await tester.pumpWidget(const SizedBox());
         await _pump(tester, _sf, tiles: tiles, brightness: Brightness.dark);
         expect(

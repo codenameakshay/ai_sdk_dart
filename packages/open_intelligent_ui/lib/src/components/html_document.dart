@@ -24,22 +24,22 @@ const htmlViewStartHeight = 360.0;
 /// native web views, or to the parent window on the web.
 enum HeightReport { channel, parent }
 
-// Native pages get no storage: the sandboxed reference frame has an opaque
-// origin, and a native web view would otherwise share the app's stores.
-const _denyStorage =
-    '<script>(function(){function deny(n){try{Object.defineProperty(window,n,{configurable:false,get:function(){throw new DOMException("The document is sandboxed","SecurityError")}})}catch(e){}}deny("localStorage");deny("sessionStorage");deny("indexedDB");try{Object.defineProperty(document,"cookie",{get:function(){return""},set:function(){}})}catch(e){}})()</script>';
+// The reference frame is sandboxed without allow-same-origin: an opaque
+// origin, so storage, cookies and service workers fail and dialogs and
+// popups do nothing. A native page gets the same: it runs only if its
+// origin is opaque (else the rest of the document becomes inert text), and
+// these APIs fail as they do in that frame.
+const _sandbox =
+    r'''<script>(function(){"use strict";if(self.origin!=="null"){document.write("<plaintext hidden>");return}function err(){return new DOMException("The document is sandboxed and lacks the 'allow-same-origin' flag.","SecurityError")}function no(){throw err()}function later(){return Promise.reject(err())}function lock(o,n,d){d.configurable=false;try{Object.defineProperty(o,n,d)}catch(e){}}function deny(o,n){lock(o,n,{get:no,set:no})}function stub(o,n,v){lock(o,n,{get:function(){return v}})}function put(o,n,v){lock(o,n,{value:v,writable:true})}deny(window,"localStorage");deny(window,"sessionStorage");deny(Document.prototype,"cookie");deny(Navigator.prototype,"serviceWorker");stub(window,"indexedDB",Object.freeze({open:no,deleteDatabase:no,cmp:no,databases:later}));stub(window,"caches",Object.freeze({open:later,has:later,delete:later,keys:later,match:later}));stub(Navigator.prototype,"storage",Object.freeze({estimate:later,persist:later,persisted:later,getDirectory:later}));put(window,"BroadcastChannel",class BroadcastChannel extends EventTarget{constructor(name){super();this.name=String(name);this.onmessage=null;this.onmessageerror=null}postMessage(){}close(){}});put(window,"open",function(){return null});put(window,"alert",function(){});put(window,"confirm",function(){return false});put(window,"prompt",function(){return null});put(window,"print",function(){})})()</script>''';
 
-String _reporter(HeightReport to) {
-  final post = switch (to) {
-    HeightReport.channel =>
-      'if(window.IuiHeight)IuiHeight.postMessage(String(h))',
-    HeightReport.parent =>
-      'parent.postMessage({type:"iui-html-view-height",height:h},"*")',
-  };
-  return '<script>(function(){var last=0;function send(){var h=Math.ceil(document.documentElement.getBoundingClientRect().height);'
-      'if(Math.abs(h-last)>1){last=h;$post}}addEventListener("load",send);'
-      'if(window.ResizeObserver)new ResizeObserver(send).observe(document.documentElement);send()})()</script>';
-}
+// The reference's reporter, word for word on the web; native pages post to
+// the IuiHeight channel and have no parent to ask them to measure again.
+String _reporter(HeightReport to) => switch (to) {
+  HeightReport.parent =>
+    '<script>(function(){var last=0;function send(){var h=Math.ceil(document.documentElement.getBoundingClientRect().height);if(Math.abs(h-last)>1){last=h;parent.postMessage({type:"iui-html-view-height",height:h},"*")}}addEventListener("message",function(e){if(e.source===parent&&e.data==="iui-html-view-measure"){last=0;send()}});addEventListener("load",send);new ResizeObserver(send).observe(document.documentElement);send()})()</script>',
+  HeightReport.channel =>
+    '<script>(function(){var last=0;function send(){var h=Math.ceil(document.documentElement.getBoundingClientRect().height);if(Math.abs(h-last)>1){last=h;if(window.IuiHeight)IuiHeight.postMessage(String(h))}}addEventListener("load",send);new ResizeObserver(send).observe(document.documentElement);send()})()</script>',
+};
 
 /// The page around the model's [html]: the policy first, so it covers all of
 /// the model's markup.
@@ -53,7 +53,7 @@ String htmlViewDocument(
     '<meta name="viewport" content="width=device-width,initial-scale=1">'
     '<style>:root{color-scheme:${dark ? 'dark' : 'light'}}html,body{margin:0}'
     'body{font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}</style>'
-    '${report == HeightReport.channel ? _denyStorage : ''}'
+    '${report == HeightReport.channel ? _sandbox : ''}'
     '${_reporter(report)}$html';
 
 /// A reported height, clamped; null when it is not a finite number.

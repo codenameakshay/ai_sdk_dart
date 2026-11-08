@@ -1,5 +1,10 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'dart:ui';
+
+import 'package:flutter/foundation.dart' show listEquals;
+import 'package:flutter/painting.dart' show Gradient;
 
 /// Parses a CSS color: hex (`#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`),
 /// `rgb()`/`rgba()`, `hsl()`/`hsla()`, a named color, or `transparent`.
@@ -333,6 +338,398 @@ List<double> _labToSrgb(List<double> lab) {
       x * x * x,
   ];
   return [for (final x in _mul(_m3, cube)) _fromLinear(x)];
+}
+
+/// A CSS `linear-gradient()` or `radial-gradient()`, plain or `repeating-`,
+/// as a [CssGradient]; null for anything else, including colour hints,
+/// `conic-gradient()` and layered backgrounds.
+CssGradient? parseCssGradient(String input) {
+  final m = RegExp(
+    r'^(repeating-)?(linear|radial)-gradient\((.*)\)$',
+  ).firstMatch(input.trim().toLowerCase());
+  if (m == null) return null;
+  final args = _splitTopLevel(m.group(3)!);
+  if (args == null || args.isEmpty) return null;
+  final config = _colorStops([args.first]) == null ? args.first.trim() : null;
+  final stops = _colorStops(config == null ? args : args.sublist(1));
+  if (stops == null || stops.length < 2) return null;
+  final repeating = m.group(1) != null;
+  if (m.group(2) == 'linear') {
+    final direction = config == null
+        ? (angle: math.pi, corner: Offset.zero)
+        : _linearDirection(config);
+    if (direction == null) return null;
+    return CssGradient._(
+      stops,
+      repeating: repeating,
+      angle: direction.angle,
+      corner: direction.corner,
+    );
+  }
+  final radial = _radialShape(config ?? '');
+  if (radial == null) return null;
+  return CssGradient._(stops, repeating: repeating, radial: radial);
+}
+
+/// One colour stop: px, or a fraction of the gradient length; null [at] is
+/// placed by the CSS fix-up rules.
+typedef _Stop = ({Color color, double? at, bool px});
+
+/// A length: [value] px, or a fraction of a reference length.
+typedef _Len = ({double value, bool fraction});
+
+/// A radial gradient's ending shape, its size and its centre.
+typedef _Radial = ({
+  bool circle,
+  String extent,
+  _Len? rx,
+  _Len? ry,
+  _Len cx,
+  _Len cy,
+});
+
+final _dimension = RegExp(
+  r'^([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)(%|px|deg|rad|grad|turn)?$',
+);
+
+({double value, String unit})? _measure(String text) {
+  final m = _dimension.firstMatch(text);
+  if (m == null) return null;
+  final value = double.parse(m.group(1)!);
+  return value.isFinite ? (value: value, unit: m.group(2) ?? '') : null;
+}
+
+/// `10px`, `25%` or a unitless `0`.
+_Len? _length(String text) {
+  final d = _measure(text);
+  return switch (d?.unit) {
+    'px' => (value: d!.value, fraction: false),
+    '%' => (value: d!.value / 100, fraction: true),
+    '' when d!.value == 0 => (value: 0.0, fraction: false),
+    _ => null,
+  };
+}
+
+/// An angle in radians: `deg`, `rad`, `grad`, `turn`, or a unitless `0`.
+double? _angle(String text) {
+  final d = _measure(text);
+  return switch (d?.unit) {
+    'deg' => d!.value * math.pi / 180,
+    'rad' => d!.value,
+    'grad' => d!.value * math.pi / 200,
+    'turn' => d!.value * 2 * math.pi,
+    '' when d!.value == 0 => 0.0,
+    _ => null,
+  };
+}
+
+/// Splits [s] at whitespace outside parentheses.
+List<String> _words(String s) {
+  final out = <String>[];
+  var depth = 0, start = -1;
+  for (var i = 0; i < s.length; i++) {
+    final ch = s[i];
+    if (ch == '(') depth++;
+    if (ch == ')') depth--;
+    if (depth == 0 && (ch == ' ' || ch == '\t' || ch == '\n')) {
+      if (start >= 0) out.add(s.substring(start, i));
+      start = -1;
+    } else if (start < 0) {
+      start = i;
+    }
+  }
+  if (start >= 0) out.add(s.substring(start));
+  return out;
+}
+
+/// `<color> <length>{0,2}` items, the colour first or last; null when one
+/// is not a colour stop.
+List<_Stop>? _colorStops(List<String> items) {
+  final out = <_Stop>[];
+  for (final item in items) {
+    final words = _words(item.trim());
+    if (words.isEmpty || words.length > 3) return null;
+    var color = parseCssColor(words.first);
+    var lengths = words.skip(1);
+    if (color == null) {
+      color = parseCssColor(words.last);
+      lengths = words.take(words.length - 1);
+    }
+    if (color == null) return null;
+    final at = [for (final w in lengths) _length(w)];
+    if (at.contains(null)) return null;
+    if (at.isEmpty) out.add((color: color, at: null, px: false));
+    for (final l in at) {
+      out.add((color: color, at: l!.value, px: !l.fraction));
+    }
+  }
+  return out;
+}
+
+/// An angle, or `to` a side or a corner. A corner's angle depends on the
+/// box, so it stays as signs: `to top right` is `Offset(1, -1)`.
+({double? angle, Offset corner})? _linearDirection(String config) {
+  final angle = _angle(config);
+  if (angle != null) return (angle: angle, corner: Offset.zero);
+  final words = _words(config);
+  if (words.length < 2 || words.length > 3 || words.first != 'to') return null;
+  var x = 0.0, y = 0.0;
+  for (final w in words.skip(1)) {
+    switch (w) {
+      case 'left' when x == 0:
+        x = -1;
+      case 'right' when x == 0:
+        x = 1;
+      case 'top' when y == 0:
+        y = -1;
+      case 'bottom' when y == 0:
+        y = 1;
+      default:
+        return null;
+    }
+  }
+  if (x != 0 && y != 0) return (angle: null, corner: Offset(x, y));
+  return (angle: math.atan2(x, -y), corner: Offset.zero);
+}
+
+const _center = (value: 0.5, fraction: true);
+const _extents = {
+  'closest-side',
+  'closest-corner',
+  'farthest-side',
+  'farthest-corner',
+};
+
+/// `[circle | ellipse] [<extent> | <length>{1,2}] [at <position>]`.
+_Radial? _radialShape(String config) {
+  final words = _words(config);
+  final at = words.indexOf('at');
+  final center = at < 0
+      ? (cx: _center, cy: _center)
+      : _position(words.sublist(at + 1));
+  if (center == null) return null;
+  bool? circle;
+  String? extent;
+  final sizes = <_Len>[];
+  for (final w in at < 0 ? words : words.sublist(0, at)) {
+    final size = _length(w);
+    if ((w == 'circle' || w == 'ellipse') && circle == null) {
+      circle = w == 'circle';
+    } else if (_extents.contains(w) && extent == null && sizes.isEmpty) {
+      extent = w;
+    } else if (size != null &&
+        size.value >= 0 &&
+        extent == null &&
+        sizes.length < 2) {
+      sizes.add(size);
+    } else {
+      return null;
+    }
+  }
+  final round = circle ?? sizes.length == 1;
+  if (round
+      ? sizes.length > 1 || sizes.any((s) => s.fraction)
+      : sizes.length == 1) {
+    return null;
+  }
+  return (
+    circle: round,
+    extent: extent ?? 'farthest-corner',
+    rx: sizes.firstOrNull,
+    ry: sizes.length == 2 ? sizes[1] : null,
+    cx: center.cx,
+    cy: center.cy,
+  );
+}
+
+/// One or two of `left`, `center`, `right`, `top`, `bottom` or a length.
+({_Len cx, _Len cy})? _position(List<String> words) {
+  if (words.isEmpty || words.length > 2) return null;
+  var x = words.first, y = words.length == 2 ? words[1] : 'center';
+  if (x == 'top' || x == 'bottom' || y == 'left' || y == 'right') {
+    (x, y) = (y, x);
+  }
+  _Len? place(String w, String start, String end) => switch (w) {
+    'center' => _center,
+    _ when w == start => (value: 0.0, fraction: true),
+    _ when w == end => (value: 1.0, fraction: true),
+    _ => _length(w),
+  };
+  final cx = place(x, 'left', 'right');
+  final cy = place(y, 'top', 'bottom');
+  return cx == null || cy == null ? null : (cx: cx, cy: cy);
+}
+
+/// A CSS gradient. Angles to corners, ending-shape sizes and stop lengths
+/// depend on the painted box, so they resolve in [createShader].
+final class CssGradient extends Gradient {
+  CssGradient._(
+    this._stops, {
+    required this.repeating,
+    this.angle,
+    this.corner = Offset.zero,
+    _Radial? radial,
+  }) : _radial = radial,
+       super(colors: [for (final s in _stops) s.color]);
+
+  final List<_Stop> _stops;
+  final bool repeating;
+
+  /// A linear gradient's angle in radians (0 points up, clockwise), or null
+  /// for a gradient to [corner].
+  final double? angle;
+  final Offset corner;
+  final _Radial? _radial;
+
+  TileMode get _tileMode => repeating ? TileMode.repeated : TileMode.clamp;
+
+  @override
+  Shader createShader(Rect rect, {TextDirection? textDirection}) {
+    final radial = _radial;
+    if (radial == null) {
+      final a =
+          angle ?? math.atan2(corner.dx * rect.height, -corner.dy * rect.width);
+      final dir = Offset(math.sin(a), -math.cos(a));
+      final length =
+          (rect.width * math.sin(a)).abs() + (rect.height * math.cos(a)).abs();
+      final (colors, at) = _resolve(length);
+      final span = math.max(at.last - at.first, 1e-3);
+      final start = rect.center - dir * (length / 2) + dir * at.first;
+      return ui.Gradient.linear(start, start + dir * span, colors, [
+        for (final p in at) (p - at.first) / span,
+      ], _tileMode);
+    }
+    double px(_Len l, double of) => l.fraction ? l.value * of : l.value;
+    final center = Offset(
+      rect.left + px(radial.cx, rect.width),
+      rect.top + px(radial.cy, rect.height),
+    );
+    final (rx, ry) = _radii(radial, rect, center, px);
+    final (colors, at) = _resolve(rx);
+    final last = math.max(at.last, 1e-3);
+    final scaleY = ry / rx;
+    return ui.Gradient.radial(
+      center,
+      last,
+      colors,
+      [for (final p in at) (p / last).clamp(0.0, 1.0)],
+      _tileMode,
+      Float64List(16)
+        ..[0] = 1
+        ..[5] = scaleY
+        ..[10] = 1
+        ..[13] = center.dy * (1 - scaleY)
+        ..[15] = 1,
+    );
+  }
+
+  /// The ending shape's radii: explicit, or from the extent keyword measured
+  /// from [center] to the box's sides or corners.
+  (double, double) _radii(
+    _Radial r,
+    Rect rect,
+    Offset center,
+    double Function(_Len, double) px,
+  ) {
+    var rx = 0.0, ry = 0.0;
+    if (r.rx != null) {
+      rx = px(r.rx!, rect.width);
+      ry = r.circle ? rx : px(r.ry!, rect.height);
+    } else {
+      final dx = [center.dx - rect.left, rect.right - center.dx];
+      final dy = [center.dy - rect.top, rect.bottom - center.dy];
+      final closest = r.extent.startsWith('closest');
+      final x = closest
+          ? dx.map((v) => v.abs()).reduce(math.min)
+          : dx.map((v) => v.abs()).reduce(math.max);
+      final y = closest
+          ? dy.map((v) => v.abs()).reduce(math.min)
+          : dy.map((v) => v.abs()).reduce(math.max);
+      final corner = r.extent.endsWith('corner');
+      if (r.circle) {
+        rx = ry = corner
+            ? math.sqrt(x * x + y * y)
+            : (closest ? math.min(x, y) : math.max(x, y));
+      } else {
+        rx = corner ? x * math.sqrt2 : x;
+        ry = corner ? y * math.sqrt2 : y;
+      }
+    }
+    return (math.max(rx, 1e-3), math.max(ry, 1e-3));
+  }
+
+  /// Colours and px positions after the CSS fix-up: a missing first or last
+  /// position is 0% or 100%, no position goes back, and stops without one
+  /// share the space between their neighbours. A transparent stop takes each
+  /// neighbour's colour at zero alpha, as premultiplied interpolation shows it.
+  (List<Color>, List<double>) _resolve(double length) {
+    final at = [
+      for (final s in _stops)
+        s.at == null ? null : (s.px ? s.at! : s.at! * length),
+    ];
+    at.first ??= 0;
+    at.last ??= length;
+    var max = at.first!;
+    for (var i = 1; i < at.length; i++) {
+      if (at[i] != null) max = at[i] = math.max(at[i]!, max);
+    }
+    for (var i = 1; i < at.length; i++) {
+      if (at[i] != null) continue;
+      var j = i;
+      while (at[j] == null) {
+        j++;
+      }
+      final from = at[i - 1]!, to = at[j]!;
+      for (var k = i; k < j; k++) {
+        at[k] = from + (to - from) * (k - i + 1) / (j - i + 1);
+      }
+    }
+    final colors = <Color>[];
+    final positions = <double>[];
+    for (var i = 0; i < _stops.length; i++) {
+      final color = _stops[i].color;
+      final neighbours = color.a > 0
+          ? [color]
+          : [
+              if (i > 0) _stops[i - 1].color.withValues(alpha: 0),
+              if (i < _stops.length - 1)
+                _stops[i + 1].color.withValues(alpha: 0),
+            ];
+      for (final c in neighbours) {
+        colors.add(c);
+        positions.add(at[i]!);
+      }
+    }
+    return (colors, positions);
+  }
+
+  CssGradient _map(Color Function(Color) f) => CssGradient._(
+    [for (final s in _stops) (color: f(s.color), at: s.at, px: s.px)],
+    repeating: repeating,
+    angle: angle,
+    corner: corner,
+    radial: _radial,
+  );
+
+  @override
+  CssGradient scale(double factor) => _map((c) => Color.lerp(null, c, factor)!);
+
+  @override
+  CssGradient withOpacity(double opacity) =>
+      _map((c) => c.withValues(alpha: c.a * opacity));
+
+  @override
+  bool operator ==(Object other) =>
+      other is CssGradient &&
+      listEquals(other._stops, _stops) &&
+      other.repeating == repeating &&
+      other.angle == angle &&
+      other.corner == corner &&
+      other._radial == _radial;
+
+  @override
+  int get hashCode =>
+      Object.hash(Object.hashAll(_stops), repeating, angle, corner, _radial);
 }
 
 const Map<String, int> _named = {

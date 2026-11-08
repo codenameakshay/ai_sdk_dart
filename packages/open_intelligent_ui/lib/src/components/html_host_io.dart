@@ -32,32 +32,48 @@ class _NativePage extends StatefulWidget {
 }
 
 class _NativePageState extends State<_NativePage> {
-  late final WebViewController _controller = WebViewController()
-    ..setJavaScriptMode(JavaScriptMode.unrestricted)
-    ..setBackgroundColor(const Color(0x00000000))
-    ..addJavaScriptChannel(
-      'IuiHeight',
-      onMessageReceived: (m) {
-        final h = clampHeight(m.message);
-        if (mounted && h != null) widget.onHeight(h);
-      },
-    )
-    ..setNavigationDelegate(
-      NavigationDelegate(
-        onNavigationRequest: (request) =>
-            !_loaded && request.url == 'about:blank'
-            ? NavigationDecision.navigate
-            : NavigationDecision.prevent,
-        onPageFinished: (_) => _loaded = true,
-      ),
-    )
-    ..loadHtmlString(widget.document);
+  late final WebViewController _controller = WebViewController(
+    onPermissionRequest: (request) => request.deny(),
+  );
   bool _loaded = false;
+  bool _configured = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _configure();
+  }
+
+  Future<void> _configure() async {
+    await Future.wait([
+      _controller.setJavaScriptMode(JavaScriptMode.unrestricted),
+      _controller.setBackgroundColor(const Color(0x00000000)),
+      _controller.addJavaScriptChannel(
+        'IuiHeight',
+        onMessageReceived: (m) {
+          final h = clampHeight(m.message);
+          if (mounted && h != null) widget.onHeight(h);
+        },
+      ),
+      _controller.setNavigationDelegate(
+        NavigationDelegate(
+          onNavigationRequest: (request) =>
+              !_loaded && request.url == 'about:blank'
+              ? NavigationDecision.navigate
+              : NavigationDecision.prevent,
+          onPageFinished: (_) => _loaded = true,
+        ),
+      ),
+    ]);
+    if (!mounted) return;
+    _configured = true;
+    await _controller.loadHtmlString(widget.document);
+  }
 
   @override
   void didUpdateWidget(_NativePage old) {
     super.didUpdateWidget(old);
-    if (old.document != widget.document) {
+    if (_configured && old.document != widget.document) {
       _loaded = false;
       _controller.loadHtmlString(widget.document);
     }

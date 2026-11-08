@@ -1,3 +1,4 @@
+import 'package:ai_sdk_openui/src/lang/parser.dart';
 import 'package:ai_sdk_openui/src/runtime/store.dart';
 import 'package:test/test.dart';
 
@@ -110,7 +111,7 @@ void main() {
         final store = Store()
           ..initialize({
             'value': [
-              {2.0: 9007199254740993},
+              {2.0: int.parse('9007199254740993')},
             ],
           }, {});
         var notified = 0;
@@ -152,5 +153,107 @@ void main() {
     store.set('a', 2);
     expect(store.snapshot, {'a': 2});
     expect(notified, 0);
+  });
+
+  // Ported from lang-core 1.0.0 runtime/__tests__/store.test.ts.
+  group('store defaults while streaming', () {
+    const program =
+        'root = Col([shopping, copyButton, dinnerCards], 4)\n'
+        r'$ingredients = ["500 g (about 1 lb) ground beef", "12 small tortillas or taco shells", "1 packet taco seasoning (about 28 g / 1 oz)", "1 small head lettuce", "2 medium tomatoes", "1 small onion", "150 g (about 1½ cups) shredded cheddar", "2 avocados", "200 g (about ¾ cup) salsa", "150 g (about ⅔ cup) sour cream", "2 limes"]'
+        '\n'
+        r'$checked = []'
+        '\n'
+        r'$dishes = [{name: "Lemon chicken pasta", time: "30 minutes"}, {name: "Chickpea and spinach curry", time: "35 minutes"}]'
+        '\n'
+        r'shopping = Card([Col(@Each($ingredients, "item", Pressable([Text(item)], @Set($checked, @Toggle($checked, item)), @Includes($checked, item))))])'
+        '\n'
+        r'copyButton = Button("Copy whole shopping list", @CopyToClipboard(@Join($ingredients, "\n")))'
+        '\n'
+        r'dinnerCards = Grid(@Each($dishes, "dish", Card([Title(dish.name), Button("Get recipe", @ToAssistant("Recipe for " + dish.name, {dishName: dish.name}))])))'
+        '\n';
+    final schema = CompiledSchema.fromJsonSchema(const {});
+
+    void streamInto(Store store, [void Function(String text)? onStep]) {
+      final sp = StreamParser(schema, rootName: 'Col');
+      for (var end = 20; end < program.length + 20; end += 20) {
+        final text = program.substring(0, end.clamp(0, program.length));
+        store.initialize(sp.set(text).stateDeclarations, const {});
+        onStep?.call(text);
+      }
+    }
+
+    test(
+      'ends with the batch-parse state: full values, no half-typed names',
+      () {
+        final store = Store();
+        streamInto(store);
+        final batch = parseProgram(
+          program,
+          schema,
+          rootName: 'Col',
+        ).stateDeclarations;
+        expect(store.snapshot, batch);
+        expect(store.get(r'$ingredients'), hasLength(11));
+        expect(store.snapshot.keys.toList()..sort(), [
+          r'$checked',
+          r'$dishes',
+          r'$ingredients',
+        ]);
+      },
+    );
+
+    test('keeps a value the user set mid-stream', () {
+      final store = Store();
+      streamInto(store, (text) {
+        final checked = store.get(r'$checked');
+        if (text.contains('\$checked = []\n') &&
+            !(checked is List && checked.isNotEmpty)) {
+          store.set(r'$checked', ['2 limes']);
+        }
+      });
+      expect(store.get(r'$checked'), ['2 limes']);
+      expect(store.get(r'$ingredients'), hasLength(11));
+    });
+
+    for (final end in ['', '\n']) {
+      test(
+        'declares a \$name that ends the program (trailing ${end.isEmpty ? '""' : r'"\n"'})',
+        () {
+          final src = 'root = Col([Input(email)])\nemail = \$email$end';
+          final sp = StreamParser(schema, rootName: 'Col');
+          final store = Store();
+          for (var i = 5; i < src.length; i += 5) {
+            store.initialize(
+              sp.set(src.substring(0, i)).stateDeclarations,
+              const {},
+            );
+          }
+          store.initialize(
+            sp.set(src, complete: true).stateDeclarations,
+            const {},
+          );
+          final batch = parseProgram(
+            src,
+            schema,
+            rootName: 'Col',
+          ).stateDeclarations;
+          expect(batch, {r'$email': null});
+          expect(store.snapshot, batch);
+        },
+      );
+    }
+
+    test(
+      'a value restored with pristine: true (@Reset) can still be replaced',
+      () {
+        final store = Store()
+          ..initialize({r'$title': 'Quarterly rev'}, const {});
+        store
+          ..set(r'$title', 'user edit')
+          ..set(r'$title', 'Quarterly rev', pristine: true)
+          ..initialize({r'$title': 'Quarterly revenue'}, const {});
+        expect(store.get(r'$title'), 'Quarterly revenue');
+      },
+    );
   });
 }

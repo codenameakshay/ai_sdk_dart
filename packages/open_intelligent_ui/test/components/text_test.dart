@@ -1,5 +1,7 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
 
@@ -30,6 +32,15 @@ Color? _decorationColor(WidgetTester tester, String text) {
   return (container.decoration! as BoxDecoration).color;
 }
 
+void _phone(WidgetTester tester) {
+  tester.view.physicalSize = const Size(400, 800);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
+}
+
+Color? _ink(WidgetTester tester, String text) =>
+    tester.renderObject<RenderParagraph>(find.text(text)).text.style?.color;
+
 void main() {
   const titleSizes = <String, (double, double, double)>{
     'sm': (15, 1.5, 0),
@@ -47,9 +58,25 @@ void main() {
       expect(style.fontSize, fontSize);
       expect(style.height, height);
       expect(style.letterSpacing, spacing);
-      expect(style.fontWeight, FontWeight.w600);
+      expect(style.fontWeight, OpenUiTheme.weightSemibold);
     });
   }
+
+  testWidgets('on a phone lg, 2xl and 3xl titles shrink; card titles stay 18', (
+    tester,
+  ) async {
+    _phone(tester);
+    await pumpProgram(
+      tester,
+      'root = Col([Title("L", "lg"), Title("X", "xl"), Title("D", "2xl"), '
+      'Title("T", "3xl"), Card([Title("C", "2xl")])])',
+    );
+    double size(String t) => tester.widget<Text>(find.text(t)).style!.fontSize!;
+    expect(
+      [size('L'), size('X'), size('D'), size('T'), size('C')],
+      [19, 25, 28, 34, 18],
+    );
+  });
 
   testWidgets('Title without a size is md and takes a model color', (
     tester,
@@ -84,7 +111,21 @@ void main() {
     final plain = tester.widget<Text>(find.text('Plain')).style!;
     expect(plain.fontSize, isNull);
     expect(plain.height, 1.6);
-    expect(plain.color, OpenUiTheme.light.ink);
+    expect(plain.color, isNull);
+    expect(_ink(tester, 'Plain'), OpenUiTheme.light.ink);
+  });
+
+  testWidgets('Text without a color takes the hovered popover trigger color', (
+    tester,
+  ) async {
+    await pumpProgram(tester, 'root = Col([Popover(Text("Term"), "Meaning")])');
+    expect(_ink(tester, 'Term'), OpenUiTheme.light.ink);
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(tester.getCenter(find.text('Term')));
+    await tester.pump();
+    expect(_ink(tester, 'Term'), OpenUiTheme.light.muted);
   });
 
   testWidgets('Text applies color, weight and decoration props', (
@@ -97,17 +138,17 @@ void main() {
     );
     final styled = tester.widget<Text>(find.text('Styled')).style!;
     expect(styled.color, OpenUiTheme.light.status['danger']);
-    expect(styled.fontWeight, FontWeight.w600);
+    expect(styled.fontWeight, OpenUiTheme.weightSemibold);
     expect(styled.fontStyle, FontStyle.italic);
     expect(styled.decoration, TextDecoration.lineThrough);
     expect(styled.fontFeatures, const [FontFeature.tabularFigures()]);
     expect(
       tester.widget<Text>(find.text('Light')).style!.fontWeight,
-      FontWeight.w400,
+      OpenUiTheme.weightNormal,
     );
     expect(
       tester.widget<Text>(find.text('Middle')).style!.fontWeight,
-      FontWeight.w500,
+      OpenUiTheme.weightMedium,
     );
   });
 
@@ -116,7 +157,14 @@ void main() {
       tester,
       'root = Col([Text("**Bold** and *soft* and `code`")])',
     );
-    expect(find.text('Bold and soft and code'), findsOneWidget);
+    expect(find.text('Bold and soft and ￼'), findsOneWidget);
+    expect(find.text('code'), findsOneWidget);
+  });
+
+  testWidgets('inline code in Text takes the text colour', (tester) async {
+    await pumpProgram(tester, 'root = Col([Text("run `make test` now")])');
+    final code = tester.widget<Text>(find.text('make test'));
+    expect(code.style!.color, OpenUiTheme.light.ink);
   });
 
   testWidgets('Text keeps line breaks from the model', (tester) async {
@@ -184,7 +232,7 @@ void main() {
     final style = tester.widget<Text>(find.text('Field name')).style!;
     expect(style.fontSize, 14);
     expect(style.height, 1.4);
-    expect(style.fontWeight, FontWeight.w500);
+    expect(style.fontWeight, OpenUiTheme.weightMedium);
     expect(style.color, OpenUiTheme.light.ink);
   });
 
@@ -212,6 +260,19 @@ void main() {
       OpenUiTheme.light.status['info'],
     );
     expect(find.byType(Glyph), findsOneWidget);
+  });
+
+  testWidgets('a Badge icon sits 8px in, 2px left of the text padding', (
+    tester,
+  ) async {
+    await pumpProgram(tester, 'root = Col([Badge("Clock", "info", "clock")])');
+    final badge = find
+        .ancestor(of: find.text('Clock'), matching: find.byType(Container))
+        .first;
+    expect(
+      tester.getTopLeft(find.byType(Glyph)).dx - tester.getTopLeft(badge).dx,
+      8,
+    );
   });
 
   testWidgets('Badge takes status colors and skips an unknown icon', (
@@ -250,10 +311,7 @@ void main() {
       tester.widget<Text>(find.text('Dark')).style!.color,
       OpenUiTheme.dark.badge['success'],
     );
-    expect(
-      tester.widget<Text>(find.text('Body')).style!.color,
-      OpenUiTheme.dark.ink,
-    );
+    expect(_ink(tester, 'Body'), OpenUiTheme.dark.ink);
   });
 
   testWidgets('Link opens an http URL when tapped', (tester) async {
@@ -307,6 +365,18 @@ void main() {
     );
   });
 
+  testWidgets('Link takes keyboard focus and opens on Enter', (tester) async {
+    final pumped = await pumpProgram(
+      tester,
+      'root = Col([Link("Docs", "https://example.com/a")])',
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(pumped.opened, [Uri.parse('https://example.com/a')]);
+  });
+
   testWidgets('Link with a non-http URL is plain text and does not open', (
     tester,
   ) async {
@@ -339,6 +409,32 @@ void main() {
     expect(find.text('1'), findsOneWidget);
     expect(find.text('2'), findsOneWidget);
     expect(_circles(), findsNWidgets(2));
+  });
+
+  testWidgets('number circles are 24px, also around a step chip', (
+    tester,
+  ) async {
+    await pumpProgram(
+      tester,
+      'root = Col([List(["a", "b"], "number"), List([ListItem("Prep", null, "A")], "number")])',
+    );
+    expect(
+      tester.getSize(
+        find
+            .ancestor(of: find.text('1'), matching: find.byType(Container))
+            .first,
+      ),
+      const Size(24, 24),
+    );
+    expect(
+      find.ancestor(
+        of: find.text('A'),
+        matching: find.byWidgetPredicate(
+          (w) => w is SizedBox && w.width == 24 && w.height == 24,
+        ),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('a none List has no markers', (tester) async {
@@ -433,6 +529,37 @@ void main() {
     expect(find.text('Serve'), findsOneWidget);
   });
 
+  testWidgets('on a phone a wide list lane is 64px with a 20px gap', (
+    tester,
+  ) async {
+    _phone(tester);
+    await pumpProgram(
+      tester,
+      'root = Col([List([ListItem("Arrive", null, "09:00"), ListItem("Leave", null, "11:30")], "bullet", true)])',
+    );
+    expect(tester.getTopLeft(find.text('Arrive')).dx, 16 + 64 + 20);
+    expect(tester.getTopLeft(_connectors()).dx, 16 + 73);
+    final ring = find.byWidgetPredicate(
+      (w) =>
+          w is Container &&
+          w.decoration is BoxDecoration &&
+          (w.decoration! as BoxDecoration).border ==
+              Border.all(color: OpenUiTheme.light.ink, width: 2),
+    );
+    expect(tester.getTopLeft(ring.first).dx, 16 + 70);
+  });
+
+  testWidgets('a List is a list of list items for assistive technology', (
+    tester,
+  ) async {
+    final handle = tester.ensureSemantics();
+    await pumpProgram(tester, 'root = Col([List(["Milk", "Eggs"])])');
+    final item = tester.getSemantics(find.text('Milk'));
+    expect(item.role, SemanticsRole.listItem);
+    expect(item.parent!.role, SemanticsRole.list);
+    handle.dispose();
+  });
+
   testWidgets('a ListItem shows its title, description and children', (
     tester,
   ) async {
@@ -443,7 +570,7 @@ void main() {
     expect(find.text('Pack'), findsOneWidget);
     expect(
       tester.widget<Text>(find.text('Pack')).style!.fontWeight,
-      FontWeight.w500,
+      OpenUiTheme.weightMedium,
     );
     final description = tester.widget<Text>(find.text('Bring tools')).style!;
     expect(description.color, OpenUiTheme.light.muted);
@@ -476,7 +603,7 @@ void main() {
     );
     expect(
       tester.widget<Text>(find.text('Pack')).style!.fontWeight,
-      FontWeight.w500,
+      OpenUiTheme.weightMedium,
     );
     pumped.session.update(
       'root = Col([List([ListItem("Pack")])])',

@@ -113,6 +113,10 @@ final class Props {
   OpenUiAction? action(String name) {
     final v = this[name];
     if (v is OpenUiAction) return v;
+    final raw = _raw[name];
+    if (raw is Map && raw['steps'] is List) {
+      return OpenUiAction._plan(ActionPlan(dataSteps(raw)));
+    }
     if (v is Map) return OpenUiAction._legacy(v.cast());
     return null;
   }
@@ -154,6 +158,7 @@ final class OpenUiSession {
     Map<String, Object?> initialState = const {},
     this.onError,
     this.onStateUpdate,
+    this.onParseResult,
   }) : _tools = {for (final t in tools) t.name: t},
        _initialState = initialState,
        _parser = StreamParser(library.compiled, rootName: library.rootName) {
@@ -190,14 +195,18 @@ final class OpenUiSession {
 
   /// react-lang `onStateUpdate`: the store after each user or action change.
   final void Function(Map<String, Object?> state)? onStateUpdate;
-  final Map<String, OpenUiTool> _tools;
+
+  /// react-lang `onParseResult`: the raw parse result, each time the
+  /// program, its bundle error or the streaming flag changes.
+  final void Function(ParseResult? result)? onParseResult;
+  Map<String, OpenUiTool> _tools;
   final Map<String, Object?> _initialState;
   final StreamParser _parser;
   final Store _store = Store();
-  late final QueryManager _queries;
+  late QueryManager _queries;
   late final EvaluationContext _context;
   late final void Function() _cancelStore;
-  late final void Function() _cancelQueries;
+  late void Function() _cancelQueries;
   final List<void Function()> _listeners = [];
 
   String? _text;
@@ -209,6 +218,9 @@ final class OpenUiSession {
   ParseResult? _result;
   OpenUiError? _parseException;
   List<OpenUiError> _runtimeErrors = const [];
+  List<OpenUiError> _renderErrors = [];
+  bool _renderReportScheduled = false;
+  (String, String?, bool)? _parseKey;
   String _lastErrorKey = '';
   String? _storeKey;
   OpenUiElement? _root;
@@ -235,37 +247,44 @@ final class OpenUiSession {
       _scriptRevision = bundle.scriptRevision;
       _scriptNames = bundle.scripts;
     }
-    _parseException = bundle.error == null
-        ? null
-        : OpenUiError(
+    final parseKey = (bundle.program, bundle.error, streaming);
+    if (parseKey != _parseKey) {
+      _parseKey = parseKey;
+      _parseException = bundle.error == null
+          ? null
+          : OpenUiError(
+              source: OpenUiErrorSource.parser,
+              code: OpenUiErrorCode.parseFailed,
+              message: bundle.error!,
+            );
+      ParseResult? result;
+      if (bundle.program.isNotEmpty) {
+        try {
+          result = _parser.set(bundle.program, complete: !streaming);
+        } catch (e) {
+          // coverage:ignore-start
+          _parseException = OpenUiError(
             source: OpenUiErrorSource.parser,
-            code: OpenUiErrorCode.parseFailed,
-            message: bundle.error!,
+            code: OpenUiErrorCode.parseException,
+            message: 'Parser crashed: ${errorMessage(e)}',
+            hint: 'The response may contain syntax the parser cannot handle',
           );
-    ParseResult? result;
-    if (bundle.program.isNotEmpty) {
-      try {
-        result = _parser.set(bundle.program, complete: !streaming);
-      } catch (e) {
-        // coverage:ignore-start
-        _parseException = OpenUiError(
-          source: OpenUiErrorSource.parser,
-          code: OpenUiErrorCode.parseException,
-          message: 'Parser crashed: ${errorMessage(e)}',
-          hint: 'The response may contain syntax the parser cannot handle',
-        );
-        // coverage:ignore-end
+          // coverage:ignore-end
+        }
       }
+      _result = result;
+      onParseResult?.call(result);
+      if (_disposed) return;
     }
-    _result = result;
-    final declarations = result?.stateDeclarations ?? const {};
+    final declarations = _result?.stateDeclarations ?? const {};
     final key = '${Js.stringify(declarations)}::${Js.stringify(_initialState)}';
     if (key != _storeKey) {
       _storeKey = key;
       final persisted = <String, Object?>{};
       _initializing = true;
       // initialState only fills keys the store lacks, so a re-parse never undoes user edits.
-      for (final MapEntry(:key, :value) in _initialState.entries) {
+      for (final MapEntry(:key, value: raw) in _initialState.entries) {
+        final value = Js.normalize(raw);
         if (key.startsWith(r'$')) {
           if (!_store.has(key)) persisted[key] = value;
         } else if (!_store.has(key)) {
@@ -290,6 +309,15 @@ final class OpenUiSession {
       (_streaming &&
           _bundleBlocked &&
           (_result?.queryStatements.length ?? 0) > 0);
+
+  /// Whether the last [update] said the model is still writing: react-lang's
+  /// `isStreaming` prop. [isStreaming] also stays true for an unfinished or
+  /// invalid OpenUI Cloud bundle. True before the first update.
+  bool get isGenerating => _streaming;
+
+  /// The OpenUI Cloud metadata of the response, such as its `name`.
+  ResponseMetadata get metadata =>
+      _bundle?.metadata ?? const ResponseMetadata();
 
   /// The `$state` and form fields, as JSON to persist and pass back as
   /// `initialState`.
@@ -318,6 +346,7 @@ final class OpenUiSession {
         library.components.keys.toList(),
       ),
       ..._runtimeErrors,
+      ..._renderErrors,
       ..._queries.getSnapshot().errors,
     ];
   }
@@ -343,6 +372,28 @@ final class OpenUiSession {
     return () => _listeners.remove(listener);
   }
 
+  /// react-lang's error boundary: [component]'s builder threw [error]. It is
+  /// reported through [onError], with the answer's other errors, once the
+  /// current synchronous work (a Flutter frame) ends; dropped while the model
+  /// writes.
+  void reportRenderError(String component, Object error) {
+    if (_disposed || _streaming) return;
+    _renderErrors.add(
+      OpenUiError(
+        source: OpenUiErrorSource.runtime,
+        code: OpenUiErrorCode.renderError,
+        component: component,
+        message: 'Component $component render failed: ${errorMessage(error)}',
+      ),
+    );
+    if (_renderReportScheduled) return;
+    _renderReportScheduled = true;
+    scheduleMicrotask(() {
+      _renderReportScheduled = false;
+      if (!_disposed) _reportErrors();
+    });
+  }
+
   void _onStoreChange() {
     if (_initializing) {
       _dirty = true;
@@ -354,17 +405,23 @@ final class OpenUiSession {
   }
 
   void _onChange() {
+    if (_disposed) return;
     _dirty = true;
     for (final l in [..._listeners]) {
       l();
+      if (_disposed) return;
     }
     _reportErrors();
   }
 
   void _reportErrors() {
     final onError = this.onError;
-    if (onError == null) return;
+    if (onError == null) {
+      _renderErrors = [];
+      return;
+    }
     if (_streaming) {
+      _renderErrors = [];
       if (_lastErrorKey.isNotEmpty) {
         _lastErrorKey = '';
         onError(const []);
@@ -372,6 +429,7 @@ final class OpenUiSession {
       return;
     }
     final errors = this.errors;
+    _renderErrors = [];
     final key = Js.stringify([for (final e in errors) e.toJson()]);
     if (key == _lastErrorKey) return;
     _lastErrorKey = key;
@@ -405,11 +463,14 @@ final class OpenUiSession {
       for (final q in result?.queryStatements ?? const <QueryStatementInfo>[])
         queryNode(q),
     ]);
-    _queries.registerMutations({
+    _queries.registerMutations([
       for (final m
           in result?.mutationStatements ?? const <MutationStatementInfo>[])
-        m.statementId: Js.string(eval(m.toolAst) ?? ''),
-    });
+        MutationNode(
+          statementId: m.statementId,
+          toolName: Js.string(eval(m.toolAst) ?? ''),
+        ),
+    ]);
   }
 
   void _evaluateIfDirty() {
@@ -442,13 +503,9 @@ final class OpenUiSession {
 
   /// A field's value and setter: a `$binding` writes its `$variable`;
   /// anything else is a form field named [name] (inside [formName]), whose
-  /// value starts as [bound].
-  FieldState field(
-    String name,
-    Object? bound, {
-    String? formName,
-    String? componentType,
-  }) {
+  /// value starts as [bound]. Like react-lang's `useStateField`, the stored
+  /// wrapper is `{value}`.
+  FieldState field(String name, Object? bound, {String? formName}) {
     final p = bound is OpenUiBinding ? bound._assign : null;
     if (p != null) {
       return FieldState._(_store.get(p.target), (value) {
@@ -463,8 +520,8 @@ final class OpenUiSession {
         ? _store.has(name)
         : raw is Map && raw.containsKey(name);
     return FieldState._(
-      hasValue ? _fieldValue(formName, name) : bound,
-      (value) => _writeField(formName, name, componentType, value),
+      hasValue ? fieldValue(name, formName: formName) : bound,
+      (value) => _writeField(formName, name, null, value),
     );
   }
 
@@ -490,19 +547,24 @@ final class OpenUiSession {
     String? componentType,
     Object? value,
   ) {
-    final wrapped = {'value': value, 'componentType': componentType};
+    final wrapped = {'value': value, 'componentType': ?componentType};
     if (formName == null) {
       _store.set(name, wrapped);
     } else {
       final raw = _store.get(formName);
-      _store.set(formName, {
-        if (raw is Map) ...raw.cast<String, Object?>(),
-        name: wrapped,
-      });
+      _store.set(
+        formName,
+        Js.object([
+          if (raw is Map) ...raw.cast<String, Object?>().entries,
+          MapEntry(name, wrapped),
+        ]),
+      );
     }
   }
 
-  Object? _fieldValue(String? formName, String name) {
+  /// react-lang `getFieldValue`: field [name] of form [formName], or the
+  /// top-level field [name] without one.
+  Object? fieldValue(String name, {String? formName}) {
     if (formName == null) return _unwrapField(_store.get(name));
     final data = _store.get(formName);
     return data is Map ? _unwrapField(data[name]) : null;
@@ -511,7 +573,7 @@ final class OpenUiSession {
   Map<String, Object?> _formPayload(String? formName) {
     if (formName != null) {
       final raw = _store.get(formName);
-      if (raw is Map) return {formName: raw};
+      if (raw is Map) return {formName: Js.normalize(raw, json: true)};
     }
     return _store.snapshot;
   }
@@ -534,7 +596,7 @@ final class OpenUiSession {
       String message = '',
     ]) => ActionEvent(
       type: type,
-      params: params,
+      params: Js.normalize(params, json: true)! as Map<String, Object?>,
       humanFriendlyMessage: message,
       formState: _formPayload(formName),
       formName: formName,
@@ -595,17 +657,34 @@ final class OpenUiSession {
         case ResetStep(:final targets):
           final decls = _result?.stateDeclarations ?? const {};
           for (final t in targets) {
+            if (_disposed) return;
             _store.set(t, decls[t], pristine: true);
           }
       }
     }
   }
 
-  /// Retries failed queries.
+  /// react-lang `retryQueries`: refetches the failed Queries, or every Query
+  /// when none failed.
   void retryQueries() {
     if (_bundleBlocked) return;
-    final failed = [for (final e in queryErrors) e.statementId!];
-    if (failed.isNotEmpty) _queries.invalidate(failed);
+    _queries.invalidate([for (final e in queryErrors) e.statementId!]);
+  }
+
+  /// react-lang's `toolProvider` prop: Queries and Mutations call [tools]
+  /// from now on. Going from no tools to some, or back, starts a new Query
+  /// manager, as react-lang does, so every Query fetches again.
+  void setTools(List<OpenUiTool> tools) {
+    if (_disposed) return;
+    final had = _tools.isNotEmpty;
+    _tools = {for (final t in tools) t.name: t};
+    if (had == _tools.isNotEmpty) return;
+    _cancelQueries();
+    _queries.dispose();
+    _queries = QueryManager(_tools.isEmpty ? null : _callTool);
+    _cancelQueries = _queries.subscribe(_onChange);
+    _syncQueries();
+    _onChange();
   }
 
   void dispose() {

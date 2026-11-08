@@ -7,20 +7,40 @@ import '../lang/validation.dart';
 
 /// A two-way binding: writing `$value` runs [expr] and stores the result in
 /// [target]. Bound inputs receive this instead of the state's value.
-final class ReactiveAssign {
+final class ReactiveAssign implements JsFields {
   const ReactiveAssign(this.target, this.expr);
   final String target;
   final Ast expr;
+
+  @override
+  Map<String, Object?> get jsFields => {
+    '__reactive': 'assign',
+    'target': target,
+    'expr': expr,
+  };
 }
 
+/// lang-core `ACTION_STEPS`: each built-in step's runtime step type.
+const Map<String, String> actionSteps = {
+  'Run': 'run',
+  'ToAssistant': 'continue_conversation',
+  'OpenUrl': 'open_url',
+  'Set': 'set',
+  'Reset': 'reset',
+};
+
 /// An evaluated action: the steps a click runs, in order.
-final class ActionPlan {
+final class ActionPlan implements JsFields {
   const ActionPlan(this.steps);
   final List<ActionStep> steps;
   static const empty = ActionPlan([]);
+
+  @override
+  Map<String, Object?> get jsFields => {'steps': steps};
 }
 
-sealed class ActionStep {
+/// A step of a plan; [jsFields] are lang-core's step object.
+sealed class ActionStep implements JsFields {
   const ActionStep();
 }
 
@@ -28,28 +48,55 @@ final class RunStep extends ActionStep {
   const RunStep(this.statementId, this.refType);
   final String statementId;
   final RuntimeRefType refType;
+
+  @override
+  Map<String, Object?> get jsFields => {
+    'type': 'run',
+    'statementId': statementId,
+    'refType': refType.name,
+  };
 }
 
 final class ToAssistantStep extends ActionStep {
   const ToAssistantStep(this.message, [this.context]);
   final String message;
   final Object? context;
+
+  @override
+  Map<String, Object?> get jsFields => {
+    'type': 'continue_conversation',
+    'message': message,
+    'context': ?context,
+  };
 }
 
 final class OpenUrlStep extends ActionStep {
   const OpenUrlStep(this.url);
   final String url;
+
+  @override
+  Map<String, Object?> get jsFields => {'type': 'open_url', 'url': url};
 }
 
 final class SetStep extends ActionStep {
   const SetStep(this.target, this.valueAst);
   final String target;
   final Ast valueAst;
+
+  @override
+  Map<String, Object?> get jsFields => {
+    'type': 'set',
+    'target': target,
+    'valueAST': valueAst,
+  };
 }
 
 final class ResetStep extends ActionStep {
   const ResetStep(this.targets);
   final List<String> targets;
+
+  @override
+  Map<String, Object?> get jsFields => {'type': 'reset', 'targets': targets};
 }
 
 /// A library action call such as `@CopyToClipboard(text)`. Only an
@@ -58,6 +105,13 @@ final class CustomStep extends ActionStep {
   const CustomStep._(this.name, this.params);
   final String name;
   final Map<String, Object?> params;
+
+  @override
+  Map<String, Object?> get jsFields => {
+    'type': 'custom_action',
+    'name': name,
+    'params': params,
+  };
 }
 
 /// A library `@function` as the runtime calls it.
@@ -128,9 +182,9 @@ Object? evaluate(Ast node, EvaluationContext ctx, [IsReactiveProp? reactive]) {
     case ArrNode(:final elements):
       return [for (final e in elements) evaluate(e, ctx)];
     case ObjNode(:final entries):
-      return <String, Object?>{
-        for (final (k, v) in entries) k: evaluate(v, ctx),
-      };
+      return Js.object([
+        for (final (k, v) in entries) MapEntry(k, evaluate(v, ctx)),
+      ]);
     case CompNode():
       return _evaluateCall(node, ctx, reactive);
     case BinOpNode(:final op, :final left, :final right):
@@ -185,33 +239,19 @@ Object? evaluate(Ast node, EvaluationContext ctx, [IsReactiveProp? reactive]) {
     case MemberNode(:final object, :final field):
       final obj = evaluate(object, ctx);
       if (obj == null) return null;
-      if (obj is List) {
-        if (field == 'length') return obj.length;
-        return [for (final item in obj) item is Map ? item[field] : null];
+      // A list plucks the field from every item.
+      if (obj is List && field != 'length') {
+        return [for (final item in obj) Js.property(item, field)];
       }
-      if (obj is Map) return obj[field];
-      if (obj is String && field == 'length') return obj.length;
-      return null;
+      return Js.property(obj, field);
     case IndexNode(:final object, :final index):
       final obj = evaluate(object, ctx);
       final idx = evaluate(index, ctx);
       if (obj == null || idx == null) return null;
-      if (obj is List) {
-        final i = Js.toNumber(idx);
-        return i is int || i == i.truncateToDouble()
-            ? (i >= 0 && i < obj.length ? obj[i.toInt()] : null)
-            : null;
-      }
-      if (obj is Map) return obj[Js.string(idx)];
-      if (obj is String) {
-        final key = Js.string(idx);
-        if (key == 'length') return obj.length;
-        final i = int.tryParse(key);
-        return i != null && i >= 0 && i < obj.length && '$i' == key
-            ? obj[i]
-            : null;
-      }
-      return null;
+      return Js.property(
+        obj,
+        obj is List ? Js.numberToString(Js.toNumber(idx)) : Js.string(idx),
+      );
     case AssignNode(:final target, :final value):
       return ReactiveAssign(target, value);
   }
@@ -274,9 +314,26 @@ Object? _evaluateCall(
   return element;
 }
 
-/// A call's args by name. The parser names every non-lazy call's args.
-Map<String, Object?> _evaluateArgs(CompNode node, EvaluationContext ctx) {
-  final named = node.mappedProps ?? const <String, Ast>{};
+/// Built-in functions' and steps' param names, in order.
+final Map<String, List<String>> _builtinParams = {
+  for (final f in builtinFunctionSpecs) f.name: f.params.keys.toList(),
+  for (final s in builtinStepSpecs) s.name: s.params.keys.toList(),
+};
+
+/// A call's args by name. The parser names them in mappedProps; an AST
+/// from parseExpression alone is named here, by [params] or the built-in's.
+Map<String, Object?> _evaluateArgs(
+  CompNode node,
+  EvaluationContext ctx, [
+  List<String>? params,
+]) {
+  final names = params ?? _builtinParams[node.name] ?? const [];
+  final named =
+      node.mappedProps ??
+      {
+        for (var i = 0; i < names.length && i < node.args.length; i++)
+          names[i]: node.args[i],
+      };
   return {
     for (final MapEntry(:key, :value) in named.entries)
       key: evaluate(value, ctx),
@@ -291,7 +348,8 @@ Map<String, Object?> _callArgs(
   JsonSchema params,
 ) {
   final required = (params['required'] as List?) ?? const [];
-  final args = _evaluateArgs(node, ctx);
+  final names = ((params['properties'] as Map?) ?? const {}).keys;
+  final args = _evaluateArgs(node, ctx, [for (final n in names) '$n']);
   args.removeWhere((key, value) => value == null && !required.contains(key));
   return args;
 }
@@ -347,8 +405,17 @@ Object? _callFunction(
 /// a built-in step when it has a known legacy shape, and is dropped otherwise.
 ActionPlan _flatten(List<Object?> values) => ActionPlan([
   for (final v in values)
-    if (v is ActionPlan) ...v.steps else ?_legacyStep(v),
+    if (v is ActionPlan) ...v.steps else ...dataSteps(v),
 ]);
+
+/// The steps a value read from data may run: a `{steps: [...]}` plan's, or
+/// one step object's, kept only as `open_url` (with a string URL) or
+/// `continue_conversation`, so data cannot set state, fire Mutations or pose
+/// as a library action.
+List<ActionStep> dataSteps(Object? value) =>
+    value is Map && value['steps'] is List
+    ? [for (final s in value['steps'] as List) ?_legacyStep(s)]
+    : [?_legacyStep(value)];
 
 ActionStep? _legacyStep(Object? v) {
   if (v is! Map) return null;

@@ -12,7 +12,9 @@ final class Store {
 
   bool has(String name) => _state.containsKey(name);
 
-  Map<String, Object?> get snapshot => Map.unmodifiable(_state);
+  /// The state as JSON values (whole numbers as ints, see [Js.normalize]).
+  Map<String, Object?> get snapshot =>
+      Map.unmodifiable(Js.normalize(_state, json: true)! as Map);
 
   void set(String name, Object? value, {bool pristine = false}) {
     if (pristine) {

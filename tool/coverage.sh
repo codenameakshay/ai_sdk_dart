@@ -52,8 +52,9 @@ dart_test_dirs=""
 for p in $DART_PKGS; do
   dart_test_dirs="$dart_test_dirs packages/$p/test/"
 done
+# TZ=UTC as the OpenUI reference's vitest config pins it: its date tests expect it.
 # shellcheck disable=SC2086
-$DART test --reporter=failures-only --coverage-path="$MERGED" \
+TZ=UTC $DART test --reporter=failures-only --coverage-path="$MERGED" \
   --coverage-package="^(${DART_PKGS// /|})\$" $dart_test_dirs
 if [ ! -f "$MERGED" ]; then
   echo "Missing Dart coverage output at $MERGED."

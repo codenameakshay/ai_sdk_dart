@@ -5,19 +5,23 @@ import 'ast.dart';
 import 'js.dart';
 import 'validation.dart';
 
-/// lang-core `jsonToOpenUI`: an element tree (a parse result's root) back to program text that
-/// `mergeStatements` accepts.
+/// lang-core `jsonToOpenUI`: an element tree back to program text that
+/// `mergeStatements` accepts. [json] is an [ElementNode] (a parse result's
+/// root) or its JSON form ([ElementNode.toJson]).
 String jsonToOpenUI(
-  ElementNode json,
+  Object json,
   OpenUiLibrary library, {
   Map<String, Object?>? stateDeclarations,
 }) {
+  final root = json is ElementNode
+      ? json
+      : ElementNode.fromJson(json is Map ? json : const {});
   final collector = _Collector(
     library.compiled.components,
     library.compiled.calls.keys.toSet(),
   );
-  final rootExpr = collector.elementExpr(json);
-  final rootId = (json.statementId ?? '').isEmpty ? 'root' : json.statementId!;
+  final rootExpr = collector.elementExpr(root);
+  final rootId = (root.statementId ?? '').isEmpty ? 'root' : root.statementId!;
   final lines = ['$rootId = $rootExpr'];
   for (final entry in collector.statements.entries) {
     if (entry.key != rootId) lines.add(entry.value);
@@ -62,7 +66,11 @@ final class _Collector {
     if (v is num) return Js.numberToString(v);
     if (v is bool) return v ? 'true' : 'false';
     if (v is ElementNode) return elementValue(v);
+    if (v is Map && isElementNodeJson(v)) {
+      return elementValue(ElementNode.fromJson(v));
+    }
     if (v is Ast) return _ast(v, calls);
+    if (v is Map && isAstJson(v)) return _ast(astFromJson(v), calls);
     if (v is List) return '[${v.map(value).join(', ')}]';
     if (v is Map) {
       return '{${v.entries.map((e) => '${e.key}: ${value(e.value)}').join(', ')}}';

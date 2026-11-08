@@ -18,10 +18,13 @@ String toFixed(double x, int digits) {
     final s = x.toString();
     return s.endsWith('.0') ? s.substring(0, s.length - 2) : s;
   }
-  final bits = (ByteData(8)..setFloat64(0, x.abs())).getUint64(0);
-  final biased = (bits >> 52) & 0x7FF;
-  final fraction = bits & 0xFFFFFFFFFFFFF;
-  final mantissa = BigInt.from(biased == 0 ? fraction : fraction | (1 << 52));
+  // Two 32-bit halves, not getUint64: dart2js has no 64-bit ints.
+  final bytes = ByteData(8)..setFloat64(0, x.abs());
+  final high = bytes.getUint32(0);
+  final biased = (high >> 20) & 0x7FF;
+  final fraction =
+      BigInt.from(high & 0xFFFFF) << 32 | BigInt.from(bytes.getUint32(4));
+  final mantissa = biased == 0 ? fraction : fraction | BigInt.one << 52;
   final exponent = (biased == 0 ? 1 : biased) - 1075;
   final scaled = mantissa * BigInt.from(10).pow(digits);
   BigInt n;

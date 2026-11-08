@@ -11,11 +11,17 @@ typedef OpenUiBuilder = Widget Function(BuildContext context, OpenUiNode node);
 /// Looks up the builder for a component name; null renders nothing.
 typedef OpenUiBuilderLookup = OpenUiBuilder? Function(String typeName);
 
-/// Renders an [OpenUiSession]'s evaluated tree and routes its events.
+/// Renders an [OpenUiSession]'s evaluated tree and routes its events, like
+/// react-lang's `Renderer`.
 ///
 /// `@OpenUrl` goes to [OpenUiServices.openUrl], `@CopyToClipboard` to
 /// [OpenUiServices.copyText], `@ToAssistant` (and a Button without an action)
 /// to [onToAssistant]; every other library action goes to [onAction].
+///
+/// Without a [child], the content shows dimmed with [queryLoader] (else a
+/// spinner) while a Query loads. A [child] composes [OpenUiContent],
+/// [OpenUiQueryLoading], [OpenUiQueryError] and [OpenUiRetry] around the same
+/// session, like `Renderer.Root` and its slots.
 class OpenUiView extends StatefulWidget {
   const OpenUiView({
     super.key,
@@ -23,12 +29,24 @@ class OpenUiView extends StatefulWidget {
     required this.builders,
     this.onToAssistant,
     this.onAction,
+    this.queryLoader,
+    this.child,
   });
 
   final OpenUiSession session;
   final OpenUiBuilderLookup builders;
   final ValueChanged<ActionEvent>? onToAssistant;
   final ValueChanged<ActionEvent>? onAction;
+
+  /// Shown while a Query loads, in place of the default spinner.
+  final Widget? queryLoader;
+
+  /// Slot composition; null shows the default content.
+  final Widget? child;
+
+  /// react-lang `useRendererQuery`: the nearest view's Query state.
+  static OpenUiQueryState queryOf(BuildContext context) =>
+      _RendererScope.of(context).query;
 
   @override
   State<OpenUiView> createState() => _OpenUiViewState();
@@ -82,39 +100,202 @@ class _OpenUiViewState extends State<OpenUiView> {
   @override
   Widget build(BuildContext context) {
     final session = widget.session;
-    final root = session.root;
-    if (root == null) return const SizedBox.shrink();
-    final loading = session.isQueryLoading;
-    final theme = OpenUiTheme.of(context);
-    final content = DefaultTextStyle.merge(
-      style: TextStyle(fontFamily: theme.fontFamily, color: theme.ink),
+    return _RendererScope(
+      root: session.root,
+      query: OpenUiQueryState._(
+        isLoading: session.isQueryLoading,
+        errors: session.queryErrors,
+        retry: session.retryQueries,
+      ),
+      queryLoader: widget.queryLoader,
       child: _RuntimeScope(
         session: session,
         builders: widget.builders,
         emit: (event) => _emit(context, event),
-        child: OpenUiElementView(element: root),
+        child: widget.child ?? const _DefaultContent(),
       ),
     );
+  }
+}
+
+/// react-lang `RendererQueryState`: the Query loading, failures and retry of
+/// the nearest [OpenUiView].
+final class OpenUiQueryState {
+  const OpenUiQueryState._({
+    required this.isLoading,
+    required this.errors,
+    required this.retry,
+  });
+
+  /// Whether a Query is waiting for generation or fetching data.
+  final bool isLoading;
+
+  /// The failed Queries' errors.
+  final List<OpenUiError> errors;
+
+  /// Retries the failed Queries, or every Query when none failed.
+  final VoidCallback retry;
+
+  /// A Query failed and is loading again.
+  bool get isRetrying => errors.isNotEmpty && isLoading;
+}
+
+class _RendererScope extends InheritedWidget {
+  const _RendererScope({
+    required this.root,
+    required this.query,
+    required this.queryLoader,
+    required super.child,
+  });
+  final OpenUiElement? root;
+  final OpenUiQueryState query;
+  final Widget? queryLoader;
+
+  static _RendererScope of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_RendererScope>() ??
+      (throw FlutterError(
+        'OpenUiView slots must be used within an OpenUiView.',
+      ));
+
+  // Fields read the store while building, so every view update reaches the slots.
+  @override
+  bool updateShouldNotify(_RendererScope old) => true;
+}
+
+Widget _rootView(BuildContext context, OpenUiElement root) {
+  final theme = OpenUiTheme.of(context);
+  return DefaultTextStyle.merge(
+    style: TextStyle(fontFamily: theme.fontFamily, color: theme.ink),
+    child: OpenUiElementView(element: root),
+  );
+}
+
+class _QueryLoader extends StatelessWidget {
+  const _QueryLoader();
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.square(
+    dimension: 16,
+    child: CircularProgressIndicator(
+      strokeWidth: 2,
+      semanticsLabel: 'Loading data',
+    ),
+  );
+}
+
+/// react-lang's default content: dimmed while a Query loads, with the
+/// view's queryLoader above it, else a spinner in its top corner.
+class _DefaultContent extends StatelessWidget {
+  const _DefaultContent();
+
+  @override
+  Widget build(BuildContext context) {
+    final scope = _RendererScope.of(context);
+    final root = scope.root;
+    if (root == null) return const SizedBox.shrink();
+    final loading = scope.query.isLoading;
+    final content = AnimatedOpacity(
+      opacity: loading ? 0.7 : 1,
+      duration: const Duration(milliseconds: 200),
+      child: _rootView(context, root),
+    );
+    final loader = scope.queryLoader;
+    if (loader != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [if (loading) loader, content],
+      );
+    }
     return Stack(
       children: [
-        AnimatedOpacity(
-          opacity: loading ? 0.7 : 1,
-          duration: const Duration(milliseconds: 200),
-          child: content,
-        ),
-        if (loading)
-          const Positioned(
-            top: 8,
-            right: 8,
-            child: SizedBox.square(
-              dimension: 16,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                semanticsLabel: 'Loading data',
-              ),
-            ),
-          ),
+        content,
+        if (loading) const Positioned(top: 8, right: 8, child: _QueryLoader()),
       ],
+    );
+  }
+}
+
+/// react-lang `Renderer.Content`: the generated content, dimmed while a
+/// Query loads and hidden while a Query failure shows. It stays mounted
+/// either way.
+class OpenUiContent extends StatelessWidget {
+  const OpenUiContent({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final scope = _RendererScope.of(context);
+    final root = scope.root;
+    if (root == null) return const SizedBox.shrink();
+    final query = scope.query;
+    return Visibility(
+      visible: query.errors.isEmpty,
+      maintainState: true,
+      child: AnimatedOpacity(
+        opacity: query.isLoading ? 0.7 : 1,
+        duration: const Duration(milliseconds: 200),
+        child: _rootView(context, root),
+      ),
+    );
+  }
+}
+
+/// react-lang `Renderer.QueryLoading`: [child] (else the view's queryLoader,
+/// else a spinner) while a Query loads, except while a Query failure shows.
+class OpenUiQueryLoading extends StatelessWidget {
+  const OpenUiQueryLoading({super.key, this.child});
+  final Widget? child;
+
+  @override
+  Widget build(BuildContext context) {
+    final scope = _RendererScope.of(context);
+    final query = scope.query;
+    if (!query.isLoading || query.errors.isNotEmpty) {
+      return const SizedBox.shrink();
+    }
+    return child ?? scope.queryLoader ?? const _QueryLoader();
+  }
+}
+
+/// react-lang `Renderer.QueryError`: [child] while a Query has failed.
+class OpenUiQueryError extends StatelessWidget {
+  const OpenUiQueryError({super.key, this.child});
+  final Widget? child;
+
+  @override
+  Widget build(BuildContext context) =>
+      OpenUiView.queryOf(context).errors.isEmpty
+      ? const SizedBox.shrink()
+      : child ?? const SizedBox.shrink();
+}
+
+/// react-lang `Renderer.Retry`: a button that retries the failed Queries. It
+/// is disabled while a Query loads, when none failed, or when not [enabled].
+class OpenUiRetry extends StatelessWidget {
+  const OpenUiRetry({
+    super.key,
+    required this.child,
+    this.onPressed,
+    this.enabled = true,
+  });
+  final Widget child;
+
+  /// Called before the retry.
+  final VoidCallback? onPressed;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final query = OpenUiView.queryOf(context);
+    final disabled = !enabled || query.isLoading || query.errors.isEmpty;
+    return TextButton(
+      onPressed: disabled
+          ? null
+          : () {
+              onPressed?.call();
+              query.retry();
+            },
+      child: child,
     );
   }
 }
@@ -194,7 +375,11 @@ class _FormHostState extends State<_FormHost> {
 int _nextFieldId = 0;
 
 /// Renders one element through its builder. If the builder throws, the
-/// element keeps showing its last good widget.
+/// element keeps showing its last good widget, and the error goes to the
+/// session's `onError` as a `render-error`, as react-lang's error boundary
+/// reports it. Errors thrown while building the widgets a builder returns
+/// stay with Flutter's own handler: Flutter catches each widget's build
+/// error itself, so only a global hook could see them.
 class OpenUiElementView extends StatefulWidget {
   const OpenUiElementView({super.key, required this.element});
   final OpenUiElement element;
@@ -222,6 +407,7 @@ class _OpenUiElementViewState extends State<OpenUiElementView> {
     try {
       return _lastGood = builder(context, node);
     } catch (error, stack) {
+      runtime.session.reportRenderError(widget.element.typeName, error);
       FlutterError.reportError(
         FlutterErrorDetails(
           exception: error,
@@ -262,6 +448,34 @@ final class OpenUiNode {
   /// While the model is still writing, actions wait.
   bool get isStreaming => _session.isStreaming;
 
+  /// react-lang `useIsQueryLoading`: whether a Query is loading.
+  bool get isQueryLoading => _session.isQueryLoading;
+
+  /// react-lang `useGetFieldValue`: field [name] of form [formName], or the
+  /// top-level field [name] without one.
+  Object? fieldValue(String name, {String? formName}) =>
+      _session.fieldValue(name, formName: formName);
+
+  /// react-lang `useSetDefaultValue`: after this frame, once the answer has
+  /// settled, stores [defaultValue] for field [name] of the enclosing Form
+  /// unless it has a value. Call it while building.
+  void setDefaultValue(
+    String name,
+    Object? defaultValue, {
+    String? componentType,
+  }) {
+    final session = _session;
+    final formName = this.formName;
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => session.setDefaultValue(
+        name,
+        defaultValue,
+        formName: formName,
+        componentType: componentType,
+      ),
+    );
+  }
+
   /// The enclosing Form's name, if any.
   String? get formName =>
       _context.dependOnInheritedWidgetOfExactType<_FormScope>()?.name;
@@ -301,7 +515,6 @@ final class OpenUiNode {
     name ?? element.statementId ?? _generatedId,
     props[prop],
     formName: formName,
-    componentType: element.typeName,
   );
 
   /// Runs the action in [prop]. With no action and [sendLabel], the [label]

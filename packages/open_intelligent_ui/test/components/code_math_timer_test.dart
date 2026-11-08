@@ -1,7 +1,10 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_math_fork/flutter_math.dart' as fm;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
+import 'package:open_intelligent_ui/src/components/controls.dart'
+    show IuiButton;
 import 'package:open_intelligent_ui/src/components/timer.dart' show clock;
 
 import '../support/pump.dart';
@@ -11,10 +14,10 @@ Finder get _horizontalScroll => find.byWidgetPredicate(
 );
 
 Finder _button(String label) =>
-    find.ancestor(of: find.text(label), matching: find.byType(InkWell));
+    find.ancestor(of: find.text(label), matching: find.byType(IuiButton));
 
 bool _enabled(WidgetTester tester, String label) =>
-    tester.widget<InkWell>(_button(label)).onTap != null;
+    tester.widget<IuiButton>(_button(label)).onTap != null;
 
 void main() {
   group('Code', () {
@@ -99,6 +102,57 @@ void main() {
       );
       final text = tester.widget<SelectableText>(find.byType(SelectableText));
       expect(text.style!.color, OpenUiTheme.dark.ink);
+    });
+
+    testWidgets('the copy button works with no Material above it', (
+      tester,
+    ) async {
+      final copied = <String>[];
+      final session = OpenUiSession(intelligentUi)
+        ..update('root = Code("x", "dart")', streaming: false);
+      addTearDown(session.dispose);
+      await tester.pumpWidget(
+        WidgetsApp(
+          color: const Color(0xFF000000),
+          builder: (context, _) => OpenUiScope(
+            services: OpenUiServices(
+              copyText: (t) async => copied.add(t),
+              openUrl: (_) async {},
+              mapTiles: null,
+            ),
+            child: OpenUiView(
+              session: session,
+              builders: intelligentUiBuilders,
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Copy'));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(copied, ['x']);
+      await tester.pump(const Duration(milliseconds: 1500));
+    });
+
+    testWidgets('hovering the copy button shows the hover wash and ink', (
+      tester,
+    ) async {
+      await pumpProgram(tester, 'root = Col([Code("x", "dart")])');
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      addTearDown(mouse.removePointer);
+      await mouse.moveTo(tester.getCenter(find.text('Copy')));
+      await tester.pump();
+      final box = tester.widget<Container>(
+        find
+            .ancestor(of: find.text('Copy'), matching: find.byType(Container))
+            .first,
+      );
+      expect((box.decoration! as BoxDecoration).color, OpenUiTheme.light.hover);
+      expect(
+        tester.widget<Text>(find.text('Copy')).style!.color,
+        OpenUiTheme.light.ink,
+      );
     });
   });
 
@@ -307,10 +361,11 @@ void main() {
     ) async {
       await pumpProgram(
         tester,
-        'root = Col([Timer(\$a), Timer(\$b), Timer(\$c)])\n\$a = "90"\n\$b = "abc"\n\$c = -5',
+        'root = Col([Timer(\$a), Timer(\$b), Timer(\$c), Timer(\$d)])\n\$a = "90"\n\$b = "abc"\n\$c = -5\n\$d = true',
       );
       expect(find.text('1:30'), findsOneWidget);
       expect(find.text('0:00'), findsNWidgets(2));
+      expect(find.text('0:01'), findsOneWidget);
     });
 
     testWidgets('both buttons are disabled while the program streams', (
@@ -350,5 +405,24 @@ void main() {
       expect(find.text('2:59'), findsOneWidget);
       expect(p.session.state[r'$left'], 179);
     });
+
+    testWidgets(
+      'a timer is a labelled group and its buttons are their own nodes',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        await pumpProgram(
+          tester,
+          'root = Col([Timer(\$left, "Tea")])\n\$left = 30',
+        );
+        final timer = tester.getSemantics(find.text('0:30'));
+        expect(timer.label, contains('Tea'));
+        expect(timer.label, isNot(contains('Start')));
+        expect(
+          tester.getSemantics(find.text('Start')),
+          isSemantics(isButton: true),
+        );
+        handle.dispose();
+      },
+    );
   });
 }

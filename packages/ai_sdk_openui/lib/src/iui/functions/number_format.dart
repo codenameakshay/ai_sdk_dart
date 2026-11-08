@@ -31,6 +31,16 @@ String formatCurrency(
       (fraction.isEmpty ? '' : '.$fraction');
 }
 
+/// [minor] units of [code] at [scale] decimals as en-US Intl writes the
+/// currency, from digits, never a double.
+String formatMinorUnits(int minor, int scale, String code) {
+  final digits = minor.abs().toString().padLeft(scale + 1, '0');
+  final whole = digits.substring(0, digits.length - scale);
+  final fraction = digits.substring(digits.length - scale);
+  return '${minor < 0 ? '-' : ''}${currencyPrefix(code)}${_group(whole, 1)}'
+      '${fraction.isEmpty ? '' : '.$fraction'}';
+}
+
 /// `notation: "compact"` with `maximumFractionDigits` [maxFraction]
 /// (1.2K, 3.4M, 5B, 1000T), with a currency prefix when [currency] is set.
 String formatCompact(num value, {required int maxFraction, String? currency}) {

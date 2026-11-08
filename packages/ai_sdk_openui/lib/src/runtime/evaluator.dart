@@ -116,10 +116,16 @@ final class CustomStep extends ActionStep {
 
 /// A library `@function` as the runtime calls it.
 final class RuntimeFunction {
-  const RuntimeFunction({required this.params, required this.fn, this.returns});
+  const RuntimeFunction({
+    required this.params,
+    required this.fn,
+    this.returns,
+    this.localized,
+  });
   final JsonSchema params;
   final JsonSchema? returns;
   final Object? Function(Map<String, Object?> args) fn;
+  final Object? Function(Map<String, Object?> args, String locale)? localized;
 }
 
 /// What evaluation reads from: state, statement refs, library calls.
@@ -131,6 +137,7 @@ final class EvaluationContext {
     this.actions = const {},
     this.extraScope,
     this.reportError,
+    this.locale,
   });
 
   final Object? Function(String name) getState;
@@ -141,6 +148,9 @@ final class EvaluationContext {
   final Map<String, JsonSchema> actions;
   final Map<String, Object?>? extraScope;
   final void Function(String message)? reportError;
+
+  /// The intl locale functions format in; null for the reference's en-US output.
+  final String? locale;
 
   EvaluationContext copyWith({
     Object? Function(String name)? resolveRef,
@@ -153,6 +163,7 @@ final class EvaluationContext {
     actions: actions,
     extraScope: extraScope ?? this.extraScope,
     reportError: reportError ?? this.reportError,
+    locale: locale,
   );
 }
 
@@ -390,7 +401,12 @@ Object? _callFunction(
   if (identical(args, invalid)) return null;
   Object? result;
   try {
-    result = def.fn((args as Map).cast());
+    final named = (args as Map).cast<String, Object?>();
+    final locale = ctx.locale;
+    final localized = def.localized;
+    result = locale != null && localized != null
+        ? localized(named, locale)
+        : def.fn(named);
   } catch (e) {
     ctx.reportError?.call('@$name threw: ${errorMessage(e)}');
     return null;

@@ -37,12 +37,17 @@ final class FunctionSpec {
     required this.params,
     this.returns,
     required this.fn,
+    this.localized,
   });
   final String name;
   final String description;
   final Map<String, Schema> params;
   final Schema? returns;
   final Object? Function(Map<String, Object?> args) fn;
+
+  /// Runs instead of [fn] when the session has a locale (an intl name such as
+  /// `de` or `en_IN`).
+  final Object? Function(Map<String, Object?> args, String locale)? localized;
 }
 
 /// A library action step such as `@CopyToClipboard`. The host runs it.

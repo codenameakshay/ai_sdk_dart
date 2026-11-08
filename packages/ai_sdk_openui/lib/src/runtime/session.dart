@@ -7,6 +7,7 @@ import '../spec/bound.dart';
 import '../spec/library.dart';
 import 'errors.dart';
 import 'evaluator.dart';
+import 'locale.dart';
 import 'queries.dart';
 import 'response_bundle.dart';
 import 'store.dart';
@@ -161,7 +162,9 @@ final class OpenUiSession {
     this.onStateUpdate,
     this.onParseResult,
     List<BoundRecord> records = const [],
-  }) : _tools = {for (final t in tools) t.name: t},
+    String? locale,
+  }) : locale = resolveLocale(locale),
+       _tools = {for (final t in tools) t.name: t},
        _initialState = initialState,
        _bound = {for (final r in records) r.variable: Js.normalize(r.value)},
        _parser = StreamParser(
@@ -187,6 +190,7 @@ final class OpenUiSession {
             params: (fnSchemas[f.name]!['params'] as Map).cast(),
             returns: (fnSchemas[f.name]!['returns'] as Map?)?.cast(),
             fn: f.fn,
+            localized: f.localized,
           ),
       },
       actions: {
@@ -194,10 +198,14 @@ final class OpenUiSession {
             in ((schema['actions'] as Map?) ?? const {}).entries)
           '$key': ((value as Map)['params'] as Map).cast(),
       },
+      locale: this.locale,
     );
   }
 
   final OpenUiLibrary library;
+
+  /// The intl locale functions format in; null for the reference's en-US output.
+  final String? locale;
 
   /// react-lang `onError`: the settled answer's errors, once per change.
   final void Function(List<OpenUiError> errors)? onError;

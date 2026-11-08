@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../../spec/library.dart';
 import '../../spec/schema.dart';
 import 'js_date.dart';
+import 'locale_format.dart';
 import 'shared.dart';
 import 'unicode.dart';
 
@@ -98,6 +99,17 @@ String _formatDate(DateTime at, String style) {
   return (d.year, d.month, d.day);
 }
 
+/// FormatDate's input: the ISO day when the style is `iso`, else the instant
+/// to format (a calendar date formats in UTC, so its day never shifts).
+(String?, DateTime?, String) _dateArgs(Map<String, Object?> a) {
+  final parsed = parseDate(a['date']!);
+  final style = a['style'] as String? ?? 'date';
+  if (style == 'iso') return (isoDay(parsed.day), null, style);
+  final instant = parsed.instant;
+  final at = instant == null ? utcDay(parsed.day) : Impure.toLocal(instant);
+  return (null, at, style);
+}
+
 int _whole(Object? n) => (n as num).clamp(-_wholeLimit, _wholeLimit).truncate();
 
 final List<FunctionSpec> dateFunctions = [
@@ -137,13 +149,12 @@ final List<FunctionSpec> dateFunctions = [
     },
     returns: S.string(),
     fn: (a) {
-      final parsed = parseDate(a['date']!);
-      final style = a['style'] as String? ?? 'date';
-      if (style == 'iso') return isoDay(parsed.day);
-      final instant = parsed.instant;
-      // A calendar date formats in UTC so its day never shifts with the viewer's zone.
-      final at = instant == null ? utcDay(parsed.day) : Impure.toLocal(instant);
-      return _formatDate(at, style);
+      final d = _dateArgs(a);
+      return d.$1 ?? _formatDate(d.$2!, d.$3);
+    },
+    localized: (a, locale) {
+      final d = _dateArgs(a);
+      return d.$1 ?? localeDate(d.$2!, d.$3, locale);
     },
   ),
   FunctionSpec(

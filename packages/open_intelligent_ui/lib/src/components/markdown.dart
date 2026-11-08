@@ -1,8 +1,10 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../services.dart';
 import '../theme.dart';
 import '../view.dart';
+import 'table.dart';
 
 // A port of the reference's small Markdown renderer. It never interprets HTML.
 // Inline: **bold**, *italic*, ~~strike~~, `code`, [text](https://...).
@@ -79,19 +81,19 @@ List<InlineSpan> inlineSpans(
             decoration: TextDecoration.underline,
             decorationColor: theme.borderStrong,
           );
-          out.add(
-            WidgetSpan(
-              alignment: PlaceholderAlignment.baseline,
-              baseline: TextBaseline.alphabetic,
-              child: MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: GestureDetector(
-                  onTap: () => services.openUrl(href),
-                  child: Text.rich(TextSpan(children: walk(label, linkStyle))),
-                ),
+          // ponytail: recognizers are not disposed; they hold no platform resources
+          final tap = TapGestureRecognizer()
+            ..onTap = () => services.openUrl(href);
+          // Leaves carry the recognizer: a tap resolves to the leaf span only.
+          out.addAll([
+            for (final s in walk(label, linkStyle).cast<TextSpan>())
+              TextSpan(
+                text: s.text,
+                style: s.style,
+                recognizer: tap,
+                mouseCursor: SystemMouseCursors.click,
               ),
-            ),
-          );
+          ]);
         }
       }
       rest = rest.substring(m.end);
@@ -332,7 +334,11 @@ class MarkdownBlocks extends StatelessWidget {
             _ => 1.4,
           },
         );
-        return Semantics(header: true, child: rich(text, style));
+        return Semantics(
+          header: true,
+          headingLevel: level + 1,
+          child: rich(text, style),
+        );
       case _CodeBlock(:final text):
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -394,45 +400,12 @@ Widget markdownTable(
   Widget Function(String text, [TextStyle? style]) cell,
 ) {
   final theme = OpenUiTheme.of(context);
-  final base = DefaultTextStyle.of(context).style;
-  final headStyle = base.copyWith(
-    fontSize: 13,
-    color: theme.muted,
-    fontWeight: FontWeight.w500,
-  );
-  return SingleChildScrollView(
-    scrollDirection: Axis.horizontal,
-    child: Table(
-      defaultColumnWidth: const IntrinsicColumnWidth(),
-      border: TableBorder(horizontalInside: BorderSide(color: theme.border)),
-      children: [
-        TableRow(
-          decoration: BoxDecoration(
-            border: Border(bottom: BorderSide(color: theme.borderStrong)),
-          ),
-          children: [
-            for (final h in head)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(0, 8, 16, 8),
-                child: cell(h, headStyle),
-              ),
-          ],
-        ),
-        for (final r in rows)
-          TableRow(
-            children: [
-              for (var i = 0; i < head.length; i++)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(0, 8, 16, 8),
-                  child: cell(
-                    i < r.length ? r[i] : '',
-                    base.copyWith(fontSize: 14),
-                  ),
-                ),
-            ],
-          ),
-      ],
-    ),
+  return IuiTable(
+    head: [for (final h in head) cell(h, iuiTableHeadStyle(theme))],
+    rows: [
+      for (final r in rows)
+        [for (final c in r) IuiCell(cell(c, iuiTableBodyStyle(theme)))],
+    ],
   );
 }
 

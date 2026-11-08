@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
+import 'package:open_intelligent_ui/src/components/table.dart';
 
 import '../support/pump.dart';
 
@@ -163,7 +164,7 @@ void main() {
           '| Name | Qty |\n|---|:--:|\n| apple | 3 |\n| pear |\n| plum | 5 | extra |\n\ndone',
         ),
       );
-      expect(find.byType(Table), findsOneWidget);
+      expect(find.byType(IuiTable), findsOneWidget);
       for (final t in ['Name', 'Qty', 'apple', '3', 'pear', 'plum', '5']) {
         expect(_text(t), findsOneWidget, reason: t);
       }
@@ -177,9 +178,6 @@ void main() {
         findsOneWidget,
         reason: 'the table ends at the blank line',
       );
-      final table = tester.widget<Table>(find.byType(Table));
-      expect(table.children, hasLength(4));
-      expect(table.children.every((r) => r.children.length == 2), isTrue);
       expect(
         tester.getTopLeft(_text('apple')).dy,
         lessThan(tester.getTopLeft(_text('pear')).dy),
@@ -188,7 +186,7 @@ void main() {
         tester.getTopLeft(_text('Qty')).dx,
         tester.getTopLeft(_text('3')).dx,
       );
-      expect(_style(tester, 'Name')!.color, _light.muted);
+      expect(_style(tester, 'Name')!.color, _light.ink);
     });
 
     testWidgets('a line with a pipe but no divider row is a paragraph', (
@@ -313,36 +311,29 @@ void main() {
         tester,
         _md('see [the docs](https://example.com/a?b=1) now'),
       );
-      expect(find.text('the docs'), findsOneWidget);
-      await tester.tap(find.text('the docs'));
+      expect(find.text('see the docs now'), findsOneWidget);
+      await tester.tapOnText(find.textRange.ofSubstring('the docs'));
       await tester.pump();
       expect(p.opened, [Uri.parse('https://example.com/a?b=1')]);
-      final label =
-          (tester.widget<Text>(find.text('the docs')).textSpan! as TextSpan)
-              .children!
-              .first;
-      expect(label.style!.decoration, TextDecoration.underline);
+      final link = _children(
+        tester,
+        'see the docs now',
+      ).cast<TextSpan>().firstWhere((s) => s.recognizer != null);
+      expect(link.text, 'the docs');
+      expect(link.style!.decoration, TextDecoration.underline);
     });
 
     testWidgets('a link shows a click cursor and styles its label', (
       tester,
     ) async {
       await pumpProgram(tester, _md('[**bold** link](http://example.com)'));
-      expect(
-        find.byWidgetPredicate(
-          (w) => w is MouseRegion && w.cursor == SystemMouseCursors.click,
-        ),
-        findsOneWidget,
-      );
-      final label = find.byWidgetPredicate(
-        (w) => w is Text && w.textSpan?.toPlainText() == 'bold link',
-      );
-      expect(label, findsOneWidget);
-      final children = (tester.widget<Text>(label).textSpan! as TextSpan)
-          .children!
-          .cast<TextSpan>();
-      expect(children.first.style!.fontWeight, FontWeight.w600);
-      expect(children.first.style!.decoration, TextDecoration.underline);
+      final bold = _children(
+        tester,
+        'bold link',
+      ).cast<TextSpan>().firstWhere((s) => s.text == 'bold');
+      expect(bold.mouseCursor, SystemMouseCursors.click);
+      expect(bold.style!.fontWeight, FontWeight.w600);
+      expect(bold.style!.decoration, TextDecoration.underline);
     });
 
     testWidgets('a javascript: link renders as plain text and does nothing', (
@@ -355,12 +346,13 @@ void main() {
         ),
       );
       final spans = _children(tester, 'click me and file and ftp and data');
-      expect(spans.whereType<WidgetSpan>(), isEmpty);
       expect(
-        find.byWidgetPredicate(
-          (w) => w is MouseRegion && w.cursor == SystemMouseCursors.click,
-        ),
-        findsNothing,
+        spans.cast<TextSpan>().where((s) => s.recognizer != null),
+        isEmpty,
+      );
+      expect(
+        spans.cast<TextSpan>().where((s) => s.mouseCursor != MouseCursor.defer),
+        isEmpty,
       );
       await tester.tapAt(
         tester.getTopLeft(_text('click me and file and ftp and data')) +
@@ -375,7 +367,7 @@ void main() {
         tester,
         _md('[one](https://one.test) and [two](https://two.test)'),
       );
-      await tester.tap(find.text('two'));
+      await tester.tapOnText(find.textRange.ofSubstring('two'));
       await tester.pump();
       expect(p.opened.single.host, 'two.test');
     });

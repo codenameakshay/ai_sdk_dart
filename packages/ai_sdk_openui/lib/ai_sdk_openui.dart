@@ -5,6 +5,13 @@ library;
 export 'src/lang/merge.dart' show mergeStatements;
 export 'src/lang/message.dart' show ParsedMessage, buildMessage, parseMessage;
 export 'src/lang/parser.dart' show ParseResult;
+export 'src/lang/policy.dart'
+    show
+        UnknownComponentPolicy,
+        ValidationIssue,
+        ValidationPolicy,
+        ValidationReport,
+        validateProgram;
 export 'src/runtime/action_message.dart' show buildActionUserMessage;
 export 'src/runtime/errors.dart'
     show OpenUiError, OpenUiErrorCode, OpenUiErrorSource;

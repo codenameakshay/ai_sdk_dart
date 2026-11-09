@@ -70,7 +70,8 @@ endif
 
 .PHONY: all get run run-web run-advanced run-advanced-web run-basic run-mcp \
         test test-web test-examples analyze format format-check dry-run publish help \
-        coverage coverage-check benchmark catalog-check test-mcp-reference
+        coverage coverage-check benchmark catalog-check test-mcp-reference \
+        test-openui-conformance
 
 all: help
 
@@ -128,6 +129,11 @@ test:
 ## Run the OpenUI engine's tests compiled to JavaScript, as Flutter web runs them (needs Node)
 test-web:
 	cd packages/ai_sdk_openui && TZ=UTC $(DART) test -p node
+
+## Check the OpenUI conformance vectors against the pinned @openuidev/lang-core
+test-openui-conformance:
+	npm ci --ignore-scripts --prefix packages/ai_sdk_openui/tool/conformance
+	cd packages/ai_sdk_openui && node tool/conformance/run.mjs test/fixtures/spec.json conformance/vectors.json
 
 ## Run the example tests only (CI pairs this with coverage-check)
 test-examples:

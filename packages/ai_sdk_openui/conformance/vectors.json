@@ -1,0 +1,439 @@
+{
+  "spec": "../test/fixtures/spec.json",
+  "langCore": "1.0.0",
+  "vectors": [
+    {
+      "id": "clean",
+      "program": "root = Col([title, body])\ntitle = Title(\"Hello\")\nbody = Text(\"World\")",
+      "expect": {
+        "hasRoot": true,
+        "meta": {
+          "incomplete": false,
+          "unresolved": [],
+          "orphaned": [],
+          "statementCount": 3,
+          "errors": []
+        },
+        "stateDeclarations": {}
+      }
+    },
+    {
+      "id": "missing-required",
+      "program": "root = Col([Title()])",
+      "expect": {
+        "hasRoot": true,
+        "meta": {
+          "incomplete": false,
+          "unresolved": [],
+          "orphaned": [],
+          "statementCount": 1,
+          "errors": [
+            {
+              "code": "missing-required",
+              "component": "Title",
+              "path": "/text",
+              "message": "missing required field \"/text\" — signature: Title(text*: string, size: \"sm\"|\"md\"|\"lg\"|\"xl\"|\"2xl\"|\"3xl\", color: string)",
+              "statementId": "root"
+            }
+          ]
+        },
+        "stateDeclarations": {}
+      }
+    },
+    {
+      "id": "null-required",
+      "program": "root = Col([Title(null)])",
+      "expect": {
+        "hasRoot": true,
+        "meta": {
+          "incomplete": false,
+          "unresolved": [],
+          "orphaned": [],
+          "statementCount": 1,
+          "errors": [
+            {
+              "code": "null-required",
+              "component": "Title",
+              "path": "/text",
+              "message": "required field \"/text\" cannot be null — signature: Title(text*: string, size: \"sm\"|\"md\"|\"lg\"|\"xl\"|\"2xl\"|\"3xl\", color: string)",
+              "statementId": "root"
+            }
+          ]
+        },
+        "stateDeclarations": {}
+      }
+    },
+    {
+      "id": "unknown-component",
+      "program": "root = Col([Foo(\"x\")])",
+      "expect": {
+        "hasRoot": true,
+        "meta": {
+          "incomplete": false,
+          "unresolved": [],
+          "orphaned": [],
+          "statementCount": 1,
+          "errors": [
+            {
+              "code": "unknown-component",
+              "component": "Foo",
+              "path": "",
+              "message": "Unknown component \"Foo\" — not found in catalog or builtins. Available components: Col, Row, Box, Grid, Card, Carousel, Popover, Divider, Spacer, Title, Text, Caption, Label, Badge, Link, List, ListItem, Markdown, Quote, Code, Math, Button, IconButton, Pressable, Input, TextArea, Select, SegmentedControl, Slider, Checkbox, RadioGroup, DatePicker, Timer, Form, SearchImage, Image, Icon, Table, Chart, Map, MapMarker, YouTube, Flashcard, Celebration, Svg, Circle, Ellipse, Rect, Line, Path, Polyline, Polygon, G, SvgText, HtmlView",
+              "statementId": "root"
+            }
+          ]
+        },
+        "stateDeclarations": {}
+      }
+    },
+    {
+      "id": "inline-reserved",
+      "program": "root = Col([Text(Query(\"t\", {}, {}))])",
+      "expect": {
+        "hasRoot": true,
+        "meta": {
+          "incomplete": false,
+          "unresolved": [],
+          "orphaned": [],
+          "statementCount": 1,
+          "errors": [
+            {
+              "code": "inline-reserved",
+              "component": "Query",
+              "path": "",
+              "message": "Query() must be declared as a top-level statement, not used inline as a value",
+              "statementId": "root"
+            },
+            {
+              "code": "null-required",
+              "component": "Text",
+              "path": "/text",
+              "message": "required field \"/text\" cannot be null — signature: Text(text*, size: \"xs\"|\"sm\"|\"md\"|\"lg\", color: string, weight: \"normal\"|\"medium\"|\"semibold\", italic: boolean, lineThrough: boolean, tabularNums: boolean, maxLines: number)",
+              "statementId": "root"
+            }
+          ]
+        },
+        "stateDeclarations": {}
+      }
+    },
+    {
+      "id": "excess-args",
+      "program": "root = Col([Badge(\"a\", \"info\", \"star\", \"extra\")])",
+      "expect": {
+        "hasRoot": true,
+        "meta": {
+          "incomplete": false,
+          "unresolved": [],
+          "orphaned": [],
+          "statementCount": 1,
+          "errors": [
+            {
+              "code": "excess-args",
+              "component": "Badge",
+              "path": "",
+              "message": "Badge takes 3 arg(s), got 4 (1 excess dropped)",
+              "statementId": "root"
+            }
+          ]
+        },
+        "stateDeclarations": {}
+      }
+    },
+    {
+      "id": "enum-mismatch",
+      "program": "root = Col([Title(\"a\", \"huge\")])",
+      "expect": {
+        "hasRoot": true,
+        "meta": {
+          "incomplete": false,
+          "unresolved": [],
+          "orphaned": [],
+          "statementCount": 1,
+          "errors": [
+            {
+              "code": "type-mismatch",
+              "component": "Title",
+              "path": "/size",
+              "message": "field \"/size\" expects one of [\"sm\", \"md\", \"lg\", \"xl\", \"2xl\", \"3xl\"] but got \"huge\"",
+              "statementId": "root"
+            }
+          ]
+        },
+        "stateDeclarations": {}
+      }
+    },
+    {
+      "id": "type-mismatch",
+      "program": "root = Col([Title(5)])",
+      "expect": {
+        "hasRoot": true,
+        "meta": {
+          "incomplete": false,
+          "unresolved": [],
+          "orphaned": [],
+          "statementCount": 1,
+          "errors": [
+            {
+              "code": "type-mismatch",
+              "component": "Title",
+              "path": "/text",
+              "message": "field \"/text\" expects string but got number",
+              "statementId": "root"
+            }
+          ]
+        },
+        "stateDeclarations": {}
+      }
+    },
+    {
+      "id": "unknown-function",
+      "program": "root = Col([Text(@Nope(1))])",
+      "expect": {
+        "hasRoot": true,
+        "meta": {
+          "incomplete": false,
+          "unresolved": [],
+          "orphaned": [],
+          "statementCount": 1,
+          "errors": [
+            {
+              "code": "unknown-function",
+              "component": "Nope",
+              "path": "",
+              "message": "Unknown function \"@Nope\": not a built-in or action step. The call evaluates to null",
+              "statementId": "root"
+            },
+            {
+              "code": "null-required",
+              "component": "Text",
+              "path": "/text",
+              "message": "required field \"/text\" cannot be null — signature: Text(text*, size: \"xs\"|\"sm\"|\"md\"|\"lg\", color: string, weight: \"normal\"|\"medium\"|\"semibold\", italic: boolean, lineThrough: boolean, tabularNums: boolean, maxLines: number)",
+              "statementId": "root"
+            }
+          ]
+        },
+        "stateDeclarations": {}
+      }
+    },
+    {
+      "id": "no-root",
+      "program": "title = Title(\"x\")",
+      "expect": {
+        "hasRoot": false,
+        "meta": {
+          "incomplete": false,
+          "unresolved": [],
+          "orphaned": [],
+          "statementCount": 1,
+          "errors": [
+            {
+              "code": "no-root",
+              "component": "Col",
+              "path": "",
+              "message": "No root statement, and no statement calls the root component Col"
+            }
+          ]
+        },
+        "stateDeclarations": {}
+      }
+    },
+    {
+      "id": "no-root-fallback",
+      "program": "page = Col([Title(\"x\")])",
+      "expect": {
+        "hasRoot": true,
+        "meta": {
+          "incomplete": false,
+          "unresolved": [],
+          "orphaned": [],
+          "statementCount": 1,
+          "errors": [
+            {
+              "code": "no-root",
+              "component": "Col",
+              "path": "",
+              "message": "No root statement. Rendering the first statement that calls the root component Col",
+              "statementId": "page",
+              "severity": "warning"
+            }
+          ]
+        },
+        "stateDeclarations": {}
+      }
+    },
+    {
+      "id": "root-not-component",
+      "program": "root = 5",
+      "expect": {
+        "hasRoot": false,
+        "meta": {
+          "incomplete": false,
+          "unresolved": [],
+          "orphaned": [],
+          "statementCount": 1,
+          "errors": [
+            {
+              "code": "no-root",
+              "component": "Col",
+              "path": "",
+              "message": "root does not evaluate to a component",
+              "statementId": "root"
+            }
+          ]
+        },
+        "stateDeclarations": {}
+      }
+    },
+    {
+      "id": "unresolved",
+      "program": "root = Col([missing])",
+      "expect": {
+        "hasRoot": true,
+        "meta": {
+          "incomplete": false,
+          "unresolved": [
+            "missing"
+          ],
+          "orphaned": [],
+          "statementCount": 1,
+          "errors": []
+        },
+        "stateDeclarations": {}
+      }
+    },
+    {
+      "id": "orphaned",
+      "program": "root = Col([a])\na = Title(\"a\")\nb = Title(\"b\")",
+      "expect": {
+        "hasRoot": true,
+        "meta": {
+          "incomplete": false,
+          "unresolved": [],
+          "orphaned": [
+            "b"
+          ],
+          "statementCount": 3,
+          "errors": []
+        },
+        "stateDeclarations": {}
+      }
+    },
+    {
+      "id": "incomplete",
+      "program": "root = Col([Title(\"a\"",
+      "expect": {
+        "hasRoot": true,
+        "meta": {
+          "incomplete": true,
+          "unresolved": [],
+          "orphaned": [],
+          "statementCount": 1,
+          "errors": []
+        },
+        "stateDeclarations": {}
+      }
+    },
+    {
+      "id": "state",
+      "program": "$count = 0\nroot = Col([Text(\"n: \" + $count), Button(\"+\", @Set($count, $count + 1))])",
+      "expect": {
+        "hasRoot": true,
+        "meta": {
+          "incomplete": false,
+          "unresolved": [],
+          "orphaned": [],
+          "statementCount": 2,
+          "errors": []
+        },
+        "stateDeclarations": {
+          "$count": 0
+        }
+      }
+    },
+    {
+      "id": "query-mutation",
+      "program": "data = Query(\"get_rows\", {}, {rows: []})\nsave = Mutation(\"save\", {})\nroot = Col([Text(@Count(data.rows)), Button(\"Save\", @Run(save))])",
+      "expect": {
+        "hasRoot": true,
+        "meta": {
+          "incomplete": false,
+          "unresolved": [],
+          "orphaned": [],
+          "statementCount": 3,
+          "errors": []
+        },
+        "stateDeclarations": {}
+      }
+    },
+    {
+      "id": "library-action",
+      "program": "root = Col([Button(\"Copy\", @CopyToClipboard(\"hi\"))])",
+      "expect": {
+        "hasRoot": true,
+        "meta": {
+          "incomplete": false,
+          "unresolved": [],
+          "orphaned": [],
+          "statementCount": 1,
+          "errors": []
+        },
+        "stateDeclarations": {}
+      }
+    },
+    {
+      "id": "library-action-bad-arg",
+      "program": "root = Col([Button(\"Copy\", @CopyToClipboard(5))])",
+      "expect": {
+        "hasRoot": true,
+        "meta": {
+          "incomplete": false,
+          "unresolved": [],
+          "orphaned": [],
+          "statementCount": 1,
+          "errors": [
+            {
+              "code": "type-mismatch",
+              "component": "CopyToClipboard",
+              "path": "/text",
+              "message": "field \"/text\" expects string but got number",
+              "statementId": "root"
+            }
+          ]
+        },
+        "stateDeclarations": {}
+      }
+    },
+    {
+      "id": "root-expression",
+      "program": "$t = true\nroot = $t ? Col([Title(\"a\")]) : Col([Title(\"b\")])",
+      "expect": {
+        "hasRoot": true,
+        "meta": {
+          "incomplete": false,
+          "unresolved": [],
+          "orphaned": [],
+          "statementCount": 2,
+          "errors": []
+        },
+        "stateDeclarations": {
+          "$t": true
+        }
+      }
+    },
+    {
+      "id": "each",
+      "program": "root = Col(@Each([1, 2], \"n\", Text(\"\" + n)))",
+      "expect": {
+        "hasRoot": true,
+        "meta": {
+          "incomplete": false,
+          "unresolved": [],
+          "orphaned": [],
+          "statementCount": 1,
+          "errors": []
+        },
+        "stateDeclarations": {}
+      }
+    }
+  ]
+}

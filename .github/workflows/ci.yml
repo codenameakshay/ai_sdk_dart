@@ -60,6 +60,9 @@ jobs:
           npm ci --ignore-scripts --prefix examples/remote_backend/js
           npm ci --ignore-scripts --prefix examples/mcp_reference/js
 
+      - name: Check OpenUI conformance vectors against lang-core
+        run: make test-openui-conformance
+
       - name: Test remote backend fixture
         run: npm test --prefix examples/remote_backend/js
 

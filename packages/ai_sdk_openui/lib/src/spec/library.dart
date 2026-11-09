@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../lang/parser.dart';
+import '../lang/policy.dart';
 import 'bound.dart';
 import 'prompt.dart';
 import 'schema.dart';
@@ -355,6 +356,19 @@ final class OpenUiLibrary {
       ParseReport._(
         parseProgram(program, compiled, rootName: rootName, boundNames: bound),
       );
+
+  /// [parse] plus the [policy] limits, with each issue's statement id.
+  ValidationReport validate(
+    String program, {
+    ValidationPolicy policy = const ValidationPolicy(),
+    Set<String> bound = const {},
+  }) => validateProgram(
+    program,
+    compiled,
+    rootName: rootName,
+    policy: policy,
+    boundNames: bound,
+  );
 }
 
 /// lang-core `generateSystemPrompt` for a library: [OpenUiLibrary.systemPrompt].

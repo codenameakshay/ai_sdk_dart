@@ -12,13 +12,25 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  ai_sdk_openui: ^3.1.0
+  ai_sdk_openui:
+    # ignore: invalid_dependency
+    path: ../ai_sdk_openui
   http: ^1.6.0
-  open_intelligent_ui_chat: ^3.1.0
-  open_intelligent_ui_core: ^3.1.0
-  open_intelligent_ui_maps: ^3.1.0
-  open_intelligent_ui_math: ^3.1.0
-  open_intelligent_ui_web: ^3.1.0
+  open_intelligent_ui_chat:
+    # ignore: invalid_dependency
+    path: ../open_intelligent_ui_chat
+  open_intelligent_ui_core:
+    # ignore: invalid_dependency
+    path: ../open_intelligent_ui_core
+  open_intelligent_ui_maps:
+    # ignore: invalid_dependency
+    path: ../open_intelligent_ui_maps
+  open_intelligent_ui_math:
+    # ignore: invalid_dependency
+    path: ../open_intelligent_ui_math
+  open_intelligent_ui_web:
+    # ignore: invalid_dependency
+    path: ../open_intelligent_ui_web
   url_launcher: ^6.3.1
 
 dev_dependencies:

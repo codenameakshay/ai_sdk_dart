@@ -98,12 +98,10 @@ abstract final class Impure {
     DateTime Function()? now,
     double Function()? random,
     OpenUiTimeZone? timeZone,
-  }) => now == null && random == null && timeZone == null
-      ? body()
-      : runZoned(
-          body,
-          zoneValues: {_key: (now: now, random: random, timeZone: timeZone)},
-        );
+  }) => runZoned(
+    body,
+    zoneValues: {_key: (now: now, random: random, timeZone: timeZone)},
+  );
 
   static DateTime _toLocal(DateTime instant) => instant.toLocal();
 

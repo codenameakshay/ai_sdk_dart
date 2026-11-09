@@ -122,6 +122,45 @@ void main() {
     expect(Impure.now(), isNot(_instant));
   });
 
+  test('an unconfigured session does not inherit another session clock', () {
+    final defaultInstant = DateTime.utc(2030);
+    Impure.now = () => defaultInstant;
+    addTearDown(Impure.reset);
+    final unconfigured = _session();
+    final actual = Impure.run(
+      now: () => _instant,
+      () => _value(unconfigured, '@Now()'),
+    );
+    expect(actual, '2030-01-01T00:00:00.000Z');
+  });
+
+  test(
+    'impure inputs stay isolated across asynchronous continuations',
+    () async {
+      Impure.now = () => DateTime.utc(2030);
+      Impure.random = () => 0.25;
+      Impure.useUtc();
+      addTearDown(Impure.reset);
+      await Impure.run(
+        now: () => _instant,
+        random: () => 0.75,
+        timeZone: _kolkata,
+        () async {
+          await Future<void>.delayed(Duration.zero);
+          expect(Impure.now(), _instant);
+          expect(Impure.random(), 0.75);
+          await Impure.run(() async {
+            await Future<void>.delayed(Duration.zero);
+            expect(Impure.now(), DateTime.utc(2030));
+            expect(Impure.random(), 0.25);
+            expect(Impure.toLocal(_instant), _instant);
+          });
+          expect(Impure.toLocal(_instant), DateTime.utc(2026, 11, 10, 0, 15));
+        },
+      );
+    },
+  );
+
   test('a localized session formats in its own zone', () {
     final s = OpenUiSession(
       _lib,

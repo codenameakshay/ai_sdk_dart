@@ -42,6 +42,9 @@ class OpenUiLocalizations {
   String get cancel => 'Cancel';
   String get actionFailed => 'Something went wrong. Try again.';
 
+  /// A write cut off by a restore while the host checks whether it went through.
+  String get checkingAction => 'Checking…';
+
   // web package
   String get interactiveView => 'Interactive view';
   String get preparingInteractiveView => 'Preparing the interactive view…';

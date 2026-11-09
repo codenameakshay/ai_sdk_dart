@@ -8,7 +8,13 @@ sealed class ActionResult {
 }
 
 final class ActionSuccess extends ActionResult {
-  const ActionSuccess();
+  const ActionSuccess([this.data]);
+
+  /// JSON the host returns with the success, such as the id of the record
+  /// it wrote. It is saved with the session state, and later steps of the
+  /// same plan read it from [ActionInvocation.results] and
+  /// `ActionEvent.results`.
+  final Object? data;
 }
 
 final class ActionFailure extends ActionResult {
@@ -26,6 +32,7 @@ final class ActionInvocation {
     required this.attempt,
     this.formState = const {},
     this.formName,
+    this.results = const {},
   });
 
   final String name;
@@ -38,12 +45,18 @@ final class ActionInvocation {
   final int attempt;
   final Map<String, Object?> formState;
   final String? formName;
+
+  /// The [ActionSuccess.data] of the handled actions that succeeded earlier
+  /// in the same plan, by action name.
+  final Map<String, Object?> results;
 }
 
 typedef ActionHandler =
     Future<ActionResult> Function(ActionInvocation invocation);
 
-enum ActionPhase { idle, pending, done, failed }
+/// [unknown]: a run was cut off by a restore and the host's
+/// `OpenUiSession.resolveAction` has not said yet whether it went through.
+enum ActionPhase { idle, pending, done, failed, unknown }
 
 final class ActionStatus {
   const ActionStatus({
@@ -65,7 +78,7 @@ final class ActionStatus {
   /// Ask this before running.
   final String? confirm;
 
-  /// Pending, or done with `disableAfterSuccess`.
+  /// Pending, unknown, or done with `disableAfterSuccess`.
   final bool disabled;
 }
 

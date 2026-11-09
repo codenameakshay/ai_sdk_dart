@@ -6,6 +6,7 @@ import '../lang/js.dart';
 final class Store {
   final Map<String, Object?> _state = {};
   final Set<String> _pristine = {};
+  final Set<String> _localWrites = {};
   final List<void Function()> _listeners = [];
 
   Object? get(String name) => _state[name];
@@ -16,7 +17,13 @@ final class Store {
   Map<String, Object?> get snapshot =>
       Map.unmodifiable(Js.normalize(_state, json: true)! as Map);
 
-  void set(String name, Object? value, {bool pristine = false}) {
+  void set(
+    String name,
+    Object? value, {
+    bool pristine = false,
+    bool local = true,
+  }) {
+    if (local) _localWrites.add(name);
     if (pristine) {
       _pristine.add(name);
     } else {
@@ -33,6 +40,16 @@ final class Store {
     }
     _state[name] = value;
     _notify();
+  }
+
+  /// Restores keys not written locally since this store was created.
+  void restoreUntouched(Map<String, Object?> state) {
+    initialize(
+      const {},
+      Map.fromEntries(
+        state.entries.where((entry) => !_localWrites.contains(entry.key)),
+      ),
+    );
   }
 
   /// Applies declared defaults and persisted values; persisted wins.
@@ -81,6 +98,7 @@ final class Store {
   void dispose() {
     _state.clear();
     _pristine.clear();
+    _localWrites.clear();
     _listeners.clear();
   }
 }

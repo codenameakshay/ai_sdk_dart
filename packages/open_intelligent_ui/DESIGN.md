@@ -24,7 +24,7 @@ packages/open_intelligent_ui_core   Flutter; no map, web view, TeX or chat depen
 packages/open_intelligent_ui_maps   Map, MapMarker, OsrmStreetRoute (flutter_map)
 packages/open_intelligent_ui_web    HtmlView, YouTube (webview_flutter)
 packages/open_intelligent_ui_math   Math (flutter_math_fork)
-packages/open_intelligent_ui_chat   OpenUiChat, OpenUiUserMessage (ai_sdk_flutter_ui)
+packages/open_intelligent_ui_chat   OpenUiChat, OpenUiUserMessage, OpenUiAnswerView (ai_sdk_flutter_ui)
 packages/open_intelligent_ui        umbrella: re-exports the packages above, bundles Inter, opens links
                                     in the browser, adds chat.dart and Wikimedia photo search
 ```
@@ -122,23 +122,28 @@ model text ──► OpenUiSession.update(text, streaming)
 
 ## Chat integration
 
-`package:open_intelligent_ui/chat.dart` is the adapter for `ai_sdk_flutter_ui`. It is a separate
-library so `ai_sdk_flutter_ui` does not depend on the map and web view packages. That package
-gained three generic hooks, and the adapter needs nothing else from it:
+`package:open_intelligent_ui_chat` is the adapter for `ai_sdk_flutter_ui`, re-exported by
+`package:open_intelligent_ui/chat.dart`. It is a separate library so `ai_sdk_flutter_ui` does not
+depend on the map and web view packages. That package gained three generic hooks, and the adapter
+needs nothing else from it:
 
 ```
 ChatController ── streamingMessageId ──► row id while streaming ═ committed ChatMessage.id
       │                                         │
       │ chatMessageBuilder(ChatMessage)         ▼
-      └──────────────────────────────► OpenUiChat: one OpenUiSession per id
+      └──────────────────────────────► OpenUiChat: one OpenUiAnswers, one OpenUiSession per id
                                                 │ @ToAssistant
-   sendMessage(buildActionUserMessage(e)) ◄─────┘
-   updateMessage(id, content + ]]>openui:context [state]) ◄── session.onStateUpdate
+   send(buildActionUserMessage(e)) or sendMessage ◄─┘
+   updateMessage(id, content + ]]>openui:context [state]) ◄── OpenUiAnswers.onSave
 ```
 
-1. **One session per message id.** The streaming row gets the id that the answer commits under,
-   so `$state` typed while the answer streams carries over. Sessions of answers that leave the
-   transcript (reload, clear, a failed run) are disposed, which stops their Query timers.
+1. **One session per message id, in one store.** The adapter feeds every answer to one
+   `OpenUiAnswers` (ai_sdk_openui), so streaming, saving and replay share one code path. The
+   streaming row gets the id that the answer commits under, so `$state` typed while the answer
+   streams carries over. Answers stored as text parts (as `ConversationChatController` stores
+   them) render too. `send` carries `@ToAssistant` turns over any transport, and `agent` is the
+   default when `send` is null. Sessions of answers that leave the transcript (reload, clear, a
+   failed run) are disposed, which stops their Query timers.
 2. **Turns use the reference's envelope.** Messages are read and written with lang-core's
    `parseMessage` and `buildMessage`. A `@ToAssistant` turn is react-ui's
    `buildActionUserMessage`, which the engine exports:
@@ -151,8 +156,8 @@ ChatController ── streamingMessageId ──► row id while streaming ═ co
 5. **An answer with no component after streaming shows as text.** The reference renders
    nothing; text keeps a model's plain refusal readable.
 
-`ConversationChatController` keeps its transcript in the backend, so its `updateMessage`
-returns false and edits are not saved there.
+`ConversationChatController` saves edits through a backend that implements
+`ConversationMessageEditBackend`; `LocalConversationBackend` does, the remote backend does not yet.
 
 ## Hard widgets
 
@@ -313,6 +318,5 @@ and library publish tests, and observability hooks.
 
 ## Follow-up work
 
-- Saving edits for `ConversationChatController` transcripts needs a backend message update.
 - Host `ToolSet` tools as `OpenUiTool`s, if apps want one tool list for the agent and for Query.
 - The reference's coach (`/clash`) and chess libraries, as their own `ComponentSpec` sets.

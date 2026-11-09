@@ -53,14 +53,19 @@ OpenUiSession _session(
   String program, {
   String scope = '',
   Map<String, Object?> state = const {},
+  void Function(Map<String, Object?> state)? onStateUpdate,
 }) {
   final library = OpenUiLibrary(
     root: _Spec('Out', _outProps),
     components: [_Spec('Out', _outProps)],
     actions: actions,
   );
-  final s = OpenUiSession(library, actionScope: scope, initialState: state)
-    ..update(program, streaming: false);
+  final s = OpenUiSession(
+    library,
+    actionScope: scope,
+    initialState: state,
+    onStateUpdate: onStateUpdate,
+  )..update(program, streaming: false);
   addTearDown(s.dispose);
   return s;
 }
@@ -70,7 +75,14 @@ OpenUiSession _open(
   String program = _payProgram,
   String scope = '',
   Map<String, Object?> state = const {},
-}) => _session([spec], program, scope: scope, state: state);
+  void Function(Map<String, Object?> state)? onStateUpdate,
+}) => _session(
+  [spec],
+  program,
+  scope: scope,
+  state: state,
+  onStateUpdate: onStateUpdate,
+);
 
 OpenUiAction? _action(OpenUiSession s) => s.root!.props.action('action');
 
@@ -181,12 +193,21 @@ void main() {
 
     test('a handler that finishes after dispose changes nothing', () async {
       _gate = Completer<void>();
-      final s = _open(_pay());
+      var stateUpdates = 0;
+      var listenerCalls = 0;
+      final s = _open(_pay(), onStateUpdate: (_) => stateUpdates++);
+      s.listen(() => listenerCalls++);
       final running = _click(s);
+      final stateUpdatesAtDispose = stateUpdates;
+      final listenerCallsAtDispose = listenerCalls;
       s.dispose();
+      final disposedState = s.state;
       _gate!.complete();
       await running;
       expect(_events, isEmpty);
+      expect(stateUpdates, stateUpdatesAtDispose);
+      expect(listenerCalls, listenerCallsAtDispose);
+      expect(s.state, disposedState);
     });
 
     test('a failed handled step stops later host steps', () async {
@@ -303,8 +324,14 @@ void main() {
     test('statuses survive a restore', () async {
       final first = _open(_pay(disable: true));
       await _click(first);
-      expect(first.state[r'__openui_actions'], {
-        _payBase: {'phase': 'done', 'attempt': 1},
+      final firstActionState = first.state[r'__openui_actions'] as Map;
+      expect(
+        firstActionState,
+        containsPair(_payBase, {'phase': 'done', 'attempt': 1}),
+      );
+      expect((firstActionState['__plans'] as Map).values.single, {
+        'phase': 'done',
+        'cursor': 1,
       });
       final second = _open(_pay(disable: true), state: first.state);
       expect(_status(second).phase, ActionPhase.done);
@@ -335,8 +362,19 @@ void main() {
       _results = [const ActionFailure('Card declined')];
       final s = _open(_pay());
       await _click(s);
-      expect(s.state[r'__openui_actions'], {
-        _payBase: {'phase': 'failed', 'attempt': 1, 'message': 'Card declined'},
+      final saved = s.state[r'__openui_actions'] as Map;
+      expect(
+        saved,
+        containsPair(_payBase, {
+          'phase': 'failed',
+          'attempt': 1,
+          'message': 'Card declined',
+        }),
+      );
+      expect((saved['__plans'] as Map).values.single, {
+        'phase': 'failed',
+        'cursor': 0,
+        'message': 'Card declined',
       });
     });
 

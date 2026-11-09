@@ -55,6 +55,15 @@ abstract interface class ConversationRetryBackend {
   Future<void> retryLastTurn();
 }
 
+/// Optional capability: a backend that can replace a stored message, so
+/// [ConversationChatController.updateMessage] can save per-message data such as
+/// UI state.
+abstract interface class ConversationMessageEditBackend {
+  /// Replaces the message with [message]'s id. Throws when no message has that
+  /// id.
+  Future<void> updateMessage(ConversationMessage message);
+}
+
 class ConversationRetryError implements Exception {
   ConversationRetryError(this.message);
   final String message;
@@ -88,6 +97,8 @@ class ConversationController {
   final _listeners = StreamController<void>.broadcast();
   late final StreamSubscription<Conversation> _subscription;
   bool _disposed = false;
+  int _restoreGeneration = 0;
+  int _restoreOperations = 0;
 
   Conversation get conversation => _conversation;
   Stream<void> get changes => _listeners.stream;
@@ -125,9 +136,15 @@ class ConversationController {
     return backend.interrupt();
   }
 
-  Future<void> restore(Map<String, dynamic> encoded) {
+  Future<void> restore(Map<String, dynamic> encoded) async {
     _checkNotDisposed();
-    return backend.restore(encoded);
+    _restoreGeneration++;
+    _restoreOperations++;
+    try {
+      await backend.restore(encoded);
+    } finally {
+      _restoreOperations--;
+    }
   }
 
   Future<void> respondToApproval({
@@ -168,8 +185,15 @@ class ConversationChatController extends ChatController {
     this.disposeConversationController = true,
     super.notificationScheduler,
   }) : super() {
+    _snapshotRestoreGeneration = conversationController._restoreGeneration;
     _conversationSubscription = conversationController.changes.listen((_) {
-      _snapshot = conversationController.conversation;
+      if (_snapshotRestoreGeneration !=
+          conversationController._restoreGeneration) {
+        _snapshotRestoreGeneration = conversationController._restoreGeneration;
+        _pendingMessageEdits.clear();
+        _messageEditQueues.clear();
+      }
+      _snapshot = _withPendingMessageEdits(conversationController.conversation);
       _awaitingBackendSnapshot = false;
       _failureDismissed = false;
       _refreshFromSnapshot();
@@ -181,10 +205,13 @@ class ConversationChatController extends ChatController {
   final bool disposeConversationController;
   late Conversation _snapshot = conversationController.conversation;
   late final StreamSubscription<void> _conversationSubscription;
+  late int _snapshotRestoreGeneration;
   bool _sending = false;
   int _operationGeneration = 0;
   bool _awaitingBackendSnapshot = false;
   bool _failureDismissed = false;
+  final _messageEditQueues = <String, Future<void>>{};
+  final _pendingMessageEdits = <String, _PendingMessageEdit>{};
   Object? _conversationError;
   ChatStatus _conversationStatus = ChatStatus.ready;
 
@@ -223,9 +250,180 @@ class ConversationChatController extends ChatController {
   @override
   String get streamingContent => '';
 
-  /// Always false: the conversation backend owns the transcript.
+  /// Replaces the text of the message with [id] by [message]'s text, keeping its
+  /// id, role, status, metadata and other parts, as [ChatController.updateMessage]
+  /// does. The snapshot updates at once and the backend saves it; a backend
+  /// failure becomes [error]. Returns false when the message is missing or
+  /// streaming, a restore is in progress, or the backend does not implement
+  /// [ConversationMessageEditBackend].
   @override
-  bool updateMessage(String id, ModelMessage message) => false;
+  bool updateMessage(String id, ModelMessage message) {
+    if (isDisposed) return false;
+    if (conversationController._restoreOperations > 0) return false;
+    if (_snapshotRestoreGeneration !=
+        conversationController._restoreGeneration) {
+      _snapshotRestoreGeneration = conversationController._restoreGeneration;
+      _pendingMessageEdits.clear();
+      _messageEditQueues.clear();
+      _snapshot = conversationController.backend.conversation;
+    }
+    final backend = conversationController.backend;
+    if (backend is! ConversationMessageEditBackend) return false;
+    final index = _snapshot.messages.indexWhere((m) => m.id == id);
+    if (index == -1) return false;
+    final current = conversationController.backend.conversation.messages
+        .where((m) => m.id == id)
+        .firstOrNull;
+    if (current == null ||
+        current.status == ConversationMessageStatus.streaming) {
+      return false;
+    }
+    final updated = _withText(current, message.text);
+    _snapshot = Conversation(
+      id: _snapshot.id,
+      messages: [..._snapshot.messages]..[index] = updated,
+      metadata: _snapshot.metadata,
+      schemaVersion: _snapshot.schemaVersion,
+      extra: _snapshot.extra,
+    );
+    final generation = conversationController._restoreGeneration;
+    final edit = _PendingMessageEdit(
+      text: message.text,
+      restoreGeneration: generation,
+    );
+    _pendingMessageEdits[id] = edit;
+    _enqueueMessageEdit(
+      backend as ConversationMessageEditBackend,
+      id: id,
+      edit: edit,
+      restoreGeneration: generation,
+    );
+    notifyListenersSafely(immediate: true, content: true);
+    return true;
+  }
+
+  void _enqueueMessageEdit(
+    ConversationMessageEditBackend backend, {
+    required String id,
+    required _PendingMessageEdit edit,
+    required int restoreGeneration,
+  }) {
+    final previous = _messageEditQueues[id];
+    if (previous == null) {
+      try {
+        final current = _currentMessageForEdit(id);
+        _observeMessageEdit(
+          backend.updateMessage(_withText(current, edit.text)),
+          id: id,
+          edit: edit,
+          restoreGeneration: restoreGeneration,
+        );
+      } catch (error) {
+        _finishMessageEdit(id, edit, restoreGeneration, error: error);
+      }
+      return;
+    }
+
+    final write = previous.then<void>((_) async {
+      if (isDisposed ||
+          restoreGeneration != conversationController._restoreGeneration) {
+        return;
+      }
+      try {
+        final current = _currentMessageForEdit(id);
+        await backend.updateMessage(_withText(current, edit.text));
+        _finishMessageEdit(id, edit, restoreGeneration);
+      } catch (error) {
+        _finishMessageEdit(id, edit, restoreGeneration, error: error);
+      }
+    });
+    _messageEditQueues[id] = write;
+    unawaited(write.then((_) => _clearFinishedQueue(id, write)));
+  }
+
+  ConversationMessage _currentMessageForEdit(String id) {
+    final current = conversationController.backend.conversation.messages
+        .where((message) => message.id == id)
+        .firstOrNull;
+    if (current == null) {
+      throw ArgumentError.value(id, 'id', 'No message has this id');
+    }
+    if (current.status == ConversationMessageStatus.streaming) {
+      throw StateError('Cannot edit a streaming message');
+    }
+    return current;
+  }
+
+  void _observeMessageEdit(
+    Future<void> write, {
+    required String id,
+    required _PendingMessageEdit edit,
+    required int restoreGeneration,
+  }) {
+    late final Future<void> settled;
+    settled = write.then<void>(
+      (_) => _finishMessageEdit(id, edit, restoreGeneration),
+      onError: (Object error, StackTrace _) =>
+          _finishMessageEdit(id, edit, restoreGeneration, error: error),
+    );
+    _messageEditQueues[id] = settled;
+    unawaited(settled.then((_) => _clearFinishedQueue(id, settled)));
+  }
+
+  void _clearFinishedQueue(String id, Future<void> write) {
+    if (identical(_messageEditQueues[id], write)) {
+      _messageEditQueues.remove(id);
+    }
+  }
+
+  void _finishMessageEdit(
+    String id,
+    _PendingMessageEdit edit,
+    int restoreGeneration, {
+    Object? error,
+  }) {
+    if (identical(_pendingMessageEdits[id], edit)) {
+      _pendingMessageEdits.remove(id);
+    }
+    if (error != null) {
+      _recordEditFailure(error, restoreGeneration);
+    }
+  }
+
+  Conversation _withPendingMessageEdits(Conversation value) {
+    final messages = [...value.messages];
+    var changed = false;
+    for (final entry in _pendingMessageEdits.entries.toList()) {
+      final id = entry.key;
+      final edit = entry.value;
+      if (edit.restoreGeneration != conversationController._restoreGeneration) {
+        _pendingMessageEdits.remove(id);
+        _messageEditQueues.clear();
+        continue;
+      }
+      final index = messages.indexWhere((message) => message.id == id);
+      if (index < 0) continue;
+      messages[index] = _withText(messages[index], edit.text);
+      changed = true;
+    }
+    if (!changed) return value;
+    return Conversation(
+      id: value.id,
+      messages: messages,
+      metadata: value.metadata,
+      schemaVersion: value.schemaVersion,
+      extra: value.extra,
+    );
+  }
+
+  void _recordEditFailure(Object error, int generation) {
+    if (generation != conversationController._restoreGeneration || isDisposed) {
+      return;
+    }
+    _conversationError = error;
+    _conversationStatus = ChatStatus.error;
+    notifyListenersSafely(immediate: true, status: true);
+  }
 
   @override
   List<LanguageModelV4ToolApprovalRequestPart> get pendingApprovalRequests =>
@@ -274,7 +472,7 @@ class ConversationChatController extends ChatController {
     _awaitingBackendSnapshot = false;
     await conversationController.interrupt();
     if (isDisposed) return;
-    _snapshot = conversationController.conversation;
+    _snapshot = _withPendingMessageEdits(conversationController.conversation);
     _refreshFromSnapshot();
   }
 
@@ -411,6 +609,8 @@ class ConversationChatController extends ChatController {
   @override
   void dispose() {
     ++_operationGeneration;
+    _messageEditQueues.clear();
+    _pendingMessageEdits.clear();
     _sending = false;
     unawaited(_conversationSubscription.cancel());
     super.dispose();
@@ -420,9 +620,47 @@ class ConversationChatController extends ChatController {
   }
 }
 
+class _PendingMessageEdit {
+  const _PendingMessageEdit({
+    required this.text,
+    required this.restoreGeneration,
+  });
+
+  final String text;
+  final int restoreGeneration;
+}
+
+ConversationMessage _withText(ConversationMessage m, String text) {
+  final first = m.parts.whereType<TextPart>().firstOrNull;
+  return ConversationMessage(
+    id: m.id,
+    role: m.role,
+    status: m.status,
+    metadata: m.metadata,
+    extra: m.extra,
+    parts: [
+      for (final p in m.parts)
+        if (p is! TextPart)
+          p
+        else if (identical(p, first))
+          TextPart(
+            id: p.id,
+            text: text,
+            metadata: p.metadata,
+            providerOptions: p.providerOptions,
+            extra: p.extra,
+          ),
+      if (first == null) TextPart(id: '${m.id}-text', text: text),
+    ],
+  );
+}
+
 /// Local adapter around [ToolLoopAgent].
 class LocalConversationBackend
-    implements ConversationBackend, ConversationRetryBackend {
+    implements
+        ConversationBackend,
+        ConversationRetryBackend,
+        ConversationMessageEditBackend {
   LocalConversationBackend({
     required ToolLoopAgent agent,
     required Conversation initial,
@@ -1058,6 +1296,27 @@ class LocalConversationBackend
       );
     }
     _publishLive(ConversationMessageStatus.streaming);
+  }
+
+  @override
+  Future<void> updateMessage(ConversationMessage message) async {
+    if (_disposed) throw StateError('Conversation backend is disposed');
+    final index = _conversation.messages.indexWhere((m) => m.id == message.id);
+    if (index == -1) {
+      throw ArgumentError.value(
+        message.id,
+        'message.id',
+        'No message has this id',
+      );
+    }
+    _publish(
+      Conversation(
+        id: _conversation.id,
+        messages: [..._conversation.messages]..[index] = message,
+        metadata: _conversation.metadata,
+        extra: _conversation.extra,
+      ),
+    );
   }
 
   @override

@@ -1,5 +1,8 @@
 ## 3.1.0 (unreleased)
 
+- `OpenUiAnswers` keeps one session per message for any transport: feed it full text, deltas, edit-mode patches or a
+  `Stream<OpenUiMessageEvent>`, save with `onSave`, and replay a saved message with `update(id, text, streaming: false)`.
+  `messageWithState` and `messageState` read and write an answer's saved state.
 - Async host actions: `ActionSpec(handler:)` runs a library action in the session and returns `ActionSuccess` or
   `ActionFailure(message)`. Each run gets an `idempotencyKey` that stays the same for retries of the same write,
   and `OpenUiSession.actionStatus(action, nodeId:)` reports pending, done or failed per triggering node.

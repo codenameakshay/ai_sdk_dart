@@ -9,11 +9,14 @@ import 'batteries.dart';
 final class OpenUiChat extends chat.OpenUiChat {
   OpenUiChat({
     required super.controller,
-    required super.agent,
+    super.agent,
+    super.send,
     super.library,
     OpenUiBuilderLookup? builders,
     super.tools,
     super.onAction,
     super.fallbackServices = batteryServices,
+    super.locale,
+    super.records,
   }) : super(builders: builders ?? intelligentUiBuilders);
 }

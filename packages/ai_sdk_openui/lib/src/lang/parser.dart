@@ -787,18 +787,25 @@ List<Ast> _nameRawCallArgs(List<Ast> args, _Ctx ctx, String statementId) {
   }
 }
 
-Ast _nameRawCalls(Ast node, _Ctx ctx) {
-  Ast map(Ast child) => _nameRawCalls(child, ctx);
+Ast _nameRawCalls(Ast node, _Ctx ctx, [Set<String> scoped = const {}]) {
+  Ast map(Ast child) => _nameRawCalls(child, ctx, scoped);
   switch (node) {
+    case RefNode(:final name):
+      return scoped.contains(name)
+          ? node
+          : _resolveRef(name, ctx, asExpr: true) as Ast;
     case CompNode():
       final def = ctx.schema.calls[node.name];
       final mappedArgs = <Ast>[];
       if (def?.lazy == true && node.name == 'Each' && node.args.length >= 3) {
         mappedArgs.add(map(node.args[0]));
-        mappedArgs.add(map(node.args[1]));
-        _withLoopVar(loopVarName(node.args[1]), node.args[0], ctx, () {
+        mappedArgs.add(node.args[1]);
+        final name = loopVarName(node.args[1]);
+        _withLoopVar(name, mappedArgs[0], ctx, () {
           for (var i = 2; i < node.args.length; i++) {
-            mappedArgs.add(map(node.args[i]));
+            mappedArgs.add(
+              _nameRawCalls(node.args[i], ctx, {...scoped, ?name}),
+            );
           }
         });
       } else {

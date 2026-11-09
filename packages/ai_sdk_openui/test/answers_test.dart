@@ -285,7 +285,7 @@ void main() {
 
     await press(answers, 'msg-1');
 
-    expect(_payKeys, ['cc882598d3b427ba-1']);
+    expect(_payKeys, ['52c26a82b68da5b0-1']);
   });
 
   test('actionScope is the message id', () {

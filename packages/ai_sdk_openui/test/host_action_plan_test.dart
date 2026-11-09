@@ -45,25 +45,25 @@ Future<void> _click(OpenUiSession session, {String nodeId = 'button'}) =>
 
 void main() {
   test('idempotency keys match cross-runtime Unicode and number vectors', () {
-    final vectors = <(String, String, String, Map<String, Object?>)>[
-      ('', '', 'Pay', {'value': -0.0}),
-      ('scope-😀', 'node-λ', 'ÉPay', {'value': 1e-7}),
-      ('', '', 'Pay', {'value': 1e-6}),
-      ('', '', 'Pay', {'value': 1e20}),
-      ('', '', 'Pay', {'value': 1e21}),
-      ('', '', 'Pay', {'2': 'two', '10': 'ten', 'a': 1}),
+    final vectors = <(String, String, Map<String, Object?>)>[
+      ('', 'Pay', {'value': -0.0}),
+      ('scope-😀-λ', 'ÉPay', {'value': 1e-7}),
+      ('', 'Pay', {'value': 1e-6}),
+      ('', 'Pay', {'value': 1e20}),
+      ('', 'Pay', {'value': 1e21}),
+      ('', 'Pay', {'2': 'two', '10': 'ten', 'a': 1}),
     ];
     const expected = [
-      '6467502cc9d079c6',
-      'f9bdde5446e2a086',
-      '1969f3a53757d7cf',
-      '9712510bcaea2add',
-      'a6db0dca40ffd474',
-      'cce26bad3bd271ef',
+      'ce0006182fa6fae6',
+      '73eb82705dfbfaf6',
+      'b3cba461b09fa06f',
+      '8e6185177555a3fd',
+      '63f9190e27b4e294',
+      'a9b684418820f40f',
     ];
     expect([
-      for (final (scope, node, name, params) in vectors)
-        actionBaseKey(scope, node, name, params),
+      for (final (scope, name, params) in vectors)
+        actionBaseKey(scope, name, params),
     ], expected);
   });
 

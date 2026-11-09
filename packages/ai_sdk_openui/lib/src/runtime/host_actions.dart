@@ -91,16 +91,10 @@ Object? _sorted(Object? v) => switch (v) {
 };
 
 /// The 16-hex base key of a handled action run: FNV-1a (two 32-bit seeds)
-/// over the JSON of the scope, node id, name and key-sorted params.
-String actionBaseKey(
-  String scope,
-  String nodeId,
-  String name,
-  Map<String, Object?> params,
-) {
-  final bytes = utf8.encode(
-    Js.stringify([scope, nodeId, name, _sorted(params)]),
-  );
+/// over the JSON of the scope, name and key-sorted params. It never depends
+/// on where the control sits, so a list that grows keeps each item's key.
+String actionBaseKey(String scope, String name, Map<String, Object?> params) {
+  final bytes = utf8.encode(Js.stringify([scope, name, _sorted(params)]));
   String hex(int seed) => _fnv1a(bytes, seed).toRadixString(16).padLeft(8, '0');
   return '${hex(0x811c9dc5)}${hex(0x01000193)}';
 }

@@ -21,8 +21,8 @@ final _outProps = <String, Schema>{
 
 const _payProgram = 'root = Out(1, @Pay("o-1"))';
 
-/// `actionBaseKey('', '', 'Pay', {'orderId': 'o-1'})`: the JSON `["","","Pay",{"orderId":"o-1"}]`.
-const _payBase = '02ad64fd0e3b0b23';
+/// `actionBaseKey('', 'Pay', {'orderId': 'o-1'})`: the JSON `["","","Pay",{"orderId":"o-1"}]`.
+const _payBase = '3ad08ff935776d83';
 
 final _calls = <ActionInvocation>[];
 var _results = <ActionResult>[];
@@ -243,11 +243,11 @@ void main() {
     });
   });
 
-  group('node and scope identity', () {
+  group('key identity', () {
     test('the scope is part of the key', () async {
       final s = _open(_pay(), scope: 'msg-1');
       await _click(s);
-      expect(_calls.single.idempotencyKey, 'cc882598d3b427ba-1');
+      expect(_calls.single.idempotencyKey, '52c26a82b68da5b0-1');
     });
 
     test('parameter order does not change the key', () async {
@@ -257,13 +257,12 @@ void main() {
       expect(_calls.single.params, {'orderId': 'o-1', 'note': 'x'});
       expect(
         _calls.single.idempotencyKey,
-        '${actionBaseKey('', '', 'Pay', {'note': 'x', 'orderId': 'o-1'})}-1',
+        '${actionBaseKey('', 'Pay', {'note': 'x', 'orderId': 'o-1'})}-1',
       );
     });
 
     test('nested maps and lists in parameters are key-sorted', () {
-      String key(Object? items) =>
-          actionBaseKey('', '', 'Pay', {'items': items});
+      String key(Object? items) => actionBaseKey('', 'Pay', {'items': items});
       expect(
         key([
           {'b': 1, 'a': 2},
@@ -284,32 +283,29 @@ void main() {
       );
     });
 
-    test('the node id is part of the key', () {
-      const params = {'orderId': 'o-1'};
-      expect(
-        actionBaseKey('', 'n1', 'Pay', params),
-        isNot(actionBaseKey('', 'n2', 'Pay', params)),
-      );
-    });
-
     test(
-      'two nodes running the same action get separate keys and statuses',
+      'two nodes running the same action share its key and status',
       () async {
-        final s = _open(_pay());
-        await _click(s, nodeId: 'a');
-        expect(_status(s, nodeId: 'a').phase, ActionPhase.done);
-        expect(_status(s, nodeId: 'b').phase, ActionPhase.idle);
-        await _click(s, nodeId: 'b');
-        expect(
-          _calls[0].idempotencyKey,
-          '${actionBaseKey('', 'a', 'Pay', {'orderId': 'o-1'})}-1',
-        );
-        expect(
-          _calls[1].idempotencyKey,
-          '${actionBaseKey('', 'b', 'Pay', {'orderId': 'o-1'})}-1',
-        );
+        final s = _open(_pay(disable: true));
+        await _click(s, nodeId: 'list/children.0');
+        expect(_status(s, nodeId: 'list/children.1').phase, ActionPhase.done);
+        expect(_status(s, nodeId: 'list/children.1').disabled, isTrue);
+        await _click(s, nodeId: 'list/children.1');
+        expect(_calls.single.idempotencyKey, '$_payBase-1');
       },
     );
+
+    test('another node waits while the same plan runs', () async {
+      _gate = Completer<void>();
+      final s = _open(_pay());
+      final running = _click(s, nodeId: 'a');
+      await _click(s, nodeId: 'b');
+      expect(_status(s, nodeId: 'b').phase, ActionPhase.pending);
+      _gate!.complete();
+      await running;
+      expect(_calls, hasLength(1));
+      expect(_status(s, nodeId: 'b').phase, ActionPhase.done);
+    });
 
     test('the same node retries a failed run with the same key', () async {
       _results = [const ActionFailure('Card declined')];

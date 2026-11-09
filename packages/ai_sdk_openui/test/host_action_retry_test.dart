@@ -302,7 +302,7 @@ void main() {
       final session = _session(actions, onStateUpdate: snapshots.add);
       await _click(session);
 
-      final base = actionBaseKey('', 'button', 'ChargeA', const {});
+      final base = actionBaseKey('', 'ChargeA', const {});
       final completion = snapshots.firstWhere((state) {
         final status = (state[actionStateKey] as Map)[base];
         return status is Map && status['phase'] == 'done';

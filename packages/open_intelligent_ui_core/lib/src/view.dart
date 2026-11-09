@@ -543,6 +543,9 @@ final class OpenUiNode {
   OpenUiTheme get theme => OpenUiTheme.of(_context);
   OpenUiServices get services => OpenUiScope.servicesOf(_context);
 
+  /// The session's intl locale (`en_IN`, `de`); null for en-US output.
+  String? get locale => _session.locale;
+
   /// While the model is still writing, actions wait.
   bool get isStreaming => _session.isStreaming;
 

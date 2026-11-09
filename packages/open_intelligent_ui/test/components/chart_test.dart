@@ -131,6 +131,21 @@ void main() {
       expect(chartFormat('currency', '12')(840), r'$840');
     });
 
+    test('a locale groups and compacts by its own rules', () {
+      final inr = chartFormat('currency', 'INR', locale: 'en_IN');
+      expect(inr(234567), '₹2,34,567');
+      expect(inr(1234567), '₹12.35L');
+      expect(inr(1234567, compact: true), '₹12.3L');
+      expect(inr(123456789), '₹12.35Cr');
+      expect(
+        chartFormat('number', null, locale: 'en_IN')(234567.5),
+        '2,34,567.5',
+      );
+      expect(chartFormat('number', null, locale: 'de')(1234.5), '1.234,5');
+      expect(chartFormat('currency', 'INR')(1234567), '₹1.23M');
+      expect(chartFormat('currency', 'INR', locale: null)(234567), '₹234,567');
+    });
+
     test(
       'percent: the value with a sign, rounded to two decimals (one for ticks)',
       () {
@@ -404,6 +419,37 @@ void main() {
         expect(find.text('40'), findsOneWidget);
       },
     );
+
+    testWidgets('a tooltip formats values in the session locale', (
+      tester,
+    ) async {
+      await pumpProgram(
+        tester,
+        'root = Col([Chart("bar", [{m: "Jan", a: 234567}, {m: "Feb", a: 1234567}], "m", ["a"], "currency", "INR")])',
+        locale: 'en_IN',
+      );
+      final mouse = await _mouse(tester);
+      await mouse.moveTo(_global(tester, _bars(tester)[0].center));
+      await tester.pump();
+      expect(find.text('₹2,34,567'), findsOneWidget);
+      await mouse.moveTo(_global(tester, _bars(tester)[1].center));
+      await tester.pump();
+      expect(find.text('₹12.35L'), findsOneWidget);
+    });
+
+    testWidgets('a scatter tooltip writes x in the session locale', (
+      tester,
+    ) async {
+      await pumpProgram(
+        tester,
+        'root = Col([Chart("scatter", [{x: 1234567, y: 5}, {x: 2345678, y: 9}], "x", ["y"])])',
+        locale: 'en_IN',
+      );
+      final mouse = await _mouse(tester);
+      await mouse.moveTo(_global(tester, _dots(tester)[0]));
+      await tester.pump();
+      expect(find.text('12,34,567'), findsOneWidget);
+    });
 
     testWidgets('hovering with a mouse shows it and leaving hides it', (
       tester,

@@ -27,11 +27,13 @@ Future<Pumped> pumpProgram(
   TextDirection textDirection = TextDirection.ltr,
   bool semanticsIdentifiers = false,
   OpenUiLibrary? library,
+  String? locale,
 }) async {
   final session = OpenUiSession(
     library ?? intelligentUi,
     tools: tools,
     initialState: initialState,
+    locale: locale,
   )..update(program, streaming: streaming);
   addTearDown(session.dispose);
   final events = <ActionEvent>[];

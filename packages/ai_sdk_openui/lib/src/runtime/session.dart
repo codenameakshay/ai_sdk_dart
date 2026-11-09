@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import '../iui/functions/shared.dart' show Impure, OpenUiTimeZone;
 import '../lang/ast.dart';
 import '../lang/js.dart';
 import '../lang/parser.dart';
@@ -186,6 +187,9 @@ final class OpenUiSession {
     this.actionScope = '',
     this.resolveAction,
     this.policy = const ValidationPolicy(),
+    this.clock,
+    this.random,
+    this.timeZone,
   }) : locale = resolveLocale(locale),
        _tools = {for (final t in tools) t.name: t},
        _initialState = initialState,
@@ -213,8 +217,10 @@ final class OpenUiSession {
           f.name: RuntimeFunction(
             params: (fnSchemas[f.name]!['params'] as Map).cast(),
             returns: (fnSchemas[f.name]!['returns'] as Map?)?.cast(),
-            fn: f.fn,
-            localized: f.localized,
+            fn: (a) => _impure(() => f.fn(a)),
+            localized: f.localized == null
+                ? null
+                : (a, locale) => _impure(() => f.localized!(a, locale)),
           ),
       },
       actions: {
@@ -230,6 +236,22 @@ final class OpenUiSession {
 
   /// The intl locale functions format in; null for the reference's en-US output.
   final String? locale;
+
+  /// What `@Now` and `@Today` read; null uses the process clock.
+  final DateTime Function()? clock;
+
+  /// What `@Random`, `@Pick` and `@Shuffle` draw from, a double in [0, 1);
+  /// null uses the process random source.
+  final double Function()? random;
+
+  /// The zone dates read and format in; null is the device's local zone.
+  final OpenUiTimeZone? timeZone;
+
+  T _impure<T>(T Function() body) =>
+      Impure.run(body, now: clock, random: random, timeZone: timeZone);
+
+  /// The current wall-clock time in [timeZone], from [clock].
+  DateTime get localNow => _impure(() => Impure.toLocal(Impure.now()));
 
   /// react-lang `onError`: the settled answer's errors, once per change.
   final void Function(List<OpenUiError> errors)? onError;

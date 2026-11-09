@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import '../iui/functions/shared.dart' show OpenUiTimeZone;
 import '../lang/merge.dart';
 import '../lang/message.dart';
 import '../spec/bound.dart';
@@ -111,6 +112,9 @@ final class OpenUiAnswers {
     this.locale,
     this.records,
     this.onSave,
+    this.clock,
+    this.random,
+    this.timeZone,
   });
 
   final OpenUiLibrary library;
@@ -118,6 +122,11 @@ final class OpenUiAnswers {
   final String? locale;
   final List<BoundRecord> Function(String id)? records;
   final void Function(String id, String text)? onSave;
+
+  /// Each session's clock, random source and time zone (see [OpenUiSession]).
+  final DateTime Function()? clock;
+  final double Function()? random;
+  final OpenUiTimeZone? timeZone;
 
   final Map<String, OpenUiSession> _sessions = {};
   final Map<String, String> _rawTexts = {};
@@ -140,6 +149,9 @@ final class OpenUiAnswers {
         locale: locale,
         records: records?.call(id) ?? const [],
         actionScope: id,
+        clock: clock,
+        random: random,
+        timeZone: timeZone,
         initialState: messageState(
           parseMessage(text, streaming: streaming).context,
         ),

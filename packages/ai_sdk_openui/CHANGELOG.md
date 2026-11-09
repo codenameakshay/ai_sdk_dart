@@ -25,6 +25,9 @@
   the session state, and later steps of the same plan read it from `ActionInvocation.results` and
   `ActionEvent.results`, keyed by action name, also after a restore.
 - `Impure` (the clock and random seams that `@Today`, `@Now` and `@Random` use) is public, so hosts and tests can pin time and randomness.
+- `OpenUiSession` and `OpenUiAnswers` take `clock`, `random` and `timeZone`, so two sessions in one process can
+  read their own time, randomness and zone; the `Impure` hooks are now only the defaults. `OpenUiTimeZone` is a
+  host-supplied offset per instant (`OpenUiTimeZone.fixed`, `OpenUiTimeZone.utc`); null keeps the device zone.
 - `intelligentUiWithout(optionalIuiComponents)` gives a library without Math, Map, MapMarker, YouTube and HtmlView, and `chatPromptFor(library)` / `dashboardPrompt(library:)` drop the medium-rule clauses for components the library lacks. `intelligentUi` and `chatPrompt` are unchanged.
 - The system prompt follows the library: `chatPromptFor` and `dashboardPrompt(library:)` leave out rules and
   examples that use a component or `@call` the library lacks, `extend` drops group notes that name a removed

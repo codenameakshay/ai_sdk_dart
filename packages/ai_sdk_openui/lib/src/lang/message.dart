@@ -23,6 +23,15 @@ final class ParsedMessage {
 
 /// Splits a stored message into its content, context, attributes and end flag.
 ParsedMessage parseMessage(String raw, {bool streaming = false}) {
+  // No marker can start in the text, and no streamed `]` may begin one.
+  if (!raw.contains(']]>') && !(streaming && raw.endsWith(']'))) {
+    return ParsedMessage(
+      content: raw,
+      context: null,
+      attributes: {},
+      end: false,
+    );
+  }
   var text = raw.replaceAllMapped(_retry, (m) => '${m[1]}\n');
   final cut = streaming ? _retryCut.firstMatch(text) : null;
   if (cut != null && '${_prefix}content'.startsWith(cut[1]!)) {

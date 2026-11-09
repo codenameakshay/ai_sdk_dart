@@ -1416,7 +1416,11 @@ final class StreamParser {
     }
     String? tailName;
     if (!complete) {
-      final tail = RegExp(r'\$\w+$').firstMatch(_buf)?.group(0);
+      // Only the last `$` can start a match, so match there, not from the start.
+      final at = _buf.lastIndexOf(r'$');
+      final tail = at < 0
+          ? null
+          : RegExp(r'\$\w+$').matchAsPrefix(_buf, at)?.group(0);
       if (tail != null &&
           pendingText.endsWith(tail) &&
           !RegExp('${RegExp.escape(tail)}(?!\\w)').hasMatch(

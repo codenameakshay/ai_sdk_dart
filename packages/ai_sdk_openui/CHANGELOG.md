@@ -87,6 +87,9 @@
   does not compile, so model-written input cannot freeze the UI thread with catastrophic backtracking.
 - `OpenUiAnswers.listen(events, onError:)`: an error on the event stream cancels it and goes to `onError` with the
   id of the message it was feeding, which stays unfinished, instead of becoming an uncaught zone error.
+- Streaming is cheaper per delta: an unframed answer is no longer split into message sections twice per update, the
+  streaming parser no longer scans the whole text for a trailing `$name`, and the initial state is serialised once.
+  A 20 KB answer in 1-character deltas went from about 15 s to under 3 s.
 - First release: OpenUI Lang 1.0 (a port of `@openuidev/lang-core` and the state, query and
   action handling of `@openuidev/react-lang` 1.0.0) and the Open Intelligent UI library spec
   (a port of thesysdev/open-intelligent-ui at `9df2e64`), with `OpenUiSession`,

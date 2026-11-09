@@ -141,6 +141,9 @@ final class OpenUiAnswers {
   /// Sets the full text of message [id].
   OpenUiSession update(String id, String text, {required bool streaming}) {
     if (_disposed) throw StateError('OpenUiAnswers is disposed');
+    final restored = messageState(
+      parseMessage(text, streaming: streaming).context,
+    );
     final session = _sessions.putIfAbsent(
       id,
       () => OpenUiSession(
@@ -152,9 +155,7 @@ final class OpenUiAnswers {
         clock: clock,
         random: random,
         timeZone: timeZone,
-        initialState: messageState(
-          parseMessage(text, streaming: streaming).context,
-        ),
+        initialState: restored,
         onStateUpdate: (_) => _save(id),
       ),
     );
@@ -162,13 +163,7 @@ final class OpenUiAnswers {
     _texts[id] = text;
     _streaming[id] = streaming;
     if (!streaming) _finished[id] = text;
-    session.update(
-      text,
-      streaming: streaming,
-      restoredState: messageState(
-        parseMessage(text, streaming: streaming).context,
-      ),
-    );
+    session.update(text, streaming: streaming, restoredState: restored);
     if (_hasLocalState.contains(id)) {
       _texts[id] = messageWithState(text, session.state);
     }

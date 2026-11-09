@@ -264,6 +264,7 @@ final class OpenUiSession {
   final void Function(ParseResult? result)? onParseResult;
   Map<String, OpenUiTool> _tools;
   final Map<String, Object?> _initialState;
+  late final String _initialStateKey = Js.stringify(_initialState);
 
   /// Prefixed to every handled action's idempotency key: chat adapters pass the message id.
   final String actionScope;
@@ -392,7 +393,7 @@ final class OpenUiSession {
     final declarations = {...?_result?.stateDeclarations}
       ..removeWhere((k, _) => _bound.containsKey(k));
     final key =
-        '${Js.stringify(declarations)}::${Js.stringify(_initialState)}::$restoredStateKey';
+        '${Js.stringify(declarations)}::$_initialStateKey::$restoredStateKey';
     if (key != _storeKey) {
       _initializing = true;
       try {

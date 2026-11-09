@@ -9,7 +9,6 @@ import 'package:http/testing.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
 import 'package:open_intelligent_ui_core/src/components/media.dart'
     show MediaRowSlot;
-import 'package:open_intelligent_ui_core/src/view.dart' show resetFieldIds;
 
 import 'support/pump.dart';
 
@@ -129,14 +128,13 @@ void main() {
     testWidgets('a Form without a statement name is named after its id', (
       tester,
     ) async {
-      resetFieldIds();
       final pumped = await pumpProgram(
         tester,
         'root = Col([Form([Input("", "Name"), Button("Send", @ToAssistant("Hi"))])])',
       );
       await tester.tap(find.text('Send'));
       await tester.pump();
-      expect(pumped.events.single.formName, 'field-1');
+      expect(pumped.events.single.formName, 'root/children.0');
     });
   });
 }

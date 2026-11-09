@@ -7,6 +7,9 @@
   `OpenUiNode` gains `actionStatus(prop)` and `run(confirmed:)`.
 - Every rendered element has a stable key from its statement id (inline elements: parent id and
   position). `OpenUiView(semanticsIdentifiers: true)` also sets Semantics identifiers for UI tests.
+- An unnamed field or Form is named after that element id, not a process-wide `field-N` counter, so what
+  the user typed or picked survives a remount, a restore from `initialState` and other views rendered first.
+  Two controls with the same label in one form keep separate values: the later one is named `<label>~<id>`.
 - Elements are keyed by statement id, so a statement that is renamed or moved inline mounts a new
   widget and drops its local widget state (an expanded map, a scroll position).
 - All user-visible text comes from `OpenUiLocalizations` (English by default). Register

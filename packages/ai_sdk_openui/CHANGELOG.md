@@ -26,6 +26,13 @@
   `ActionEvent.results`, keyed by action name, also after a restore.
 - `Impure` (the clock and random seams that `@Today`, `@Now` and `@Random` use) is public, so hosts and tests can pin time and randomness.
 - `intelligentUiWithout(optionalIuiComponents)` gives a library without Math, Map, MapMarker, YouTube and HtmlView, and `chatPromptFor(library)` / `dashboardPrompt(library:)` drop the medium-rule clauses for components the library lacks. `intelligentUi` and `chatPrompt` are unchanged.
+- The system prompt follows the library: `chatPromptFor` and `dashboardPrompt(library:)` leave out rules and
+  examples that use a component or `@call` the library lacks, `extend` drops group notes that name a removed
+  component, and component, function and action descriptions lose the sentences that call a missing component or
+  name an unlisted step. `PromptOptions(allowedActions:)` (the same set as `ValidationPolicy.allowedActions`) lists
+  only those steps and actions, takes the others out of component signatures (leaving out a component whose
+  step slot keeps none), and the fixed text (action examples, `@Run` refresh and Mutation, Forms, and the
+  "tables, charts, forms" hints) names only steps and components the prompt offers. `intelligentUi`'s prompts are unchanged.
 - `library.validate(program, policy: ValidationPolicy(...))` and `validateProgram` (from a spec's JSON Schema
   alone) return a `ValidationReport`: parse issues plus node, depth and string limits, unknown-component handling
   (drop or fail) and allowed actions, each with its statement id. `toJson()` is the wire form.

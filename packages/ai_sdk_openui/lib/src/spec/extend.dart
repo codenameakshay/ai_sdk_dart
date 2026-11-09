@@ -142,7 +142,11 @@ OpenUiLibrary _extendLibrary(OpenUiLibrary base, LibraryExtension ext) {
         if (!removed.contains(c.typeName)) rebuilt[c.typeName] ?? c,
     ];
     if (comps.isEmpty) continue;
-    groups.add(ComponentGroup(g.name, comps, notes: g.notes));
+    final notes = [
+      for (final n in g.notes)
+        if (!removed.any((r) => RegExp('\\b$r\\b').hasMatch(n))) n,
+    ];
+    groups.add(ComponentGroup(g.name, comps, notes: notes));
   }
 
   return OpenUiLibrary(

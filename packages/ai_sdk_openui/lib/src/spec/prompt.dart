@@ -56,6 +56,7 @@ final class PromptSpec {
     this.inlineMode = false,
     this.records = const [],
     this.state = const {},
+    this.allowedActions,
   });
 
   final String root;
@@ -92,12 +93,112 @@ final class PromptSpec {
   /// Seeded `$variables` with their values, listed in a "Current State" section.
   /// Other keys are ignored.
   final Map<String, Object?> state;
+
+  /// Built-in steps and [actions] the prompt may name; null allows all.
+  final Set<String>? allowedActions;
 }
 
 const _preamble =
     'You are an AI assistant that responds using openui-lang, a declarative UI language. Your ENTIRE response must be valid openui-lang code — no markdown, no explanations, just openui-lang.';
 
 final _restrictedSlot = RegExp(r'[:|] @[A-Z]');
+final _componentCall = RegExp(r'(?<![@\w.])([A-Z]\w*)\(');
+final _stepCall = RegExp(r'@([A-Z]\w*)\b');
+const _languageCalls = {'Query', 'Mutation', 'Action'};
+
+/// What the prompt offers, to keep library text from naming anything else.
+final class _Scope {
+  _Scope(this.components, this.absent, this.hidden);
+
+  /// Components the library has.
+  final Set<String> components;
+
+  /// Components a group lists that the library does not have.
+  final Set<String> absent;
+
+  /// Built-in steps and library actions the prompt does not list.
+  final Set<String> hidden;
+
+  bool offers(String text) =>
+      _componentCall
+          .allMatches(text)
+          .every(
+            (m) => components.contains(m[1]) || _languageCalls.contains(m[1]),
+          ) &&
+      !_stepCall.allMatches(text).any((m) => hidden.contains(m[1])) &&
+      !absent.any((n) => RegExp('\\b$n\\b').hasMatch(text));
+
+  /// [signature] with the hidden steps taken out of its step unions; null
+  /// when a slot keeps only hidden steps, so the component cannot be written.
+  String? signature(String signature) {
+    String? filter(String text) {
+      text = text.trim();
+      final separators = <int>[];
+      final groups = <(int, int)>[];
+      var depth = 0;
+      var start = 0;
+      var quoted = false;
+      var hiddenStep = false;
+      for (var i = 0; i < text.length; i++) {
+        final c = text[i];
+        if (c == r'\') {
+          i++;
+          continue;
+        }
+        if (c == '"') quoted = !quoted;
+        if (quoted || c == '"') continue;
+        if ('(<[{'.contains(c)) {
+          if (depth++ == 0) start = i;
+        } else if (')>]}'.contains(c)) {
+          if (--depth == 0) groups.add((start, i));
+        } else if (depth == 0) {
+          if (',:|'.contains(c)) separators.add(i);
+          if (c == '@') {
+            final step = _stepCall.matchAsPrefix(text, i);
+            hiddenStep |= step != null && hidden.contains(step[1]);
+          }
+        }
+      }
+      final fields = separators.where((i) => text[i] != '|').toList();
+      final split = fields.isNotEmpty ? fields : separators;
+      if (split.isNotEmpty) {
+        final parts = <String>[];
+        var from = 0;
+        for (final to in [...split, text.length]) {
+          final part = filter(text.substring(from, to));
+          if (part == null && fields.isNotEmpty) return null;
+          if (part != null) parts.add(part);
+          if (fields.isNotEmpty && to < text.length) parts.add('${text[to]} ');
+          from = to + 1;
+        }
+        return parts.isEmpty ? null : parts.join(fields.isEmpty ? ' | ' : '');
+      }
+      if (hiddenStep) return null;
+      final out = StringBuffer();
+      var from = 0;
+      for (final (start, end) in groups) {
+        final body = filter(text.substring(start + 1, end));
+        if (body == null) return null;
+        out.write('${text.substring(from, start + 1)}$body${text[end]}');
+        from = end + 1;
+      }
+      out.write(text.substring(from));
+      return out.toString();
+    }
+
+    return filter(signature);
+  }
+
+  /// [text] without the sentences and `;` clauses that name what is not offered.
+  String clauses(String text) {
+    if (offers(text)) return text;
+    final kept = text.split(RegExp(r'(?<=[.;])\s+')).where(offers).join(' ');
+    return kept.endsWith(';') ? kept.substring(0, kept.length - 1) : kept;
+  }
+
+  PromptEntry entry(PromptEntry e) =>
+      PromptEntry(e.signature, clauses(e.description ?? ''));
+}
 
 String functionLine(PromptEntry f) => (f.description ?? '').isNotEmpty
     ? '@${f.signature} — ${f.description}'
@@ -221,9 +322,17 @@ String _syntaxRules(
 String _builtinFunctionsSection(
   List<String> builtinLines,
   List<String> custom,
-  bool toolCalls,
-) {
+  bool toolCalls, {
+  required bool charts,
+  required bool tables,
+}) {
   final lines = [...builtinLines, ...custom].join('\n');
+  final pluckUses = [
+    '@Sum',
+    '@Avg',
+    if (charts) 'charts',
+    if (tables) 'tables',
+  ].join(', ');
   return '''## Built-in Functions
 
 Data functions prefixed with `@` to distinguish from components. These are the ONLY functions available — do NOT invent new ones.
@@ -232,8 +341,8 @@ Use @-prefixed built-in functions (@Count, @Sum, @Avg, @Min, @Max, @Round) on ${
 $lines
 
 Builtins compose — output of one is input to the next:
-`@Count(@Filter(data.rows, "field", "==", "val"))` for KPIs/chart values, `@Round(@Avg(data.rows.score), 1)`, `@Each(data.rows, "item", Comp(item.field))` for per-item rendering.
-Array pluck: `data.rows.field` extracts a field from every row → use with @Sum, @Avg, charts, tables.
+`@Count(@Filter(data.rows, "field", "==", "val"))` for KPIs${charts ? '/chart values' : ''}, `@Round(@Avg(data.rows.score), 1)`, `@Each(data.rows, "item", Comp(item.field))` for per-item rendering.
+Array pluck: `data.rows.field` extracts a field from every row → use with $pluckUses.
 
 IMPORTANT @Each rule: The loop variable (e.g. "item") is ONLY available inside the @Each template expression. Always inline the template — do NOT extract it to a separate statement.
 CORRECT: `list = @Each(rows, "t", Comp(t.name))`
@@ -256,6 +365,11 @@ metrics = Query("tool_name", {arg1: value, arg2: $binding}, {defaultField: 0, de
 - Query results must use regular identifiers: `metrics = Query(...)`, NOT `$metrics = Query(...)`
 - Manual refresh: `Button("Refresh", Action([@Run(query1), @Run(query2)]), "secondary")` — re-fetches the listed queries
 - Refresh all queries: create Action with @Run for each query''';
+
+/// [_querySection], without its `@Run` refresh lines unless [run].
+String _query(bool run) => run
+    ? _querySection
+    : _querySection.substring(0, _querySection.indexOf('\n- Manual refresh'));
 
 const _mutationSection = r'''## Mutation — Write Operations
 
@@ -281,52 +395,41 @@ List<MapEntry<String, PromptEntry>> _visibleSteps(
   required bool bindings,
 }) => [
   for (final e in (spec.builtinSteps ?? _builtinSteps).entries)
-    if (e.key == 'Run'
-        ? toolCalls
-        : (e.key == 'Set' || e.key == 'Reset')
-        ? bindings
-        : true)
+    if ((e.key == 'Run'
+            ? toolCalls
+            : (e.key == 'Set' || e.key == 'Reset')
+            ? bindings
+            : true) &&
+        (spec.allowedActions?.contains(e.key) ?? true))
       e,
 ];
 
-String _actionSection(
-  PromptSpec spec,
-  List<String> custom, {
-  required bool toolCalls,
-  required bool bindings,
-}) {
-  final steps = [
-    for (final s in _visibleSteps(
-      spec,
-      toolCalls: toolCalls,
-      bindings: bindings,
-    ))
-      '- ${functionLine(s.value)}',
-    ...custom,
-  ];
+String _actionSection(List<String> steps, Set<String> offered) {
+  final ask = offered.contains('ToAssistant');
+  final open = offered.contains('OpenUrl');
+  final run = offered.contains('Run');
   final examples = [
-    if (toolCalls)
+    if (run && offered.contains('Reset'))
       'Example — mutation + refresh + reset (PREFERRED pattern):\n```\n\$binding = "default"\nresult = Mutation("tool_name", {field: \$binding})\ndata = Query("tool_name", {}, {rows: []})\nonSubmit = Action([@Run(result), @Run(data), @Reset(\$binding)])\n```',
-    'Example — simple nav:\n```\nviewBtn = Button("View", @OpenUrl("https://example.com"))\n```',
+    if (open)
+      'Example — simple nav:\n```\nviewBtn = Button("View", @OpenUrl("https://example.com"))\n```',
   ];
   final rules = [
     '- An action can be assigned to a variable or inlined: Button("Go", onSubmit) and Button("Go", Action([...])) both work',
-    if (toolCalls) ...[
+    if (run) ...[
       '- If a @Run(mutation) step fails, remaining steps are skipped (halt on failure)',
       '- @Run(queryRef) re-fetches the query (fire-and-forget, cannot fail)',
     ],
   ];
   return '''$_actionHeader
 
-An action wires a button click to operations. Pass one @-prefixed step bare, e.g. Button("Ask", @ToAssistant("Tell me more")). Put several steps in Action([...]), e.g. Button("Read", Action([@OpenUrl("https://example.com"), @ToAssistant("Summarize this page")])). Steps execute in order.
-Buttons without an action automatically send their label to the assistant (equivalent to @ToAssistant(label)).
+An action wires a button click to operations. Pass one @-prefixed step bare${ask ? ', e.g. Button("Ask", @ToAssistant("Tell me more"))' : ''}. Put several steps in Action([...])${ask && open ? ', e.g. Button("Read", Action([@OpenUrl("https://example.com"), @ToAssistant("Summarize this page")]))' : ''}. Steps execute in order.
+Buttons without an action automatically send their label to the assistant${ask ? ' (equivalent to @ToAssistant(label))' : ''}.
 
 Available steps:
 ${steps.join('\n')}
 
-${examples.join('\n\n')}
-
-${rules.join('\n')}''';
+${[if (examples.isNotEmpty) examples.join('\n\n'), rules.join('\n')].join('\n\n')}''';
 }
 
 const _interactiveFiltersSection = r'''## Interactive Filters
@@ -369,6 +472,25 @@ submitBtn = Button("Submit")
 For form + mutation patterns (create, refresh, reset), see the Action section example above.
 
 IMPORTANT: Always add validation rules to form fields used with Mutations. Use OBJECT syntax: {required: true, email: true, minLength: 8}. The renderer shows error messages automatically and blocks submit when validation fails.''';
+
+/// [_interactiveFiltersSection] with only the form text the library and steps
+/// support.
+String _filters({
+  required bool forms,
+  required bool run,
+  required bool mutationExample,
+}) {
+  const s = _interactiveFiltersSection;
+  final formsAt = s.indexOf('\n\n## Forms');
+  final patternsAt = s.indexOf('\n\nFor form + mutation');
+  final importantAt = s.indexOf('\n\nIMPORTANT: Always');
+  return [
+    s.substring(0, formsAt),
+    if (forms) s.substring(formsAt, patternsAt),
+    if (forms && mutationExample) s.substring(patternsAt, importantAt),
+    if (forms && run) s.substring(importantAt),
+  ].join();
+}
 
 const _editModeSection = '''## Edit Mode
 
@@ -482,10 +604,29 @@ submitBtn = Button("Create", Action([@Run(createResult), @Run(data), @Reset($tit
 ```
 Everything derives from the Query — when data refreshes, the entire dashboard updates automatically.''';
 
+/// [_toolWorkflowSection] without the lines that need `@Run`, `@Reset` or a chart.
+String _workflow({
+  required bool run,
+  required bool mutationExample,
+  required bool charts,
+}) {
+  var n = 0;
+  return [
+    for (final line in _toolWorkflowSection.split('\n'))
+      if ((run || !line.startsWith('3. Use Mutation()')) &&
+          (mutationExample ||
+              !line.startsWith(RegExp('createResult|submitBtn'))) &&
+          (charts || !line.startsWith('chart = ')))
+        (run ? line : line.replaceFirst(', Mutation() for writes', ''))
+            .replaceFirstMapped(RegExp(r'^\d(?=\. )'), (_) => '${++n}'),
+  ].join('\n');
+}
+
 String _importantRules(
   String root, {
   required bool toolCalls,
   required bool bindings,
+  required List<String> uses,
 }) {
   final verify = [
     '1. root = $root(...) is the FIRST line (for optimal streaming).',
@@ -498,7 +639,7 @@ String _importantRules(
       '5. Every visible filter \$binding appears in at least one Query args object.',
   ];
   return '''## Important Rules
-- Choose components that best represent the content (tables for comparisons, charts for trends, forms for input, etc.)
+- Choose components that best represent the content${uses.isEmpty ? '' : ' (${uses.join(', ')}, etc.)'}
 
 ## Final Verification
 Before finishing, walk your output and verify:
@@ -528,11 +669,13 @@ String _renderTool(PromptTool tool) {
   return line;
 }
 
-String _toolsSection(List<String> names, List<PromptTool> tools) {
+String _toolsSection(List<String> names, List<PromptTool> tools, bool run) {
   final lines = [
     '## Available Tools',
     '',
-    "Use these with Query() for read operations or Mutation() for write operations. The LLM decides which is appropriate based on the tool's purpose.",
+    run
+        ? "Use these with Query() for read operations or Mutation() for write operations. The LLM decides which is appropriate based on the tool's purpose."
+        : 'Use these with Query() for read operations.',
     '',
     for (final name in names) '- $name',
     for (final t in tools) _renderTool(t),
@@ -551,14 +694,15 @@ String _toolsSection(List<String> names, List<PromptTool> tools) {
   }
   lines.addAll([
     '',
-    "CRITICAL: Use ONLY the tools listed above in Query() and Mutation() calls. Do NOT invent or guess tool names. If the user asks for functionality that doesn't match any available tool, use realistic mock data instead of fabricating a tool call.",
+    "CRITICAL: Use ONLY the tools listed above in ${run ? 'Query() and Mutation()' : 'Query()'} calls. Do NOT invent or guess tool names. If the user asks for functionality that doesn't match any available tool, use realistic mock data instead of fabricating a tool call.",
   ]);
   return lines.join('\n');
 }
 
 String _componentSignatures(
-  PromptSpec spec, {
-  required bool toolCalls,
+  PromptSpec spec,
+  _Scope scope,
+  Set<String> offered, {
   required bool bindings,
   required bool usesActionExpression,
 }) {
@@ -568,24 +712,16 @@ String _componentSignatures(
     'Arguments marked with ? are optional. Sub-components can be inline or referenced; prefer references for better streaming.',
   ];
   if (usesActionExpression) {
-    final all = [
-      for (final s in _visibleSteps(
-        spec,
-        toolCalls: toolCalls,
-        bindings: bindings,
-      ))
-        s.key,
-      ...spec.actions.keys,
-    ].map((n) => '@$n');
     lines.add(
-      'Props typed `ActionExpression` accept one @step, or Action([@steps...]) for several. See the Action section for available steps (${all.join(', ')}).',
+      'Props typed `ActionExpression` accept one @step, or Action([@steps...]) for several. See the Action section for available steps (${offered.map((n) => '@$n').join(', ')}).',
     );
     if (spec.components.values.any(
       (c) => _restrictedSlot.hasMatch(c.signature),
     )) {
-      lines.add(
-        'Props typed like `@OpenUrl | @ToAssistant` accept only the steps listed.',
-      );
+      final like = offered.containsAll(const ['OpenUrl', 'ToAssistant'])
+          ? 'like `@OpenUrl | @ToAssistant`'
+          : 'as a union of @steps';
+      lines.add('Props typed $like accept only the steps listed.');
     }
   }
   if (bindings ||
@@ -604,32 +740,41 @@ String _componentSignatures(
       'Props marked `\$bound<type>` take only a path into a host \$variable from Bound Data, such as `\$name.field`. A literal or computed value there is rejected.',
     );
   }
-  String format(PromptEntry c) => (c.description ?? '').isNotEmpty
-      ? '${c.signature} — ${c.description}'
-      : c.signature;
+  // A component whose step slot keeps no allowed step is left out.
+  String? format(PromptEntry c) {
+    final signature = scope.signature(c.signature);
+    if (signature == null) return null;
+    final description = scope.clauses(c.description ?? '');
+    return description.isNotEmpty ? '$signature — $description' : signature;
+  }
+
+  final signatures = <String, String>{};
+  for (final e in spec.components.entries) {
+    final line = format(e.value);
+    if (line != null) signatures[e.key] = line;
+  }
   if (spec.groups.isNotEmpty) {
     final grouped = <String>{};
     for (final g in spec.groups) {
-      lines.addAll(['', '### ${g.name}']);
-      for (final name in g.components) {
-        final comp = spec.components[name];
-        if (comp == null || !grouped.add(name)) continue;
-        lines.add(format(comp));
-      }
-      lines.addAll(g.notes);
+      final members = [
+        for (final name in g.components)
+          if (signatures.containsKey(name) && grouped.add(name))
+            signatures[name]!,
+      ];
+      if (members.isEmpty) continue;
+      lines.addAll(['', '### ${g.name}', ...members]);
+      lines.addAll(g.notes.where(scope.offers));
     }
-    final ungrouped = spec.components.keys
+    final ungrouped = signatures.keys
         .where((n) => !grouped.contains(n))
         .toList();
     if (ungrouped.isNotEmpty) {
       lines.addAll(['', '### Other']);
-      for (final n in ungrouped) {
-        lines.add(format(spec.components[n]!));
-      }
+      lines.addAll(ungrouped.map((n) => signatures[n]!));
     }
   } else {
     lines.add('');
-    lines.addAll(spec.components.values.map(format));
+    lines.addAll(signatures.values);
   }
   return lines.join('\n');
 }
@@ -660,6 +805,29 @@ String generatePrompt(PromptSpec spec) {
         c.signature.contains('ActionExpression') ||
         _restrictedSlot.hasMatch(c.signature),
   );
+  bool allows(String name) => spec.allowedActions?.contains(name) ?? true;
+  final steps = _visibleSteps(spec, toolCalls: toolCalls, bindings: bindings);
+  final actions = [
+    for (final a in spec.actions.entries)
+      if (allows(a.key)) a,
+  ];
+  final offered = {...steps.map((s) => s.key), ...actions.map((a) => a.key)};
+  final scope = _Scope(
+    spec.components.keys.toSet(),
+    {
+      for (final g in spec.groups)
+        for (final n in g.components)
+          if (!spec.components.containsKey(n)) n,
+    },
+    {
+      ...builtinStepSpecs.map((s) => s.name),
+      ...spec.actions.keys,
+    }.difference(offered),
+  );
+  final run = offered.contains('Run');
+  final mutationExample = run && offered.contains('Reset');
+  bool has(String kind) => spec.components.keys.any((n) => n.contains(kind));
+  final charts = has('Chart'), tables = has('Table'), forms = has('Form');
   final parts = <String>[
     spec.preamble ?? _preamble,
     '',
@@ -671,12 +839,15 @@ String generatePrompt(PromptSpec spec) {
     '',
     _componentSignatures(
       spec,
-      toolCalls: toolCalls,
+      scope,
+      offered,
       bindings: bindings,
       usesActionExpression: usesActionExpression,
     ),
   ];
-  final custom = spec.functions.values.map(functionLine).toList();
+  final custom = spec.functions.values
+      .map((f) => functionLine(scope.entry(f)))
+      .toList();
   if (spec.builtinFunctions ?? supportsExpressions) {
     parts.addAll([
       '',
@@ -684,24 +855,25 @@ String generatePrompt(PromptSpec spec) {
         spec.builtinFunctionLines ?? _builtinFunctionLines,
         custom,
         toolCalls,
+        charts: charts,
+        tables: tables,
       ),
     ]);
   } else if (custom.isNotEmpty) {
     parts.addAll(['', '## Built-in Functions\n\n${custom.join('\n')}']);
   }
-  if (toolCalls) parts.addAll(['', _querySection, '', _mutationSection]);
-  final customActions = spec.actions.values
-      .map((a) => '- ${functionLine(a)}')
-      .toList();
+  if (toolCalls) parts.addAll(['', _query(run)]);
+  if (run) parts.addAll(['', _mutationSection]);
+  final customActions = [
+    for (final a in actions) '- ${functionLine(scope.entry(a.value))}',
+  ];
   if (usesActionExpression) {
     parts.addAll([
       '',
-      _actionSection(
-        spec,
-        customActions,
-        toolCalls: toolCalls,
-        bindings: bindings,
-      ),
+      _actionSection([
+        for (final s in steps) '- ${functionLine(s.value)}',
+        ...customActions,
+      ], offered),
     ]);
   } else if (customActions.isNotEmpty) {
     parts.addAll([
@@ -709,13 +881,29 @@ String generatePrompt(PromptSpec spec) {
       '$_actionHeader\n\nPass one step, or Action([...]) with several steps, as a button\'s action.\n\nAvailable steps:\n${customActions.join('\n')}',
     ]);
   }
-  if (toolCalls && bindings) parts.addAll(['', _interactiveFiltersSection]);
-  if (toolCalls) parts.addAll(['', _toolWorkflowSection]);
+  if (toolCalls && bindings) {
+    parts.addAll([
+      '',
+      _filters(forms: forms, run: run, mutationExample: mutationExample),
+    ]);
+  }
+  if (toolCalls) {
+    parts.addAll([
+      '',
+      _workflow(run: run, mutationExample: mutationExample, charts: charts),
+    ]);
+  }
   if (hasTools) {
-    parts.addAll(['', _toolsSection(spec.toolNames, spec.tools)]);
+    parts.addAll(['', _toolsSection(spec.toolNames, spec.tools, run)]);
   }
   if (spec.records.isNotEmpty) {
-    parts.addAll(['', describeBoundRecords(spec.records)]);
+    final bound = describeBoundRecords(spec.records);
+    parts.addAll([
+      '',
+      offered.containsAll(const ['Set', 'Reset'])
+          ? bound
+          : bound.replaceFirst('never @Set, @Reset or bind', 'never bind'),
+    ]);
   }
   if (hasState) parts.addAll(['', _stateSection(spec.state)]);
   parts.addAll([
@@ -735,7 +923,18 @@ String generatePrompt(PromptSpec spec) {
   }
   if (spec.editMode) parts.addAll(['', _editModeSection]);
   if (spec.inlineMode) parts.addAll(['', _inlineModeSection]);
-  parts.add(_importantRules(root, toolCalls: toolCalls, bindings: bindings));
+  parts.add(
+    _importantRules(
+      root,
+      toolCalls: toolCalls,
+      bindings: bindings,
+      uses: [
+        if (tables) 'tables for comparisons',
+        if (charts) 'charts for trends',
+        if (forms) 'forms for input',
+      ],
+    ),
+  );
   if (spec.additionalRules.isNotEmpty) {
     parts.add('');
     parts.addAll(spec.additionalRules.map((r) => '- $r'));

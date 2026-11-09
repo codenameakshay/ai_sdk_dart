@@ -112,6 +112,7 @@ final class PromptOptions {
     this.inlineMode = false,
     this.records = const [],
     this.state = const {},
+    this.allowedActions,
   });
   final String? preamble;
   final bool? bindings;
@@ -132,6 +133,10 @@ final class PromptOptions {
 
   /// Seeded `$variables` with their values, listed in a "Current State" section.
   final Map<String, Object?> state;
+
+  /// Built-in steps and library actions the prompt may name, as in
+  /// [ValidationPolicy.allowedActions]; null allows all.
+  final Set<String>? allowedActions;
 }
 
 const _actionExpression = 'ActionExpression';
@@ -361,6 +366,7 @@ final class OpenUiLibrary {
           inlineMode: options.inlineMode,
           records: options.records,
           state: options.state,
+          allowedActions: options.allowedActions,
         ),
       );
 

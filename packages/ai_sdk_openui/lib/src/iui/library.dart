@@ -149,37 +149,70 @@ OpenUiLibrary intelligentUiWithout(Set<IuiComponent> omit) {
 
 const _medium = 'Pick the medium that shows the idea: ';
 
-List<String> _rulesFor(OpenUiLibrary library, List<String> rules) => [
-  for (final r in rules)
-    if (!r.startsWith(_medium))
-      r
-    else
-      '$_medium${r.substring(_medium.length, r.length - 1).split('; ').where((c) => library.components.containsKey(c.split(' ').first)).join('; ')}.',
+final Map<String, RegExp> _iuiWords = {
+  for (final c in IuiComponent.values)
+    c.typeName: RegExp('\\b${c.typeName}\\b'),
+};
+final Set<String> _iuiCalls = {
+  ...intelligentUi.functions.map((f) => f.name),
+  ...intelligentUi.actions.map((a) => a.name),
+};
+final _call = RegExp(r'@(\w+)');
+
+/// Whether [text] names only the [intelligentUi] components and `@calls` that
+/// [library] has.
+bool _fits(OpenUiLibrary library, String text) {
+  final calls = {
+    ...library.functions.map((f) => f.name),
+    ...library.actions.map((a) => a.name),
+  };
+  return _iuiWords.entries.every(
+        (w) => library.components.containsKey(w.key) || !w.value.hasMatch(text),
+      ) &&
+      _call
+          .allMatches(text)
+          .every((m) => !_iuiCalls.contains(m[1]) || calls.contains(m[1]));
+}
+
+/// [text] if it [_fits] [library], else null; the "Pick the medium" rule keeps
+/// the media that fit.
+String? _textFor(OpenUiLibrary library, String text) {
+  if (!text.startsWith(_medium)) return _fits(library, text) ? text : null;
+  final media = text
+      .substring(_medium.length, text.length - 1)
+      .split('; ')
+      .where((c) => _fits(library, c));
+  return media.isEmpty ? null : '$_medium${media.join('; ')}.';
+}
+
+List<String> _textsFor(OpenUiLibrary library, List<String> texts) => [
+  for (final t in texts) ?_textFor(library, t),
 ];
 
-/// [chatPrompt] for [library]: the "Pick the medium" rule names only components
-/// [library] has. For [intelligentUi] this is [chatPrompt] itself.
+/// [chatPrompt] for [library]: rules and examples that name a component or
+/// `@call` [library] lacks are left out, and the "Pick the medium" rule names
+/// only media it has. For [intelligentUi] this is [chatPrompt] itself.
 PromptOptions chatPromptFor(OpenUiLibrary library) =>
     identical(library, intelligentUi)
     ? chatPrompt
     : PromptOptions(
         bindings: true,
-        additionalRules: _rulesFor(library, chatRules),
-        examples: chatExamples,
+        additionalRules: _textsFor(library, chatRules),
+        examples: _textsFor(library, chatExamples),
       );
 
-/// The dashboard prompt over [tools] (the demo data tools by default). Rules are
-/// filtered as in [chatPromptFor].
+/// The dashboard prompt over [tools] (the demo data tools by default). Rules and
+/// examples are filtered as in [chatPromptFor].
 PromptOptions dashboardPrompt({
   List<OpenUiTool>? tools,
   OpenUiLibrary? library,
-}) => PromptOptions(
-  bindings: true,
-  tools: tools ?? demoTools(),
-  additionalRules: [
-    ..._rulesFor(library ?? intelligentUi, chatRules),
-    ...dashboardRules,
-  ],
-  examples: chatExamples,
-  toolExamples: dashboardExamples,
-);
+}) {
+  final lib = library ?? intelligentUi;
+  return PromptOptions(
+    bindings: true,
+    tools: tools ?? demoTools(),
+    additionalRules: _textsFor(lib, [...chatRules, ...dashboardRules]),
+    examples: _textsFor(lib, chatExamples),
+    toolExamples: _textsFor(lib, dashboardExamples),
+  );
+}

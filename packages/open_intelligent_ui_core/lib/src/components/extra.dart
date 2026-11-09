@@ -226,24 +226,19 @@ final class _CarouselArrow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = OpenUiTheme.of(context);
+    final size = theme.styleOf('Carousel.arrow').size ?? 34;
     final reduce = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
     return Semantics(
       container: true,
       button: true,
       label: label,
       child: Press(
-        radius: 17,
+        radius: size / 2,
         onTap: (_) => onTap(),
         builder: (hovered, pressed) => DecoratedBox(
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: Color(0x14000000),
-                blurRadius: 12,
-                offset: Offset(0, 2),
-              ),
-            ],
+            boxShadow: theme.floatShadow,
           ),
           child: ClipOval(
             child: BackdropFilter(
@@ -253,8 +248,8 @@ final class _CarouselArrow extends StatelessWidget {
                     ? Duration.zero
                     : const Duration(milliseconds: 120),
                 curve: Curves.easeOut,
-                width: 34,
-                height: 34,
+                width: size,
+                height: size,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
@@ -491,7 +486,7 @@ final class _PopoverState extends State<_Popover> {
                     child: DefaultTextStyle(
                       style: TextStyle(
                         fontFamily: theme.fontFamily,
-                        fontSize: theme.typography.size(14),
+                        fontSize: theme.fontSizeOf('Popover', 14),
                         fontWeight: theme.typography.normal,
                         height: 1.5,
                         color: theme.ink,
@@ -532,10 +527,13 @@ Widget buildQuote(BuildContext context, OpenUiNode node) {
   final theme = node.theme;
   final text = node.props.string('text') ?? '';
   final cite = node.props.string('cite');
+  final radius = Radius.circular(
+    theme.styleOf('Quote').radius ?? theme.radii.lg,
+  );
   return ClipRRect(
-    borderRadius: const BorderRadiusDirectional.only(
-      topEnd: Radius.circular(12),
-      bottomEnd: Radius.circular(12),
+    borderRadius: BorderRadiusDirectional.only(
+      topEnd: radius,
+      bottomEnd: radius,
     ),
     child: IntrinsicHeight(
       child: Row(
@@ -555,7 +553,7 @@ Widget buildQuote(BuildContext context, OpenUiNode node) {
                       text,
                       context,
                       style: TextStyle(
-                        fontSize: theme.typography.size(16),
+                        fontSize: theme.fontSizeOf('Quote', 16),
                         height: 1.6,
                         color: theme.ink,
                       ),
@@ -570,7 +568,7 @@ Widget buildQuote(BuildContext context, OpenUiNode node) {
                           cite,
                           context,
                           style: TextStyle(
-                            fontSize: theme.typography.size(13),
+                            fontSize: theme.fontSizeOf('Quote.cite', 13),
                             color: theme.muted,
                           ),
                           links: links,

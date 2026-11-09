@@ -30,6 +30,7 @@ export 'src/theme.dart'
         OpenUiSpacing,
         OpenUiTextSize,
         OpenUiTheme,
+        OpenUiThemeScope,
         OpenUiTypography,
         referenceTextSizes,
         referenceTitleSizes;

@@ -7,6 +7,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
 
@@ -83,4 +84,81 @@ void main() {
       }
     });
   }
+
+  testWidgets(
+    'a dark subtree in a light app, with a host font and the date picker open',
+    skip: skip,
+    (tester) async {
+      tester.view.physicalSize = const Size(420, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      Impure.now = () => DateTime.utc(2030, 5, 17, 12);
+      Impure.useUtc();
+      addTearDown(Impure.reset);
+
+      // The host font: Inter Italic under the host's own family name.
+      final dir = (goldenFileComparator as LocalFileComparator).basedir;
+      await tester.runAsync(() async {
+        final bytes = await File.fromUri(
+          dir.resolve('../../assets/fonts/InterVariable-Italic.ttf'),
+        ).readAsBytes();
+        await (FontLoader(
+          'Host Italic',
+        )..addFont(Future.value(ByteData.sublistView(bytes)))).load();
+      });
+
+      final session = OpenUiSession(intelligentUi)
+        ..update(
+          'root = Card([Title("Pay by"), DatePicker(\$day, "Due date")])\n'
+          '\$day = "2030-05-17"',
+          streaming: false,
+        );
+      addTearDown(session.dispose);
+      final dark = OpenUiTheme.dark.copyWith(fontFamily: 'Host Italic');
+      await tester.pumpWidget(
+        MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(brightness: Brightness.light),
+          home: Scaffold(
+            body: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Light host app',
+                    style: TextStyle(
+                      fontFamily: 'packages/open_intelligent_ui/Inter',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  OpenUiThemeScope(
+                    theme: dark,
+                    child: ColoredBox(
+                      color: dark.canvas,
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: OpenUiView(
+                          session: session,
+                          builders: intelligentUiBuilders,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.bySemanticsLabel(RegExp('Due date')));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      await expectLater(
+        find.byType(MaterialApp),
+        matchesGoldenFile('theme/dark_subtree_date_picker.png'),
+      );
+    },
+  );
 }

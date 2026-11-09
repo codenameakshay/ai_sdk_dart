@@ -17,7 +17,7 @@ const _fixedComponents = {'Badge', 'Button', 'IconButton', 'Icon', 'Link'};
 
 /// `.iui-table th`: 13px, weight 560, ink.
 TextStyle iuiTableHeadStyle(OpenUiTheme t) => TextStyle(
-  fontSize: t.typography.size(13),
+  fontSize: t.fontSizeOf('Table.head', 13),
   height: 1.5,
   fontWeight: t.typography.medium,
   color: t.ink,
@@ -26,7 +26,7 @@ TextStyle iuiTableHeadStyle(OpenUiTheme t) => TextStyle(
 
 /// `.iui-table td`: 14px, line height 1.5, ink.
 TextStyle iuiTableBodyStyle(OpenUiTheme t) => TextStyle(
-  fontSize: t.typography.size(14),
+  fontSize: t.fontSizeOf('Table', 14),
   height: 1.5,
   color: t.ink,
   fontFamily: t.fontFamily,
@@ -158,10 +158,8 @@ class _IuiTableState extends State<IuiTable> {
       ),
     );
     if (s.foreground case final foreground?) {
-      table = Theme(
-        data: Theme.of(context).copyWith(
-          extensions: [...Theme.of(context).extensions.values, tableTheme],
-        ),
+      table = OpenUiThemeScope(
+        theme: tableTheme,
         child: DefaultTextStyle.merge(
           style: TextStyle(color: foreground),
           child: table,

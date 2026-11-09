@@ -13,15 +13,16 @@ import 'markdown.dart';
 Widget buildFlashcard(BuildContext context, OpenUiNode node) {
   Widget face(Object? value, {required bool back, required String slot}) {
     if (value is String) {
-      final typography = node.theme.typography;
+      final theme = node.theme;
+      final typography = theme.typography;
       final style = back
           ? TextStyle(
-              fontSize: typography.size(16),
+              fontSize: theme.fontSizeOf('Flashcard.back', 16),
               height: 1.3,
               fontWeight: typography.medium,
             )
           : TextStyle(
-              fontSize: typography.size(21),
+              fontSize: theme.fontSizeOf('Flashcard', 21),
               height: 1.3,
               fontWeight: typography.semibold,
               letterSpacing: -0.4,
@@ -104,7 +105,7 @@ class _FlashcardState extends State<Flashcard> {
                     child: Text(
                       widget.hint,
                       style: TextStyle(
-                        fontSize: theme.typography.size(11),
+                        fontSize: theme.fontSizeOf('Flashcard.hint', 11),
                         color: theme.faint,
                       ),
                     ),
@@ -279,12 +280,14 @@ class _CelebrationState extends State<Celebration>
     }
     final overlay = Overlay.maybeOf(context);
     if (overlay == null) return;
-    final colors = OpenUiTheme.of(context).chart;
+    final theme = OpenUiTheme.of(context);
+    final colors = theme.chart;
+    final radius = theme.styleOf('Celebration').radius ?? 2;
     _entry?.remove();
     _entry = OverlayEntry(
       builder: (_) => IgnorePointer(
         child: CustomPaint(
-          painter: _ConfettiPainter(_burst, colors),
+          painter: _ConfettiPainter(_burst, colors, radius),
           size: Size.infinite,
         ),
       ),
@@ -308,9 +311,11 @@ class _CelebrationState extends State<Celebration>
 }
 
 class _ConfettiPainter extends CustomPainter {
-  _ConfettiPainter(this.progress, this.colors) : super(repaint: progress);
+  _ConfettiPainter(this.progress, this.colors, this.radius)
+    : super(repaint: progress);
   final Animation<double> progress;
   final List<Color> colors;
+  final double radius;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -334,7 +339,7 @@ class _ConfettiPainter extends CustomPainter {
         ..drawRRect(
           RRect.fromRectAndRadius(
             const Rect.fromLTWH(-4, -6, 8, 12),
-            const Radius.circular(2),
+            Radius.circular(radius),
           ),
           paint,
         )

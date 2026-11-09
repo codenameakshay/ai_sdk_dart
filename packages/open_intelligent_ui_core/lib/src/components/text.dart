@@ -192,13 +192,18 @@ Widget buildTitle(BuildContext context, OpenUiNode node) {
       _isCardSized(slot);
   final (fontSize, height, letterSpacing, weight) = cardTitle
       ? (
-          theme.typography.size(14),
+          theme.fontSizeOf('Title.card', 14),
           20 / 14,
           base.letterSpacing,
           theme.typography.medium,
         )
       : cardSized
-      ? (theme.typography.size(18), 24 / 18, -0.3, theme.typography.semibold)
+      ? (
+          theme.fontSizeOf('Title.cardLarge', 18),
+          24 / 18,
+          -0.3,
+          theme.typography.semibold,
+        )
       : (
           base.fontSize,
           base.height,
@@ -234,9 +239,9 @@ Widget buildText(BuildContext context, OpenUiNode node) {
       sizeName != 'lg';
   final subtitle = _isSubtitle(context, slot);
   final metrics = cardSized
-      ? (fontSize: theme.typography.size(15), height: 22 / 15)
+      ? (fontSize: theme.fontSizeOf('Text.card', 15), height: 22 / 15)
       : subtitle
-      ? (fontSize: theme.typography.size(13), height: 18 / 13)
+      ? (fontSize: theme.fontSizeOf('Text.subtitle', 13), height: 18 / 13)
       : (
           fontSize: size == null ? null : theme.typography.size(size.fontSize),
           height: size?.height ?? 1.6,
@@ -256,7 +261,7 @@ Widget buildText(BuildContext context, OpenUiNode node) {
     decoration: struck ? TextDecoration.lineThrough : null,
     fontFeatures: props.boolean('tabularNums') == true
         ? theme.typography.tabular
-        : null,
+        : theme.typography.allText,
   );
   return _subtitleGap(
     _richText(context, node, props['text'], style, maxLines: _lineLimit(props)),
@@ -277,7 +282,9 @@ Widget buildCaption(BuildContext context, OpenUiNode node) {
       _textStyle(
         theme,
         color: theme.fg(node.props['color']) ?? theme.muted,
-        size: theme.typography.size(subtitle ? 13 : 12),
+        size: subtitle
+            ? theme.fontSizeOf('Caption.subtitle', 13)
+            : theme.fontSizeOf('Caption', 12),
         height: subtitle ? 18 / 13 : 1.6,
       ),
     ),
@@ -293,7 +300,7 @@ Widget buildLabel(BuildContext context, OpenUiNode node) {
     style: _textStyle(
       theme,
       color: theme.ink,
-      size: theme.typography.size(14),
+      size: theme.fontSizeOf('Label', 14),
       height: 1.4,
       weight: theme.typography.medium,
     ),
@@ -343,7 +350,7 @@ Widget buildBadge(BuildContext context, OpenUiNode node) {
               style: _textStyle(
                 theme,
                 color: color,
-                size: theme.typography.size(13),
+                size: theme.fontSizeOf('Badge', 13),
                 height: 18 / 13,
                 weight: theme.typography.medium,
               ),
@@ -423,7 +430,7 @@ Widget _numberCircle(OpenUiTheme theme, int number) => Container(
     style: _textStyle(
       theme,
       color: theme.onInk,
-      size: theme.typography.size(13),
+      size: theme.fontSizeOf('List.number', 13),
       height: 1,
       fontFeatures: theme.typography.tabular,
     ),
@@ -463,7 +470,7 @@ Widget _customMarker(OpenUiTheme theme, String marker) {
         style: _textStyle(
           theme,
           color: theme.onInk,
-          size: theme.typography.size(12),
+          size: theme.fontSizeOf('List.step', 12),
           height: 1,
           weight: theme.typography.medium,
           fontFeatures: theme.typography.tabular,
@@ -477,7 +484,7 @@ Widget _customMarker(OpenUiTheme theme, String marker) {
     style: _textStyle(
       theme,
       color: theme.muted,
-      size: theme.typography.size(13),
+      size: theme.fontSizeOf('List.marker', 13),
       fontFeatures: theme.typography.tabular,
     ),
   );

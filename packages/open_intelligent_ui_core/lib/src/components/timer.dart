@@ -121,7 +121,7 @@ class _CountdownTimerState extends State<CountdownTimer> {
                   Text(
                     label,
                     style: TextStyle(
-                      fontSize: theme.typography.size(14),
+                      fontSize: theme.fontSizeOf('Timer.label', 14),
                       height: 1.4,
                       fontWeight: theme.typography.medium,
                       color: theme.ink,
@@ -132,7 +132,7 @@ class _CountdownTimerState extends State<CountdownTimer> {
                 Text(
                   clock(left),
                   style: TextStyle(
-                    fontSize: theme.typography.size(32),
+                    fontSize: theme.fontSizeOf('Timer', 32),
                     height: 1.1,
                     fontWeight: theme.typography.semibold,
                     letterSpacing: -0.32,

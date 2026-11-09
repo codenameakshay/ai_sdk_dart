@@ -14,7 +14,7 @@ void main() {
 
     final style = DefaultTextStyle.of(tester.element(find.text('plain'))).style;
     expect(style.color, OpenUiTheme.dark.ink);
-    expect(style.fontFamily, OpenUiTheme.dark.fontFamily);
+    expect(style.fontFamily, 'packages/open_intelligent_ui/Inter');
   });
 
   group('OpenUiFormValidation', () {

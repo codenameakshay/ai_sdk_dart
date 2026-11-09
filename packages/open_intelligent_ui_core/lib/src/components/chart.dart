@@ -34,7 +34,7 @@ double _fixed1(double v) => double.parse(v.toStringAsFixed(1));
 
 /// `.iui-chart-tick`: faint 11px tabular figures in the theme font.
 TextStyle chartTickStyle(OpenUiTheme theme) => TextStyle(
-  fontSize: theme.typography.size(11),
+  fontSize: theme.fontSizeOf('Chart.tick', 11),
   color: theme.faint,
   fontFamily: theme.fontFamily,
   fontFeatures: theme.typography.tabular,
@@ -42,7 +42,7 @@ TextStyle chartTickStyle(OpenUiTheme theme) => TextStyle(
 
 /// `.iui-chart-category`: muted 12px in the theme font.
 TextStyle chartCategoryStyle(OpenUiTheme theme) => TextStyle(
-  fontSize: theme.typography.size(12),
+  fontSize: theme.fontSizeOf('Chart.category', 12),
   color: theme.muted,
   fontFamily: theme.fontFamily,
 );
@@ -248,7 +248,7 @@ class _Legend extends StatelessWidget {
               Text(
                 s,
                 style: TextStyle(
-                  fontSize: theme.typography.size(12),
+                  fontSize: theme.fontSizeOf('Chart.legend', 12),
                   color: theme.muted,
                 ),
               ),
@@ -435,7 +435,7 @@ class _Tooltip extends StatelessWidget {
           ),
           child: DefaultTextStyle.merge(
             style: TextStyle(
-              fontSize: theme.typography.size(12),
+              fontSize: theme.fontSizeOf('Chart.tooltip', 12),
               color: theme.muted,
             ),
             child: Column(
@@ -940,7 +940,7 @@ class _PieChart extends StatelessWidget {
                     child: Text(
                       item.label,
                       style: TextStyle(
-                        fontSize: theme.typography.size(13),
+                        fontSize: theme.fontSizeOf('Chart.slice', 13),
                         color: theme.ink,
                       ),
                     ),
@@ -949,7 +949,7 @@ class _PieChart extends StatelessWidget {
                   Text(
                     '${jsString((item.value / total * 1000).round() / 10)}%',
                     style: TextStyle(
-                      fontSize: theme.typography.size(13),
+                      fontSize: theme.fontSizeOf('Chart.slice', 13),
                       fontWeight: theme.typography.medium,
                       color: theme.ink,
                       fontFeatures: theme.typography.tabular,

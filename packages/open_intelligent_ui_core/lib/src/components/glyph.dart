@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:path_parsing/path_parsing.dart';
 
 import '../services.dart';
+import '../theme.dart';
 import 'builtin_glyphs.dart';
 
 /// The kebab-case name [value] gives: "MapPin", "map_pin" and "map pin" all
@@ -63,7 +64,7 @@ Widget? _resolve(
   final c =
       color ??
       DefaultTextStyle.of(context).style.color ??
-      const Color(0xFF000000);
+      OpenUiTheme.of(context).ink;
   final w =
       OpenUiScope.servicesOf(context).icons?.call(n, size, c, strokeWidth) ??
       _builtin(n, size, c, strokeWidth);

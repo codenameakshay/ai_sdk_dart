@@ -8,6 +8,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
 import 'package:open_intelligent_ui_core/src/css_color.dart';
 
+import 'support/pump.dart';
+
 void expectColor(Color? actual, int argb, {double tolerance = 1.5}) {
   expect(actual, isNotNull);
   final c = actual!;
@@ -151,8 +153,10 @@ void main() {
     expect(OpenUiTheme.light.monoFontFamily, 'Menlo');
   });
 
-  test('text uses the bundled Inter font by default', () {
-    expect(OpenUiTheme.light.fontFamily, 'packages/open_intelligent_ui/Inter');
+  testWidgets('text uses the bundled Inter font by default', (tester) async {
+    await pumpProgram(tester, 'root = Text("plain")');
+    final text = tester.renderObject<RenderParagraph>(find.text('plain'));
+    expect(text.text.style?.fontFamily, 'packages/open_intelligent_ui/Inter');
   });
 
   test(

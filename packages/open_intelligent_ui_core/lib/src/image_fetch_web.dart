@@ -20,7 +20,25 @@ extension type _FetchResponse._(JSObject _) implements JSObject {
   external bool get ok;
   external int get status;
   external _Headers get headers;
-  external JSPromise<JSArrayBuffer> arrayBuffer();
+  external _Body? get body;
+}
+
+@JS()
+extension type _Body._(JSObject _) implements JSObject {
+  external _Reader getReader();
+}
+
+@JS()
+extension type _Reader._(JSObject _) implements JSObject {
+  external JSPromise<_Chunk> read();
+  external JSPromise<JSAny?> cancel();
+  external void releaseLock();
+}
+
+@JS()
+extension type _Chunk._(JSObject _) implements JSObject {
+  external bool get done;
+  external JSUint8Array get value;
 }
 
 @JS()
@@ -29,8 +47,6 @@ extension type _Headers._(JSObject _) implements JSObject {
 }
 
 /// Fetches [uri] without redirects; the browser aborts it after [timeout].
-// ponytail: a body without Content-Length is read whole before the size check;
-// stream it through a reader if memory on web matters.
 Future<Uint8List> fetchImageBytes(
   Uri uri, {
   required int maxBytes,
@@ -43,18 +59,32 @@ Future<Uint8List> fetchImageBytes(
       signal: _timeoutSignal(timeout.inMilliseconds),
     ),
   ).toDart;
-  if (!response.ok) {
-    throw StateError(
-      'Image request failed with status ${response.status}: $uri',
-    );
+  final reader = response.body?.getReader();
+  try {
+    if (!response.ok) {
+      throw StateError(
+        'Image request failed with status ${response.status}: $uri',
+      );
+    }
+    final declared = int.tryParse(response.headers.get('content-length') ?? '');
+    final tooLarge = StateError('Image is larger than $maxBytes bytes: $uri');
+    if (declared != null && declared > maxBytes) throw tooLarge;
+    final bytes = BytesBuilder(copy: false);
+    if (reader != null) {
+      while (true) {
+        final chunk = await reader.read().toDart;
+        if (chunk.done) break;
+        final data = chunk.value.toDart;
+        if (bytes.length + data.length > maxBytes) throw tooLarge;
+        bytes.add(data);
+      }
+    }
+    return bytes.takeBytes();
+  } finally {
+    try {
+      await reader?.cancel().toDart;
+    } finally {
+      reader?.releaseLock();
+    }
   }
-  final declared = int.tryParse(response.headers.get('content-length') ?? '');
-  if (declared != null && declared > maxBytes) {
-    throw StateError('Image is larger than $maxBytes bytes: $uri');
-  }
-  final buffer = (await response.arrayBuffer().toDart).toDart;
-  if (buffer.lengthInBytes > maxBytes) {
-    throw StateError('Image is larger than $maxBytes bytes: $uri');
-  }
-  return Uint8List.fromList(buffer.asUint8List());
 }

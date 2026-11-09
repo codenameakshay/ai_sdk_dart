@@ -15,9 +15,12 @@ export 'src/services.dart'
         LatLng,
         MapTiles,
         OpenUiIconResolver,
+        OpenUiImageLoader,
         OpenUiScope,
         OpenUiServices,
-        esriStreetTiles;
+        allowImageHosts,
+        esriStreetTiles,
+        networkImages;
 export 'src/theme.dart'
     show
         OpenUiComponentStyle,

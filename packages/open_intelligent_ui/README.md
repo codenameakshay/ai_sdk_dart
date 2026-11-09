@@ -29,9 +29,28 @@ OpenUiScope(
 );
 ```
 
-Nothing calls a network service unless you pass it: without `searchImages` a `SearchImage`
-shows an empty photo, without `streetRoute` a map route draws straight segments, and
-`mapTiles: null` shows no tiles. `@OpenUrl` opens only http(s) URLs.
+Nothing reaches the network until you allow it. Without `imageLoader` every image shows its
+placeholder, and without `mapTiles` a `Map` draws no tiles. Without `searchImages` a `SearchImage`
+shows an empty photo, and without `streetRoute` a map route draws straight segments. `@OpenUrl`
+opens only http(s) URLs. The [Network](#network) section lists every place that can reach the network.
+
+## Network
+
+Nothing reaches the network until the host allows it. Each row names a place that can, what makes it
+do so, and how to turn it on.
+
+| Where | Touches the network when | Off by default | How to opt in |
+|---|---|---|---|
+| Image, SearchImage, YouTube thumbnail (`Photo`) | `imageLoader` returns a provider | yes (`imageLoader: null`) | `imageLoader: networkImages`, or `allowImageHosts(['example.com'])` |
+| Map tiles (`Map`, flutter_map) | `mapTiles` is set | yes (`mapTiles: null`) | `mapTiles: esriStreetTiles`, or your own `MapTiles` |
+| Street routes | `streetRoute` is set (`OsrmStreetRoute`, router.project-osrm.org) | yes | `streetRoute: OsrmStreetRoute().call` |
+| Photo search | `searchImages` is set (`WikimediaImageSearch`, en.wikipedia.org, commons.wikimedia.org) | yes | `searchImages: WikimediaImageSearch().call` |
+| `@OpenUrl`, Link, Markdown links, map attribution, YouTube fallback card | the user taps, and the URL goes to `openUrl` | nothing opens without `openUrl`; the umbrella opens the browser on tap | already set in the umbrella |
+| HtmlView (web package) | renders after streaming; its page may load scripts from cdn.jsdelivr.net, unpkg.com, cdnjs.cloudflare.com and esm.sh, styles and fonts from fonts.googleapis.com and fonts.gstatic.com, and images from any https host (the reference's CSP) | not in the core; the umbrella includes the web package | leave `open_intelligent_ui_web` out of the app |
+| YouTube (web package) | renders an embed from www.youtube-nocookie.com | same as HtmlView | same as HtmlView |
+| Flutter web engine | CanvasKit and fallback fonts load from Google's CDN | no | build with `--no-web-resources-cdn` (an engine flag, not this package's) |
+
+The YouTube thumbnail is an image, so `imageLoader` blocks it too.
 
 ## In a chat
 

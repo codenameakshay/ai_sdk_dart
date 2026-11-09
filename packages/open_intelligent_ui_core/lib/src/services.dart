@@ -1,6 +1,8 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import 'image_host_provider.dart';
+
 /// A place on a map.
 typedef LatLng = ({double lat, double lng});
 
@@ -9,8 +11,11 @@ typedef LatLng = ({double lat, double lng});
 typedef OpenUiIconResolver =
     Widget? Function(String name, double size, Color color, double strokeWidth);
 
+/// Returns the image for [url], or null to block it.
+typedef OpenUiImageLoader = ImageProvider? Function(Uri url);
+
 /// What components need from the host app. Nothing here calls a server the
-/// host did not choose.
+/// host did not choose: by default there are no map tiles and no images.
 @immutable
 final class OpenUiServices {
   const OpenUiServices({
@@ -18,7 +23,8 @@ final class OpenUiServices {
     Future<void> Function(String text)? copyText,
     this.searchImages,
     this.streetRoute,
-    this.mapTiles = esriStreetTiles,
+    this.mapTiles,
+    this.imageLoader,
     this.embedReferrer,
     this.icons,
   }) : _openUrl = openUrl,
@@ -38,8 +44,13 @@ final class OpenUiServices {
   /// Without it, a `Map` route draws straight segments.
   final Future<List<LatLng>?> Function(List<LatLng> stops)? streetRoute;
 
-  /// Raster tiles for `Map`, chosen by brightness; null shows no tiles.
+  /// Raster tiles for `Map`, chosen by brightness. Null (the default) draws no
+  /// tiles; pass [esriStreetTiles] to opt in.
   final MapTiles? mapTiles;
+
+  /// Images for `Image`, `SearchImage` and YouTube thumbnails. Null (the
+  /// default) blocks them all; see [networkImages] and [allowImageHosts].
+  final OpenUiImageLoader? imageLoader;
 
   /// Icons by name, tried before the built-in set. Null or a null result
   /// falls back to the built-in icons, and a name neither draws shows nothing.
@@ -53,14 +64,15 @@ final class OpenUiServices {
       _copyText?.call(text) ?? Clipboard.setData(ClipboardData(text: text));
 
   /// These services, with [fallback]'s openUrl, copyText, searchImages,
-  /// streetRoute, embedReferrer and icons wherever this sets none. mapTiles is
-  /// always this one's. Returns this when [fallback] fills nothing.
+  /// streetRoute, imageLoader, embedReferrer and icons wherever this sets none.
+  /// mapTiles is always this one's. Returns this when [fallback] fills nothing.
   OpenUiServices orElse(OpenUiServices fallback) {
     final fills =
         (_openUrl == null && fallback._openUrl != null) ||
         (_copyText == null && fallback._copyText != null) ||
         (searchImages == null && fallback.searchImages != null) ||
         (streetRoute == null && fallback.streetRoute != null) ||
+        (imageLoader == null && fallback.imageLoader != null) ||
         (embedReferrer == null && fallback.embedReferrer != null) ||
         (icons == null && fallback.icons != null);
     if (!fills) return this;
@@ -70,11 +82,35 @@ final class OpenUiServices {
       searchImages: searchImages ?? fallback.searchImages,
       streetRoute: streetRoute ?? fallback.streetRoute,
       mapTiles: mapTiles,
+      imageLoader: imageLoader ?? fallback.imageLoader,
       embedReferrer: embedReferrer ?? fallback.embedReferrer,
       icons: icons ?? fallback.icons,
     );
   }
 }
+
+/// Loads every http(s) image.
+ImageProvider? networkImages(Uri url) => _httpImage(url);
+
+/// Loads images only from [hosts] and their subdomains; other hosts are
+/// blocked. Host names are case-insensitive. Redirects are rejected so an
+/// allowed server cannot load an image from a different host. Only HTTP and
+/// HTTPS URLs are accepted. On web, the image server must allow the app's
+/// origin with CORS; otherwise the image fails closed.
+OpenUiImageLoader allowImageHosts(Iterable<String> hosts) {
+  final allowed = {for (final h in hosts) h.toLowerCase()};
+  return (url) {
+    if (url.scheme != 'http' && url.scheme != 'https') return null;
+    final host = url.host.toLowerCase();
+    final ok = allowed.any((h) => host == h || host.endsWith('.$h'));
+    return ok ? AllowlistedImageProvider(url) : null;
+  };
+}
+
+ImageProvider? _httpImage(Uri url) => switch (url.scheme) {
+  'http' || 'https' => NetworkImage(url.toString()),
+  _ => null,
+};
 
 /// A raster tile source: a URL template with `{z}`, `{x}` and `{y}`.
 @immutable

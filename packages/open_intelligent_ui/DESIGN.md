@@ -109,6 +109,11 @@ model text ──► OpenUiSession.update(text, streaming)
     host font.
 
 13. **Theme tokens are instance fields with the reference values as defaults.** `OpenUiTheme` reads its radii, spacing, typography and component styles from the instance, so a host changes them with `copyWith` or `fromMaterial`. The static constants (`radiusSm`, `spaceTight`, `weightNormal`, ...) stay as the reference values. Per-component styles cover Card, Button, Badge and Table first.
+14. **No network by default.** `mapTiles` and `imageLoader` default to null, so no map tile or image loads until the
+    host passes `esriStreetTiles` or `networkImages` (or `allowImageHosts`). `Photo` is the only image path, and it
+    is the one gate. The umbrella does not re-allow either. HtmlView CDNs and YouTube embeds keep the reference's
+    behaviour and are documented in the README's Network table, not switched off: leaving the web package out
+    turns them off.
 
 ## Chat integration
 

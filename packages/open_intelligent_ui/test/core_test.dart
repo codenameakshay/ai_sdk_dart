@@ -328,12 +328,15 @@ void main() {
       expect((launch.arguments as Map)['url'], 'https://a.test/x');
     });
 
-    test('the default tiles are Esri and brightness picks one', () {
-      expect(const OpenUiServices().mapTiles, same(esriStreetTiles));
+    test('map tiles are off by default and Esri is opt-in', () {
+      expect(const OpenUiServices().mapTiles, isNull);
+      expect(
+        OpenUiServices(mapTiles: esriStreetTiles).mapTiles,
+        same(esriStreetTiles),
+      );
       expect(esriStreetTiles.light, contains('World_Street_Map'));
       expect(esriStreetTiles.dark, contains('World_Dark_Gray_Base'));
       expect(esriStreetTiles.attribution, contains('Esri'));
-      expect(const OpenUiServices(mapTiles: null).mapTiles, isNull);
     });
 
     testWidgets('a scope provides services, and none gives the defaults', (
@@ -353,7 +356,7 @@ void main() {
           : OpenUiScope(services: services, child: probe);
 
       await tester.pumpWidget(app(null));
-      expect(seen!.mapTiles, same(esriStreetTiles));
+      expect(seen!.mapTiles, isNull);
       expect(seen!.searchImages, isNull);
 
       final a = OpenUiServices(searchImages: (_) async => []);

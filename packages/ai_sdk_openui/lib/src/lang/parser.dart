@@ -502,6 +502,27 @@ bool _violatesBound(
   if (!bound && ctx.boundSchemas.isEmpty) return false;
   final s = schema is Map ? schema : const {};
   if (s[boundKeyword] != true) {
+    final options = s['anyOf'] ?? s['oneOf'];
+    if (bound && options is List) {
+      final type = switch (arg) {
+        String() || StrNode() => 'string',
+        num() || NumNode() => 'number',
+        bool() || BoolNode() => 'boolean',
+        List() || ArrNode() => 'array',
+        Map() || ObjNode() => 'object',
+        _ => null,
+      };
+      var violated = false;
+      var matched = false;
+      for (final option in options) {
+        final types = option is Map ? _jsonTypes(option) : null;
+        if (type != null && types != null && !types.contains(type)) continue;
+        matched = true;
+        if (_violatesBound(option, arg, component, path, ctx)) violated = true;
+      }
+      if (matched) return violated;
+    }
+
     final children = _children(arg);
     if (children != null) {
       final isObject = arg is Map || arg is ObjNode;

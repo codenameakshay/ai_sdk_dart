@@ -19,6 +19,7 @@ final class _Out implements ComponentSpec {
         .object({'minor': S.number(), 'currency': S.string()})
         .boundOnly()
         .optional(),
+    'choice': S.union([S.string().boundOnly(), S.number()]).optional(),
   };
 }
 

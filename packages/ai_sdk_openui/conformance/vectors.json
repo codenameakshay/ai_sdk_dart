@@ -995,7 +995,7 @@
     },
     {
       "id": "report-excess-args",
-      "program": "root = Out(1, null, null, null, null, 5)",
+      "program": "root = Out(1, null, null, null, null, 5, null)",
       "expectReport": {
         "ok": false,
         "issues": [
@@ -1435,6 +1435,40 @@
           "nodes": 2,
           "depth": 2,
           "statements": 2
+        }
+      }
+    },
+    {
+      "id": "report-bound-union-literal",
+      "program": "root = Out(1, null, null, null, null, \"forged\")",
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "bound-only",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Out",
+            "path": "/choice"
+          }
+        ],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-bound-union-unrestricted-type",
+      "program": "root = Out(1, null, null, null, null, 12)",
+      "expectReport": {
+        "ok": true,
+        "issues": [],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 1
         }
       }
     }

@@ -70,6 +70,12 @@ own and reported at its own path (`/payment/amount`, `/ids/0`). A container that
 parts must be written out, be null, or be a bound path itself. A computed container (state, a
 ternary, a call) is a `bound-only` error at the container's path, because its fields cannot be checked.
 
+For `anyOf` and `oneOf`, bound-only constraints apply to every alternative compatible with the
+literal's JSON type. An alternative of another type does not constrain that literal. When alternatives
+overlap, their bound-only constraints all apply; an unrestricted alternative cannot erase one. A
+computed value has no known literal type, so every alternative is checked. Null remains allowed here;
+required/null validation is separate.
+
 ### Record schemas
 
 A validator can also know the shape of each record: a JSON Schema per `$name`

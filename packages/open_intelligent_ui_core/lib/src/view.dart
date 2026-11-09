@@ -408,7 +408,8 @@ class _FormHostState extends State<_FormHost> {
   );
 }
 
-int _nextFieldId = 0;
+/// Per session: which element owns each field name, by `<form>\0<name>`.
+final _fieldOwners = Expando<Map<String, String>>();
 
 /// Renders one element through its builder. If the builder throws, the
 /// element keeps showing its last good widget, and the error goes to the
@@ -420,7 +421,8 @@ class OpenUiElementView extends StatefulWidget {
   const OpenUiElementView({super.key, required this.element, this.id});
   final OpenUiElement element;
 
-  /// The element's stable id; defaults to its statement id.
+  /// The element's stable id; defaults to its statement id, else its type
+  /// name. Pass it for an inline element: its fields are named after it.
   final String? id;
 
   @override
@@ -428,7 +430,6 @@ class OpenUiElementView extends StatefulWidget {
 }
 
 class _OpenUiElementViewState extends State<OpenUiElementView> {
-  final String _id = 'field-${_nextFieldId++}';
   Widget? _lastGood;
 
   @override
@@ -436,13 +437,13 @@ class _OpenUiElementViewState extends State<OpenUiElementView> {
     final runtime = _RuntimeScope.of(context);
     final builder = runtime.builders(widget.element.typeName);
     if (builder == null) return const SizedBox.shrink();
-    final id = widget.id ?? widget.element.statementId ?? _id;
+    final id =
+        widget.id ?? widget.element.statementId ?? widget.element.typeName;
     final node = OpenUiNode._(
       element: widget.element,
       session: runtime.session,
       emit: runtime.emit,
       context: context,
-      generatedId: _id,
       id: id,
     );
     try {
@@ -473,19 +474,16 @@ final class OpenUiNode {
     required OpenUiSession session,
     required void Function(ActionEvent) emit,
     required BuildContext context,
-    required String generatedId,
     required String id,
   }) : _session = session,
        _emit = emit,
        _context = context,
-       _generatedId = generatedId,
        _nodeId = id;
 
   final OpenUiElement element;
   final OpenUiSession _session;
   final void Function(ActionEvent) _emit;
   final BuildContext _context;
-  final String _generatedId;
   final String _nodeId;
   final Set<String> _used = {};
 
@@ -588,12 +586,24 @@ final class OpenUiNode {
 
   /// A field's value and setter. A `$binding` prop writes its `$variable`;
   /// otherwise it is a form field named [name], else this element's
-  /// statement id, else a stable generated id.
-  FieldState field(String prop, {String? name}) => _session.field(
-    name ?? element.statementId ?? _generatedId,
-    props[prop],
-    formName: formName,
-  );
+  /// statement id, else its [id]. When another element in the same form
+  /// already uses [name], this one is named `<name>~<id>`.
+  FieldState field(String prop, {String? name}) {
+    final formName = this.formName;
+    final value = props[prop];
+    final owner = element.statementId ?? _nodeId;
+    var key = name ?? owner;
+    if (value is! OpenUiBinding) {
+      // ponytail: the first element built keeps a shared label; build order is
+      // tree order except in lazily built lists.
+      final owners = _fieldOwners[_session] ??= {};
+      if (owners.putIfAbsent('${formName ?? ''}\u0000$key', () => owner) !=
+          owner) {
+        key = '$key~$owner';
+      }
+    }
+    return _session.field(key, value, formName: formName);
+  }
 
   /// Runs the action in [prop]. With no action and [sendLabel], the [label]
   /// goes to the assistant, like a Button without an action. [confirmed]
@@ -625,11 +635,8 @@ final class OpenUiNode {
 
   /// Puts [child] in a Form scope named after this element.
   Widget form(Widget child) =>
-      _FormHost(name: element.statementId ?? _generatedId, child: child);
+      _FormHost(name: element.statementId ?? _nodeId, child: child);
 
   /// Copies [text] with the host's clipboard.
   Future<void> copy(String text) => services.copyText(text);
 }
-
-@visibleForTesting
-void resetFieldIds() => _nextFieldId = 0;

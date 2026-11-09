@@ -250,6 +250,49 @@ void main() {
     test('ignores a pattern argument that is not text', () {
       expect(validate('abc', [const ParsedRule('pattern', 3)]), isNull);
     });
+
+    test('ignores a nested-quantifier pattern instead of backtracking', () {
+      final watch = Stopwatch()..start();
+      final error = validate('${'a' * 27}!', [
+        const ParsedRule('pattern', r'^(a+)+$'),
+      ]);
+
+      expect(watch.elapsedMilliseconds, lessThan(500));
+      expect(error, isNull);
+    });
+
+    test('ignores every quantified group that holds a quantifier', () {
+      for (final pattern in [
+        r'^(a*)*$',
+        r'(?:a+){2,}',
+        r'((a+)b)+',
+        r'(a{1,3})+',
+        r'([a-z]+\d)*',
+      ]) {
+        expect(
+          validate('!', [ParsedRule('pattern', pattern)]),
+          isNull,
+          reason: pattern,
+        );
+      }
+    });
+
+    test('still checks patterns without a nested quantifier', () {
+      for (final pattern in [
+        r'^(ab)+$',
+        r'^(a+)?$',
+        r'^\(a+\)+$',
+        r'^[(a+)]+$',
+        r'^[\](+]+$',
+        r'^(a|b)*$',
+      ]) {
+        expect(
+          validate('!', [ParsedRule('pattern', pattern)]),
+          'Invalid format',
+          reason: pattern,
+        );
+      }
+    });
   });
 
   group('validate', () {

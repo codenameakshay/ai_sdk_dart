@@ -83,6 +83,8 @@
   seeded `$variables`; `describeBoundRecords` returns the first for per-turn use. Default prompts are unchanged.
 - Migration: `ValidationCode` and `OpenUiErrorCode` gain `boundOnly`. An exhaustive `switch` over either enum
   needs a case for it.
+- A `pattern` validation rule that repeats a repeating group, such as `^(a+)+$`, is ignored like a pattern that
+  does not compile, so model-written input cannot freeze the UI thread with catastrophic backtracking.
 - First release: OpenUI Lang 1.0 (a port of `@openuidev/lang-core` and the state, query and
   action handling of `@openuidev/react-lang` 1.0.0) and the Open Intelligent UI library spec
   (a port of thesysdev/open-intelligent-ui at `9df2e64`), with `OpenUiSession`,

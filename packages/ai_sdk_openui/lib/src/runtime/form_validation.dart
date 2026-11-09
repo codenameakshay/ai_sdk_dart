@@ -192,9 +192,44 @@ String? _maxLength(Object? value, Object? arg) {
 
 String? _pattern(Object? value, Object? arg) {
   if (_isEmpty(value) || value is! String || arg is! String) return null;
+  if (_hasNestedQuantifier(arg)) return null;
   try {
     return RegExp(arg).hasMatch(value) ? null : 'Invalid format';
   } on FormatException {
     return null;
   }
+}
+
+/// Whether [pattern] repeats a group that itself repeats, such as `(a+)+` or
+/// `(?:a*){2,}`: the shape that backtracks exponentially. Such a pattern is
+/// ignored like one that does not compile.
+// ponytail: catches nested quantifiers only; overlapping alternation such as
+// `(a|a)*` can still backtrack. Run patterns in an isolate if that matters.
+bool _hasNestedQuantifier(String pattern) {
+  final groups = <bool>[];
+  var repeats = false;
+  for (var i = 0; i < pattern.length; i++) {
+    switch (pattern[i]) {
+      case r'\':
+        i++;
+      case '[':
+        i++;
+        while (i < pattern.length && pattern[i] != ']') {
+          if (pattern[i] == r'\') i++;
+          i++;
+        }
+      case '(':
+        groups.add(repeats);
+        repeats = false;
+      case ')' when groups.isNotEmpty:
+        final inner = repeats;
+        repeats = groups.removeLast() || inner;
+        if (inner && i + 1 < pattern.length && '*+{'.contains(pattern[i + 1])) {
+          return true;
+        }
+      case '*' || '+' || '{':
+        repeats = true;
+    }
+  }
+  return false;
 }

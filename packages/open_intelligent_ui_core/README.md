@@ -10,6 +10,9 @@ Install:
 fvm flutter pub add open_intelligent_ui_core
 ```
 
+Before a release is on pub.dev, pin `ai_sdk_openui` and `open_intelligent_ui_core` to one commit as git
+dependencies, with no overrides: see [docs/git-dependencies.md](../../docs/git-dependencies.md).
+
 ## Use
 
 ```dart

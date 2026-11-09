@@ -177,17 +177,25 @@ format-check:
 
 # ── Publish ───────────────────────────────────────────────────────────────────
 
+# Unreleased siblings are path dependencies so a git consumer resolves them
+# (docs/git-dependencies.md). pub.dev needs hosted ones, so tool/hosted_deps.dart
+# swaps them in for the publish and restores the pubspecs afterwards.
+
 ## Dry-run publish for all packages (checks pub.dev readiness)
 dry-run:
-	$(foreach p,$(PUBLISH_PKGS),$(DART) pub publish --dry-run -C packages/$(p) &&) true
-	$(foreach p,$(OIU_PUBLISH),$(FLUTTER) pub publish --dry-run -C packages/$(p) &&) true
-	$(foreach p,$(FLUTTER_PKGS),$(FLUTTER) pub publish --dry-run -C packages/$(p) &&) true
+	$(DART) run tool/hosted_deps.dart
+	$(foreach p,$(PUBLISH_PKGS),$(DART) pub publish --dry-run -C packages/$(p) &&) \
+	$(foreach p,$(OIU_PUBLISH),$(FLUTTER) pub publish --dry-run -C packages/$(p) &&) \
+	$(foreach p,$(FLUTTER_PKGS),$(FLUTTER) pub publish --dry-run -C packages/$(p) &&) true; \
+	status=$$?; $(DART) run tool/hosted_deps.dart --restore; exit $$status
 
 ## Publish all packages to pub.dev (run dry-run first to verify)
 publish:
-	$(foreach p,$(PUBLISH_PKGS),$(DART) pub publish -C packages/$(p) &&) true
-	$(foreach p,$(OIU_PUBLISH),$(FLUTTER) pub publish -C packages/$(p) &&) true
-	$(foreach p,$(FLUTTER_PKGS),$(FLUTTER) pub publish -C packages/$(p) &&) true
+	$(DART) run tool/hosted_deps.dart
+	$(foreach p,$(PUBLISH_PKGS),$(DART) pub publish -C packages/$(p) &&) \
+	$(foreach p,$(OIU_PUBLISH),$(FLUTTER) pub publish -C packages/$(p) &&) \
+	$(foreach p,$(FLUTTER_PKGS),$(FLUTTER) pub publish -C packages/$(p) &&) true; \
+	status=$$?; $(DART) run tool/hosted_deps.dart --restore; exit $$status
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 

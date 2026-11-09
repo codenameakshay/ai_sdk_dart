@@ -1,7 +1,7 @@
 name: CI
 
-# One job. The whole suite takes about a minute, so a second job would spend
-# more time on Flutter setup than it saves. A newer push to a pull request
+# One job runs the whole suite, which takes about a minute. A second, small job
+# checks that a host can depend on the packages from git. A newer push to a pull request
 # cancels the older run. A change that touches only docs does not start a run.
 
 on:
@@ -102,3 +102,25 @@ jobs:
           if test -f "$RUNNER_TEMP/remote-reference.pid"; then
             kill "$(cat "$RUNNER_TEMP/remote-reference.pid")" 2>/dev/null || true
           fi
+
+  # A host app pins the renderer by commit as a git dependency. This resolves
+  # ai_sdk_openui and open_intelligent_ui_core from this commit on GitHub, with
+  # no dependency_overrides, and analyzes an app that uses both.
+  git-consumer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Flutter (includes Dart)
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version-file: .fvmrc
+          cache: true
+
+      - name: Resolve and analyze a scratch app that uses the packages from git
+        run: >-
+          tool/git_consumer_check.sh
+          "https://github.com/${{ github.repository }}.git"
+          "${{ github.event.pull_request.head.sha || github.sha }}"

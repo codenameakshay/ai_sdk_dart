@@ -12,6 +12,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  ai_sdk_openui: ^3.1.0
-  open_intelligent_ui_core: ^3.1.0
+  ai_sdk_openui:
+    # ignore: invalid_dependency
+    path: ../ai_sdk_openui
+  open_intelligent_ui_core:
+    # ignore: invalid_dependency
+    path: ../open_intelligent_ui_core
   flutter_math_fork: ^0.7.4

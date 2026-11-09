@@ -1,5 +1,7 @@
 ## 3.1.0 (unreleased)
 
+- An app can depend on `ai_sdk_openui` and this package from git at one commit, with no
+  `dependency_overrides`: unreleased siblings are path dependencies (see `docs/git-dependencies.md`).
 - Button, IconButton and Pressable show a handled action's pending, done and failed states, ask for an inline
   confirmation when the action has `confirm`, and stay disabled after success with `disableAfterSuccess`.
   `OpenUiNode` gains `actionStatus(prop)` and `run(confirmed:)`.

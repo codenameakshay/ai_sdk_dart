@@ -316,8 +316,39 @@ final class _Ctx extends ValidationContext {
   int syntheticValueDepth = 0;
 }
 
-bool _isBoundOnly(ParamDef p) =>
-    p.schema is Map && (p.schema as Map)[boundKeyword] == true;
+/// Whether [schema] marks itself, or any field or item inside it, bound-only.
+bool _hasBound(Object? schema) => switch (schema) {
+  Map() => schema[boundKeyword] == true || schema.values.any(_hasBound),
+  List() => schema.any(_hasBound),
+  _ => false,
+};
+
+/// The part of [schema] for a value of JSON type [type]: itself, or the one
+/// `anyOf`/`oneOf` option of that type (null when there is not exactly one).
+Map? _schemaFor(Map schema, String type) {
+  if (schema['type'] == type) return schema;
+  final options = schema['anyOf'] ?? schema['oneOf'];
+  if (options is! List) return null;
+  final matching = [
+    for (final o in options)
+      if (o is Map && o['type'] == type) o,
+  ];
+  return matching.length == 1 ? matching.single : null;
+}
+
+/// The fields of an object value or the items of a list value, keyed as a
+/// path segment; null for anything else.
+List<(String, Object?)>? _children(Object? value) => switch (value) {
+  Map() => [
+    for (final MapEntry(:key, :value) in value.entries) ('$key', value),
+  ],
+  ObjNode(:final entries) => entries,
+  List() => [for (var i = 0; i < value.length; i++) ('$i', value[i])],
+  ArrNode(:final elements) => [
+    for (var i = 0; i < elements.length; i++) ('$i', elements[i]),
+  ],
+  _ => null,
+};
 
 /// A path into a bound record: `$name`, then `.field` or `[index]`, or a loop variable over one.
 bool _isBoundPath(Object? v, _Ctx ctx) => switch (v) {
@@ -330,15 +361,53 @@ bool _isBoundPath(Object? v, _Ctx ctx) => switch (v) {
   _ => false,
 };
 
-/// Reports and returns true when [arg] sits in a bound-only [param] but is not a bound path.
-bool _violatesBound(ParamDef param, Object? arg, String name, _Ctx ctx) {
+/// Reports each place in [arg] where a bound-only part of [schema] gets
+/// something other than a bound path, at any depth of object fields and list
+/// items. Returns true when it reported any.
+///
+/// A container that holds bound-only parts must be a bound path itself, an
+/// object or list written out in the program, or null: a computed one (state,
+/// a ternary, a call) fails, because its fields cannot be checked here.
+bool _violatesBound(
+  Object? schema,
+  Object? arg,
+  String component,
+  String path,
+  _Ctx ctx,
+) {
   if (arg == null ||
       arg is NullNode ||
-      !_isBoundOnly(param) ||
+      !_hasBound(schema) ||
       _isBoundPath(arg, ctx)) {
     return false;
   }
-  pushIssue(ctx, name, '/${param.name}', const BoundOnly());
+  schema as Map;
+  if (schema[boundKeyword] != true) {
+    final children = _children(arg);
+    if (children != null) {
+      final isObject = arg is Map || arg is ObjNode;
+      final sub = _schemaFor(schema, isObject ? 'object' : 'array');
+      if (sub != null) {
+        final props = sub['properties'];
+        var violated = false;
+        for (final (key, value) in children) {
+          final child = !isObject
+              ? sub['items']
+              : props is Map && props.containsKey(key)
+              ? props[key]
+              : sub['additionalProperties'];
+          if (_violatesBound(child, value, component, '$path/$key', ctx)) {
+            violated = true;
+          }
+        }
+        return violated;
+      }
+    } else if (arg is! Ast || literalValue(arg).found) {
+      // A scalar has no fields; the type check reports the mismatch.
+      return false;
+    }
+  }
+  pushIssue(ctx, component, path, const BoundOnly());
   return true;
 }
 
@@ -394,7 +463,7 @@ Map<String, Ast>? _mapCallArgs(
   final errorsBefore = ctx.errors.length;
   for (final p in params) {
     final arg = mapped[p.name];
-    if (_violatesBound(p, arg, name, ctx)) {
+    if (_violatesBound(p.schema, arg, name, '/${p.name}', ctx)) {
       isInvalid = true;
       continue;
     }
@@ -603,7 +672,13 @@ Ast _materializeExpr(Ast node, _Ctx ctx, Set<String> scoped) {
         final checked = [
           for (var i = 0; i < args.length; i++)
             i < params.length &&
-                    _violatesBound(params[i], args[i], node.name, ctx)
+                    _violatesBound(
+                      params[i].schema,
+                      args[i],
+                      node.name,
+                      '/${params[i].name}',
+                      ctx,
+                    )
                 ? const NullNode()
                 : args[i],
         ];
@@ -713,7 +788,8 @@ Object? _materializeValue(Ast node, _Ctx ctx) {
         final value = _materializeValue(args[i], ctx);
         props[param.name] = value;
         if (param.schema == null) continue;
-        var next = _violatesBound(param, value, name, ctx)
+        var next =
+            _violatesBound(param.schema, value, name, '/${param.name}', ctx)
             ? invalid
             : validateSchemaValue(
                 value,

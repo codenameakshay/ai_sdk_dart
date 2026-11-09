@@ -38,6 +38,10 @@
   (`$order.total`, `$orders[0]`, an `@Each` item); a literal is rejected with the new `bound-only` error
   (also checked by `library.parse(program, bound: {...})`). The JSON Schema marks them `"x-openui-bound": true`,
   which lang-core ignores.
+- Bound-only fields nested in a prop are enforced too: an object field or list item marked `.boundOnly()`
+  (`S.object({'amount': S.any().boundOnly()})`, `S.list(S.string().boundOnly())`) takes only a bound path,
+  reported at its own path (`/payment/amount`, `/ids/0`), and the whole prop is dropped. A computed container
+  (state, a ternary, a call) around such fields is rejected unless it is itself a bound path.
 - `PromptOptions.records` adds a "Bound Data" section and `PromptOptions.state` a "Current State" section for
   seeded `$variables`; `describeBoundRecords` returns the first for per-turn use. Default prompts are unchanged.
 - Migration: `ValidationCode` and `OpenUiErrorCode` gain `boundOnly`. An exhaustive `switch` over either enum

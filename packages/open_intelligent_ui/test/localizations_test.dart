@@ -12,6 +12,12 @@ final class _Fr extends OpenUiLocalizations {
 
   @override
   String get start => 'Démarrer';
+
+  @override
+  String get fieldRequired => 'Champ obligatoire';
+
+  @override
+  String atLeastCharacters(String limit) => 'Au moins $limit caractères';
 }
 
 const _m8Literals = [
@@ -87,6 +93,54 @@ void main() {
     await tester.pump();
     expect(find.text('Démarrer'), findsOneWidget);
     expect(find.text('Start'), findsNothing);
+  });
+
+  testWidgets('form validation errors come from the registered delegate', (
+    tester,
+  ) async {
+    OpenUiFormValidation? validation;
+    OpenUiBuilder? lookup(String name) => name == 'Text'
+        ? (context, node) {
+            validation = node.formValidation;
+            return const SizedBox.shrink();
+          }
+        : intelligentUiBuilders(name);
+    final session = OpenUiSession(intelligentUi)
+      ..update('root = Form([name])\nname = Text("a")', streaming: false);
+    addTearDown(session.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Localizations.override(
+            context: context,
+            locale: const Locale('fr'),
+            delegates: [
+              OpenUiLocalizationsDelegate({'fr': const _Fr()}),
+            ],
+            child: OpenUiView(session: session, builders: lookup),
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      validation!.validateField('name', '', [const ParsedRule('required')]),
+      isFalse,
+    );
+    expect(validation!.getFieldError('name'), 'Champ obligatoire');
+
+    validation!.registerField('nick', [
+      const ParsedRule('minLength', 3),
+    ], () => {'value': 'ab'});
+    expect(validation!.validateForm(), isFalse);
+    expect(validation!.getFieldError('nick'), 'Au moins 3 caractères');
+  });
+
+  test('default validation messages are English', () {
+    final validation = OpenUiFormValidation();
+    addTearDown(validation.dispose);
+    validation.validateField('name', '', [const ParsedRule('required')]);
+    expect(validation.getFieldError('name'), 'This field is required');
   });
 
   test('no hard-coded English left', () {

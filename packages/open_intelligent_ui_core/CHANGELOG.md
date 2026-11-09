@@ -47,6 +47,9 @@
   default) or slower than `timeout` (30 seconds by default) fails instead of downloading without limit.
 - `OpenUiServices` and `MapTiles` compare by value, so an `OpenUiScope` rebuilt with equal services (the same
   tear-offs and values) no longer rebuilds every component that reads them.
+- Form validation errors come from `OpenUiLocalizations`, which now extends `ValidationMessages`: override
+  `fieldRequired`, `invalidEmail`, `atLeastCharacters` and the rest to translate them.
+  `OpenUiFormValidation.messages` holds the words a Form validates with.
 - Behaviour change: no network by default. Map tiles and images no longer load until you allow them:
   `OpenUiServices(mapTiles: esriStreetTiles, imageLoader: networkImages)`, or allow a few hosts with
   `imageLoader: allowImageHosts(['upload.wikimedia.org'])`. A blocked image shows the photo placeholder.

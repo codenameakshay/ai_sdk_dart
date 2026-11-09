@@ -1,6 +1,30 @@
 import 'package:ai_sdk_openui/src/runtime/form_validation.dart';
 import 'package:test/test.dart';
 
+final class _Upper extends ValidationMessages {
+  const _Upper();
+  @override
+  String get fieldRequired => 'REQUIRED';
+  @override
+  String get optionRequired => 'PICK ONE';
+  @override
+  String get invalidEmail => 'EMAIL';
+  @override
+  String get invalidUrl => 'URL';
+  @override
+  String get notANumber => 'NUMBER';
+  @override
+  String atLeast(String limit) => '>= $limit';
+  @override
+  String atMost(String limit) => '<= $limit';
+  @override
+  String atLeastCharacters(String limit) => 'LEN >= $limit';
+  @override
+  String atMostCharacters(String limit) => 'LEN <= $limit';
+  @override
+  String get invalidFormat => 'FORMAT';
+}
+
 void main() {
   group('parseRules', () {
     test('keeps numeric arguments as numbers and skips non-string entries', () {
@@ -318,6 +342,68 @@ void main() {
           {'required': (_, _) => 'custom says no'},
         ),
         'custom says no',
+      );
+    });
+
+    test('built-in rules speak the given messages', () {
+      String? check(Object? value, String rule) =>
+          validate(value, parseRules([rule]), null, const _Upper());
+
+      expect(check('', 'required'), 'REQUIRED');
+      expect(check({'a': false}, 'required'), 'PICK ONE');
+      expect(check('x', 'email'), 'EMAIL');
+      expect(check('x', 'url'), 'URL');
+      expect(check('x', 'numeric'), 'NUMBER');
+      expect(check('1', 'min:2'), '>= 2');
+      expect(check('3', 'max:2'), '<= 2');
+      expect(check('a', 'minLength:2'), 'LEN >= 2');
+      expect(check('abc', 'maxLength:2'), 'LEN <= 2');
+      expect(check('A', r'pattern:^[a-z]$'), 'FORMAT');
+    });
+
+    test('the default messages are English', () {
+      const english = ValidationMessages();
+      for (final (value, rule) in [
+        ('', 'required'),
+        ({'a': false}, 'required'),
+        ('x', 'email'),
+        ('x', 'url'),
+        ('x', 'numeric'),
+        ('1', 'min:2'),
+        ('3', 'max:2'),
+        ('a', 'minLength:2'),
+        ('abc', 'maxLength:2'),
+        ('A', r'pattern:^[a-z]$'),
+      ]) {
+        final rules = parseRules([rule]);
+        expect(
+          validate(value, rules, null, english),
+          validate(value, rules),
+          reason: rule,
+        );
+      }
+    });
+
+    test('a custom validator wins over the given messages', () {
+      expect(
+        validate(
+          '',
+          [const ParsedRule('required')],
+          {'required': (_, _) => 'custom'},
+          const _Upper(),
+        ),
+        'custom',
+      );
+    });
+
+    test('a host-added validator still runs with messages', () {
+      builtInValidators['even'] = (value, _) =>
+          value is int && value.isEven ? null : 'odd';
+      addTearDown(() => builtInValidators.remove('even'));
+
+      expect(
+        validate(3, [const ParsedRule('even')], null, const _Upper()),
+        'odd',
       );
     });
 

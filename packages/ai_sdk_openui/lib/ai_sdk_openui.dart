@@ -38,6 +38,7 @@ export 'src/runtime/host_actions.dart'
 export 'src/runtime/form_validation.dart'
     show
         ParsedRule,
+        ValidationMessages,
         ValidatorFn,
         builtInValidators,
         parseRules,

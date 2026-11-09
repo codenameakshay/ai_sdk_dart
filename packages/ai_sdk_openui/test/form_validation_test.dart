@@ -321,6 +321,71 @@ void main() {
       expect(watch.elapsedMilliseconds, lessThan(500));
     });
 
+    test('ignores choices that repeat the same escaped literal', () {
+      for (final pattern in [r'^(-|\-)+$', r'^(,|\,)+?$']) {
+        expect(
+          validate('---!', [ParsedRule('pattern', pattern)]),
+          isNull,
+          reason: pattern,
+        );
+      }
+    });
+
+    test('checks literal pipes and parentheses inside repeated groups', () {
+      for (final pattern in [
+        r'^([|])+$',
+        r'^(a\|b)+$',
+        r'^(\(|a)+$',
+        r'^([()|])+$',
+        r'^(\||a)+$',
+      ]) {
+        expect(
+          validate('!', [ParsedRule('pattern', pattern)]),
+          'Invalid format',
+          reason: pattern,
+        );
+      }
+    });
+
+    test(
+      'ignores overlapping choices through nested groups and assertions',
+      () {
+        for (final pattern in [
+          r'^((a|aa))+$',
+          r'^(?:(a|aa))+$',
+          r'^(?=(a|aa)+$)a+$',
+          r'^(?!(a|aa)+$)a+$',
+          r'^(a|aa)+?$',
+          r'^((a+?))+$',
+        ]) {
+          expect(
+            validate('aaaa!', [ParsedRule('pattern', pattern)]),
+            isNull,
+            reason: pattern,
+          );
+        }
+      },
+    );
+
+    test('ignores unbalanced groups without throwing', () {
+      for (final pattern in [
+        '(',
+        ')',
+        '(()',
+        '())',
+        '(?=',
+        '([|])(',
+        r'(a\',
+        '[',
+      ]) {
+        expect(
+          validate('!', [ParsedRule('pattern', pattern)]),
+          isNull,
+          reason: pattern,
+        );
+      }
+    });
+
     test('still checks patterns without a nested quantifier', () {
       for (final pattern in [
         r'^(ab)+$',

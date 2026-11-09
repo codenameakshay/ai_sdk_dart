@@ -279,10 +279,34 @@ bool _overlappingChoice(String body) {
   final choice = body.startsWith('?')
       ? body.replaceFirst(RegExp(r'^\?[:=!]'), '')
       : body;
-  if (!choice.contains('|')) return false;
-  if (choice.contains('(')) return true;
-  final alternatives = choice.split('|');
+  final alternatives = <String>[];
+  var start = 0;
+  var hasGroup = false;
+  for (var i = 0; i < choice.length; i++) {
+    switch (choice[i]) {
+      case r'\':
+        i++;
+      case '[':
+        i++;
+        while (i < choice.length && choice[i] != ']') {
+          if (choice[i] == r'\') i++;
+          i++;
+        }
+      case '(':
+        hasGroup = true;
+      case '|':
+        alternatives.add(choice.substring(start, i));
+        start = i + 1;
+    }
+  }
+  if (alternatives.isEmpty) return false;
+  if (hasGroup) return true;
+  alternatives.add(choice.substring(start));
   final single = RegExp(r'^(?:[^\\.\[\]^$*+?{}()|]|\\[^\w])$');
   return !alternatives.every(single.hasMatch) ||
-      alternatives.toSet().length != alternatives.length;
+      alternatives
+              .map((s) => s.startsWith(r'\') ? s.substring(1) : s)
+              .toSet()
+              .length !=
+          alternatives.length;
 }

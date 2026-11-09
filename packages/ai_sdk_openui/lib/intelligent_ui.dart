@@ -15,5 +15,6 @@ export 'src/iui/library.dart'
         intelligentUiWithout,
         optionalIuiComponents;
 
+export 'src/iui/functions/money.dart' show formatMoney;
 export 'src/iui/functions/number_format.dart' show formatDecimal;
 export 'src/iui/functions/shared.dart' show Impure;

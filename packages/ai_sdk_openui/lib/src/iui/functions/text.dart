@@ -2,6 +2,7 @@ import '../../lang/js.dart';
 import '../../spec/library.dart';
 import '../../spec/schema.dart';
 import 'js_number.dart';
+import 'locale_format.dart';
 import 'number_format.dart';
 import 'shared.dart';
 import 'unicode.dart';
@@ -19,30 +20,40 @@ final List<FunctionSpec> textFunctions = [
     },
     returns: S.string(),
     fn: (a) {
-      final value = a['value'] as num;
-      if (!value.isFinite) throw StateError('value is not a finite number');
-      final kind = (a['kind'] as String?) ?? 'number';
-      final decimals = a['decimals'] as num?;
-      final d = decimals?.truncate().clamp(0, 10).toInt();
-      final currency = a['currency'] as String?;
-      return switch (kind) {
+      final f = _formatArgs(a);
+      final d = f.d;
+      final currency = f.currency;
+      return switch (f.kind) {
         'currency' => formatCurrency(
-          value,
+          f.value,
           _currencyCode(currency),
           minFraction: d ?? 2,
           maxFraction: d ?? 2,
         ),
         'percent' =>
-          '${formatDecimal(value, minFraction: 0, maxFraction: d ?? 1)}%',
+          '${formatDecimal(f.value, minFraction: 0, maxFraction: d ?? 1)}%',
         'compact' => formatCompact(
-          value,
+          f.value,
           maxFraction: d ?? 1,
           currency: currency == null || currency.isEmpty
               ? null
               : _currencyCode(currency),
         ),
-        _ => formatDecimal(value, minFraction: 0, maxFraction: d ?? 2),
+        _ => formatDecimal(f.value, minFraction: 0, maxFraction: d ?? 2),
       };
+    },
+    localized: (a, locale) {
+      final f = _formatArgs(a);
+      final code = f.currency == null || f.currency!.isEmpty
+          ? null
+          : _currencyCode(f.currency);
+      return localeFormat(
+        f.value,
+        locale,
+        kind: f.kind,
+        decimals: f.d,
+        currency: f.kind == 'currency' ? (code ?? 'USD') : code,
+      );
     },
   ),
   FunctionSpec(
@@ -75,13 +86,10 @@ final List<FunctionSpec> textFunctions = [
       'plural': S.string().optional(),
     },
     returns: S.string(),
-    fn: (a) {
-      final n = a['n'] as num;
-      final word = a['word'] as String;
-      final plural = a['plural'] as String?;
-      final noun = n.abs() == 1 ? word : (plural ?? '${word}s');
-      return '${formatDecimal(n, minFraction: 0, maxFraction: 2)} $noun';
-    },
+    fn: (a) =>
+        '${formatDecimal(a['n'] as num, minFraction: 0, maxFraction: 2)} ${_noun(a)}',
+    localized: (a, locale) =>
+        '${localeNumber(a['n'] as num, locale, maxFraction: 2)} ${_noun(a)}',
   ),
   FunctionSpec(
     'Pad',
@@ -213,6 +221,27 @@ final List<FunctionSpec> textFunctions = [
     },
   ),
 ];
+
+({num value, String kind, int? d, String? currency}) _formatArgs(
+  Map<String, Object?> a,
+) {
+  final value = a['value'] as num;
+  if (!value.isFinite) throw StateError('value is not a finite number');
+  final decimals = a['decimals'] as num?;
+  return (
+    value: value,
+    kind: (a['kind'] as String?) ?? 'number',
+    d: decimals?.truncate().clamp(0, 10).toInt(),
+    currency: a['currency'] as String?,
+  );
+}
+
+String _noun(Map<String, Object?> a) {
+  final n = a['n'] as num;
+  final word = a['word'] as String;
+  final plural = a['plural'] as String?;
+  return n.abs() == 1 ? word : (plural ?? '${word}s');
+}
 
 /// The code when it is three letters, else USD, as the reference's `currencyCode`.
 String _currencyCode(String? code) {

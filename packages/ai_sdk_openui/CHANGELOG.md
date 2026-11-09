@@ -2,6 +2,12 @@
 
 - `Impure` (the clock and random seams that `@Today`, `@Now` and `@Random` use) is public, so hosts and tests can pin time and randomness.
 - `intelligentUiWithout(optionalIuiComponents)` gives a library without Math, Map, MapMarker, YouTube and HtmlView, and `chatPromptFor(library)` / `dashboardPrompt(library:)` drop the medium-rule clauses for components the library lacks. `intelligentUi` and `chatPrompt` are unchanged.
+- `Money`: an exact amount in integer minor units with an ISO 4217 code (scale from CLDR), parsed from
+  `{minor, currency}` or `{amount: "12.34", currency}`, with `+`, `-` and `format({locale})`. It never uses a
+  double. `formatMoney` adds `@FormatMoney` to a library through `extend`.
+- `OpenUiSession(locale: 'de-DE')` formats `@Format`, `@Plural` and `@FormatDate` for that locale
+  (en-IN groups 12,34,567.00; de-DE writes 1.234,56 €). No locale, or en-US, keeps the reference's output.
+  `FunctionSpec.localized` lets a library function do the same.
 - Host-bound records: `OpenUiSession(records: [BoundRecord('order', json)])` gives a program a read-only
   `$order`. Props, action params and function params marked `.boundOnly()` take only a path into a record
   (`$order.total`, `$orders[0]`, an `@Each` item); a literal is rejected with the new `bound-only` error

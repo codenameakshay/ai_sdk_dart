@@ -57,15 +57,33 @@ What a validator reads from the spec:
 
 A program reads host data through bound records (`BoundRecord('order', json)` is `$order`). A value
 marked bound-only takes only a path into a bound record: `$order.total`, `$order.items[0]`, an alias
-statement that is such a path, or an `@Each` item over one. Anything else is a `bound-only` error:
-a literal, arithmetic, a ternary, a function call, a `$variable` the program declares, or an `@Each`
-item over a literal list. A program cannot shadow a record: when `$order` is bound, a program
+statement that is such a path, or an `@Each` item over one. An index in a path must be a literal or a
+bound path itself. Anything else is a `bound-only` error: a literal, arithmetic, a ternary, a function
+call, a computed index such as `$order[$k]` (it lets the program pick the field), a `$variable` the
+program declares, or an `@Each` item over a literal list. A program cannot shadow a record: when `$order` is bound, a program
 declaration of `$order` is ignored.
 
 Inside an object or list written out in the program, each bound-only field or item is checked on its
 own and reported at its own path (`/payment/amount`, `/ids/0`). A container that holds bound-only
 parts must be written out, be null, or be a bound path itself. A computed container (state, a
 ternary, a call) is a `bound-only` error at the container's path, because its fields cannot be checked.
+
+### Record schemas
+
+A validator can also know the shape of each record: a JSON Schema per `$name`
+(`library.validate(program, boundSchemas: {r'$order': schema})`, `openui validate --bound-schemas=<file>`
+with a JSON object of the same form). A name with a schema counts as bound. Then every bound path that is
+the value of a component prop or a library function or action param, or of an object field or list item
+written out inside one, bound-only or not, is checked (built-in `@` functions are not):
+
+- It must exist in the schema, or it is an `unknown-bound-path` error. A field exists when `properties`
+  lists it or `additionalProperties` is a schema or `true`; an array has numeric indexes and `length`; a
+  string has `length`. A bound index (`$order.items[$order.pick]`) matches any item or field.
+  An `@Each` item reads the schema of the source's `items`.
+- Its JSON type (`integer` counts as `number`; `anyOf`/`oneOf` join their options) must share a type with
+  the prop's schema, or it is a `type-mismatch` error. A schema without `type` matches anything.
+
+A record without a schema is not checked beyond section 3.
 
 ## 4. The report
 
@@ -114,6 +132,7 @@ version. A minor version can add codes; treat an unknown code with `"severity": 
 | `inline-reserved` | error | `Query` or `Mutation` used inline instead of as a statement |
 | `no-root` | error, or warning when another statement calls the root component | no usable root |
 | `bound-only` | error | a bound-only value is not a bound path (section 3) |
+| `unknown-bound-path` | error | a bound path the record's schema does not have (section 3) |
 | `incomplete` | error | the program ends inside an unfinished statement |
 | `unresolved` | warning | a reference is never defined |
 | `orphaned` | warning | a statement is not reachable from the root |
@@ -131,6 +150,7 @@ version. A minor version can add codes; treat an unknown code with `"severity": 
 - Validator vectors have `expectReport`. They run against the spec named by the top-level
   `validatorSpec` (`conformance/validator-spec.json`), with these optional inputs:
   - `bound`: the bound record names, with the `$`.
+  - `boundSchemas`: a JSON Schema per bound record name; these names count as bound too.
   - `policy`: the policy, in the form of section 2.
 
   `expectReport` is the full report of section 4 without the `message` fields. The lang-core runner

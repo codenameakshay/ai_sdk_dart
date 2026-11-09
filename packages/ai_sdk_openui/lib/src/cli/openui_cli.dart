@@ -18,6 +18,8 @@ Policy options:
 validate options:
   --root=<Name>           root component (default: the spec's "root")
   --bound=<\$a,\$b>         host-bound \$variables
+  --bound-schemas=<file>  JSON object of a JSON Schema per \$variable: bound
+                          paths must exist in it and fit their props
 Exit codes: 0 valid, 1 invalid, 2 unreadable input, 64 usage error.''';
 
 /// Policy flags and the [ValidationPolicy.toJson] key each sets.
@@ -29,6 +31,7 @@ const _policyFlags = {
   'allow-actions': 'allowedActions',
 };
 const _intFlags = {'max-nodes', 'max-depth', 'max-string'};
+const _validateFlags = {'root', 'bound', 'bound-schemas'};
 
 /// `openui validate <spec> <program|->` prints the validation report as JSON;
 /// `openui spec <spec>` prints the spec as canonical JSON. Returns the exit
@@ -76,11 +79,17 @@ Future<int> runOpenUiCli(
   }
   final CompiledSchema schema;
   final String program;
+  final Map<String, Map<String, Object?>> boundSchemas;
   try {
     schema = CompiledSchema.fromJsonSchema(
       (spec['schema'] as Map?)?.cast<String, Object?>() ?? spec,
     );
     program = await read(args[2]);
+    final schemasPath = options.boundSchemas;
+    boundSchemas = schemasPath == null
+        ? const {}
+        : (jsonDecode(await read(schemasPath)) as Map)
+              .cast<String, Map<String, Object?>>();
   } catch (error) {
     err('openui: $error');
     return 2;
@@ -91,22 +100,26 @@ Future<int> runOpenUiCli(
     rootName: options.root ?? spec['root'] as String?,
     policy: policy,
     boundNames: options.bound,
+    boundSchemas: boundSchemas,
   );
   out(report.toJsonString());
   return report.ok ? 0 : 1;
 }
 
 final class _Options {
-  const _Options(this.policy, this.root, this.bound);
+  const _Options(this.policy, this.root, this.bound, this.boundSchemas);
 
   /// [ValidationPolicy.toJson] keys the flags set.
   final Map<String, Object?> policy;
   final String? root;
   final Set<String> bound;
+
+  /// The `--bound-schemas` file.
+  final String? boundSchemas;
 }
 
 /// The flags after the paths, or null for a usage error. Only `validate`
-/// takes `--root` and `--bound`.
+/// takes `--root`, `--bound` and `--bound-schemas`.
 _Options? _options(List<String> flags, bool validate) {
   final values = <String, String>{};
   for (final arg in flags) {
@@ -114,7 +127,7 @@ _Options? _options(List<String> flags, bool validate) {
     if (!arg.startsWith('--') || eq < 0) return null;
     final name = arg.substring(2, eq);
     if (!_policyFlags.containsKey(name) &&
-        !(validate && (name == 'root' || name == 'bound'))) {
+        !(validate && _validateFlags.contains(name))) {
       return null;
     }
     values[name] = arg.substring(eq + 1);
@@ -134,7 +147,12 @@ _Options? _options(List<String> flags, bool validate) {
       policy[key] = _names(text).toList();
     }
   }
-  return _Options(policy, values['root'], _names(values['bound'] ?? ''));
+  return _Options(
+    policy,
+    values['root'],
+    _names(values['bound'] ?? ''),
+    values['bound-schemas'],
+  );
 }
 
 Set<String> _names(String list) => {

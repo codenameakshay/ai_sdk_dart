@@ -63,6 +63,7 @@ void main() {
         'unknown-component',
         'unknown-function',
         'action-not-allowed',
+        'unknown-bound-path',
         'too-many-nodes',
         'too-deep',
         'string-too-long',
@@ -94,6 +95,9 @@ void main() {
           (v['policy'] as Map?)?.cast<String, Object?>() ?? const {},
         ),
         boundNames: {...?(v['bound'] as List?)?.cast<String>()},
+        boundSchemas: {
+          ...?(v['boundSchemas'] as Map?)?.cast<String, Map<String, Object?>>(),
+        },
       );
       expect(_contract(report), v['expectReport']);
     });

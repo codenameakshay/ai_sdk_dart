@@ -995,7 +995,7 @@
     },
     {
       "id": "report-excess-args",
-      "program": "root = Out(1, null, null, null, 5)",
+      "program": "root = Out(1, null, null, null, null, 5)",
       "expectReport": {
         "ok": false,
         "issues": [
@@ -1147,6 +1147,254 @@
             "code": "orphaned",
             "severity": "warning",
             "statementId": "extra"
+          }
+        ],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 2
+        }
+      }
+    },
+    {
+      "id": "report-bound-schema-paths",
+      "program": "root = Out(@Each($order.items, \"it\", Out(it.price, it.price)), $order.total, null, {amount: $order.items[0].price}, $order.total)",
+      "boundSchemas": {
+        "$order": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "total": {
+              "type": "object",
+              "properties": {
+                "minor": {
+                  "type": "integer"
+                },
+                "currency": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "minor",
+                "currency"
+              ]
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "price": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "expectReport": {
+        "ok": true,
+        "issues": [],
+        "stats": {
+          "nodes": 2,
+          "depth": 2,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-unknown-bound-path",
+      "program": "root = Out(1, $order.nope)",
+      "boundSchemas": {
+        "$order": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "total": {
+              "type": "object",
+              "properties": {
+                "minor": {
+                  "type": "integer"
+                },
+                "currency": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "minor",
+                "currency"
+              ]
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "price": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "unknown-bound-path",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Out",
+            "path": "/amount"
+          }
+        ],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-unknown-bound-path-loop-item",
+      "program": "root = Out(@Each($order.items, \"it\", Out(1, it.nope)))",
+      "boundSchemas": {
+        "$order": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "total": {
+              "type": "object",
+              "properties": {
+                "minor": {
+                  "type": "integer"
+                },
+                "currency": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "minor",
+                "currency"
+              ]
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "price": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "unknown-bound-path",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Out",
+            "path": "/amount"
+          }
+        ],
+        "stats": {
+          "nodes": 2,
+          "depth": 2,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-bound-type-mismatch",
+      "program": "root = Out(1, null, null, null, $order.id)",
+      "boundSchemas": {
+        "$order": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "total": {
+              "type": "object",
+              "properties": {
+                "minor": {
+                  "type": "integer"
+                },
+                "currency": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "minor",
+                "currency"
+              ]
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "price": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "type-mismatch",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Out",
+            "path": "/money"
+          }
+        ],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-bound-only-computed-index",
+      "program": "$k = \"id\"\nroot = Out(1, $order[$k])",
+      "bound": [
+        "$order"
+      ],
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "bound-only",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Out",
+            "path": "/amount"
           }
         ],
         "stats": {

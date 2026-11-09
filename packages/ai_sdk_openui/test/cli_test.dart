@@ -139,6 +139,47 @@ void main() {
     expect(codes, contains('bound-only'));
   });
 
+  test('--bound-schemas checks bound paths against record schemas', () async {
+    files['schemas.json'] = jsonEncode({
+      r'$order': {
+        'type': 'object',
+        'properties': {
+          'total': {'type': 'object'},
+        },
+        'additionalProperties': false,
+      },
+    });
+    files['field.oui'] = r'root = Out(1, $order.nope)';
+    final (ok, _, _) = await cli([
+      'validate',
+      'hostlib.json',
+      'bound.oui',
+      '--bound-schemas=schemas.json',
+    ]);
+    expect(ok, 0);
+
+    final (code, out, _) = await cli([
+      'validate',
+      'hostlib.json',
+      'field.oui',
+      '--bound-schemas=schemas.json',
+    ]);
+    expect(code, 1);
+    expect(jsonDecode(out)['issues'][0]['code'], 'unknown-bound-path');
+
+    final (missing, _, _) = await cli([
+      'validate',
+      'hostlib.json',
+      'bound.oui',
+      '--bound-schemas=gone.json',
+    ]);
+    expect(missing, 2);
+    expect(
+      (await cli(['spec', 'hostlib.json', '--bound-schemas=schemas.json'])).$1,
+      64,
+    );
+  });
+
   test('bad input and usage are reported', () async {
     final (usage, _, err) = await cli(['validate', 'spec.json']);
     expect(usage, 64);

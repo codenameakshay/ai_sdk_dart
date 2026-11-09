@@ -31,6 +31,13 @@
   `properties` keep their positional order), and `canonicalJson(library.toSpec())` prints the same bytes for a
   host library. Policy flags add a `policy` block, which `openui validate` applies under its own flags;
   `ValidationPolicy.toJson`/`fromJson` read and write it.
+- Bound record schemas: `library.validate(program, boundSchemas: {r'$order': jsonSchema})` (also
+  `library.parse`, `validateProgram` and `openui validate --bound-schemas=<file>`) checks every bound path
+  against its record's schema: a path the schema lacks is the new `unknown-bound-path` error, and a value
+  whose type does not fit the prop is `type-mismatch`. A computed index into a record (`$order[$k]`) is no
+  longer a bound path, so it cannot feed a bound-only prop, in sessions too.
+- Migration: `ValidationCode` and `OpenUiErrorCode` gain `unknownBoundPath`. An exhaustive `switch` over
+  either needs a case.
 - Validator vectors: `conformance/vectors.json` gains vectors with `bound`, `policy` and `expectReport`, run
   against `conformance/validator-spec.json`, for every report code. `doc/validation.md` documents the report
   (codes, severities, path syntax) as a stable contract for validators in other languages.

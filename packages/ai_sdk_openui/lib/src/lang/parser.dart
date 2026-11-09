@@ -305,6 +305,7 @@ final class _Ctx extends ValidationContext {
     required super.partial,
     required this.unreached,
     required this.boundNames,
+    required this.boundSchemas,
   }) : super(componentNames: schema.components.keys.toSet());
   final Map<String, Ast> syms;
   final CompiledSchema schema;
@@ -313,6 +314,12 @@ final class _Ctx extends ValidationContext {
   final Set<String> unreached;
   final Set<String> boundNames;
   final Set<String> boundLoopVars = {};
+
+  /// JSON Schemas of bound records by `$name`; a record without one is unchecked.
+  final Map<String, Object?> boundSchemas;
+
+  /// The item schema of each bound loop variable, when its source has one.
+  final Map<String, Object?> boundLoopSchemas = {};
   int syntheticValueDepth = 0;
 }
 
@@ -350,20 +357,129 @@ List<(String, Object?)>? _children(Object? value) => switch (value) {
   _ => null,
 };
 
-/// A path into a bound record: `$name`, then `.field` or `[index]`, or a loop variable over one.
+/// A path into a bound record: `$name`, then `.field` or `[index]`, or a loop
+/// variable over one. An index must be a literal or a bound path itself: a
+/// computed one (`$order[$k]`) lets the program pick the field.
 bool _isBoundPath(Object? v, _Ctx ctx) => switch (v) {
   StateRefNode(:final name) =>
     !(ctx.syntheticValueDepth > 0 && name == r'$value') &&
         ctx.boundNames.contains(name),
   RefNode(:final name) => ctx.boundLoopVars.contains(name),
-  MemberNode(:final object) ||
-  IndexNode(:final object) => _isBoundPath(object, ctx),
+  MemberNode(:final object) => _isBoundPath(object, ctx),
+  IndexNode(:final object, :final index) =>
+    _isBoundPath(object, ctx) &&
+        (literalValue(index).found || _isBoundPath(index, ctx)),
   _ => false,
 };
 
+/// The schema at bound path [node]: a schema map, [absent] when the record
+/// schema has no such path, or null when it is not known.
+Object? _boundSchemaAt(Ast node, _Ctx ctx) => switch (node) {
+  StateRefNode(:final name) => ctx.boundSchemas[name],
+  RefNode(:final name) => ctx.boundLoopSchemas[name],
+  MemberNode(:final object, :final field) => _fieldSchema(
+    _boundSchemaAt(object, ctx),
+    field,
+  ),
+  IndexNode(:final object, :final index) => _fieldSchema(
+    _boundSchemaAt(object, ctx),
+    switch (literalValue(index)) {
+      (found: true, :final value) => Js.string(value),
+      _ => null,
+    },
+  ),
+  _ => null,
+};
+
+/// The schema of field or item [key] in [schema]; a null [key] (a bound index)
+/// is any item or field. A field is known when `properties` lists it or
+/// `additionalProperties` is a schema or true.
+Object? _fieldSchema(Object? schema, String? key) {
+  if (schema is! Map) return schema;
+  final type = schema['type'];
+  if (key == 'length' && (type == 'array' || type == 'string')) {
+    return const {'type': 'number'};
+  }
+  if (type == 'array') {
+    if (key != null && !Js.isArrayIndex(key)) return absent;
+    return schema['items'] is Map ? schema['items'] : null;
+  }
+  if (type == 'object') {
+    final props = schema['properties'];
+    if (key != null && props is Map && props[key] is Map) return props[key];
+    final extra = schema['additionalProperties'];
+    if (extra is Map) return extra;
+    if (extra == true || key == null || (props == null && extra == null)) {
+      return null;
+    }
+    return absent;
+  }
+  return type is String ? absent : null;
+}
+
+/// The JSON types [schema] allows (`integer` counts as `number`), or null
+/// when it allows any.
+Set<String>? _jsonTypes(Map schema) {
+  final options = schema['anyOf'] ?? schema['oneOf'];
+  if (options is List) {
+    final types = <String>{};
+    for (final o in options) {
+      final t = o is Map ? _jsonTypes(o) : null;
+      if (t == null) return null;
+      types.addAll(t);
+    }
+    return types;
+  }
+  final type = schema['type'];
+  final list = type is String ? [type] : type;
+  if (list is! List) return null;
+  return {for (final t in list) t == 'integer' ? 'number' : '$t'};
+}
+
+/// `$order.items[0].price`, for a message.
+String _pathText(Ast node) => switch (node) {
+  MemberNode(:final object, :final field) => '${_pathText(object)}.$field',
+  IndexNode(:final object, :final index) =>
+    '${_pathText(object)}[${switch (literalValue(index)) {
+      (found: true, :final value) => jsonEncode(value),
+      _ => _pathText(index),
+    }}]',
+  StateRefNode(:final name) => name,
+  _ => (node as RefNode).name,
+};
+
+/// Checks bound path [arg] against the record schemas: it must exist, and its
+/// type must fit [schema]. Reports and returns true when it does not.
+bool _violatesBoundSchema(
+  Object? schema,
+  Ast arg,
+  String component,
+  String path,
+  _Ctx ctx,
+) {
+  final at = _boundSchemaAt(arg, ctx);
+  if (identical(at, absent)) {
+    pushIssue(ctx, component, path, UnknownBoundPath(_pathText(arg)));
+    return true;
+  }
+  if (at is! Map || schema is! Map) return false;
+  final want = _jsonTypes(schema), got = _jsonTypes(at);
+  if (want == null || got == null || want.intersection(got).isNotEmpty) {
+    return false;
+  }
+  pushIssue(
+    ctx,
+    component,
+    path,
+    TypeMismatch(want.join('|'), '${_pathText(arg)} (${got.join('|')})'),
+  );
+  return true;
+}
+
 /// Reports each place in [arg] where a bound-only part of [schema] gets
 /// something other than a bound path, at any depth of object fields and list
-/// items. Returns true when it reported any.
+/// items, and each bound path the record schemas reject. Returns true when it
+/// reported any.
 ///
 /// A container that holds bound-only parts must be a bound path itself, an
 /// object or list written out in the program, or null: a computed one (state,
@@ -375,23 +491,25 @@ bool _violatesBound(
   String path,
   _Ctx ctx,
 ) {
-  if (arg == null ||
-      arg is NullNode ||
-      !_hasBound(schema) ||
-      _isBoundPath(arg, ctx)) {
-    return false;
+  if (arg == null || arg is NullNode) return false;
+  if (_isBoundPath(arg, ctx)) {
+    return _violatesBoundSchema(schema, arg as Ast, component, path, ctx);
   }
-  schema as Map;
-  if (schema[boundKeyword] != true) {
+  final bound = _hasBound(schema);
+  if (!bound && ctx.boundSchemas.isEmpty) return false;
+  final s = schema is Map ? schema : const {};
+  if (s[boundKeyword] != true) {
     final children = _children(arg);
     if (children != null) {
       final isObject = arg is Map || arg is ObjNode;
-      final sub = _schemaFor(schema, isObject ? 'object' : 'array');
-      if (sub != null) {
-        final props = sub['properties'];
+      final sub = _schemaFor(s, isObject ? 'object' : 'array');
+      if (sub != null || !bound) {
+        final props = sub?['properties'];
         var violated = false;
         for (final (key, value) in children) {
-          final child = !isObject
+          final child = sub == null
+              ? null
+              : !isObject
               ? sub['items']
               : props is Map && props.containsKey(key)
               ? props[key]
@@ -402,13 +520,46 @@ bool _violatesBound(
         }
         return violated;
       }
-    } else if (arg is! Ast || literalValue(arg).found) {
+    } else if (!bound || arg is! Ast || literalValue(arg).found) {
       // A scalar has no fields; the type check reports the mismatch.
       return false;
     }
   }
   pushIssue(ctx, component, path, const BoundOnly());
   return true;
+}
+
+/// Runs [body] with loop variable [name] over [source] in scope: bound, with
+/// the item schema, when [source] is a bound path.
+T _withLoopVar<T>(String? name, Ast source, _Ctx ctx, T Function() body) {
+  if (name == null) return body();
+  final wasBound = ctx.boundLoopVars.contains(name);
+  final hadSchema = ctx.boundLoopSchemas.containsKey(name);
+  final previousSchema = ctx.boundLoopSchemas[name];
+  if (_isBoundPath(source, ctx)) {
+    ctx.boundLoopVars.add(name);
+    ctx.boundLoopSchemas[name] = _fieldSchema(
+      _boundSchemaAt(source, ctx),
+      null,
+    );
+  } else {
+    ctx.boundLoopVars.remove(name);
+    ctx.boundLoopSchemas.remove(name);
+  }
+  try {
+    return body();
+  } finally {
+    if (wasBound) {
+      ctx.boundLoopVars.add(name);
+    } else {
+      ctx.boundLoopVars.remove(name);
+    }
+    if (hadSchema) {
+      ctx.boundLoopSchemas[name] = previousSchema;
+    } else {
+      ctx.boundLoopSchemas.remove(name);
+    }
+  }
 }
 
 bool _isRuntimeCall(String name, _Ctx ctx) =>
@@ -543,28 +694,11 @@ Ast _nameRawCalls(Ast node, _Ctx ctx) {
       if (def?.lazy == true && node.name == 'Each' && node.args.length >= 3) {
         mappedArgs.add(map(node.args[0]));
         mappedArgs.add(map(node.args[1]));
-        final name = loopVarName(node.args[1]);
-        final wasBound = name != null && ctx.boundLoopVars.contains(name);
-        if (name != null) {
-          if (_isBoundPath(node.args[0], ctx)) {
-            ctx.boundLoopVars.add(name);
-          } else {
-            ctx.boundLoopVars.remove(name);
-          }
-        }
-        try {
+        _withLoopVar(loopVarName(node.args[1]), node.args[0], ctx, () {
           for (var i = 2; i < node.args.length; i++) {
             mappedArgs.add(map(node.args[i]));
           }
-        } finally {
-          if (name != null) {
-            if (wasBound) {
-              ctx.boundLoopVars.add(name);
-            } else {
-              ctx.boundLoopVars.remove(name);
-            }
-          }
-        }
+        });
       } else {
         mappedArgs.addAll(node.args.map(map));
       }
@@ -625,28 +759,19 @@ Ast? _materializeLazyBuiltin(CompNode node, _Ctx ctx, Set<String> scoped) {
   if (varName == null) return null;
   final nextScoped = {...scoped, varName};
   final list = _materializeExpr(node.args[0], ctx, nextScoped);
-  final wasBound = ctx.boundLoopVars.contains(varName);
-  if (_isBoundPath(list, ctx)) {
-    ctx.boundLoopVars.add(varName);
-  } else {
-    ctx.boundLoopVars.remove(varName);
-  }
-  try {
-    return node.copyWith(
+  return _withLoopVar(
+    varName,
+    list,
+    ctx,
+    () => node.copyWith(
       args: [
         list,
         node.args[1],
         for (var i = 2; i < node.args.length; i++)
           _materializeExpr(node.args[i], ctx, nextScoped),
       ],
-    );
-  } finally {
-    if (wasBound) {
-      ctx.boundLoopVars.add(varName);
-    } else {
-      ctx.boundLoopVars.remove(varName);
-    }
-  }
+    ),
+  );
 }
 
 Ast _materializeExpr(Ast node, _Ctx ctx, Set<String> scoped) {
@@ -896,6 +1021,7 @@ ParseResult _buildResult(
   String? rootName, {
   ({String name, Set<Statement> stmts})? partialRef,
   Set<String> boundNames = const {},
+  Map<String, Object?> boundSchemas = const {},
 }) {
   final entry = _pickEntry(stmtMap, rootName);
   final syms = <String, Ast>{
@@ -916,7 +1042,8 @@ ParseResult _buildResult(
     schema: schema,
     partial: wasIncomplete,
     unreached: unreached,
-    boundNames: boundNames,
+    boundNames: {...boundNames, ...boundSchemas.keys},
+    boundSchemas: boundSchemas,
   )..currentStatementId = entry?.id;
   ElementNode? root;
   Ast? rootExpression;
@@ -1030,6 +1157,7 @@ ParseResult parseProgram(
   CompiledSchema schema, {
   String? rootName,
   Set<String> boundNames = const {},
+  Map<String, JsonSchema> boundSchemas = const {},
 }) {
   final trimmed = preprocess(input);
   if (trimmed.isEmpty) return ParseResult.empty();
@@ -1043,6 +1171,7 @@ ParseResult parseProgram(
     schema,
     rootName,
     boundNames: boundNames,
+    boundSchemas: boundSchemas,
   );
 }
 

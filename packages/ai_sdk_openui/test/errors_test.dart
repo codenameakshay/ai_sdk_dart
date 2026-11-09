@@ -29,7 +29,7 @@ void main() {
     expect(error.toJson()['severity'], 'warning');
   });
 
-  test('the codes carry the 15 lang-core wire strings in order', () {
+  test('the codes carry their wire strings in order', () {
     expect(OpenUiErrorCode.values.map((c) => c.wire), [
       'missing-required',
       'null-required',
@@ -47,7 +47,14 @@ void main() {
       'tool-not-found',
       'tool-error',
       'mcp-error',
+      'unknown-bound-path',
     ]);
+  });
+
+  test('every validation code has a session error code', () {
+    for (final code in ValidationCode.values) {
+      expect(OpenUiErrorCode.values.byName(code.name).wire, code.wire);
+    }
   });
 
   test('errorMessage gives the message of each kind of throwable', () {

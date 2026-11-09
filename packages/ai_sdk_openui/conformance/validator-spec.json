@@ -8,7 +8,7 @@
   "components": {
     "Out": {
       "description": "Shows a value, an amount and an action.",
-      "signature": "Out(value: any, amount?: $bound<any>, action?: ActionExpression, payment?: {amount: $bound<any>})"
+      "signature": "Out(value: any, amount?: $bound<any>, action?: ActionExpression, payment?: {amount: $bound<any>}, money?: $bound<{minor: number, currency: string}>)"
     }
   },
   "id": "validator-conformance",
@@ -93,6 +93,23 @@
               "amount"
             ],
             "type": "object"
+          },
+          "money": {
+            "additionalProperties": false,
+            "properties": {
+              "minor": {
+                "type": "number"
+              },
+              "currency": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "minor",
+              "currency"
+            ],
+            "type": "object",
+            "x-openui-bound": true
           }
         },
         "required": [

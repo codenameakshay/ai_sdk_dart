@@ -1,7 +1,8 @@
 import 'package:ai_sdk_openui/ai_sdk_openui.dart';
 
 /// The library behind `conformance/validator-spec.json`: a bound-only prop at
-/// the top level and nested, an action slot, and a bound-only action param.
+/// the top level and nested, an action slot, a typed bound-only money prop,
+/// and a bound-only action param.
 final class _Out implements ComponentSpec {
   const _Out();
   @override
@@ -14,6 +15,10 @@ final class _Out implements ComponentSpec {
     'amount': S.any().boundOnly().optional(),
     'action': actionSchema.optional(),
     'payment': S.object({'amount': S.any().boundOnly()}).optional(),
+    'money': S
+        .object({'minor': S.number(), 'currency': S.string()})
+        .boundOnly()
+        .optional(),
   };
 }
 

@@ -139,12 +139,14 @@ ValidationReport validateProgram(
   String? rootName,
   ValidationPolicy policy = const ValidationPolicy(),
   Set<String> boundNames = const {},
+  Map<String, JsonSchema> boundSchemas = const {},
 }) {
   final result = parseProgram(
     program,
     schema,
     rootName: rootName,
     boundNames: boundNames,
+    boundSchemas: boundSchemas,
   );
   final issues = <ValidationIssue>[
     for (final e in result.meta.errors)

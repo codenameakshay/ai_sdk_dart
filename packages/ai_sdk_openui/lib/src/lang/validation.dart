@@ -27,7 +27,8 @@ enum ValidationCode {
   typeMismatch('type-mismatch'),
   unknownFunction('unknown-function'),
   noRoot('no-root'),
-  boundOnly('bound-only');
+  boundOnly('bound-only'),
+  unknownBoundPath('unknown-bound-path');
 
   const ValidationCode(this.wire);
   final String wire;
@@ -201,11 +202,20 @@ final class BoundOnly extends Issue {
   const BoundOnly() : super(ValidationCode.boundOnly);
 }
 
+/// A bound path, such as `$order.nope`, that its record's schema lacks.
+final class UnknownBoundPath extends Issue {
+  const UnknownBoundPath(this.boundPath)
+    : super(ValidationCode.unknownBoundPath);
+  final String boundPath;
+}
+
 String _message(String component, String path, Issue issue) => switch (issue) {
   TypeMismatch(:final expected, :final actual) =>
     'field "$path" expects $expected but got $actual',
   BoundOnly() =>
     'field "$path" accepts only a path into a host-bound \$variable, such as \$order.total',
+  UnknownBoundPath(:final boundPath) =>
+    'field "$path" reads $boundPath, which the bound record\'s schema does not have',
   Missing(:final code, :final signature) =>
     '${code == ValidationCode.nullRequired ? 'required field "$path" cannot be null' : 'missing required field "$path"'}'
         '${signature != null ? ' — signature: $signature' : ''}',

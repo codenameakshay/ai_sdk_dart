@@ -266,7 +266,7 @@ void main() {
     expect(pumped.events.single.type, 'Ping');
   });
 
-  testWidgets('two Buttons with the same action and params get different keys', (
+  testWidgets('two Buttons with the same action and params share one key', (
     tester,
   ) async {
     await pumpProgram(
@@ -279,7 +279,7 @@ void main() {
     await tester.pump();
     await tapText(tester, 'Pay again');
     expect(calls, hasLength(2));
-    expect(calls[1].idempotencyKey, isNot(calls[0].idempotencyKey));
+    expect(calls[1].idempotencyKey, calls[0].idempotencyKey);
   });
 
   testWidgets('a finished action survives a restore', (tester) async {

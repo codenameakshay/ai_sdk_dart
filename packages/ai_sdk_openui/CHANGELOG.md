@@ -9,6 +9,9 @@
   `confirm:` makes `run` wait for `confirmed: true`, and `disableAfterSuccess:` stops repeats. Statuses are saved
   in `session.state` under `__openui_actions` and restored from `initialState`; a run cut off mid-flight restores
   as failed. Actions without a handler still reach the host as events.
+- A handled action's idempotency key and status come from the message scope, the action name and its resolved
+  params, never from the control's position: an `@Each` row keeps its key, and a `disableAfterSuccess` row stays
+  disabled, when a restore adds rows around it. Two controls with the same action and params share one key.
 - `Impure` (the clock and random seams that `@Today`, `@Now` and `@Random` use) is public, so hosts and tests can pin time and randomness.
 - `intelligentUiWithout(optionalIuiComponents)` gives a library without Math, Map, MapMarker, YouTube and HtmlView, and `chatPromptFor(library)` / `dashboardPrompt(library:)` drop the medium-rule clauses for components the library lacks. `intelligentUi` and `chatPrompt` are unchanged.
 - `library.validate(program, policy: ValidationPolicy(...))` and `validateProgram` (from a spec's JSON Schema

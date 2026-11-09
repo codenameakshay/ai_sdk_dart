@@ -237,6 +237,7 @@ final class OpenUiSession {
   final Set<String> _locallyRunActions = {};
   final Set<String> _locallyRunPlans = {};
   final Set<String> _runningActionNodes = {};
+  final Set<String> _runningPlans = {};
   final Map<String, _ActiveAction> _activeActions = {};
   final Map<String, _ActivePlan> _activePlans = {};
   late final Map<String, ActionSpec> _handled = {
@@ -722,7 +723,7 @@ final class OpenUiSession {
     return _store.snapshot;
   }
 
-  String _planKey(ActionPlan plan, String nodeId) {
+  String _planKey(ActionPlan plan) {
     final steps = [
       for (final step in plan.steps)
         {
@@ -740,7 +741,7 @@ final class OpenUiSession {
             }?.jsFields,
         },
     ];
-    return actionBaseKey(actionScope, nodeId, '__plan', {'steps': steps});
+    return actionBaseKey(actionScope, '__plan', {'steps': steps});
   }
 
   void _writePlan(String key, _PlanRun plan) {
@@ -754,14 +755,14 @@ final class OpenUiSession {
     _onChange();
   }
 
-  bool _completedPlanIsDisabled(ActionPlan plan, String nodeId) {
+  bool _completedPlanIsDisabled(ActionPlan plan) {
     for (final step in plan.steps) {
       if (step case CustomStep(:final name, :final params)) {
         final spec = _handled[name];
         if (spec == null || !spec.disableAfterSuccess) continue;
         final normalized =
             Js.normalize(params, json: true)! as Map<String, Object?>;
-        final base = actionBaseKey(actionScope, nodeId, spec.name, normalized);
+        final base = actionBaseKey(actionScope, spec.name, normalized);
         if (_actions[base]?.phase == ActionPhase.done) return true;
       }
     }
@@ -823,16 +824,21 @@ final class OpenUiSession {
     final guarded = plan.steps.any(
       (s) => s is CustomStep && _handled.containsKey(s.name),
     );
-    final planKey = guarded ? _planKey(plan, nodeId) : null;
+    final planKey = guarded ? _planKey(plan) : null;
     final savedPlan = planKey == null ? null : _plans[planKey];
     if (savedPlan?.phase == ActionPhase.done &&
-        _completedPlanIsDisabled(plan, nodeId)) {
+        _completedPlanIsDisabled(plan)) {
       return;
     }
     final start = savedPlan?.phase == ActionPhase.done
         ? 0
         : savedPlan?.cursor ?? 0;
-    if (guarded && !_runningActionNodes.add(nodeId)) return;
+    // Another node may run the same plan (same key): it waits for this run.
+    if (guarded &&
+        (_runningPlans.contains(planKey) || !_runningActionNodes.add(nodeId))) {
+      return;
+    }
+    if (guarded) _runningPlans.add(planKey!);
     try {
       if (guarded) {
         _activePlans[nodeId] = (cursor: start, plan: plan);
@@ -945,6 +951,7 @@ final class OpenUiSession {
     } finally {
       if (guarded) {
         _runningActionNodes.remove(nodeId);
+        _runningPlans.remove(planKey);
         _activeActions.remove(nodeId);
         _activePlans.remove(nodeId);
         _onChange();
@@ -978,7 +985,7 @@ final class OpenUiSession {
     int nextCursor = 0,
     bool done = false,
   }) async {
-    final base = actionBaseKey(actionScope, nodeId, spec.name, params);
+    final base = actionBaseKey(actionScope, spec.name, params);
     final last = _actions[base];
     if (last?.phase == ActionPhase.pending) return false;
     if (last?.phase == ActionPhase.done && spec.disableAfterSuccess) {
@@ -1058,7 +1065,7 @@ final class OpenUiSession {
     if (handled.isEmpty) return null;
     final activePlan = _activePlans[nodeId];
     final planState = activePlan == null
-        ? _plans[_planKey(plan!, nodeId)]
+        ? _plans[_planKey(plan!)]
         : (
             phase: ActionPhase.pending,
             cursor: activePlan.cursor,
@@ -1084,14 +1091,13 @@ final class OpenUiSession {
         active?.base ??
         actionBaseKey(
           actionScope,
-          nodeId,
           spec.name,
           Js.normalize(params, json: true)! as Map<String, Object?>,
         );
     final r = _actions[base];
     final phase = planState?.phase ?? r?.phase ?? ActionPhase.idle;
     final disableAfterSuccess =
-        phase == ActionPhase.done && _completedPlanIsDisabled(plan!, nodeId);
+        phase == ActionPhase.done && _completedPlanIsDisabled(plan!);
     return ActionStatus(
       phase: phase,
       idempotencyKey: '$base-${_nextAttempt(r)}',
@@ -1143,6 +1149,7 @@ final class OpenUiSession {
     if (_disposed) return;
     _disposed = true;
     _runningActionNodes.clear();
+    _runningPlans.clear();
     _activeActions.clear();
     _activePlans.clear();
     _locallyRunActions.clear();

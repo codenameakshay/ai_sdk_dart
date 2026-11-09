@@ -146,7 +146,7 @@ void main() {
           ),
         ],
       );
-      final base = actionBaseKey('m1', 'button', 'Pay', const {});
+      final base = actionBaseKey('m1', 'Pay', const {});
       final session = OpenUiSession(library, actionScope: 'm1')
         ..update(_program, streaming: true)
         ..update(
@@ -242,7 +242,7 @@ void main() {
   });
 
   test('late context restores pending as failed and done as disabled', () {
-    final key = actionBaseKey('m1', 'button', 'Pay', const {});
+    final key = actionBaseKey('m1', 'Pay', const {});
     final pending = _replay({
       actionStateKey: {
         key: {'phase': 'pending', 'attempt': 1},

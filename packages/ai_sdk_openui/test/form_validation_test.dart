@@ -288,6 +288,8 @@ void main() {
     test('ignores every quantified group that holds a quantifier', () {
       for (final pattern in [
         r'^(a*)*$',
+        r'^(a?){25}a{25}$',
+        r'^(?:a?)+$',
         r'(?:a+){2,}',
         r'((a+)b)+',
         r'(a{1,3})+',
@@ -304,6 +306,9 @@ void main() {
     test('still checks patterns without a nested quantifier', () {
       for (final pattern in [
         r'^(ab)+$',
+        r'^(?:ab)+$',
+        r'^\?+$',
+        r'^[?]+$',
         r'^(a+)?$',
         r'^\(a+\)+$',
         r'^[(a+)]+$',

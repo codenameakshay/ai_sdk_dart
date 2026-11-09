@@ -261,6 +261,8 @@ bool _hasNestedQuantifier(String pattern) {
         if (inner && i + 1 < pattern.length && '*+{'.contains(pattern[i + 1])) {
           return true;
         }
+      case '?' when i > 0 && pattern[i - 1] != '(':
+        repeats = true;
       case '*' || '+' || '{':
         repeats = true;
     }

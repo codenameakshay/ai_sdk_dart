@@ -34,6 +34,7 @@ class OpenUiView extends StatefulWidget {
     this.child,
     this.fallbackServices = const OpenUiServices(),
     this.semanticsIdentifiers = false,
+    this.fallback,
   });
 
   final OpenUiSession session;
@@ -54,6 +55,11 @@ class OpenUiView extends StatefulWidget {
   /// Sets a Semantics identifier `openui:<id>` on each element (for UI tests).
   /// Off by default: each element then adds a container node to the semantics tree.
   final bool semanticsIdentifiers;
+
+  /// Shown in place of the content when the settled answer has errors and no
+  /// root, as under the session's `ValidationPolicy` when it fails an answer.
+  /// Null shows nothing.
+  final Widget? fallback;
 
   /// react-lang `useRendererQuery`: the nearest view's Query state.
   static OpenUiQueryState queryOf(BuildContext context) =>
@@ -122,10 +128,14 @@ class _OpenUiViewState extends State<OpenUiView> {
       _fallback = widget.fallbackServices;
       _services = ambient.orElse(widget.fallbackServices);
     }
+    final root = session.root;
     return OpenUiScope(
       services: _services,
       child: _RendererScope(
-        root: session.root,
+        root: root,
+        fallback: root == null && session.errors.isNotEmpty
+            ? widget.fallback
+            : null,
         query: OpenUiQueryState._(
           isLoading: session.isQueryLoading,
           errors: session.queryErrors,
@@ -169,11 +179,15 @@ final class OpenUiQueryState {
 class _RendererScope extends InheritedWidget {
   const _RendererScope({
     required this.root,
+    required this.fallback,
     required this.query,
     required this.queryLoader,
     required super.child,
   });
   final OpenUiElement? root;
+
+  /// The view's fallback, when the answer failed; else null.
+  final Widget? fallback;
   final OpenUiQueryState query;
   final Widget? queryLoader;
 
@@ -223,7 +237,7 @@ class _DefaultContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final scope = _RendererScope.of(context);
     final root = scope.root;
-    if (root == null) return const SizedBox.shrink();
+    if (root == null) return scope.fallback ?? const SizedBox.shrink();
     final loading = scope.query.isLoading;
     final content = AnimatedOpacity(
       opacity: loading ? 0.7 : 1,
@@ -258,7 +272,7 @@ class OpenUiContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final scope = _RendererScope.of(context);
     final root = scope.root;
-    if (root == null) return const SizedBox.shrink();
+    if (root == null) return scope.fallback ?? const SizedBox.shrink();
     final query = scope.query;
     return Visibility(
       visible: query.errors.isEmpty,
@@ -436,7 +450,13 @@ class _OpenUiElementViewState extends State<OpenUiElementView> {
   Widget build(BuildContext context) {
     final runtime = _RuntimeScope.of(context);
     final builder = runtime.builders(widget.element.typeName);
-    if (builder == null) return const SizedBox.shrink();
+    if (builder == null) {
+      runtime.session.reportRenderError(
+        widget.element.typeName,
+        'no builder for ${widget.element.typeName}',
+      );
+      return const SizedBox.shrink();
+    }
     final id =
         widget.id ?? widget.element.statementId ?? widget.element.typeName;
     final node = OpenUiNode._(

@@ -3,6 +3,8 @@ import 'dart:async';
 import '../lang/ast.dart';
 import '../lang/js.dart';
 import '../lang/parser.dart';
+import '../lang/policy.dart';
+import '../lang/validation.dart' show ValidationCode;
 import '../spec/bound.dart';
 import '../spec/library.dart';
 import 'errors.dart';
@@ -183,6 +185,7 @@ final class OpenUiSession {
     String? locale,
     this.actionScope = '',
     this.resolveAction,
+    this.policy = const ValidationPolicy(),
   }) : locale = resolveLocale(locale),
        _tools = {for (final t in tools) t.name: t},
        _initialState = initialState,
@@ -249,6 +252,13 @@ final class OpenUiSession {
   /// restores as failed and a retry sends the same key.
   final Future<ActionResult> Function(ActionInvocation invocation)?
   resolveAction;
+
+  /// The [ValidationPolicy] the answer runs under. A `fail`
+  /// [ValidationPolicy.unknownComponents] gives no [root] when the program
+  /// names a component the library lacks; [ValidationPolicy.maxNodes] caps the
+  /// evaluated tree, `@Each` expansions included, and past it gives no [root]
+  /// and a `too-many-nodes` error. Its other limits apply only to `validate`.
+  final ValidationPolicy policy;
 
   final Map<String, _Run> _actions = {};
 
@@ -669,9 +679,34 @@ final class OpenUiSession {
       _root = null;
       return;
     }
+    if (policy.unknownComponents == UnknownComponentPolicy.fail &&
+        result.meta.errors.any(
+          (e) => e.code == ValidationCode.unknownComponent,
+        )) {
+      _root = null;
+      return;
+    }
+    final max = policy.maxNodes;
     try {
-      final node = evaluateRoot(result, _context, library.isReactive, errors);
+      final node = evaluateRoot(
+        result,
+        max == null ? _context : _context.copyWith(nodes: NodeBudget(max)),
+        library.isReactive,
+        errors,
+      );
+      if (max != null) NodeBudget(max).spendTree(node);
       _root = node == null ? null : OpenUiElement._(node);
+    } on NodeLimitExceeded {
+      errors.add(
+        OpenUiError(
+          source: OpenUiErrorSource.runtime,
+          code: OpenUiErrorCode.tooManyNodes,
+          statementId: result.root?.statementId ?? 'root',
+          message:
+              'The answer builds more than $max components; the limit is $max',
+        ),
+      );
+      _root = null;
     } catch (e) {
       // coverage:ignore-start
       errors.add(

@@ -2,6 +2,10 @@
 
 - An app can depend on `ai_sdk_openui` and this package from git at one commit, with no
   `dependency_overrides`: unreleased siblings are path dependencies (see `docs/git-dependencies.md`).
+- A component with no builder reports a `render-error` to the session's `onError` instead of rendering
+  nothing silently. `OpenUiView(fallback:)` shows a widget when the settled answer has errors and no root, as
+  when a `ValidationPolicy` fails it. `intelligentUiFor(builders, library:)` takes a host library and throws
+  an `ArgumentError` naming each host-added component the lookup cannot build.
 - Button, IconButton and Pressable show a handled action's pending, done and failed states, ask for an inline
   confirmation when the action has `confirm`, and stay disabled after success with `disableAfterSuccess`.
   `OpenUiNode` gains `actionStatus(prop)` and `run(confirmed:)`.

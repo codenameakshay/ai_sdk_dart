@@ -1,5 +1,6 @@
 ## 3.1.0 (unreleased)
 
+- `OpenUiView` passes `fallback:` through to the core view.
 - `OpenUiChat` takes `send` for any transport, `locale` and `records`; `agent` is optional. The chat
   renders answers stored as text parts, and `package:open_intelligent_ui/chat.dart` exports
   `OpenUiAnswerView`.

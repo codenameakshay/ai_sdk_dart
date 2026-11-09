@@ -128,6 +128,40 @@ final class RuntimeFunction {
   final Object? Function(Map<String, Object?> args, String locale)? localized;
 }
 
+/// Thrown when one evaluation builds more components than its [NodeBudget].
+final class NodeLimitExceeded implements Exception {
+  const NodeLimitExceeded(this.max);
+  final int max;
+}
+
+/// Counts the components one evaluation builds, so `@Each` cannot expand a
+/// program past [max]; [spend] throws [NodeLimitExceeded] beyond it. An
+/// `@Each` item that builds no component (a string, a number) still costs
+/// one, so nested loops of plain values are capped too.
+final class NodeBudget {
+  NodeBudget(this.max);
+  final int max;
+  int _spent = 0;
+  int get spent => _spent;
+
+  void spend() {
+    if (++_spent > max) throw NodeLimitExceeded(max);
+  }
+
+  /// Spends one per component in [value], an evaluated tree.
+  void spendTree(Object? value) {
+    switch (value) {
+      case ElementNode(:final props):
+        spend();
+        props.values.forEach(spendTree);
+      case List():
+        value.forEach(spendTree);
+      case Map():
+        value.values.forEach(spendTree);
+    }
+  }
+}
+
 /// What evaluation reads from: state, statement refs, library calls.
 final class EvaluationContext {
   const EvaluationContext({
@@ -138,6 +172,7 @@ final class EvaluationContext {
     this.extraScope,
     this.reportError,
     this.locale,
+    this.nodes,
   });
 
   final Object? Function(String name) getState;
@@ -152,10 +187,14 @@ final class EvaluationContext {
   /// The intl locale functions format in; null for the reference's en-US output.
   final String? locale;
 
+  /// Caps the components this evaluation builds; null for no cap.
+  final NodeBudget? nodes;
+
   EvaluationContext copyWith({
     Object? Function(String name)? resolveRef,
     Map<String, Object?>? extraScope,
     void Function(String message)? reportError,
+    NodeBudget? nodes,
   }) => EvaluationContext(
     getState: getState,
     resolveRef: resolveRef ?? this.resolveRef,
@@ -164,6 +203,7 @@ final class EvaluationContext {
     extraScope: extraScope ?? this.extraScope,
     reportError: reportError ?? this.reportError,
     locale: locale,
+    nodes: nodes ?? this.nodes,
   );
 }
 
@@ -294,6 +334,7 @@ Object? _evaluateCall(
   }
   final mapped = node.mappedProps;
   if (mapped == null) return null;
+  ctx.nodes?.spend();
   final props = <String, Object?>{};
   for (final MapEntry(key: prop, :value) in mapped.entries) {
     if (value is StateRefNode && (reactive?.call(node.name, prop) ?? false)) {
@@ -543,6 +584,7 @@ List<Object?> _evaluateEach(
   return [
     for (final item in list)
       () {
+        final before = ctx.nodes?.spent;
         final childCtx = ctx.copyWith(
           resolveRef: (ref) => ref == varName ? item : ctx.resolveRef(ref),
         );
@@ -551,9 +593,11 @@ List<Object?> _evaluateEach(
           childCtx,
           reactive,
         );
-        return reactive != null && result is ElementNode
+        final out = reactive != null && result is ElementNode
             ? evaluateElement(result, childCtx, reactive)
             : result;
+        if (before != null && ctx.nodes!.spent == before) ctx.nodes!.spend();
+        return out;
       }(),
   ];
 }
@@ -590,6 +634,8 @@ ElementNode evaluateElementProps(
         recurseElement: (child) =>
             evaluateElementProps(child, propCtx, reactive, errors),
       );
+    } on NodeLimitExceeded {
+      rethrow;
     } catch (e) {
       // lang-core keeps the raw value; Dart props never hold syntax, so it reads as null.
       out[prop] = null;

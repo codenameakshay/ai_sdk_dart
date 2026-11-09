@@ -76,6 +76,22 @@ void main() {
       expect(watch.elapsed, lessThan(const Duration(seconds: 2)));
     });
 
+    test('stops nested @Each over plain values too', () {
+      const program =
+          'root = Col([Text(@Join(@Each(@Range(0, 10000), "i", @Each(@Range(0, 10000), "j", "x")), ""))])';
+      final watch = Stopwatch()..start();
+      final session = _settled(
+        intelligentUi,
+        program,
+        const ValidationPolicy(maxNodes: 24),
+      );
+      addTearDown(session.dispose);
+
+      expect(session.root, isNull);
+      expect(session.errors.single.code, OpenUiErrorCode.tooManyNodes);
+      expect(watch.elapsed, lessThan(const Duration(seconds: 2)));
+    });
+
     test('counts written and expanded components together', () {
       const program =
           'root = Col([Text("a"), @Each(@Range(0, 3), "i", Text("x"))])';

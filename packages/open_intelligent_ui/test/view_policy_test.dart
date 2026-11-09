@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart' show ChatController;
+import 'package:open_intelligent_ui/chat.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
 
 final class _MoneyRow implements ComponentSpec {
@@ -139,6 +141,26 @@ void main() {
     test('rejects a host component the lookup cannot build', () {
       expect(
         () => intelligentUiFor(openUiCoreBuilders, library: _withMoneyRow),
+        throwsA(
+          isA<ArgumentError>().having(
+            (e) => e.message,
+            'message',
+            'has no builder for MoneyRow',
+          ),
+        ),
+      );
+    });
+
+    test('OpenUiChat rejects a host component it cannot build', () {
+      final controller = ChatController();
+      addTearDown(controller.dispose);
+      expect(
+        () => OpenUiChat(
+          controller: controller,
+          send: (_) async {},
+          library: _withMoneyRow,
+          builders: openUiCoreBuilders,
+        ),
         throwsA(
           isA<ArgumentError>().having(
             (e) => e.message,

@@ -29,7 +29,10 @@ base class OpenUiChat {
     this.fallbackServices = const OpenUiServices(),
     this.locale,
     this.records,
-  }) : library = library ?? intelligentUiFor(builders ?? openUiCoreBuilders),
+  }) : library = intelligentUiFor(
+         builders ?? openUiCoreBuilders,
+         library: library,
+       ),
        builders = builders ?? openUiCoreBuilders {
     if (agent == null && send == null) {
       throw ArgumentError('OpenUiChat needs an agent or a send function.');

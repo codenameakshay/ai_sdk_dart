@@ -135,11 +135,14 @@ final class NodeLimitExceeded implements Exception {
 }
 
 /// Counts the components one evaluation builds, so `@Each` cannot expand a
-/// program past [max]; [spend] throws [NodeLimitExceeded] beyond it.
+/// program past [max]; [spend] throws [NodeLimitExceeded] beyond it. An
+/// `@Each` item that builds no component (a string, a number) still costs
+/// one, so nested loops of plain values are capped too.
 final class NodeBudget {
   NodeBudget(this.max);
   final int max;
   int _spent = 0;
+  int get spent => _spent;
 
   void spend() {
     if (++_spent > max) throw NodeLimitExceeded(max);
@@ -581,6 +584,7 @@ List<Object?> _evaluateEach(
   return [
     for (final item in list)
       () {
+        final before = ctx.nodes?.spent;
         final childCtx = ctx.copyWith(
           resolveRef: (ref) => ref == varName ? item : ctx.resolveRef(ref),
         );
@@ -589,9 +593,11 @@ List<Object?> _evaluateEach(
           childCtx,
           reactive,
         );
-        return reactive != null && result is ElementNode
+        final out = reactive != null && result is ElementNode
             ? evaluateElement(result, childCtx, reactive)
             : result;
+        if (before != null && ctx.nodes!.spent == before) ctx.nodes!.spend();
+        return out;
       }(),
   ];
 }

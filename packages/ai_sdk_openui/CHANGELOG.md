@@ -2,7 +2,8 @@
 
 - `OpenUiSession(policy: ValidationPolicy(...))` applies the validator's policy at runtime. With
   `unknownComponents: UnknownComponentPolicy.fail`, a program that names a component the library lacks has no
-  `root`. `maxNodes` caps the evaluated tree, `@Each` expansions included: past it the session stops
+  `root`. `maxNodes` caps the evaluated tree, `@Each` expansions included (an item that builds no component,
+  such as a string, still counts as one): past it the session stops
   evaluating, has no `root`, and reports a `too-many-nodes` error. `OpenUiErrorCode` gains `tooManyNodes`, so an
   exhaustive `switch` over it needs a new case.
 - `OpenUiAnswers` keeps one session per message for any transport: feed it full text, deltas, edit-mode patches or a

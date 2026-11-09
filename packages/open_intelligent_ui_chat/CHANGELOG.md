@@ -1,5 +1,7 @@
 ## 3.1.0 (unreleased)
 
+- `OpenUiChat(library:)` passes the host library through `intelligentUiFor`, so a host component with no
+  builder throws an `ArgumentError` and a built-in component the builders cannot draw is left out.
 - First release: OpenUiChat and OpenUiUserMessage, split from open_intelligent_ui.
 - `OpenUiChat` takes `send` instead of an agent for any transport (`agent` is now optional), renders answers
   stored as text parts (as `ConversationChatController` stores them), passes `locale` and `records` to each

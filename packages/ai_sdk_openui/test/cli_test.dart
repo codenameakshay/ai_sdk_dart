@@ -234,8 +234,133 @@ void main() {
     expect(code, 64);
   });
 
-  test('a command other than validate is a usage error', () async {
-    final (code, _, _) = await cli(['spec', 'spec.json', 'ok.oui']);
+  test('a command other than validate or spec is a usage error', () async {
+    final (code, _, _) = await cli(['render', 'spec.json', 'ok.oui']);
     expect(code, 64);
+  });
+
+  group('spec', () {
+    test('canonical JSON sorts keys but keeps schema property order', () {
+      expect(
+        canonicalJson({
+          'b': [3, 1],
+          'a': {
+            'properties': {
+              'z': {'y': 1, 'x': 2},
+              'properties': {'d': 1, 'c': 2},
+            },
+          },
+        }),
+        '{\n'
+        '  "a": {\n'
+        '    "properties": {\n'
+        '      "z": {\n'
+        '        "x": 2,\n'
+        '        "y": 1\n'
+        '      },\n'
+        '      "properties": {\n'
+        '        "c": 2,\n'
+        '        "d": 1\n'
+        '      }\n'
+        '    }\n'
+        '  },\n'
+        '  "b": [\n'
+        '    3,\n'
+        '    1\n'
+        '  ]\n'
+        '}\n',
+      );
+    });
+
+    test('prints a built-in library as canonical JSON', () async {
+      final (code, out, _) = await cli(['spec', 'intelligent-ui']);
+      expect(code, 0);
+      expect(out, canonicalJson(intelligentUi.toSpec()));
+      expect(out, endsWith('}\n'));
+      final keys = (jsonDecode(out) as Map).keys.toList();
+      expect(keys, [...keys]..sort());
+    });
+
+    test('canonicalises a spec file whatever its key order', () async {
+      final (code, out, _) = await cli(['spec', 'hostlib.json']);
+      expect(code, 0);
+      final reordered = Map.fromEntries(
+        (jsonDecode(files['hostlib.json']!) as Map<String, Object?>).entries
+            .toList()
+            .reversed,
+      );
+      files['reordered.json'] = jsonEncode(reordered);
+      expect((await cli(['spec', 'reordered.json'])).$2, out);
+      expect(out, contains('"x-openui-bound": true'));
+      expect(jsonDecode(out)['actions'], contains('Pay'));
+    });
+
+    test('policy flags add the caps to the spec', () async {
+      final (code, out, _) = await cli([
+        'spec',
+        'hostlib.json',
+        '--max-nodes=24',
+        '--max-depth=8',
+        '--max-string=280',
+        '--unknown=fail',
+        '--allow-actions=ToAssistant,Pay',
+      ]);
+      expect(code, 0);
+      expect(jsonDecode(out)['policy'], {
+        'allowedActions': ['Pay', 'ToAssistant'],
+        'maxDepth': 8,
+        'maxNodes': 24,
+        'maxStringLength': 280,
+        'unknownComponents': 'fail',
+      });
+      files['capped.json'] = out;
+    });
+
+    test(
+      'validate applies a policy the spec carries, under the flags',
+      () async {
+        files['capped.json'] = (await cli([
+          'spec',
+          'spec.json',
+          '--max-nodes=1',
+        ])).$2;
+        final (capped, out, _) = await cli([
+          'validate',
+          'capped.json',
+          'big.oui',
+        ]);
+        expect(capped, 1);
+        expect(jsonDecode(out)['issues'][0]['code'], 'too-many-nodes');
+
+        final (raised, _, _) = await cli([
+          'validate',
+          'capped.json',
+          'big.oui',
+          '--max-nodes=9',
+        ]);
+        expect(raised, 0);
+      },
+    );
+
+    test('validate takes a built-in library name', () async {
+      final (code, _, _) = await cli(['validate', 'intelligent-ui', 'ok.oui']);
+      expect(code, 0);
+    });
+
+    test('bad input and usage are reported', () async {
+      expect((await cli(['spec'])).$1, 64);
+      expect((await cli(['spec', 'spec.json', 'extra'])).$1, 64);
+      expect((await cli(['spec', 'spec.json', r'--bound=$order'])).$1, 64);
+      expect((await cli(['spec', 'spec.json', '--root=Col'])).$1, 64);
+      expect((await cli(['spec', 'broken.json'])).$1, 2);
+      files['list.json'] = '[]';
+      expect((await cli(['spec', 'list.json'])).$1, 2);
+      files['badpolicy.json'] = jsonEncode({
+        'schema': intelligentUi.toJsonSchema(),
+        'policy': {'unknownComponents': 'maybe'},
+      });
+      expect((await cli(['spec', 'badpolicy.json'])).$1, 2);
+      expect((await cli(['validate', 'badpolicy.json', 'ok.oui'])).$1, 2);
+    });
   });
 }

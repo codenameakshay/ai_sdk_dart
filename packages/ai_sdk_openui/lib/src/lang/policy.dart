@@ -27,6 +27,52 @@ final class ValidationPolicy {
   /// Built-in steps (`ToAssistant`, `OpenUrl`, `Set`, `Reset`, `Run`) and
   /// library actions a program may call; null allows all.
   final Set<String>? allowedActions;
+
+  /// Reads [toJson]'s form. A missing key leaves that cap off; an unknown
+  /// `unknownComponents` value throws an [ArgumentError].
+  factory ValidationPolicy.fromJson(Map<String, Object?> json) {
+    final unknown = json['unknownComponents'] as String?;
+    return ValidationPolicy(
+      maxNodes: json['maxNodes'] as int?,
+      maxDepth: json['maxDepth'] as int?,
+      maxStringLength: json['maxStringLength'] as int?,
+      unknownComponents: unknown == null
+          ? UnknownComponentPolicy.drop
+          : UnknownComponentPolicy.values.byName(unknown),
+      allowedActions: (json['allowedActions'] as List?)?.cast<String>().toSet(),
+    );
+  }
+
+  /// The policy as JSON: the caps that are set, `unknownComponents` as
+  /// `"drop"` or `"fail"`, and `allowedActions` sorted.
+  Map<String, Object?> toJson() => {
+    'maxNodes': ?maxNodes,
+    'maxDepth': ?maxDepth,
+    'maxStringLength': ?maxStringLength,
+    'unknownComponents': unknownComponents.name,
+    if (allowedActions != null)
+      'allowedActions': allowedActions!.toList()..sort(),
+  };
+}
+
+/// [value] as canonical JSON text: object keys sorted, arrays in their own
+/// order, two-space indents and a final newline. The members of a JSON Schema
+/// `properties` object keep their order, because that order is the positional
+/// order of a component's or call's arguments. Equal values give equal bytes
+/// whatever order their other maps were built in, so a regenerated
+/// `spec.json` only diffs when the library changes.
+String canonicalJson(Object? value) =>
+    '${const JsonEncoder.withIndent('  ').convert(_canonical(value, false))}\n';
+
+Object? _canonical(Object? value, bool keepOrder) {
+  if (value is List) return [for (final v in value) _canonical(v, false)];
+  if (value is! Map) return value;
+  final keys = [for (final k in value.keys) '$k'];
+  if (!keepOrder) keys.sort();
+  return {
+    for (final key in keys)
+      key: _canonical(value[key], !keepOrder && key == 'properties'),
+  };
 }
 
 final class ValidationIssue {

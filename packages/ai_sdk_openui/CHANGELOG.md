@@ -27,6 +27,13 @@
   `toSpecJson()`, including host extensions.
 - `conformance/vectors.json`: programs and the parse results `@openuidev/lang-core` 1.0.0 gives them, for any
   server; `make test-openui-conformance` checks them against lang-core, and the Dart tests check this port.
+- `openui spec <spec.json|intelligent-ui>` prints a library spec as canonical JSON (sorted keys; schema
+  `properties` keep their positional order), and `canonicalJson(library.toSpec())` prints the same bytes for a
+  host library. Policy flags add a `policy` block, which `openui validate` applies under its own flags;
+  `ValidationPolicy.toJson`/`fromJson` read and write it.
+- Validator vectors: `conformance/vectors.json` gains vectors with `bound`, `policy` and `expectReport`, run
+  against `conformance/validator-spec.json`, for every report code. `doc/validation.md` documents the report
+  (codes, severities, path syntax) as a stable contract for validators in other languages.
 - `Money`: an exact amount in integer minor units with an ISO 4217 code (scale from CLDR), parsed from
   `{minor, currency}` or `{amount: "12.34", currency}`, with `+`, `-` and `format({locale})`. It never uses a
   double. `formatMoney` adds `@FormatMoney` to a library through `extend`.

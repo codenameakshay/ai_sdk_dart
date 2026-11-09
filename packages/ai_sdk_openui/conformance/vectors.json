@@ -1,5 +1,6 @@
 {
   "spec": "../test/fixtures/spec.json",
+  "validatorSpec": "validator-spec.json",
   "langCore": "1.0.0",
   "vectors": [
     {
@@ -433,6 +434,726 @@
           "errors": []
         },
         "stateDeclarations": {}
+      }
+    },
+    {
+      "id": "report-clean",
+      "program": "root = Out($order.id, $order.total, @Pay($order.id))",
+      "bound": [
+        "$order"
+      ],
+      "policy": {
+        "maxNodes": 24,
+        "maxDepth": 8,
+        "maxStringLength": 280,
+        "unknownComponents": "fail"
+      },
+      "expectReport": {
+        "ok": true,
+        "issues": [],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-bound-only-top-level",
+      "program": "root = Out(1, {minor: 1, currency: \"INR\"})",
+      "bound": [
+        "$order"
+      ],
+      "policy": {
+        "maxNodes": 24,
+        "maxDepth": 8,
+        "maxStringLength": 280,
+        "unknownComponents": "fail"
+      },
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "bound-only",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Out",
+            "path": "/amount"
+          }
+        ],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-bound-only-unbound-name",
+      "program": "root = Out(1, $order.total)",
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "bound-only",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Out",
+            "path": "/amount"
+          }
+        ],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-bound-only-nested",
+      "program": "root = Out(1, null, null, {amount: {minor: 1, currency: \"INR\"}})",
+      "bound": [
+        "$order"
+      ],
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "bound-only",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Out",
+            "path": "/payment/amount"
+          }
+        ],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-bound-nested-path",
+      "program": "root = Out(1, null, null, {amount: $order.total})",
+      "bound": [
+        "$order"
+      ],
+      "expectReport": {
+        "ok": true,
+        "issues": [],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-bound-only-computed-container",
+      "program": "$p = {amount: 1}\nroot = Out(1, null, null, $p)",
+      "bound": [
+        "$order"
+      ],
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "bound-only",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Out",
+            "path": "/payment"
+          }
+        ],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 2
+        }
+      }
+    },
+    {
+      "id": "report-bound-each-over-record",
+      "program": "root = Out(@Each($order.items, \"it\", Out(1, it.price)))",
+      "bound": [
+        "$order"
+      ],
+      "expectReport": {
+        "ok": true,
+        "issues": [],
+        "stats": {
+          "nodes": 2,
+          "depth": 2,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-bound-only-each-over-literal",
+      "program": "root = Out(@Each([{p: 1}], \"it\", Out(1, it.p)))",
+      "bound": [
+        "$order"
+      ],
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "bound-only",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Out",
+            "path": "/amount"
+          }
+        ],
+        "stats": {
+          "nodes": 2,
+          "depth": 2,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-bound-alias-of-path",
+      "program": "total = $order.total\nroot = Out(1, total)",
+      "bound": [
+        "$order"
+      ],
+      "expectReport": {
+        "ok": true,
+        "issues": [],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 2
+        }
+      }
+    },
+    {
+      "id": "report-bound-only-literal-alias",
+      "program": "total = {minor: 1, currency: \"INR\"}\nroot = Out(1, total)",
+      "bound": [
+        "$order"
+      ],
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "bound-only",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Out",
+            "path": "/amount"
+          }
+        ],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 2
+        }
+      }
+    },
+    {
+      "id": "report-bound-only-ternary",
+      "program": "root = Out(1, true ? $order.total : $order.total)",
+      "bound": [
+        "$order"
+      ],
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "bound-only",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Out",
+            "path": "/amount"
+          }
+        ],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-bound-only-arithmetic",
+      "program": "root = Out(1, $order.total.minor + 1)",
+      "bound": [
+        "$order"
+      ],
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "bound-only",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Out",
+            "path": "/amount"
+          }
+        ],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-bound-only-declared-state",
+      "program": "$fake = {minor: 1}\nroot = Out(1, $fake)",
+      "bound": [
+        "$order"
+      ],
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "bound-only",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Out",
+            "path": "/amount"
+          }
+        ],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 2
+        }
+      }
+    },
+    {
+      "id": "report-bound-only-shadowed-record",
+      "program": "$order = {total: {minor: 1}}\nroot = Out(1, $order.total)",
+      "bound": [
+        "$order"
+      ],
+      "expectReport": {
+        "ok": true,
+        "issues": [],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 2
+        }
+      }
+    },
+    {
+      "id": "report-bound-only-action-param",
+      "program": "root = Out(1, null, @Pay(\"o-1\"))",
+      "bound": [
+        "$order"
+      ],
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "bound-only",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Pay",
+            "path": "/orderId"
+          }
+        ],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-unknown-component-drop",
+      "program": "root = Out([Foo(1), 2])",
+      "policy": {
+        "unknownComponents": "drop"
+      },
+      "expectReport": {
+        "ok": true,
+        "issues": [
+          {
+            "code": "unknown-component",
+            "severity": "warning",
+            "statementId": "root",
+            "component": "Foo"
+          }
+        ],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-unknown-component-fail",
+      "program": "root = Out([Foo(1), 2])",
+      "policy": {
+        "unknownComponents": "fail"
+      },
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "unknown-component",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Foo"
+          }
+        ],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-unknown-function",
+      "program": "root = Out(1, null, @Nope(1))",
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "unknown-function",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Nope"
+          }
+        ],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-action-not-allowed",
+      "program": "root = Out(1, null, @Pay($order.id))",
+      "bound": [
+        "$order"
+      ],
+      "policy": {
+        "allowedActions": [
+          "ToAssistant"
+        ]
+      },
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "action-not-allowed",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Out",
+            "path": "/action"
+          }
+        ],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-action-allowed",
+      "program": "root = Out(1, null, @Pay($order.id))",
+      "bound": [
+        "$order"
+      ],
+      "policy": {
+        "allowedActions": [
+          "Pay"
+        ]
+      },
+      "expectReport": {
+        "ok": true,
+        "issues": [],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-too-many-nodes",
+      "program": "root = Out(Out(Out(1)))",
+      "policy": {
+        "maxNodes": 2
+      },
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "too-many-nodes",
+            "severity": "error",
+            "statementId": "root"
+          }
+        ],
+        "stats": {
+          "nodes": 3,
+          "depth": 3,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-too-deep",
+      "program": "root = Out(Out(Out(1)))",
+      "policy": {
+        "maxDepth": 2
+      },
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "too-deep",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Out",
+            "path": "/value/value"
+          }
+        ],
+        "stats": {
+          "nodes": 3,
+          "depth": 3,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-string-too-long",
+      "program": "root = Out(\"four\")",
+      "policy": {
+        "maxStringLength": 3
+      },
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "string-too-long",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Out",
+            "path": "/value"
+          }
+        ],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-missing-required",
+      "program": "root = Out()",
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "missing-required",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Out",
+            "path": "/value"
+          }
+        ],
+        "stats": {
+          "nodes": 0,
+          "depth": 0,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-null-required",
+      "program": "root = Out(null)",
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "null-required",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Out",
+            "path": "/value"
+          }
+        ],
+        "stats": {
+          "nodes": 0,
+          "depth": 0,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-excess-args",
+      "program": "root = Out(1, null, null, null, 5)",
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "excess-args",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Out"
+          }
+        ],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-type-mismatch",
+      "program": "root = Out(1, null, null, \"x\")",
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "type-mismatch",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Out",
+            "path": "/payment"
+          }
+        ],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-inline-reserved",
+      "program": "root = Out(Query(\"t\"))",
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "inline-reserved",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Query"
+          },
+          {
+            "code": "null-required",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Out",
+            "path": "/value"
+          }
+        ],
+        "stats": {
+          "nodes": 0,
+          "depth": 0,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-no-root",
+      "program": "root = 1",
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "no-root",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Out"
+          }
+        ],
+        "stats": {
+          "nodes": 0,
+          "depth": 0,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-no-root-fallback",
+      "program": "main = Out(1)",
+      "expectReport": {
+        "ok": true,
+        "issues": [
+          {
+            "code": "no-root",
+            "severity": "warning",
+            "statementId": "main",
+            "component": "Out"
+          }
+        ],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-incomplete",
+      "program": "root = Out(\"a",
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "incomplete",
+            "severity": "error"
+          }
+        ],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-unresolved",
+      "program": "root = Out([1, later])",
+      "expectReport": {
+        "ok": true,
+        "issues": [
+          {
+            "code": "unresolved",
+            "severity": "warning"
+          }
+        ],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 1
+        }
+      }
+    },
+    {
+      "id": "report-orphaned",
+      "program": "root = Out(1)\nextra = Out(2)",
+      "expectReport": {
+        "ok": true,
+        "issues": [
+          {
+            "code": "orphaned",
+            "severity": "warning",
+            "statementId": "extra"
+          }
+        ],
+        "stats": {
+          "nodes": 1,
+          "depth": 1,
+          "statements": 2
+        }
       }
     }
   ]

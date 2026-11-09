@@ -1,0 +1,134 @@
+{
+  "actions": {
+    "Pay": {
+      "description": "Pays an order.",
+      "signature": "Pay(orderId: $bound<string>)"
+    }
+  },
+  "components": {
+    "Out": {
+      "description": "Shows a value, an amount and an action.",
+      "signature": "Out(value: any, amount?: $bound<any>, action?: ActionExpression, payment?: {amount: $bound<any>})"
+    }
+  },
+  "id": "validator-conformance",
+  "root": "Out",
+  "schema": {
+    "$defs": {
+      "ActionExpression": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "const": "open_url",
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "url"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "const": "continue_conversation",
+                "type": "string"
+              },
+              "context": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "params": {
+                "additionalProperties": {},
+                "propertyNames": {
+                  "type": "string"
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "Out": {
+        "additionalProperties": false,
+        "description": "Shows a value, an amount and an action.",
+        "properties": {
+          "value": {},
+          "amount": {
+            "x-openui-bound": true
+          },
+          "action": {
+            "$ref": "#/$defs/ActionExpression"
+          },
+          "payment": {
+            "additionalProperties": false,
+            "properties": {
+              "amount": {
+                "x-openui-bound": true
+              }
+            },
+            "required": [
+              "amount"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "type": "object"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "actions": {
+      "Pay": {
+        "description": "Pays an order.",
+        "params": {
+          "additionalProperties": false,
+          "properties": {
+            "orderId": {
+              "type": "string",
+              "x-openui-bound": true
+            }
+          },
+          "required": [
+            "orderId"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "Out": {
+        "$ref": "#/$defs/Out"
+      }
+    },
+    "required": [
+      "Out"
+    ],
+    "type": "object"
+  }
+}

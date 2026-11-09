@@ -40,6 +40,8 @@ void main() {
   final root = spec['root'] as String?;
 
   for (final v in (file['vectors']! as List).cast<Map<String, Object?>>()) {
+    // Validator vectors (expectReport only) run in validator_vectors_test.dart.
+    if (!v.containsKey('expect')) continue;
     final id = v['id']! as String;
     test('$id matches lang-core', () {
       final result = parseProgram(

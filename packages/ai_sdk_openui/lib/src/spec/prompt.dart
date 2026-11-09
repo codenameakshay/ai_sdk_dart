@@ -128,6 +128,20 @@ final class _Scope {
       !_stepCall.allMatches(text).any((m) => hidden.contains(m[1])) &&
       !absent.any((n) => RegExp('\\b$n\\b').hasMatch(text));
 
+  /// [signature] with the hidden steps taken out of its step unions; null
+  /// when a slot keeps only hidden steps, so the component cannot be written.
+  String? signature(String signature) {
+    var out = signature;
+    for (final h in hidden) {
+      out = out
+          .replaceAll(RegExp('@$h\\b\\s*\\|\\s*'), '')
+          .replaceAll(RegExp('\\s*\\|\\s*@$h\\b'), '');
+    }
+    return _stepCall.allMatches(out).any((m) => hidden.contains(m[1]))
+        ? null
+        : out;
+  }
+
   /// [text] without the sentences and `;` clauses that name what is not offered.
   String clauses(String text) {
     if (offers(text)) return text;
@@ -679,11 +693,12 @@ String _componentSignatures(
       'Props marked `\$bound<type>` take only a path into a host \$variable from Bound Data, such as `\$name.field`. A literal or computed value there is rejected.',
     );
   }
-  String format(PromptEntry c) {
+  // A component whose step slot keeps no allowed step is left out.
+  String? format(PromptEntry c) {
+    final signature = scope.signature(c.signature);
+    if (signature == null) return null;
     final description = scope.clauses(c.description ?? '');
-    return description.isNotEmpty
-        ? '${c.signature} — $description'
-        : c.signature;
+    return description.isNotEmpty ? '$signature — $description' : signature;
   }
 
   if (spec.groups.isNotEmpty) {
@@ -694,7 +709,7 @@ String _componentSignatures(
       for (final name in g.components) {
         final comp = spec.components[name];
         if (comp == null || !grouped.add(name)) continue;
-        lines.add(format(comp));
+        lines.addAll([?format(comp)]);
       }
       lines.addAll(g.notes.where(scope.offers));
     }
@@ -704,12 +719,12 @@ String _componentSignatures(
     if (ungrouped.isNotEmpty) {
       lines.addAll(['', '### Other']);
       for (final n in ungrouped) {
-        lines.add(format(spec.components[n]!));
+        lines.addAll([?format(spec.components[n]!)]);
       }
     }
   } else {
     lines.add('');
-    lines.addAll(spec.components.values.map(format));
+    lines.addAll(spec.components.values.map(format).nonNulls);
   }
   return lines.join('\n');
 }

@@ -13,6 +13,15 @@ final class _Link implements ComponentSpec {
   };
 }
 
+final class _Go implements ComponentSpec {
+  @override
+  String get typeName => 'Go';
+  @override
+  String get description => '';
+  @override
+  Map<String, Schema> get props => {'to': Steps.openUrl};
+}
+
 final _otherSteps = RegExp(r'@(OpenUrl|Run|Set|Reset|CopyToClipboard)\b');
 final _missingCapabilities = RegExp(
   r'\b(tables?|charts?|forms?)\b',
@@ -235,4 +244,17 @@ void main() {
       expect(withCopy.systemPrompt(options), isNot(contains('@Copy')));
     });
   });
+
+  test(
+    'signatures name only allowed steps, and drop a component left with none',
+    () {
+      final prompt = OpenUiLibrary(
+        root: _Link(),
+        components: [_Link(), _Go()],
+      ).systemPrompt(const PromptOptions(allowedActions: {'ToAssistant'}));
+      expect(prompt, contains('Link(action: @ToAssistant)'));
+      expect(prompt, isNot(contains('Go(')));
+      expect(_otherSteps.allMatches(prompt).map((m) => m[0]), isEmpty);
+    },
+  );
 }

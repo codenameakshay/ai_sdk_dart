@@ -10,7 +10,7 @@ import 'flex_row.dart';
 import 'media.dart' show MediaRowSlot;
 
 Widget buildCol(BuildContext context, OpenUiNode node) {
-  final gap = OpenUiTheme.space(node.props['gap']);
+  final gap = node.theme.spaceOf(node.props['gap']);
   final items = _slot(
     _items(node, node.props['children']),
     parent: _flowParent(context, node, flow: gap == null),
@@ -26,7 +26,7 @@ Widget buildCol(BuildContext context, OpenUiNode node) {
 }
 
 Widget buildRow(BuildContext context, OpenUiNode node) {
-  final gap = OpenUiTheme.space(node.props['gap']) ?? 8;
+  final gap = node.theme.spaceOf(node.props['gap']) ?? 8;
   final align = node.props.string('align');
   final justify = node.props.string('justify');
   final items = _slot(
@@ -39,6 +39,7 @@ Widget buildRow(BuildContext context, OpenUiNode node) {
     node,
     _row(
       items,
+      theme: node.theme,
       gap: gap,
       align: align,
       justify: justify,
@@ -49,7 +50,7 @@ Widget buildRow(BuildContext context, OpenUiNode node) {
 
 Widget buildBox(BuildContext context, OpenUiNode node) {
   final row = node.props.string('direction') == 'row';
-  final gap = OpenUiTheme.space(node.props['gap']);
+  final gap = node.theme.spaceOf(node.props['gap']);
   final align = node.props.string('align');
   final justify = node.props.string('justify');
   final wrap = node.props.boolean('wrap') ?? false;
@@ -58,6 +59,7 @@ Widget buildBox(BuildContext context, OpenUiNode node) {
   if (row) {
     content = _row(
       _slot(items, parent: SlotParent.other, flow: false),
+      theme: node.theme,
       gap: gap ?? 8,
       align: align,
       justify: justify,
@@ -81,9 +83,9 @@ Widget buildBox(BuildContext context, OpenUiNode node) {
   final theme = node.theme;
   final background = node.props['background'];
   final clip = node.props.has('radius');
-  final radius = OpenUiTheme.radius(node.props['radius']) ?? 0;
+  final radius = theme.radiusOf(node.props['radius']) ?? 0;
   final padded = Padding(
-    padding: EdgeInsets.all(OpenUiTheme.space(node.props['padding']) ?? 0),
+    padding: EdgeInsets.all(theme.spaceOf(node.props['padding']) ?? 0),
     child: row ? _cardHead(context, node, content) : content,
   );
   final fixedHeight = OpenUiTheme.length(node.props['height']).px != null;
@@ -176,7 +178,7 @@ Widget buildGrid(BuildContext context, OpenUiNode node) {
     1,
     math.min(12, (node.props.number('columns') ?? 2).round()),
   );
-  final gap = OpenUiTheme.space(node.props['gap']) ?? 12;
+  final gap = node.theme.spaceOf(node.props['gap']) ?? 12;
   final minWidth = node.props.number('minChildWidth') ?? 0;
   final items = _slot(
     _items(node, node.props['children']),
@@ -201,7 +203,8 @@ Widget buildCard(BuildContext context, OpenUiNode node) {
   final nested = context.findAncestorWidgetOfExactType<_CardScope>() != null;
   final compact = nested || MediaQuery.sizeOf(context).width <= 640;
   final soft = node.props.string('variant') == 'soft';
-  final gap = OpenUiTheme.space(node.props['gap']);
+  final s = theme.styleOf('Card', soft ? 'soft' : 'outline');
+  final gap = theme.spaceOf(node.props['gap']);
   final body = _column(
     context,
     _slot(
@@ -213,23 +216,36 @@ Widget buildCard(BuildContext context, OpenUiNode node) {
     cross: CrossAxisAlignment.stretch,
     flowBase: 12,
   );
-  return Container(
-    padding: EdgeInsets.all(
-      OpenUiTheme.space(node.props['padding']) ?? (compact ? 16 : 20),
+  final modelPadding = theme.spaceOf(node.props['padding']);
+  Widget content = _CardScope(
+    child: DefaultTextStyle.merge(
+      style: TextStyle(fontSize: theme.typography.size(14), height: 1.55),
+      child: CardHeadScope(active: false, child: body),
     ),
-    decoration: BoxDecoration(
-      color: soft ? theme.surface : theme.canvas,
-      borderRadius: BorderRadius.circular(
-        nested ? OpenUiTheme.radiusLg : OpenUiTheme.radiusXl,
-      ),
-      border: Border.all(color: soft ? Colors.transparent : theme.border),
-    ),
-    child: _CardScope(
+  );
+  if (s.foreground case final foreground?) {
+    content = Theme(
+      data: _themed(context, theme.withInk(foreground)),
       child: DefaultTextStyle.merge(
-        style: const TextStyle(fontSize: 14, height: 1.55),
-        child: CardHeadScope(active: false, child: body),
+        style: TextStyle(color: foreground),
+        child: content,
+      ),
+    );
+  }
+  return Container(
+    padding: modelPadding != null
+        ? EdgeInsets.all(modelPadding)
+        : s.padding ?? EdgeInsets.all(compact ? 16 : 20),
+    decoration: BoxDecoration(
+      color: s.background ?? (soft ? theme.surface : theme.canvas),
+      borderRadius: BorderRadius.circular(
+        s.radius ?? (nested ? theme.radii.lg : theme.radii.xl),
+      ),
+      border: Border.all(
+        color: s.border ?? (soft ? Colors.transparent : theme.border),
       ),
     ),
+    child: content,
   );
 }
 
@@ -242,6 +258,7 @@ Widget buildSpacer(BuildContext context, OpenUiNode node) =>
     const SizedBox.shrink();
 
 Widget buildForm(BuildContext context, OpenUiNode node) {
+  final theme = node.theme;
   final items = _slot(
     _items(node, node.props['children']),
     parent: SlotParent.other,
@@ -250,13 +267,13 @@ Widget buildForm(BuildContext context, OpenUiNode node) {
   return node.form(
     Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
-      spacing: OpenUiTheme.fieldGap,
+      spacing: theme.spacing.fieldGap,
       children: [
         for (final (i, item) in items.indexed)
           i == items.length - 1 && _isAction(item)
               ? Padding(
-                  padding: const EdgeInsets.only(
-                    top: OpenUiTheme.actionGap - OpenUiTheme.fieldGap,
+                  padding: EdgeInsets.only(
+                    top: theme.spacing.actionGap - theme.spacing.fieldGap,
                   ),
                   child: item.widget,
                 )
@@ -446,6 +463,7 @@ bool _isMedia(_Item item) {
 /// of the row between 120 and 200px.
 Widget _row(
   List<_Item> items, {
+  required OpenUiTheme theme,
   required double gap,
   String? align,
   String? justify,
@@ -453,7 +471,7 @@ Widget _row(
 }) {
   final media = items.any(_isMedia);
   return FlexRow(
-    gap: media ? OpenUiTheme.spaceGroupLarge : gap,
+    gap: media ? theme.spacing.groupLarge : gap,
     justify: switch (justify) {
       'center' => FlexJustify.center,
       'end' => FlexJustify.end,

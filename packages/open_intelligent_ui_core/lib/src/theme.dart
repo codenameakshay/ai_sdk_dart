@@ -9,6 +9,134 @@ Color _alpha(Color c, double opacity) => c.withValues(alpha: c.a * opacity);
 
 const _statusNames = ['info', 'success', 'warning', 'danger', 'purple', 'pink'];
 
+/// Corner radii. The defaults are the reference's values.
+@immutable
+final class OpenUiRadii {
+  const OpenUiRadii({
+    this.sm = 6,
+    this.md = 10,
+    this.lg = 12,
+    this.xl = 14,
+    this.xxl = 20,
+    this.full = 999,
+  });
+
+  final double sm, md, lg, xl, xxl, full;
+}
+
+/// Spacing steps in px. The defaults are the reference's values.
+@immutable
+final class OpenUiSpacing {
+  const OpenUiSpacing({
+    this.unit = 4,
+    this.tight = 4,
+    this.inner = 8,
+    this.group = 12,
+    this.groupLarge = 16,
+    this.section = 24,
+    this.controlGap = 8,
+    this.fieldGap = 24,
+    this.actionGap = 40,
+  });
+
+  /// The base step that `spaceOf` multiplies model values by.
+  final double unit;
+  final double tight,
+      inner,
+      group,
+      groupLarge,
+      section,
+      controlGap,
+      fieldGap,
+      actionGap;
+}
+
+/// A text size: its font size, line height and letter spacing, and the size
+/// used on compact (phone-width) layouts.
+@immutable
+final class OpenUiTextSize {
+  const OpenUiTextSize(
+    this.fontSize,
+    this.height, {
+    this.letterSpacing = 0,
+    double? compactFontSize,
+  }) : compactFontSize = compactFontSize ?? fontSize;
+
+  final double fontSize, height, letterSpacing, compactFontSize;
+}
+
+/// The Text sizes by name, as the reference sets them.
+const Map<String, OpenUiTextSize> referenceTextSizes = {
+  'xs': OpenUiTextSize(12, 1.6),
+  'sm': OpenUiTextSize(14, 1.55),
+  'md': OpenUiTextSize(16, 1.6),
+  'lg': OpenUiTextSize(18, 1.55),
+};
+
+/// The Title sizes by name, as the reference sets them.
+const Map<String, OpenUiTextSize> referenceTitleSizes = {
+  'sm': OpenUiTextSize(15, 1.5),
+  'md': OpenUiTextSize(17, 1.4, letterSpacing: -0.2),
+  'lg': OpenUiTextSize(21, 1.3, letterSpacing: -0.55, compactFontSize: 19),
+  'xl': OpenUiTextSize(25, 1.2, letterSpacing: -0.8),
+  '2xl': OpenUiTextSize(32, 1.15, letterSpacing: -1, compactFontSize: 28),
+  '3xl': OpenUiTextSize(40, 1.1, letterSpacing: -1.4, compactFontSize: 34),
+};
+
+/// Type: a [scale] for every built-in font size, the Text and Title metrics,
+/// the three font weights, and whether numbers use tabular figures.
+@immutable
+final class OpenUiTypography {
+  const OpenUiTypography({
+    this.scale = 1,
+    this.text = referenceTextSizes,
+    this.title = referenceTitleSizes,
+    this.normal = const FontWeight(440),
+    this.medium = const FontWeight(560),
+    this.semibold = const FontWeight(640),
+    this.tabularFigures = true,
+  });
+
+  final double scale;
+  final Map<String, OpenUiTextSize> text, title;
+  final FontWeight normal, medium, semibold;
+  final bool tabularFigures;
+
+  /// [px] scaled by [scale].
+  double size(double px) => px * scale;
+
+  List<FontFeature>? get tabular =>
+      tabularFigures ? const [FontFeature.tabularFigures()] : null;
+}
+
+/// A restyle of one component: any null field keeps the built-in value.
+@immutable
+final class OpenUiComponentStyle {
+  const OpenUiComponentStyle({
+    this.background,
+    this.foreground,
+    this.border,
+    this.radius,
+    this.padding,
+  });
+
+  final Color? background, foreground, border;
+  final double? radius;
+  final EdgeInsetsGeometry? padding;
+
+  /// This style with [other]'s non-null fields on top.
+  OpenUiComponentStyle merge(OpenUiComponentStyle? other) {
+    if (other == null) return this;
+    return OpenUiComponentStyle(
+      background: other.background ?? background,
+      foreground: other.foreground ?? foreground,
+      border: other.border ?? border,
+      radius: other.radius ?? radius,
+      padding: other.padding ?? padding,
+    );
+  }
+}
+
 /// The reference's `theme.css` tokens, light and dark, plus the helpers that
 /// turn model-written colors, lengths, radii and spacing into Flutter values.
 @immutable
@@ -32,6 +160,10 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
     required this.glassRingHover,
     required this.shadow,
     required this.shadowSmall,
+    this.radii = const OpenUiRadii(),
+    this.spacing = const OpenUiSpacing(),
+    this.typography = const OpenUiTypography(),
+    this.components = const {},
     // ponytail: the umbrella package bundles this family; without it Flutter falls back to the platform font. Pass fontFamily to choose.
     this.fontFamily = 'packages/open_intelligent_ui/Inter',
     String? monoFontFamily,
@@ -62,6 +194,12 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
   final Color glassRingHover;
   final List<BoxShadow> shadow;
   final List<BoxShadow> shadowSmall;
+  final OpenUiRadii radii;
+  final OpenUiSpacing spacing;
+  final OpenUiTypography typography;
+
+  /// Per-component styles keyed `Card`, `Card.soft`, `Button.outline`, ...
+  final Map<String, OpenUiComponentStyle> components;
   final String? fontFamily;
   final String? _monoFontFamily;
 
@@ -361,6 +499,76 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
     _ => length(value).px,
   };
 
+  /// The token set for a host's [ColorScheme]: the reference's chart, badge,
+  /// map and shadow tokens, with the surface and text colors from [scheme].
+  factory OpenUiTheme.fromColorScheme(
+    ColorScheme scheme, {
+    String? fontFamily,
+  }) {
+    final base = scheme.brightness == Brightness.dark ? dark : light;
+    return OpenUiTheme(
+      brightness: base.brightness,
+      canvas: scheme.surface,
+      ink: scheme.onSurface,
+      onInk: scheme.surface,
+      muted: scheme.onSurface.withValues(alpha: 0.6),
+      status: {
+        ...base.status,
+        'info': scheme.onSurface,
+        'danger': scheme.error,
+      },
+      statusSoft: {
+        ...base.statusSoft,
+        'info': scheme.onSurface.withValues(alpha: 0.06),
+        'danger': scheme.errorContainer,
+      },
+      badge: base.badge,
+      badgeSoft: base.badgeSoft,
+      chart: base.chart,
+      mapWater: base.mapWater,
+      glass: scheme.surface.withValues(alpha: 0.7),
+      glassHover: scheme.surface.withValues(alpha: 0.85),
+      glassRing: base.glassRing,
+      glassRingHover: base.glassRingHover,
+      shadow: base.shadow,
+      shadowSmall: base.shadowSmall,
+      fontFamily: fontFamily,
+    );
+  }
+
+  /// [fromColorScheme] with the font family of [theme]'s body text.
+  factory OpenUiTheme.fromMaterial(ThemeData theme) =>
+      OpenUiTheme.fromColorScheme(
+        theme.colorScheme,
+        fontFamily: theme.textTheme.bodyMedium?.fontFamily,
+      );
+
+  /// The style for [component], with the `'$component.$variant'` style on top.
+  OpenUiComponentStyle styleOf(String component, [String? variant]) {
+    final base = components[component] ?? const OpenUiComponentStyle();
+    return base.merge(
+      variant == null ? null : components['$component.$variant'],
+    );
+  }
+
+  /// A radius from a name (`sm`..`xl`, `full`) or a CSS length, as [radius]
+  /// with this theme's radii.
+  double? radiusOf(Object? value) => switch (value) {
+    'sm' => radii.sm,
+    'md' => radii.md,
+    'lg' => radii.lg,
+    'xl' => radii.xl,
+    'full' => radii.full,
+    _ => length(value).px,
+  };
+
+  /// A model spacing value in [spacing.unit] steps, as [space] in 4px steps.
+  double? spaceOf(Object? value) {
+    if (value is! num || !value.isFinite) return null;
+    final space = math.max(0.0, value.toDouble()) * spacing.unit;
+    return space.isFinite ? space : null;
+  }
+
   @override
   OpenUiTheme copyWith({
     Color? canvas,
@@ -368,7 +576,24 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
     Color? onInk,
     Color? muted,
     Color? faint,
+    Map<String, Color>? status,
+    Map<String, Color>? statusSoft,
+    Map<String, Color>? badge,
+    Map<String, Color>? badgeSoft,
+    List<Color>? chart,
+    Color? mapWater,
+    Color? glass,
+    Color? glassHover,
+    Color? glassRing,
+    Color? glassRingHover,
+    List<BoxShadow>? shadow,
+    List<BoxShadow>? shadowSmall,
     String? fontFamily,
+    String? monoFontFamily,
+    OpenUiRadii? radii,
+    OpenUiSpacing? spacing,
+    OpenUiTypography? typography,
+    Map<String, OpenUiComponentStyle>? components,
   }) => OpenUiTheme(
     brightness: brightness,
     canvas: canvas ?? this.canvas,
@@ -376,29 +601,37 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
     onInk: onInk ?? this.onInk,
     muted: muted ?? this.muted,
     faint: faint ?? this.faint,
-    status: status,
-    statusSoft: statusSoft,
-    badge: badge,
-    badgeSoft: badgeSoft,
-    chart: chart,
-    mapWater: mapWater,
-    glass: glass,
-    glassHover: glassHover,
-    glassRing: glassRing,
-    glassRingHover: glassRingHover,
-    shadow: shadow,
-    shadowSmall: shadowSmall,
+    status: status ?? this.status,
+    statusSoft: statusSoft ?? this.statusSoft,
+    badge: badge ?? this.badge,
+    badgeSoft: badgeSoft ?? this.badgeSoft,
+    chart: chart ?? this.chart,
+    mapWater: mapWater ?? this.mapWater,
+    glass: glass ?? this.glass,
+    glassHover: glassHover ?? this.glassHover,
+    glassRing: glassRing ?? this.glassRing,
+    glassRingHover: glassRingHover ?? this.glassRingHover,
+    shadow: shadow ?? this.shadow,
+    shadowSmall: shadowSmall ?? this.shadowSmall,
     fontFamily: fontFamily ?? this.fontFamily,
-    monoFontFamily: _monoFontFamily,
+    monoFontFamily: monoFontFamily ?? _monoFontFamily,
+    radii: radii ?? this.radii,
+    spacing: spacing ?? this.spacing,
+    typography: typography ?? this.typography,
+    components: components ?? this.components,
   );
 
   @override
   OpenUiTheme lerp(covariant OpenUiTheme? other, double t) {
     if (other == null) return this;
+    if (t == 0) return this;
+    if (t == 1) return other;
     Color c(Color a, Color b) => Color.lerp(a, b, t)!;
     Map<String, Color> m(Map<String, Color> a, Map<String, Color> b) => {
-      for (final k in a.keys) k: c(a[k]!, b[k] ?? a[k]!),
+      for (final k in {...a.keys, ...b.keys})
+        k: a[k] != null && b[k] != null ? c(a[k]!, b[k]!) : (a[k] ?? b[k]!),
     };
+    final chartLength = math.max(chart.length, other.chart.length);
     return OpenUiTheme(
       brightness: t < 0.5 ? brightness : other.brightness,
       canvas: c(canvas, other.canvas),
@@ -410,9 +643,11 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
       statusSoft: m(statusSoft, other.statusSoft),
       badge: m(badge, other.badge),
       badgeSoft: m(badgeSoft, other.badgeSoft),
-      chart: [
-        for (var i = 0; i < chart.length; i++) c(chart[i], other.chart[i]),
-      ],
+      chart: List.generate(chartLength, (i) {
+        if (i >= chart.length) return other.chart[i];
+        if (i >= other.chart.length) return chart[i];
+        return c(chart[i], other.chart[i]);
+      }),
       mapWater: c(mapWater, other.mapWater),
       glass: c(glass, other.glass),
       glassHover: c(glassHover, other.glassHover),
@@ -423,6 +658,10 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
           BoxShadow.lerpList(shadowSmall, other.shadowSmall, t) ?? shadowSmall,
       fontFamily: t < 0.5 ? fontFamily : other.fontFamily,
       monoFontFamily: t < 0.5 ? _monoFontFamily : other._monoFontFamily,
+      radii: t < 0.5 ? radii : other.radii,
+      spacing: t < 0.5 ? spacing : other.spacing,
+      typography: t < 0.5 ? typography : other.typography,
+      components: t < 0.5 ? components : other.components,
     );
   }
 }

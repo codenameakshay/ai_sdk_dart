@@ -18,7 +18,16 @@ export 'src/services.dart'
         OpenUiScope,
         OpenUiServices,
         esriStreetTiles;
-export 'src/theme.dart' show OpenUiTheme;
+export 'src/theme.dart'
+    show
+        OpenUiComponentStyle,
+        OpenUiRadii,
+        OpenUiSpacing,
+        OpenUiTextSize,
+        OpenUiTheme,
+        OpenUiTypography,
+        referenceTextSizes,
+        referenceTitleSizes;
 export 'src/view.dart'
     show
         OpenUiBuilder,

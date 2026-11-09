@@ -12,16 +12,17 @@ import 'markdown.dart';
 Widget buildFlashcard(BuildContext context, OpenUiNode node) {
   Widget face(Object? value, {required bool back}) {
     if (value is String) {
+      final typography = node.theme.typography;
       final style = back
-          ? const TextStyle(
-              fontSize: 16,
+          ? TextStyle(
+              fontSize: typography.size(16),
               height: 1.3,
-              fontWeight: OpenUiTheme.weightMedium,
+              fontWeight: typography.medium,
             )
-          : const TextStyle(
-              fontSize: 21,
+          : TextStyle(
+              fontSize: typography.size(21),
               height: 1.3,
-              fontWeight: OpenUiTheme.weightSemibold,
+              fontWeight: typography.semibold,
               letterSpacing: -0.4,
             );
       return InlineText(
@@ -72,7 +73,7 @@ class _FlashcardState extends State<Flashcard> {
       button: true,
       toggled: _flipped,
       child: Press(
-        radius: OpenUiTheme.radiusXl,
+        radius: theme.radii.xl,
         onTap: (_) => setState(() => _flipped = !_flipped),
         builder: (hovered, pressed) {
           Widget side(Widget child, {required bool back}) => Container(
@@ -84,7 +85,7 @@ class _FlashcardState extends State<Flashcard> {
               border: Border.all(
                 color: hovered ? theme.borderStrong : theme.border,
               ),
-              borderRadius: BorderRadius.circular(OpenUiTheme.radiusXl),
+              borderRadius: BorderRadius.circular(theme.radii.xl),
             ),
             child: Stack(
               alignment: Alignment.center,
@@ -96,7 +97,10 @@ class _FlashcardState extends State<Flashcard> {
                     bottom: -20,
                     child: Text(
                       widget.hint,
-                      style: TextStyle(fontSize: 11, color: theme.faint),
+                      style: TextStyle(
+                        fontSize: theme.typography.size(11),
+                        color: theme.faint,
+                      ),
                     ),
                   ),
               ],

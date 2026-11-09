@@ -50,7 +50,10 @@ class _HtmlPageState extends State<HtmlPage> {
       body = Center(
         child: Text(
           'Preparing the interactive view…',
-          style: TextStyle(fontSize: 13, color: theme.muted),
+          style: TextStyle(
+            fontSize: theme.typography.size(13),
+            color: theme.muted,
+          ),
         ),
       );
     } else if (host.canHostWebPages) {
@@ -82,7 +85,7 @@ class _HtmlPageState extends State<HtmlPage> {
         decoration: BoxDecoration(
           color: theme.canvas,
           border: Border.all(color: theme.border),
-          borderRadius: BorderRadius.circular(OpenUiTheme.radiusLg),
+          borderRadius: BorderRadius.circular(theme.radii.lg),
         ),
         child: body,
       ),
@@ -117,7 +120,7 @@ class _Unsupported extends StatelessWidget {
                 title,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  fontWeight: OpenUiTheme.weightSemibold,
+                  fontWeight: theme.typography.semibold,
                   color: theme.ink,
                 ),
               ),
@@ -125,7 +128,10 @@ class _Unsupported extends StatelessWidget {
               Text(
                 note,
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: theme.muted),
+                style: TextStyle(
+                  fontSize: theme.typography.size(12),
+                  color: theme.muted,
+                ),
               ),
             ],
           ),
@@ -183,10 +189,11 @@ Widget buildYouTube(BuildContext context, OpenUiNode node) {
             ),
           ),
         );
+  final theme = node.theme;
   return AspectRatio(
     aspectRatio: 16 / 9,
     child: ClipRRect(
-      borderRadius: BorderRadius.circular(OpenUiTheme.radiusLg),
+      borderRadius: BorderRadius.circular(theme.radii.lg),
       child: ColoredBox(color: const Color(0xFF000000), child: body),
     ),
   );

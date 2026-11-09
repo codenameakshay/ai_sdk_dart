@@ -7,6 +7,9 @@ import 'package:flutter/cupertino.dart'
         CupertinoButton,
         CupertinoDatePicker,
         CupertinoDatePickerMode,
+        CupertinoTextThemeData,
+        CupertinoTheme,
+        CupertinoThemeData,
         showCupertinoModalPopup;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart' show SemanticsRole;
@@ -35,13 +38,13 @@ TextStyle _text(
   fontWeight: weight,
   height: height,
   color: color ?? theme.ink,
-  fontFeatures: tabular ? theme.typography.tabular : null,
+  fontFeatures: tabular ? theme.typography.tabular : theme.typography.allText,
   decoration: TextDecoration.none,
 );
 
 TextStyle _labelStyle(OpenUiTheme theme) => _text(
   theme,
-  size: theme.typography.size(14),
+  size: theme.fontSizeOf('Field.label', 14),
   weight: theme.typography.medium,
   height: 1.4,
 );
@@ -273,17 +276,17 @@ class IuiButton extends StatelessWidget {
       'sm' => (
         32.0,
         const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-        theme.typography.size(13.0),
+        theme.fontSizeOf('Button.sm', 13),
       ),
       'lg' => (
         44.0,
         const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
-        theme.typography.size(15.0),
+        theme.fontSizeOf('Button.lg', 15),
       ),
       _ => (
         36.0,
         const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-        theme.typography.size(14.0),
+        theme.fontSizeOf('Button', 14),
       ),
     };
     return Semantics(
@@ -305,7 +308,7 @@ class IuiButton extends StatelessWidget {
           switch (variant) {
             case 'outline':
               background = Color.alphaBlend(
-                overlay ?? const Color(0x00000000),
+                overlay ?? Colors.transparent,
                 theme.canvas,
               );
               border = theme.border;
@@ -319,9 +322,7 @@ class IuiButton extends StatelessWidget {
                 background = hovered && !pressed
                     ? _brighten(toneColor, 1.08)
                     : toneColor;
-                foreground = theme.brightness == Brightness.dark
-                    ? const Color(0xFF121212)
-                    : const Color(0xFFFFFFFF);
+                foreground = theme.onTone;
               } else {
                 background = hovered && !pressed ? theme.inkHover : theme.ink;
                 foreground = theme.onInk;
@@ -340,7 +341,7 @@ class IuiButton extends StatelessWidget {
               padding: s.padding ?? pad,
               decoration: BoxDecoration(
                 color: background,
-                border: Border.all(color: border ?? const Color(0x00000000)),
+                border: Border.all(color: border ?? Colors.transparent),
                 borderRadius: BorderRadius.circular(
                   s.radius ?? theme.radii.full,
                 ),
@@ -455,7 +456,7 @@ Widget buildIconButton(BuildContext context, OpenUiNode node) {
               'ghost' => (
                 overlay,
                 hovered || pressed ? theme.ink : theme.muted,
-                const Color(0x00000000),
+                Colors.transparent,
               ),
               'solid' => (
                 hovered && !pressed ? theme.inkHover : theme.ink,
@@ -463,10 +464,7 @@ Widget buildIconButton(BuildContext context, OpenUiNode node) {
                 theme.ink,
               ),
               _ => (
-                Color.alphaBlend(
-                  overlay ?? const Color(0x00000000),
-                  theme.canvas,
-                ),
+                Color.alphaBlend(overlay ?? Colors.transparent, theme.canvas),
                 theme.ink,
                 theme.border,
               ),
@@ -505,7 +503,21 @@ Widget buildIconButton(BuildContext context, OpenUiNode node) {
             );
           },
         );
-        if (given != null) button = Tooltip(message: given, child: button);
+        if (given != null) {
+          button = Tooltip(
+            message: given,
+            decoration: BoxDecoration(
+              color: theme.ink,
+              borderRadius: BorderRadius.circular(theme.radii.sm),
+            ),
+            textStyle: _text(
+              theme,
+              size: theme.fontSizeOf('Tooltip', 12),
+              color: theme.onInk,
+            ),
+            child: button,
+          );
+        }
         return Semantics(
           container: true,
           button: true,
@@ -561,8 +573,8 @@ Widget buildPressable(BuildContext context, OpenUiNode node) {
     ),
   );
   if (on != null) {
-    content = Theme(
-      data: Theme.of(context).copyWith(extensions: [theme.withInk(on)]),
+    content = OpenUiThemeScope(
+      theme: theme.withInk(on),
       child: DefaultTextStyle.merge(
         style: TextStyle(color: on),
         child: content,
@@ -617,7 +629,7 @@ Widget buildPressable(BuildContext context, OpenUiNode node) {
                       border: Border.all(
                         color: ring
                             ? theme.ink.withValues(alpha: 0.2)
-                            : const Color(0x00000000),
+                            : Colors.transparent,
                       ),
                     ),
                     child: content,
@@ -648,11 +660,7 @@ Widget buildPressable(BuildContext context, OpenUiNode node) {
                         ),
                         child: CustomPaint(
                           size: const Size.square(12),
-                          painter: _CheckMark(
-                            theme.brightness == Brightness.dark
-                                ? const Color(0xFF171717)
-                                : const Color(0xFFFFFFFF),
-                          ),
+                          painter: _CheckMark(theme.checkInk),
                         ),
                       ),
                     ),
@@ -731,18 +739,22 @@ class _TextBoxState extends State<_TextBox> {
   @override
   Widget build(BuildContext context) {
     final theme = OpenUiTheme.of(context);
+    final rows = widget.rows;
+    final component = rows == null ? 'Input' : 'TextArea';
+    final s = theme.styleOf(component);
     final style = _text(
       theme,
-      size: theme.typography.size(16),
+      size: theme.fontSizeOf(component, 16),
       height: 1.4,
       tabular: true,
     );
-    final rows = widget.rows;
     return ListenableBuilder(
       listenable: _focus,
       builder: (context, child) => Container(
-        constraints: const BoxConstraints(minHeight: 42),
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+        constraints: BoxConstraints(minHeight: s.size ?? 42),
+        padding:
+            s.padding ??
+            const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
         decoration: BoxDecoration(
           color: theme.canvas,
           borderRadius: BorderRadius.circular(theme.radii.md),
@@ -758,7 +770,14 @@ class _TextBoxState extends State<_TextBox> {
                 ]
               : null,
         ),
-        child: child,
+        child: TextSelectionTheme(
+          data: TextSelectionThemeData(
+            cursorColor: theme.ink,
+            selectionColor: theme.selection,
+            selectionHandleColor: theme.ink,
+          ),
+          child: child!,
+        ),
       ),
       child: Material(
         type: MaterialType.transparency,
@@ -832,7 +851,7 @@ Widget buildSelect(BuildContext context, OpenUiNode node) {
   final choices = _choices(node.props.list('options'));
   final value = _plain(f.value);
   final selected = choices.indexWhere((o) => o.value == value);
-  final style = _text(theme, size: theme.typography.size(16), height: 1.4);
+  final style = _text(theme, size: theme.fontSizeOf('Select', 16), height: 1.4);
   return _labeled(
     theme,
     label,
@@ -864,9 +883,7 @@ Widget buildSelect(BuildContext context, OpenUiNode node) {
               'chevron-down',
               size: 16,
               strokeWidth: 2.4,
-              color: theme.brightness == Brightness.dark
-                  ? const Color(0xFFABABAB)
-                  : const Color(0xFF676767),
+              color: theme.chevron,
             ),
             items: [
               for (final (i, o) in choices.indexed)
@@ -907,7 +924,7 @@ Widget buildSegmentedControl(BuildContext context, OpenUiNode node) {
           decoration: BoxDecoration(
             color: selected
                 ? (dark ? theme.surfaceStrong : theme.canvas)
-                : const Color(0x00000000),
+                : Colors.transparent,
             borderRadius: BorderRadius.circular(999),
             border: selected ? Border.all(color: theme.border) : null,
             boxShadow: selected ? theme.shadowSmall : null,
@@ -923,7 +940,7 @@ Widget buildSegmentedControl(BuildContext context, OpenUiNode node) {
               softWrap: false,
               style: _text(
                 theme,
-                size: theme.typography.size(13),
+                size: theme.fontSizeOf('SegmentedControl', 13),
                 height: 1.4,
                 color: color,
                 weight: selected ? theme.typography.medium : null,
@@ -1021,7 +1038,7 @@ Widget buildSlider(BuildContext context, OpenUiNode node) {
           label: _plain(m['label']),
         ),
   ];
-  final small = _text(theme, size: theme.typography.size(13), height: 1.4);
+  final small = _text(theme, size: theme.fontSizeOf('Slider', 13), height: 1.4);
   return Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     mainAxisSize: MainAxisSize.min,
@@ -1038,7 +1055,7 @@ Widget buildSlider(BuildContext context, OpenUiNode node) {
               softWrap: false,
               style: _text(
                 theme,
-                size: theme.typography.size(12),
+                size: theme.fontSizeOf('Slider.value', 12),
                 height: 1.4,
                 weight: theme.typography.medium,
                 tabular: true,
@@ -1087,7 +1104,7 @@ Widget buildSlider(BuildContext context, OpenUiNode node) {
             builder: (context, box) {
               final style = _text(
                 theme,
-                size: theme.typography.size(11),
+                size: theme.fontSizeOf('Slider.mark', 11),
                 height: 18 / 11,
                 color: theme.muted,
                 tabular: true,
@@ -1193,6 +1210,9 @@ Widget buildCheckbox(BuildContext context, OpenUiNode node) {
   final f = _field(node, 'checked', label);
   final checked = f.value == true;
   final done = checked && node.props.boolean('lineThrough') == true;
+  final box = theme.styleOf('Checkbox');
+  final boxSize = box.size ?? 17;
+  final boxRadius = box.radius ?? 4;
   return Align(
     alignment: AlignmentDirectional.centerStart,
     widthFactor: 1,
@@ -1201,7 +1221,7 @@ Widget buildCheckbox(BuildContext context, OpenUiNode node) {
       checked: checked,
       label: label,
       child: Press(
-        radius: 4,
+        radius: boxRadius,
         onTap: (_) => f.set(!checked),
         builder: (hovered, pressed) => ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 28),
@@ -1209,12 +1229,12 @@ Widget buildCheckbox(BuildContext context, OpenUiNode node) {
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 17,
-                height: 17,
+                width: boxSize,
+                height: boxSize,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: checked ? theme.ink : const Color(0x00000000),
-                  borderRadius: BorderRadius.circular(4),
+                  color: checked ? theme.ink : Colors.transparent,
+                  borderRadius: BorderRadius.circular(boxRadius),
                   border: checked
                       ? null
                       : Border.all(color: theme.muted, width: 1.5),
@@ -1351,7 +1371,7 @@ Widget buildRadioGroup(BuildContext context, OpenUiNode node) {
           o.label,
           style: _text(
             theme,
-            size: variant == 'list' ? null : theme.typography.size(15),
+            size: variant == 'list' ? null : theme.fontSizeOf('RadioGroup', 15),
             height: variant == 'list' ? null : 22 / 15,
             weight: variant == 'cards' ? theme.typography.medium : null,
             color: variant == 'pills' && selected ? theme.onInk : theme.ink,
@@ -1363,7 +1383,7 @@ Widget buildRadioGroup(BuildContext context, OpenUiNode node) {
             o.description!,
             style: _text(
               theme,
-              size: theme.typography.size(14),
+              size: theme.fontSizeOf('RadioGroup.description', 14),
               height: 21 / 14,
               color: theme.muted,
             ),
@@ -1394,7 +1414,7 @@ Widget buildRadioGroup(BuildContext context, OpenUiNode node) {
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: selected ? theme.ink : const Color(0x00000000),
+                      color: selected ? theme.ink : Colors.transparent,
                       border: selected
                           ? null
                           : Border.all(color: theme.muted, width: 1.5),
@@ -1430,7 +1450,7 @@ Widget buildRadioGroup(BuildContext context, OpenUiNode node) {
             decoration: BoxDecoration(
               color: selected
                   ? (cards ? theme.pressed : theme.ink)
-                  : (hovered ? theme.hover : const Color(0x00000000)),
+                  : (hovered ? theme.hover : Colors.transparent),
               borderRadius: BorderRadius.circular(cards ? theme.radii.xl : 999),
               border: Border.all(
                 color: selected ? theme.ink : theme.border,
@@ -1538,7 +1558,7 @@ Widget buildDatePicker(BuildContext context, OpenUiNode node) {
   final max = _parseDate(node.props.string('max'));
   final style = _text(
     theme,
-    size: theme.typography.size(16),
+    size: theme.fontSizeOf('DatePicker', 16),
     height: 1.4,
     tabular: true,
   );
@@ -1570,30 +1590,33 @@ Widget buildDatePicker(BuildContext context, OpenUiNode node) {
           if (Theme.of(ctx).platform == TargetPlatform.iOS) {
             await showCupertinoModalPopup<void>(
               context: ctx,
-              builder: (popup) => Container(
-                height: 260,
-                color: theme.canvas,
-                child: SafeArea(
-                  top: false,
-                  child: Column(
-                    children: [
-                      Align(
-                        alignment: AlignmentDirectional.centerEnd,
-                        child: CupertinoButton(
-                          onPressed: () => Navigator.pop(popup),
-                          child: Text(OpenUiLocalizations.of(ctx).done),
+              builder: (popup) => _cupertinoThemed(
+                theme,
+                Container(
+                  height: 260,
+                  color: theme.canvas,
+                  child: SafeArea(
+                    top: false,
+                    child: Column(
+                      children: [
+                        Align(
+                          alignment: AlignmentDirectional.centerEnd,
+                          child: CupertinoButton(
+                            onPressed: () => Navigator.pop(popup),
+                            child: Text(OpenUiLocalizations.of(ctx).done),
+                          ),
                         ),
-                      ),
-                      Expanded(
-                        child: CupertinoDatePicker(
-                          mode: CupertinoDatePickerMode.date,
-                          initialDateTime: initial,
-                          minimumDate: first,
-                          maximumDate: last,
-                          onDateTimeChanged: (d) => f.set(_formatDate(d)),
+                        Expanded(
+                          child: CupertinoDatePicker(
+                            mode: CupertinoDatePickerMode.date,
+                            initialDateTime: initial,
+                            minimumDate: first,
+                            maximumDate: last,
+                            onDateTimeChanged: (d) => f.set(_formatDate(d)),
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -1605,6 +1628,8 @@ Widget buildDatePicker(BuildContext context, OpenUiNode node) {
             initialDate: initial,
             firstDate: first,
             lastDate: last,
+            builder: (_, child) =>
+                Theme(data: _materialTheme(theme), child: child!),
           );
           if (picked != null) f.set(_formatDate(picked));
         },
@@ -1637,3 +1662,46 @@ Widget buildDatePicker(BuildContext context, OpenUiNode node) {
     ),
   );
 }
+
+/// Material colours and font from [t], for Material popups such as the date
+/// picker, so they match a view whose theme differs from the app's.
+ThemeData _materialTheme(OpenUiTheme t) => ThemeData(
+  brightness: t.brightness,
+  fontFamily: t.fontFamily,
+  colorScheme: ColorScheme(
+    brightness: t.brightness,
+    primary: t.ink,
+    onPrimary: t.onInk,
+    secondary: t.ink,
+    onSecondary: t.onInk,
+    error: t.status['danger'] ?? t.ink,
+    onError: t.onTone,
+    surface: t.canvas,
+    onSurface: t.ink,
+  ),
+  textSelectionTheme: TextSelectionThemeData(
+    cursorColor: t.ink,
+    selectionColor: t.selection,
+    selectionHandleColor: t.ink,
+  ),
+);
+
+/// [child] with [t] as its OpenUI and Cupertino theme: a Cupertino popup
+/// takes neither from the view that opens it.
+Widget _cupertinoThemed(OpenUiTheme t, Widget child) => OpenUiThemeScope(
+  theme: t,
+  child: CupertinoTheme(
+    data: CupertinoThemeData(
+      brightness: t.brightness,
+      primaryColor: t.ink,
+      scaffoldBackgroundColor: t.canvas,
+      textTheme: CupertinoTextThemeData(
+        primaryColor: t.ink,
+        dateTimePickerTextStyle: const CupertinoTextThemeData()
+            .dateTimePickerTextStyle
+            .copyWith(color: t.ink, fontFamily: t.fontFamily),
+      ),
+    ),
+    child: child,
+  ),
+);

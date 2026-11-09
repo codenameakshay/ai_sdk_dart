@@ -226,7 +226,9 @@ InlineSpan _code(
   Widget box = DecoratedBox(
     decoration: BoxDecoration(
       color: theme.surface,
-      borderRadius: BorderRadius.circular(5),
+      borderRadius: BorderRadius.circular(
+        theme.styleOf('Markdown.code').radius ?? 5,
+      ),
     ),
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
@@ -443,7 +445,7 @@ class MarkdownBlocks extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = OpenUiTheme.of(context);
     final base = DefaultTextStyle.of(context).style.copyWith(
-      fontSize: theme.typography.size(16),
+      fontSize: theme.fontSizeOf('Markdown', 16),
       height: 1.65,
       color: theme.ink,
       fontFamily: theme.fontFamily,
@@ -493,8 +495,10 @@ class MarkdownBlocks extends StatelessWidget {
             border: BorderDirectional(
               start: BorderSide(color: theme.borderStrong, width: 3),
             ),
-            borderRadius: const BorderRadiusDirectional.horizontal(
-              end: Radius.circular(12),
+            borderRadius: BorderRadiusDirectional.horizontal(
+              end: Radius.circular(
+                theme.styleOf('Markdown.quote').radius ?? theme.radii.lg,
+              ),
             ),
           ),
           child: rich(text),
@@ -502,11 +506,11 @@ class MarkdownBlocks extends StatelessWidget {
       case _Heading(:final level, :final text):
         final style = base.copyWith(
           fontWeight: theme.typography.semibold,
-          fontSize: theme.typography.size(switch (level) {
-            1 => 22,
-            2 => 19,
-            _ => 16,
-          }),
+          fontSize: switch (level) {
+            1 => theme.fontSizeOf('Markdown.h1', 22),
+            2 => theme.fontSizeOf('Markdown.h2', 19),
+            _ => theme.fontSizeOf('Markdown.h3', 16),
+          },
           letterSpacing: switch (level) {
             1 => -0.5,
             2 => -0.3,
@@ -536,7 +540,7 @@ class MarkdownBlocks extends StatelessWidget {
               text,
               style: base.copyWith(
                 fontFamily: theme.monoFontFamily,
-                fontSize: theme.typography.size(13),
+                fontSize: theme.fontSizeOf('Markdown.code', 13),
                 height: 1.6,
               ),
             ),

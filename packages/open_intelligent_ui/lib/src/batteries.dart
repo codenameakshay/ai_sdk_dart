@@ -12,6 +12,7 @@ Future<void> _launch(Uri url) =>
 const core.OpenUiServices batteryServices = core.OpenUiServices(
   openUrl: _launch,
   icons: lucideIconResolver,
+  fontFamily: 'packages/open_intelligent_ui/Inter',
 );
 
 final core.OpenUiBuilderLookup _all = core.composeBuilders([
@@ -23,8 +24,8 @@ final core.OpenUiBuilderLookup _all = core.composeBuilders([
 /// Every Open Intelligent UI builder.
 core.OpenUiBuilder? intelligentUiBuilders(String typeName) => _all(typeName);
 
-/// [core.OpenUiView] with this package's defaults: Lucide icons, and links
-/// open in the browser.
+/// [core.OpenUiView] with this package's defaults: Lucide icons, the bundled
+/// Inter font, and links open in the browser.
 class OpenUiView extends core.OpenUiView {
   const OpenUiView({
     super.key,

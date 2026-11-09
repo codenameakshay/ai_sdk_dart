@@ -120,7 +120,8 @@ Widget buildSvg(BuildContext context, OpenUiNode node) {
   final theme = node.theme;
   final ink = DefaultTextStyle.of(context).style.color ?? theme.ink;
   final fontSize =
-      DefaultTextStyle.of(context).style.fontSize ?? theme.typography.size(14);
+      DefaultTextStyle.of(context).style.fontSize ??
+      theme.fontSizeOf('Svg', 14);
   final viewport = MediaQuery.sizeOf(context);
   final box = (_ok(node.props['viewBox'], _viewBox) ?? '0 0 100 100')
       .trim()
@@ -336,7 +337,7 @@ SvgShape? _shape(OpenUiElement e, OpenUiTheme theme, Color ink) {
       return _TextShape(
         jsString(p['text'] ?? ''),
         Offset(v('x'), v('y')),
-        _n(p['size']) ?? theme.typography.size(12),
+        _n(p['size']) ?? theme.fontSizeOf('SvgText', 12),
         p.string('anchor') ?? 'start',
         switch (p.string('weight')) {
           'semibold' => theme.typography.semibold,

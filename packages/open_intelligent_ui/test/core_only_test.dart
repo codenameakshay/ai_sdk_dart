@@ -233,8 +233,33 @@ void main() {
     expect(seen, same(services));
   });
 
-  test('the default font family is unchanged', () {
-    expect(OpenUiTheme.light.fontFamily, 'packages/open_intelligent_ui/Inter');
+  test(
+    'the core theme sets no font family, so text uses the platform font',
+    () {
+      expect(OpenUiTheme.light.fontFamily, isNull);
+      expect(OpenUiTheme.dark.fontFamily, isNull);
+    },
+  );
+
+  test('every colour in core comes from the theme', () {
+    final raw = <String>[];
+    for (final entity in Directory('$_core/lib').listSync(recursive: true)) {
+      if (entity is! File || !entity.path.endsWith('.dart')) continue;
+      if (entity.path.endsWith('/src/theme.dart')) continue;
+      final lines = entity.readAsLinesSync();
+      for (var i = 0; i < lines.length; i++) {
+        if (lines[i].contains('Color(0x')) raw.add('${entity.path}:${i + 1}');
+      }
+    }
+    expect(raw, isEmpty);
+  });
+
+  testWidgets('a core-only view draws text in the platform font', (
+    tester,
+  ) async {
+    await _pump(tester, 'root = Row(["plain"])');
+    final style = DefaultTextStyle.of(tester.element(find.text('plain'))).style;
+    expect(style.fontFamily, isNot('packages/open_intelligent_ui/Inter'));
   });
 }
 

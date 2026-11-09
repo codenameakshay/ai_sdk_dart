@@ -6,6 +6,13 @@
   nothing silently. `OpenUiView(fallback:)` shows a widget when the settled answer has errors and no root, as
   when a `ValidationPolicy` fails it. `intelligentUiFor(builders, library:)` takes a host library and throws
   an `ArgumentError` naming each host-added component the lookup cannot build.
+- Theming without Material: `OpenUiThemeScope` gives a subtree its own `OpenUiTheme` (a dark view in a
+  light app) with no Material `Theme` needed, and reaches the date picker and menus. The default
+  `fontFamily` is now null (the platform font); `OpenUiServices.fontFamily` sets a fallback. Every colour
+  comes from a token: new `onTone`, `checkInk`, `chevron`, `floatShadow`, `inkOnLight` and `inkOnDark`, and
+  `copyWith` takes `brightness`. `OpenUiComponentStyle` takes `fontSize` and `size` per component (for
+  example `Button`, `Checkbox`, `Input`, `Carousel.arrow`), and `OpenUiTypography(tabularNums: true)` sets
+  tabular figures on all text. The iOS date popup in a dark view is now legible in a light app.
 - Button, IconButton and Pressable show a handled action's pending, done and failed states, ask for an inline
   confirmation when the action has `confirm`, and stay disabled after success with `disableAfterSuccess`.
   `OpenUiNode` gains `actionStatus(prop)` and `run(confirmed:)`.

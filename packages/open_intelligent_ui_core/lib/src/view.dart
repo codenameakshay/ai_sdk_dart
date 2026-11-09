@@ -73,6 +73,8 @@ class _OpenUiViewState extends State<OpenUiView> {
   void Function()? _cancel;
   OpenUiServices? _ambient, _fallback;
   late OpenUiServices _services;
+  OpenUiTheme? _base, _theme;
+  String? _font;
 
   @override
   void initState() {
@@ -129,6 +131,15 @@ class _OpenUiViewState extends State<OpenUiView> {
       _services = ambient.orElse(widget.fallbackServices);
     }
     final root = session.root;
+    final base = OpenUiTheme.of(context);
+    final font = _services.fontFamily;
+    if (!identical(base, _base) || font != _font) {
+      _base = base;
+      _font = font;
+      _theme = base.fontFamily != null || font == null
+          ? base
+          : base.copyWith(fontFamily: font);
+    }
     return OpenUiScope(
       services: _services,
       child: _RendererScope(
@@ -147,7 +158,10 @@ class _OpenUiViewState extends State<OpenUiView> {
           builders: widget.builders,
           emit: _emit,
           semanticsIdentifiers: widget.semanticsIdentifiers,
-          child: widget.child ?? const _DefaultContent(),
+          child: OpenUiThemeScope(
+            theme: _theme!,
+            child: widget.child ?? const _DefaultContent(),
+          ),
         ),
       ),
     );
@@ -206,7 +220,11 @@ Widget _rootView(BuildContext context, OpenUiElement root) {
   final theme = OpenUiTheme.of(context);
   final id = root.statementId ?? 'root';
   return DefaultTextStyle.merge(
-    style: TextStyle(fontFamily: theme.fontFamily, color: theme.ink),
+    style: TextStyle(
+      fontFamily: theme.fontFamily,
+      color: theme.ink,
+      fontFeatures: theme.typography.allText,
+    ),
     child: OpenUiElementView(
       key: ValueKey('openui:$id'),
       element: root,
@@ -223,6 +241,7 @@ class _QueryLoader extends StatelessWidget {
     dimension: 16,
     child: CircularProgressIndicator(
       strokeWidth: 2,
+      color: OpenUiTheme.of(context).ink,
       semanticsLabel: OpenUiLocalizations.of(context).loadingData,
     ),
   );
@@ -334,7 +353,16 @@ class OpenUiRetry extends StatelessWidget {
   Widget build(BuildContext context) {
     final query = OpenUiView.queryOf(context);
     final disabled = !enabled || query.isLoading || query.errors.isEmpty;
+    final theme = OpenUiTheme.of(context);
     return TextButton(
+      style: TextButton.styleFrom(
+        foregroundColor: theme.ink,
+        textStyle: TextStyle(
+          fontFamily: theme.fontFamily,
+          fontSize: theme.fontSizeOf('Retry', 14),
+          fontWeight: theme.typography.medium,
+        ),
+      ),
       onPressed: disabled
           ? null
           : () {

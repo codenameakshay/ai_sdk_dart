@@ -84,7 +84,8 @@ const Map<String, OpenUiTextSize> referenceTitleSizes = {
 };
 
 /// Type: a [scale] for every built-in font size, the Text and Title metrics,
-/// the three font weights, and whether numbers use tabular figures.
+/// the three font weights, whether numbers use tabular figures, and whether
+/// all text does ([tabularNums]).
 @immutable
 final class OpenUiTypography {
   const OpenUiTypography({
@@ -95,6 +96,7 @@ final class OpenUiTypography {
     this.medium = const FontWeight(560),
     this.semibold = const FontWeight(640),
     this.tabularFigures = true,
+    this.tabularNums = false,
   });
 
   final double scale;
@@ -102,11 +104,18 @@ final class OpenUiTypography {
   final FontWeight normal, medium, semibold;
   final bool tabularFigures;
 
+  /// Tabular figures on all text, as if every Text set `tabularNums`, so
+  /// every number lines up.
+  final bool tabularNums;
+
   /// [px] scaled by [scale].
   double size(double px) => px * scale;
 
   List<FontFeature>? get tabular =>
       tabularFigures ? const [FontFeature.tabularFigures()] : null;
+
+  /// [tabular] when [tabularNums] is set, else null.
+  List<FontFeature>? get allText => tabularNums ? tabular : null;
 }
 
 /// A restyle of one component: any null field keeps the built-in value.
@@ -118,11 +127,20 @@ final class OpenUiComponentStyle {
     this.border,
     this.radius,
     this.padding,
+    this.fontSize,
+    this.size,
   });
 
   final Color? background, foreground, border;
   final double? radius;
   final EdgeInsetsGeometry? padding;
+
+  /// The text size in px, before [OpenUiTypography.scale].
+  final double? fontSize;
+
+  /// The fixed or minimum extent: a checkbox's box, a round button's
+  /// diameter, a field's minimum height.
+  final double? size;
 
   /// This style with [other]'s non-null fields on top.
   OpenUiComponentStyle merge(OpenUiComponentStyle? other) {
@@ -133,6 +151,8 @@ final class OpenUiComponentStyle {
       border: other.border ?? border,
       radius: other.radius ?? radius,
       padding: other.padding ?? padding,
+      fontSize: other.fontSize ?? fontSize,
+      size: other.size ?? size,
     );
   }
 }
@@ -160,14 +180,23 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
     required this.glassRingHover,
     required this.shadow,
     required this.shadowSmall,
+    Color? onTone,
+    Color? checkInk,
+    Color? chevron,
+    List<BoxShadow>? floatShadow,
+    this.inkOnLight = const Color(0xFF0D0D0D),
+    this.inkOnDark = const Color(0xFFFFFFFF),
     this.radii = const OpenUiRadii(),
     this.spacing = const OpenUiSpacing(),
     this.typography = const OpenUiTypography(),
     this.components = const {},
-    // ponytail: the umbrella package bundles this family; without it Flutter falls back to the platform font. Pass fontFamily to choose.
-    this.fontFamily = 'packages/open_intelligent_ui/Inter',
+    this.fontFamily,
     String? monoFontFamily,
   }) : faint = faint ?? muted,
+       _onTone = onTone,
+       _checkInk = checkInk,
+       _chevron = chevron,
+       _floatShadow = floatShadow,
        _monoFontFamily = monoFontFamily;
 
   final Brightness brightness;
@@ -194,12 +223,39 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
   final Color glassRingHover;
   final List<BoxShadow> shadow;
   final List<BoxShadow> shadowSmall;
+  final Color? _onTone, _checkInk, _chevron;
+  final List<BoxShadow>? _floatShadow;
+
+  /// Text and icons on a solid `danger` or `success` button; [onInk] when
+  /// unset.
+  Color get onTone => _onTone ?? onInk;
+
+  /// The check on a selected Pressable's [ink] dot; [onInk] when unset.
+  Color get checkInk => _checkInk ?? onInk;
+
+  /// Select's chevron; [muted] when unset.
+  Color get chevron => _chevron ?? muted;
+
+  /// The shadow under floating controls such as Carousel's arrows;
+  /// [shadowSmall] when unset.
+  List<BoxShadow> get floatShadow => _floatShadow ?? shadowSmall;
+
+  /// Ink for content on a light model-written background (see [inkOn]).
+  final Color inkOnLight;
+
+  /// Ink for content on a dark model-written background (see [inkOn]).
+  final Color inkOnDark;
+
   final OpenUiRadii radii;
   final OpenUiSpacing spacing;
   final OpenUiTypography typography;
 
   /// Per-component styles keyed `Card`, `Card.soft`, `Button.outline`, ...
   final Map<String, OpenUiComponentStyle> components;
+
+  /// The text font. Null uses the font of the text style around the view,
+  /// or the platform font; the open_intelligent_ui package supplies Inter
+  /// through `OpenUiServices.fontFamily`.
   final String? fontFamily;
   final String? _monoFontFamily;
 
@@ -222,6 +278,9 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
   Color get rangeTrack => _alpha(ink, 0.06);
   Color get badgeNeutralSoft => _alpha(ink, 0.06);
   Color get inkHover => mixColors(ink, 0.82, canvas, space: 'oklch');
+
+  /// Selected text behind a text field's cursor.
+  Color get selection => _alpha(ink, 0.2);
 
   static const radiusSm = 6.0;
   static const radiusMd = 10.0;
@@ -298,6 +357,10 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
     shadowSmall: const [
       BoxShadow(color: Color(0x0D000000), blurRadius: 3, offset: Offset(0, 1)),
     ],
+    onTone: const Color(0xFFFFFFFF),
+    checkInk: const Color(0xFFFFFFFF),
+    chevron: const Color(0xFF676767),
+    floatShadow: _floatShadowDefault,
   );
 
   static final OpenUiTheme dark = OpenUiTheme(
@@ -355,11 +418,23 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
     shadowSmall: const [
       BoxShadow(color: Color(0x4D000000), blurRadius: 3, offset: Offset(0, 1)),
     ],
+    onTone: const Color(0xFF121212),
+    checkInk: const Color(0xFF171717),
+    chevron: const Color(0xFFABABAB),
+    floatShadow: _floatShadowDefault,
   );
 
-  /// The registered extension, else the light or dark tokens for the app's
-  /// brightness.
+  static const _floatShadowDefault = [
+    BoxShadow(color: Color(0x14000000), blurRadius: 12, offset: Offset(0, 2)),
+  ];
+
+  /// The nearest [OpenUiThemeScope]'s theme, else the Material theme's
+  /// extension, else the light or dark tokens for the app's brightness.
   static OpenUiTheme of(BuildContext context) {
+    final scoped = context
+        .dependOnInheritedWidgetOfExactType<OpenUiThemeScope>()
+        ?.theme;
+    if (scoped != null) return scoped;
     final theme = Theme.of(context);
     return theme.extension<OpenUiTheme>() ??
         (theme.brightness == Brightness.dark ? dark : light);
@@ -443,7 +518,7 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
         0.2126 * channel(rgb[0]) +
         0.7152 * channel(rgb[1]) +
         0.0722 * channel(rgb[2]);
-    return luminance > 0.36 ? const Color(0xFF0D0D0D) : const Color(0xFFFFFFFF);
+    return luminance > 0.36 ? inkOnLight : inkOnDark;
   }
 
   bool _isToken(String value) =>
@@ -551,6 +626,11 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
     );
   }
 
+  /// The font size for [component] (a component name, or `Name.part` for one
+  /// of its parts): its style's fontSize, else [px], scaled.
+  double fontSizeOf(String component, double px) =>
+      typography.size(components[component]?.fontSize ?? px);
+
   /// A radius from a name (`sm`..`xl`, `full`) or a CSS length, as [radius]
   /// with this theme's radii.
   double? radiusOf(Object? value) => switch (value) {
@@ -569,8 +649,12 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
     return space.isFinite ? space : null;
   }
 
+  /// These tokens with the given ones replaced. [onTone] and [checkInk]
+  /// follow a new [onInk], [chevron] a new [muted], and [floatShadow] a new
+  /// [shadowSmall], unless they are given too.
   @override
   OpenUiTheme copyWith({
+    Brightness? brightness,
     Color? canvas,
     Color? ink,
     Color? onInk,
@@ -588,6 +672,12 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
     Color? glassRingHover,
     List<BoxShadow>? shadow,
     List<BoxShadow>? shadowSmall,
+    Color? onTone,
+    Color? checkInk,
+    Color? chevron,
+    List<BoxShadow>? floatShadow,
+    Color? inkOnLight,
+    Color? inkOnDark,
     String? fontFamily,
     String? monoFontFamily,
     OpenUiRadii? radii,
@@ -595,7 +685,7 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
     OpenUiTypography? typography,
     Map<String, OpenUiComponentStyle>? components,
   }) => OpenUiTheme(
-    brightness: brightness,
+    brightness: brightness ?? this.brightness,
     canvas: canvas ?? this.canvas,
     ink: ink ?? this.ink,
     onInk: onInk ?? this.onInk,
@@ -613,6 +703,12 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
     glassRingHover: glassRingHover ?? this.glassRingHover,
     shadow: shadow ?? this.shadow,
     shadowSmall: shadowSmall ?? this.shadowSmall,
+    onTone: onTone ?? (onInk == null ? _onTone : null),
+    checkInk: checkInk ?? (onInk == null ? _checkInk : null),
+    chevron: chevron ?? (muted == null ? _chevron : null),
+    floatShadow: floatShadow ?? (shadowSmall == null ? _floatShadow : null),
+    inkOnLight: inkOnLight ?? this.inkOnLight,
+    inkOnDark: inkOnDark ?? this.inkOnDark,
     fontFamily: fontFamily ?? this.fontFamily,
     monoFontFamily: monoFontFamily ?? _monoFontFamily,
     radii: radii ?? this.radii,
@@ -656,6 +752,13 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
       shadow: BoxShadow.lerpList(shadow, other.shadow, t) ?? shadow,
       shadowSmall:
           BoxShadow.lerpList(shadowSmall, other.shadowSmall, t) ?? shadowSmall,
+      onTone: c(onTone, other.onTone),
+      checkInk: c(checkInk, other.checkInk),
+      chevron: c(chevron, other.chevron),
+      floatShadow:
+          BoxShadow.lerpList(floatShadow, other.floatShadow, t) ?? floatShadow,
+      inkOnLight: c(inkOnLight, other.inkOnLight),
+      inkOnDark: c(inkOnDark, other.inkOnDark),
       fontFamily: t < 0.5 ? fontFamily : other.fontFamily,
       monoFontFamily: t < 0.5 ? _monoFontFamily : other._monoFontFamily,
       radii: t < 0.5 ? radii : other.radii,
@@ -664,4 +767,23 @@ final class OpenUiTheme extends ThemeExtension<OpenUiTheme> {
       components: t < 0.5 ? components : other.components,
     );
   }
+}
+
+/// Provides an [OpenUiTheme] to the views and components below it, with no
+/// Material [Theme] needed. It wins over a Material theme extension, and like
+/// `OpenUiScope` it reaches into routes such as date pickers and menus.
+class OpenUiThemeScope extends InheritedTheme {
+  const OpenUiThemeScope({
+    super.key,
+    required this.theme,
+    required super.child,
+  });
+  final OpenUiTheme theme;
+
+  @override
+  bool updateShouldNotify(OpenUiThemeScope old) => !identical(theme, old.theme);
+
+  @override
+  Widget wrap(BuildContext context, Widget child) =>
+      OpenUiThemeScope(theme: theme, child: child);
 }

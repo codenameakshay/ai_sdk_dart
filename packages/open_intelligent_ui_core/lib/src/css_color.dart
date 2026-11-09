@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart' show listEquals;
+import 'package:flutter/material.dart' show Colors;
 import 'package:flutter/painting.dart' show Gradient;
 
 /// Parses a CSS color: hex (`#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`),
@@ -12,7 +13,7 @@ import 'package:flutter/painting.dart' show Gradient;
 /// model-written string can only ever become a color.
 Color? parseCssColor(String input) {
   final s = input.trim().toLowerCase();
-  if (s == 'transparent') return const Color(0x00000000);
+  if (s == 'transparent') return Colors.transparent;
   if (_named[s] case final v?) return Color(v);
   final hex = RegExp(
     r'^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$',
@@ -233,7 +234,7 @@ Color? _colorMix(String args) {
 Color _mixColors(Color a, Color b, double wa, String space, double scale) {
   final wb = 1 - wa;
   final alpha = wa * a.a + wb * b.a;
-  if (alpha <= 0) return const Color(0x00000000);
+  if (alpha <= 0) return Colors.transparent;
   final List<double> srgb;
   if (space == 'oklch') {
     final p = _lch(a), q = _lch(b);

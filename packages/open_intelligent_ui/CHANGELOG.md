@@ -1,6 +1,8 @@
 ## 3.1.0 (unreleased)
 
 - `OpenUiView` passes `fallback:` through to the core view.
+- Views keep the bundled Inter font by default through `OpenUiServices.fontFamily`, now that the core
+  theme's default font is the platform font. A theme that sets `fontFamily` still wins.
 - `OpenUiChat` takes `send` for any transport, `locale` and `records`; `agent` is optional. The chat
   renders answers stored as text parts, and `package:open_intelligent_ui/chat.dart` exports
   `OpenUiAnswerView`.

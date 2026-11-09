@@ -27,6 +27,7 @@ final class OpenUiServices {
     this.imageLoader,
     this.embedReferrer,
     this.icons,
+    this.fontFamily,
   }) : _openUrl = openUrl,
        _copyText = copyText;
 
@@ -56,6 +57,10 @@ final class OpenUiServices {
   /// falls back to the built-in icons, and a name neither draws shows nothing.
   final OpenUiIconResolver? icons;
 
+  /// The text font when the view's theme sets none, like [icons] a bundled
+  /// resource: the open_intelligent_ui package supplies its Inter here.
+  final String? fontFamily;
+
   /// Opens an http(s) URL; without an openUrl it does nothing.
   Future<void> openUrl(Uri url) => _openUrl?.call(url) ?? Future<void>.value();
 
@@ -64,7 +69,8 @@ final class OpenUiServices {
       _copyText?.call(text) ?? Clipboard.setData(ClipboardData(text: text));
 
   /// These services, with [fallback]'s openUrl, copyText, searchImages,
-  /// streetRoute, imageLoader, embedReferrer and icons wherever this sets none.
+  /// streetRoute, imageLoader, embedReferrer, icons and fontFamily wherever
+  /// this sets none.
   /// mapTiles is always this one's. Returns this when [fallback] fills nothing.
   OpenUiServices orElse(OpenUiServices fallback) {
     final fills =
@@ -74,7 +80,8 @@ final class OpenUiServices {
         (streetRoute == null && fallback.streetRoute != null) ||
         (imageLoader == null && fallback.imageLoader != null) ||
         (embedReferrer == null && fallback.embedReferrer != null) ||
-        (icons == null && fallback.icons != null);
+        (icons == null && fallback.icons != null) ||
+        (fontFamily == null && fallback.fontFamily != null);
     if (!fills) return this;
     return OpenUiServices(
       openUrl: _openUrl ?? fallback._openUrl,
@@ -85,6 +92,7 @@ final class OpenUiServices {
       imageLoader: imageLoader ?? fallback.imageLoader,
       embedReferrer: embedReferrer ?? fallback.embedReferrer,
       icons: icons ?? fallback.icons,
+      fontFamily: fontFamily ?? fallback.fontFamily,
     );
   }
 }

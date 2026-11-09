@@ -134,7 +134,7 @@ class _ActionGateState extends State<ActionGate> {
                   confirm!,
                   style: TextStyle(
                     fontFamily: theme.fontFamily,
-                    fontSize: theme.typography.size(14),
+                    fontSize: theme.fontSizeOf('Action.confirm', 14),
                     height: 1.4,
                     color: theme.ink,
                   ),
@@ -166,7 +166,7 @@ class _ActionGateState extends State<ActionGate> {
                     : status.message!,
                 style: TextStyle(
                   fontFamily: theme.fontFamily,
-                  fontSize: theme.typography.size(13),
+                  fontSize: theme.fontSizeOf('Action.error', 13),
                   height: 1.4,
                   color: checking
                       ? theme.muted

@@ -56,7 +56,7 @@ class _CodeBlockState extends State<_CodeBlock> {
   Widget build(BuildContext context) {
     final theme = OpenUiTheme.of(context);
     final head = TextStyle(
-      fontSize: theme.typography.size(12),
+      fontSize: theme.fontSizeOf('Code.head', 12),
       color: theme.muted,
     );
     return Container(
@@ -88,7 +88,7 @@ class _CodeBlockState extends State<_CodeBlock> {
                   label: OpenUiLocalizations.of(context).copyCode,
                   excludeSemantics: true,
                   child: Press(
-                    radius: 6,
+                    radius: theme.radii.sm,
                     onTap: (_) => _copy(),
                     builder: (hovered, pressed) {
                       final color = hovered ? theme.ink : theme.muted;
@@ -133,7 +133,7 @@ class _CodeBlockState extends State<_CodeBlock> {
               widget.code,
               style: TextStyle(
                 fontFamily: theme.monoFontFamily,
-                fontSize: theme.typography.size(13),
+                fontSize: theme.fontSizeOf('Code', 13),
                 height: 1.6,
                 color: theme.ink,
               ),

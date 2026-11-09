@@ -121,7 +121,7 @@ Widget buildBox(BuildContext context, OpenUiNode node) {
   if (ink == null) return box;
   return DefaultTextStyle.merge(
     style: TextStyle(color: ink),
-    child: Theme(data: _themed(context, theme.withInk(ink)), child: box),
+    child: OpenUiThemeScope(theme: theme.withInk(ink), child: box),
   );
 }
 
@@ -219,13 +219,13 @@ Widget buildCard(BuildContext context, OpenUiNode node) {
   final modelPadding = theme.spaceOf(node.props['padding']);
   Widget content = _CardScope(
     child: DefaultTextStyle.merge(
-      style: TextStyle(fontSize: theme.typography.size(14), height: 1.55),
+      style: TextStyle(fontSize: theme.fontSizeOf('Card', 14), height: 1.55),
       child: CardHeadScope(active: false, child: body),
     ),
   );
   if (s.foreground case final foreground?) {
-    content = Theme(
-      data: _themed(context, theme.withInk(foreground)),
+    content = OpenUiThemeScope(
+      theme: theme.withInk(foreground),
       child: DefaultTextStyle.merge(
         style: TextStyle(color: foreground),
         child: content,
@@ -584,11 +584,6 @@ Widget _cell(_Item item) => item.type == 'Image' || item.type == 'SearchImage'
         child: item.widget,
       )
     : item.widget;
-
-ThemeData _themed(BuildContext context, OpenUiTheme tokens) {
-  final base = Theme.of(context);
-  return base.copyWith(extensions: [...base.extensions.values, tokens]);
-}
 
 CrossAxisAlignment _cross(String? align, CrossAxisAlignment fallback) =>
     switch (align) {

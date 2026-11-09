@@ -104,14 +104,21 @@ ImageProvider? networkImages(Uri url) => _httpImage(url);
 /// blocked. Host names are case-insensitive. Redirects are rejected so an
 /// allowed server cannot load an image from a different host. Only HTTP and
 /// HTTPS URLs are accepted. On web, the image server must allow the app's
-/// origin with CORS; otherwise the image fails closed.
-OpenUiImageLoader allowImageHosts(Iterable<String> hosts) {
+/// origin with CORS; otherwise the image fails closed. An image larger than
+/// [maxBytes], or whose fetch takes longer than [timeout], fails.
+OpenUiImageLoader allowImageHosts(
+  Iterable<String> hosts, {
+  int maxBytes = defaultImageMaxBytes,
+  Duration timeout = defaultImageTimeout,
+}) {
   final allowed = {for (final h in hosts) h.toLowerCase()};
   return (url) {
     if (url.scheme != 'http' && url.scheme != 'https') return null;
     final host = url.host.toLowerCase();
     final ok = allowed.any((h) => host == h || host.endsWith('.$h'));
-    return ok ? AllowlistedImageProvider(url) : null;
+    return ok
+        ? AllowlistedImageProvider(url, maxBytes: maxBytes, timeout: timeout)
+        : null;
   };
 }
 

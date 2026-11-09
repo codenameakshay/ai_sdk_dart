@@ -45,6 +45,8 @@
   split from open_intelligent_ui.
 - `allowImageHosts(hosts, maxBytes:, timeout:)`: an allow-listed image larger than `maxBytes` (10 MiB by
   default) or slower than `timeout` (30 seconds by default) fails instead of downloading without limit.
+- `OpenUiServices` and `MapTiles` compare by value, so an `OpenUiScope` rebuilt with equal services (the same
+  tear-offs and values) no longer rebuilds every component that reads them.
 - Behaviour change: no network by default. Map tiles and images no longer load until you allow them:
   `OpenUiServices(mapTiles: esriStreetTiles, imageLoader: networkImages)`, or allow a few hosts with
   `imageLoader: allowImageHosts(['upload.wikimedia.org'])`. A blocked image shows the photo placeholder.

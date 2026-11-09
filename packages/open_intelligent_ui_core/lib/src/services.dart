@@ -68,6 +68,35 @@ final class OpenUiServices {
   Future<void> copyText(String text) =>
       _copyText?.call(text) ?? Clipboard.setData(ClipboardData(text: text));
 
+  /// Equal when every member is equal. Function members compare as Dart
+  /// functions do: the same top-level, static or bound-method tear-off is
+  /// equal, a closure written inline in `build` is not.
+  @override
+  bool operator ==(Object other) =>
+      other is OpenUiServices &&
+      other._openUrl == _openUrl &&
+      other._copyText == _copyText &&
+      other.searchImages == searchImages &&
+      other.streetRoute == streetRoute &&
+      other.mapTiles == mapTiles &&
+      other.imageLoader == imageLoader &&
+      other.embedReferrer == embedReferrer &&
+      other.icons == icons &&
+      other.fontFamily == fontFamily;
+
+  @override
+  int get hashCode => Object.hash(
+    _openUrl,
+    _copyText,
+    searchImages,
+    streetRoute,
+    mapTiles,
+    imageLoader,
+    embedReferrer,
+    icons,
+    fontFamily,
+  );
+
   /// These services, with [fallback]'s openUrl, copyText, searchImages,
   /// streetRoute, imageLoader, embedReferrer, icons and fontFamily wherever
   /// this sets none.
@@ -138,6 +167,16 @@ final class MapTiles {
   final String light;
   final String dark;
   final String attribution;
+
+  @override
+  bool operator ==(Object other) =>
+      other is MapTiles &&
+      other.light == light &&
+      other.dark == dark &&
+      other.attribution == attribution;
+
+  @override
+  int get hashCode => Object.hash(light, dark, attribution);
 }
 
 /// The reference's raster basemap (Esri World Street Map and Dark Gray).

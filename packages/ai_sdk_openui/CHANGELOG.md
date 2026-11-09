@@ -36,6 +36,9 @@
   against its record's schema: a path the schema lacks is the new `unknown-bound-path` error, and a value
   whose type does not fit the prop is `type-mismatch`. A computed index into a record (`$order[$k]`) is no
   longer a bound path, so it cannot feed a bound-only prop, in sessions too.
+- `Steps.set` and `Steps.reset` let an action slot list `@Set` and `@Reset`. Every `@` step given to a
+  restricted slot (directly, in `Action([...])` or in a ternary branch) must be one the slot lists, or it is a
+  `type-mismatch` and the prop is dropped, so the Dart validator agrees with one that reads `spec.json`.
 - Migration: `ValidationCode` and `OpenUiErrorCode` gain `unknownBoundPath`. An exhaustive `switch` over
   either needs a case.
 - Validator vectors: `conformance/vectors.json` gains vectors with `bound`, `policy` and `expectReport`, run

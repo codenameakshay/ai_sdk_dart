@@ -37,6 +37,8 @@ What a validator reads from the spec:
   object field or list item inside one.
 - `schema.actions.<Name>.params` and `schema.functions.<Name>.params`: library `@Action` and
   `@Function` params, in the same form.
+- Restricted action slots (section 4): a param whose schema is a step shape, or a union of
+  step shapes, takes only those steps.
 - `policy` (optional): the caps below. Policy flags on `openui spec` write it
   (`--max-nodes=24 --max-depth=8 --max-string=280 --unknown=fail --allow-actions=ToAssistant,Pay`).
   `openui validate` applies a spec's `policy`, with its own flags taking precedence key by key.
@@ -85,7 +87,26 @@ written out inside one, bound-only or not, is checked (built-in `@` functions ar
 
 A record without a schema is not checked beyond section 3.
 
-## 4. The report
+## 4. Action slots
+
+A step shape is an object schema whose `type` property is a `const`. `Steps` and `S.actionRef` emit one
+into `$defs` for each step a slot lists. The const names the step:
+
+| `type` const | Step |
+| --- | --- |
+| `continue_conversation` | `@ToAssistant` |
+| `open_url` | `@OpenUrl` |
+| `set` | `@Set` |
+| `reset` | `@Reset` |
+| any other value | the library action of that name, such as `@Copy` |
+
+A param whose schema is a step shape, or a union of step shapes (a `{"type": "null"}` option is
+ignored), is a restricted slot. Each step given to it must be one it lists: the step itself, every step
+in `Action([...])`, and the steps of both branches of a ternary. Otherwise it is a `type-mismatch` error at
+the param's path, and the prop is dropped. The generic `ActionExpression` slot (`actionSchema`) takes any
+step.
+
+## 5. The report
 
 `ValidationReport.toJson()`, which `openui validate` prints:
 
@@ -125,7 +146,7 @@ version. A minor version can add codes; treat an unknown code with `"severity": 
 | --- | --- | --- |
 | `missing-required` | error | a required param is missing |
 | `null-required` | error | a required param is null |
-| `type-mismatch` | error | a value does not match its param's schema |
+| `type-mismatch` | error | a value does not match its param's schema, a bound value's type does not fit (section 3), or a step is outside its action slot (section 4) |
 | `excess-args` | error | more arguments than params; the extra ones are dropped |
 | `unknown-component` | warning with `drop`, error with `fail` | the library has no such component |
 | `unknown-function` | error | an `@Name` that is no built-in, function or action |
@@ -141,7 +162,7 @@ version. A minor version can add codes; treat an unknown code with `"severity": 
 | `string-too-long` | error | over `maxStringLength` |
 | `action-not-allowed` | error | a step or action outside `allowedActions` |
 
-## 5. Conformance vectors
+## 6. Conformance vectors
 
 `conformance/vectors.json` holds two kinds of vectors:
 
@@ -153,7 +174,7 @@ version. A minor version can add codes; treat an unknown code with `"severity": 
   - `boundSchemas`: a JSON Schema per bound record name; these names count as bound too.
   - `policy`: the policy, in the form of section 2.
 
-  `expectReport` is the full report of section 4 without the `message` fields. The lang-core runner
+  `expectReport` is the full report of section 5 without the `message` fields. The lang-core runner
   skips these vectors.
 
 A validator passes when, for every validator vector, it gives exactly `expectReport`, issues in the

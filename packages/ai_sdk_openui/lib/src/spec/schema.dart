@@ -71,8 +71,11 @@ abstract final class S {
       _StepRef(name, {'type': S.literal(name), 'params': S.object(params)});
 }
 
-/// Refs of the built-in steps that have a legacy JSON shape, for restricted action slots:
-/// `S.union([Steps.openUrl, S.actionRef('Copy', {...})])`.
+/// Refs of the built-in steps, for restricted action slots:
+/// `S.union([Steps.openUrl, S.actionRef('Copy', {...})])`. Each emits a `$defs`
+/// entry whose `type` const is the step's runtime type (`open_url`,
+/// `continue_conversation`, `set`, `reset`), so a validator reading the spec
+/// knows which `@` steps the slot takes.
 abstract final class Steps {
   static final Schema openUrl = _StepRef('OpenUrl', {
     'type': S.literal('open_url'),
@@ -81,6 +84,18 @@ abstract final class Steps {
   static final Schema toAssistant = _StepRef('ToAssistant', {
     'type': S.literal('continue_conversation'),
     'context': S.string().optional(),
+  });
+
+  /// `@Set($variable, value)`.
+  static final Schema set = _StepRef('Set', {
+    'type': S.literal('set'),
+    'target': S.string(),
+  });
+
+  /// `@Reset($variable, ...)`.
+  static final Schema reset = _StepRef('Reset', {
+    'type': S.literal('reset'),
+    'targets': S.list(S.string()),
   });
 }
 

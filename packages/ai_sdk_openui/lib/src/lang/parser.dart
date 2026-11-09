@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../runtime/builtins.dart';
+import '../runtime/evaluator.dart' show actionSteps;
 import '../spec/schema.dart' show boundKeyword;
 import 'ast.dart';
 import 'js.dart';
@@ -73,6 +74,8 @@ final class CompiledSchema {
       'ActionExpression',
       'OpenUrl',
       'ToAssistant',
+      'Set',
+      'Reset',
       ...actionsJson.keys,
     ]) {
       final body = defsJson[name];
@@ -529,6 +532,84 @@ bool _violatesBound(
   return true;
 }
 
+/// Built-in step names by runtime step type (`set` is `Set`).
+final _stepNames = {
+  for (final MapEntry(:key, :value) in actionSteps.entries) value: key,
+};
+
+/// The steps the action slot [schema] takes, by name, or null when it is no
+/// restricted slot. A restricted slot is a step shape (an object whose `type`
+/// property is a const, as `Steps` and `S.actionRef` emit) or a union of them,
+/// optionally with null.
+Set<String>? _slotSteps(Object? schema) {
+  if (schema is! Map) return null;
+  final options = schema['anyOf'] ?? schema['oneOf'];
+  if (options is List) {
+    final names = <String>{};
+    for (final o in options) {
+      if (o is Map && o['type'] == 'null') continue;
+      final steps = _slotSteps(o);
+      if (steps == null) return null;
+      names.addAll(steps);
+    }
+    return names.isEmpty ? null : names;
+  }
+  final props = schema['properties'];
+  final type = props is Map ? props['type'] : null;
+  final value = type is Map ? type['const'] : null;
+  return value is String ? {_stepNames[value] ?? value} : null;
+}
+
+/// The `@` steps [node] runs: itself, each step in `Action([...])`, and those
+/// of both branches of a ternary.
+List<String> _steps(Object? node, _Ctx ctx) => switch (node) {
+  CompNode(name: 'Action', :final args) when args.firstOrNull is ArrNode => [
+    for (final e in (args.first as ArrNode).elements) ..._steps(e, ctx),
+  ],
+  CompNode(:final name) when ctx.schema.calls[name]?.kind == CallKind.action =>
+    [name],
+  TernaryNode(:final then, :final otherwise) => [
+    ..._steps(then, ctx),
+    ..._steps(otherwise, ctx),
+  ],
+  _ => const [],
+};
+
+/// Reports a step in [arg] that the action slot [schema] does not take.
+bool _violatesSlot(
+  Object? schema,
+  Object? arg,
+  String component,
+  String path,
+  _Ctx ctx,
+) {
+  final allowed = _slotSteps(schema);
+  if (allowed == null) return false;
+  final outside = {
+    for (final step in _steps(arg, ctx))
+      if (!allowed.contains(step)) '@$step',
+  };
+  if (outside.isEmpty) return false;
+  pushIssue(
+    ctx,
+    component,
+    path,
+    TypeMismatch(allowed.map((s) => '@$s').join(' | '), outside.join(', ')),
+  );
+  return true;
+}
+
+/// [_violatesBound] and [_violatesSlot] for a prop or param: reports both.
+bool _violatesProp(
+  Object? schema,
+  Object? arg,
+  String component,
+  String path,
+  _Ctx ctx,
+) =>
+    _violatesBound(schema, arg, component, path, ctx) |
+    _violatesSlot(schema, arg, component, path, ctx);
+
 /// Runs [body] with loop variable [name] over [source] in scope: bound, with
 /// the item schema, when [source] is a bound path.
 T _withLoopVar<T>(String? name, Ast source, _Ctx ctx, T Function() body) {
@@ -614,7 +695,7 @@ Map<String, Ast>? _mapCallArgs(
   final errorsBefore = ctx.errors.length;
   for (final p in params) {
     final arg = mapped[p.name];
-    if (_violatesBound(p.schema, arg, name, '/${p.name}', ctx)) {
+    if (_violatesProp(p.schema, arg, name, '/${p.name}', ctx)) {
       isInvalid = true;
       continue;
     }
@@ -797,7 +878,7 @@ Ast _materializeExpr(Ast node, _Ctx ctx, Set<String> scoped) {
         final checked = [
           for (var i = 0; i < args.length; i++)
             i < params.length &&
-                    _violatesBound(
+                    _violatesProp(
                       params[i].schema,
                       args[i],
                       node.name,
@@ -914,7 +995,7 @@ Object? _materializeValue(Ast node, _Ctx ctx) {
         props[param.name] = value;
         if (param.schema == null) continue;
         var next =
-            _violatesBound(param.schema, value, name, '/${param.name}', ctx)
+            _violatesProp(param.schema, value, name, '/${param.name}', ctx)
             ? invalid
             : validateSchemaValue(
                 value,

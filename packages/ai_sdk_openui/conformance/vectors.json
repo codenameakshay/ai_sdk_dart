@@ -1403,6 +1403,40 @@
           "statements": 2
         }
       }
+    },
+    {
+      "id": "report-step-in-slot",
+      "program": "$a = 0\nroot = Out(Chip(\"x\", Action([@ToAssistant(\"go\"), @Set($a, 1)])))",
+      "expectReport": {
+        "ok": true,
+        "issues": [],
+        "stats": {
+          "nodes": 2,
+          "depth": 2,
+          "statements": 2
+        }
+      }
+    },
+    {
+      "id": "report-step-outside-slot",
+      "program": "$a = 0\nroot = Out(Chip(\"x\", @Reset($a)))",
+      "expectReport": {
+        "ok": false,
+        "issues": [
+          {
+            "code": "type-mismatch",
+            "severity": "error",
+            "statementId": "root",
+            "component": "Chip",
+            "path": "/action"
+          }
+        ],
+        "stats": {
+          "nodes": 2,
+          "depth": 2,
+          "statements": 2
+        }
+      }
     }
   ]
 }

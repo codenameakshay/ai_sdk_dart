@@ -6,6 +6,10 @@
     }
   },
   "components": {
+    "Chip": {
+      "description": "A chip with a restricted action.",
+      "signature": "Chip(label: string, action?: @ToAssistant | @Set)"
+    },
     "Out": {
       "description": "Shows a value, an amount and an action.",
       "signature": "Out(value: any, amount?: $bound<any>, action?: ActionExpression, payment?: {amount: $bound<any>}, money?: $bound<{minor: number, currency: string}>)"
@@ -71,6 +75,29 @@
           }
         ]
       },
+      "Chip": {
+        "additionalProperties": false,
+        "description": "A chip with a restricted action.",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "action": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ToAssistant"
+              },
+              {
+                "$ref": "#/$defs/Set"
+              }
+            ]
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "type": "object"
+      },
       "Out": {
         "additionalProperties": false,
         "description": "Shows a value, an amount and an action.",
@@ -116,6 +143,39 @@
           "value"
         ],
         "type": "object"
+      },
+      "Set": {
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "const": "set",
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "target"
+        ],
+        "type": "object"
+      },
+      "ToAssistant": {
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "const": "continue_conversation",
+            "type": "string"
+          },
+          "context": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "type": "object"
       }
     },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -141,10 +201,14 @@
     "properties": {
       "Out": {
         "$ref": "#/$defs/Out"
+      },
+      "Chip": {
+        "$ref": "#/$defs/Chip"
       }
     },
     "required": [
-      "Out"
+      "Out",
+      "Chip"
     ],
     "type": "object"
   }

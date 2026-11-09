@@ -2,7 +2,7 @@ import 'package:ai_sdk_openui/ai_sdk_openui.dart';
 
 /// The library behind `conformance/validator-spec.json`: a bound-only prop at
 /// the top level and nested, an action slot, a typed bound-only money prop,
-/// and a bound-only action param.
+/// a bound-only action param, and a restricted action slot (Chip).
 final class _Out implements ComponentSpec {
   const _Out();
   @override
@@ -22,9 +22,23 @@ final class _Out implements ComponentSpec {
   };
 }
 
+/// A component whose action slot takes only `@ToAssistant` and `@Set`.
+final class _Chip implements ComponentSpec {
+  const _Chip();
+  @override
+  String get typeName => 'Chip';
+  @override
+  String get description => 'A chip with a restricted action.';
+  @override
+  Map<String, Schema> get props => {
+    'label': S.string(),
+    'action': S.union([Steps.toAssistant, Steps.set]).optional(),
+  };
+}
+
 final validatorLibrary = OpenUiLibrary(
   root: const _Out(),
-  components: const [_Out()],
+  components: const [_Out(), _Chip()],
   actions: [
     ActionSpec(
       'Pay',

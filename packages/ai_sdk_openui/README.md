@@ -47,6 +47,9 @@ final report = intelligentUi.parse(program);
 print(report.isClean ? 'ok' : report.errors);
 ```
 
+A server in another language can run the same checks: `doc/validation.md` describes the spec export
+(`openui spec`), the report format and the conformance vectors that prove a validator matches.
+
 ## Fidelity
 
 - `spec.json` from the reference is reproduced byte for byte, and both system prompts match the

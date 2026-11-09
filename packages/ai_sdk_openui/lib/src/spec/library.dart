@@ -365,22 +365,36 @@ final class OpenUiLibrary {
       );
 
   /// Parses a complete program without running it: a server-side check.
-  ParseReport parse(String program, {Set<String> bound = const {}}) =>
-      ParseReport._(
-        parseProgram(program, compiled, rootName: rootName, boundNames: bound),
-      );
+  /// [bound] names the host-bound `$variables`; [boundSchemas] gives a JSON
+  /// Schema per `$variable` (its names count as bound too), so a bound path
+  /// must exist in it and fit the prop it feeds.
+  ParseReport parse(
+    String program, {
+    Set<String> bound = const {},
+    Map<String, Map<String, Object?>> boundSchemas = const {},
+  }) => ParseReport._(
+    parseProgram(
+      program,
+      compiled,
+      rootName: rootName,
+      boundNames: bound,
+      boundSchemas: boundSchemas,
+    ),
+  );
 
   /// [parse] plus the [policy] limits, with each issue's statement id.
   ValidationReport validate(
     String program, {
     ValidationPolicy policy = const ValidationPolicy(),
     Set<String> bound = const {},
+    Map<String, Map<String, Object?>> boundSchemas = const {},
   }) => validateProgram(
     program,
     compiled,
     rootName: rootName,
     policy: policy,
     boundNames: bound,
+    boundSchemas: boundSchemas,
   );
 }
 

@@ -21,7 +21,10 @@ enum OpenUiErrorCode {
   parseFailed('parse-failed'),
   toolNotFound('tool-not-found'),
   toolError('tool-error'),
-  mcpError('mcp-error');
+  mcpError('mcp-error'),
+
+  /// A bound path the record's schema does not have.
+  unknownBoundPath('unknown-bound-path');
 
   const OpenUiErrorCode(this.wire);
   final String wire;

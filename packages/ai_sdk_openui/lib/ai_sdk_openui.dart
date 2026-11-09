@@ -11,6 +11,7 @@ export 'src/lang/policy.dart'
         ValidationIssue,
         ValidationPolicy,
         ValidationReport,
+        canonicalJson,
         validateProgram;
 export 'src/runtime/action_message.dart' show buildActionUserMessage;
 export 'src/runtime/answers.dart'

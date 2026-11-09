@@ -1,8 +1,9 @@
 name: CI
 
-# One job runs the whole suite, which takes about a minute. A second, small job
-# checks that a host can depend on the packages from git. A newer push to a pull request
-# cancels the older run. A change that touches only docs does not start a run.
+# One job runs the whole suite, which takes about a minute. Two small jobs
+# check that a host can depend on the packages from git and that the engine
+# tests pass outside UTC. A newer push to a pull request cancels the older run.
+# A change that touches only docs does not start a run.
 
 on:
   pull_request:
@@ -124,3 +125,24 @@ jobs:
           tool/git_consumer_check.sh
           "https://github.com/${{ github.repository }}.git"
           "${{ github.event.pull_request.head.sha || github.sha }}"
+
+  # The engine reads dates in the device zone by default; this catches tests
+  # that only pass in UTC.
+  openui-non-utc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Flutter (includes Dart)
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version-file: .fvmrc
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Test the OpenUI engine in UTC+05:30
+        run: cd packages/ai_sdk_openui && TZ=Asia/Kolkata dart test

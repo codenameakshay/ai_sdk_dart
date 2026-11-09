@@ -18,9 +18,25 @@ void main() {
   });
 
   group('Impure.fromLocal', () {
-    test('reads a zone-less date string as local time, UTC in tests', () {
+    test('reads a zone-less date string in the device zone by default', () {
       Impure.reset();
-      expect(jsDateParse('2026-10-09T10:00', Impure.fromLocal), 1791540000000);
+      expect(
+        jsDateParse('2026-10-09T10:00', Impure.fromLocal),
+        DateTime(2026, 10, 9, 10).millisecondsSinceEpoch,
+      );
+    });
+
+    test('reads a zone-less date string in the zone a session picks', () {
+      final kolkata = OpenUiTimeZone.fixed(
+        const Duration(hours: 5, minutes: 30),
+      );
+      expect(
+        Impure.run(
+          timeZone: kolkata,
+          () => jsDateParse('2026-10-09T10:00', Impure.fromLocal),
+        ),
+        1791520200000,
+      );
     });
   });
 
@@ -33,7 +49,10 @@ void main() {
     ];
     for (final (text, want) in cases) {
       test('"$text" parses to ${want ?? 'NaN'}', () {
-        final got = jsDateParse(text, Impure.fromLocal);
+        final got = Impure.run(
+          timeZone: OpenUiTimeZone.utc,
+          () => jsDateParse(text, Impure.fromLocal),
+        );
         expect(got.isNaN ? null : got.toInt(), want);
       });
     }

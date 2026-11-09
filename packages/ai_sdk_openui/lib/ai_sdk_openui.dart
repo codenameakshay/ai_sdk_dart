@@ -74,6 +74,7 @@ export 'src/spec/library.dart'
         actionSchema;
 export 'src/spec/schema.dart' show S, Schema, Steps;
 export 'src/runtime/queries.dart' show ToolNotFoundError;
+export 'src/iui/functions/shared.dart' show OpenUiTimeZone;
 export 'src/runtime/session.dart'
     show
         ActionEvent,

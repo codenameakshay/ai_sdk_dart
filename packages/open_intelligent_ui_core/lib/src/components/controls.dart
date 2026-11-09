@@ -1,7 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:ai_sdk_openui/ai_sdk_openui.dart';
-import 'package:ai_sdk_openui/intelligent_ui.dart' show Impure, formatDecimal;
+import 'package:ai_sdk_openui/intelligent_ui.dart' show formatDecimal;
 import 'package:flutter/cupertino.dart'
     show
         CupertinoButton,
@@ -1583,7 +1583,7 @@ Widget buildDatePicker(BuildContext context, OpenUiNode node) {
           final last = max != null && !max.isBefore(first)
               ? max
               : (first.isAfter(DateTime(2100)) ? first : DateTime(2100));
-          final today = Impure.toLocal(Impure.now());
+          final today = node.localNow;
           var initial = current ?? DateTime(today.year, today.month, today.day);
           if (initial.isBefore(first)) initial = first;
           if (initial.isAfter(last)) initial = last;

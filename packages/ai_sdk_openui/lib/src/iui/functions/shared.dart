@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import '../../lang/js.dart';
@@ -11,26 +12,96 @@ Schema agg() => S.oneOf(['sum', 'avg', 'count', 'min', 'max']);
 
 const maxItems = 10000;
 
+/// A time zone as its offset from UTC at each instant. The host supplies it,
+/// for example from its own time zone database; null means device local.
+final class OpenUiTimeZone {
+  const OpenUiTimeZone(this.offsetAt);
+
+  /// A zone that is always [offset] from UTC, such as +05:30.
+  OpenUiTimeZone.fixed(Duration offset) : offsetAt = ((_) => offset);
+
+  static final OpenUiTimeZone utc = OpenUiTimeZone.fixed(Duration.zero);
+
+  /// The offset from UTC at a UTC instant.
+  final Duration Function(DateTime utc) offsetAt;
+
+  /// The wall-clock time at [instant], as a UTC DateTime with those fields.
+  DateTime toLocal(DateTime instant) {
+    final utc = instant.toUtc();
+    return utc.add(offsetAt(utc));
+  }
+
+  /// The epoch milliseconds of a wall-clock time given as epoch milliseconds
+  /// read as UTC, as JavaScript picks them: a time a clock change repeats is
+  /// its earlier instant, and one it skips reads with the earlier offset.
+  // ponytail: assumes at most one offset change within a day of the time.
+  int fromLocal(int wallMs) {
+    int offset(int ms) => offsetAt(
+      DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true),
+    ).inMilliseconds;
+    const day = 86400000;
+    final before = wallMs - offset(wallMs - day);
+    final after = wallMs - offset(wallMs + day);
+    final valid = [
+      for (final t in [before, after])
+        if (t + offset(t) == wallMs) t,
+    ];
+    return valid.isEmpty ? before : valid.reduce(math.min);
+  }
+}
+
+typedef _Scope = ({
+  DateTime Function()? now,
+  double Function()? random,
+  OpenUiTimeZone? timeZone,
+});
+
 /// The impure inputs `@Random`, `@Pick`, `@Shuffle`, `@Now` and `@Today`
-/// read. Tests replace them.
-// ponytail: process-wide seams; pass them per session if two need to differ.
+/// read. A session's clock, random source and time zone apply while [run]
+/// runs its functions; otherwise these process-wide defaults apply, which
+/// tests may replace.
 abstract final class Impure {
   static final math.Random _random = math.Random();
+  static final Object _key = Object();
+  static _Scope? get _scope => Zone.current[_key] as _Scope?;
+
+  static double Function() _randomDefault = _random.nextDouble;
+  static DateTime Function() _nowDefault = DateTime.now;
+  static DateTime Function(DateTime instant) _toLocalDefault = _toLocal;
+  static int Function(int wallMs) _fromLocalDefault = _fromLocal;
 
   /// `Math.random()`: a double in [0, 1).
-  static double Function() random = _random.nextDouble;
+  static double Function() get random => _scope?.random ?? _randomDefault;
+  static set random(double Function() f) => _randomDefault = f;
 
   /// `Date.now()`.
-  static DateTime Function() now = DateTime.now;
+  static DateTime Function() get now => _scope?.now ?? _nowDefault;
+  static set now(DateTime Function() f) => _nowDefault = f;
 
   /// The local time zone JavaScript formats instants in. Tests use UTC,
   /// as the reference's vitest config does.
-  static DateTime Function(DateTime instant) toLocal = _toLocal;
+  static DateTime Function(DateTime instant) get toLocal =>
+      _scope?.timeZone?.toLocal ?? _toLocalDefault;
+  static set toLocal(DateTime Function(DateTime instant) f) =>
+      _toLocalDefault = f;
 
   /// The epoch milliseconds of a local wall-clock time, given as epoch
   /// milliseconds read as UTC: how JavaScript reads a date string without a
   /// time zone.
-  static int Function(int wallMs) fromLocal = _fromLocal;
+  static int Function(int wallMs) get fromLocal =>
+      _scope?.timeZone?.fromLocal ?? _fromLocalDefault;
+  static set fromLocal(int Function(int wallMs) f) => _fromLocalDefault = f;
+
+  /// Runs [body] with these inputs in place of the defaults; null keeps one.
+  static T run<T>(
+    T Function() body, {
+    DateTime Function()? now,
+    double Function()? random,
+    OpenUiTimeZone? timeZone,
+  }) => runZoned(
+    body,
+    zoneValues: {_key: (now: now, random: random, timeZone: timeZone)},
+  );
 
   static DateTime _toLocal(DateTime instant) => instant.toLocal();
 

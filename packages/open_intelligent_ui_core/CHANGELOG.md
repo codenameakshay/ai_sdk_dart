@@ -47,3 +47,4 @@
   `OpenUiServices(mapTiles: esriStreetTiles, imageLoader: networkImages)`, or allow a few hosts with
   `imageLoader: allowImageHosts(['upload.wikimedia.org'])`. A blocked image shows the photo placeholder.
   The README's Network section lists every place that can reach the network.
+- DatePicker opens on today in its session's clock and time zone. `OpenUiNode` gains `localNow`.

@@ -546,6 +546,9 @@ final class OpenUiNode {
   /// The session's intl locale (`en_IN`, `de`); null for en-US output.
   String? get locale => _session.locale;
 
+  /// The current wall-clock time in the session's time zone, from its clock.
+  DateTime get localNow => _session.localNow;
+
   /// While the model is still writing, actions wait.
   bool get isStreaming => _session.isStreaming;
 

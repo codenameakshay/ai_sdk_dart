@@ -31,6 +31,7 @@ class OpenUiView extends StatefulWidget {
     this.onAction,
     this.queryLoader,
     this.child,
+    this.fallbackServices = const OpenUiServices(),
   });
 
   final OpenUiSession session;
@@ -44,6 +45,10 @@ class OpenUiView extends StatefulWidget {
   /// Slot composition; null shows the default content.
   final Widget? child;
 
+  /// Services for whatever the nearest OpenUiScope leaves unset (see
+  /// OpenUiServices.orElse).
+  final OpenUiServices fallbackServices;
+
   /// react-lang `useRendererQuery`: the nearest view's Query state.
   static OpenUiQueryState queryOf(BuildContext context) =>
       _RendererScope.of(context).query;
@@ -54,6 +59,8 @@ class OpenUiView extends StatefulWidget {
 
 class _OpenUiViewState extends State<OpenUiView> {
   void Function()? _cancel;
+  OpenUiServices? _ambient, _fallback;
+  late OpenUiServices _services;
 
   @override
   void initState() {
@@ -80,8 +87,8 @@ class _OpenUiViewState extends State<OpenUiView> {
     if (mounted) setState(() {});
   }
 
-  void _emit(BuildContext context, ActionEvent event) {
-    final services = OpenUiScope.servicesOf(context);
+  void _emit(ActionEvent event) {
+    final services = _services;
     switch (event.type) {
       case ActionEvent.continueConversation:
         widget.onToAssistant?.call(event);
@@ -100,19 +107,31 @@ class _OpenUiViewState extends State<OpenUiView> {
   @override
   Widget build(BuildContext context) {
     final session = widget.session;
-    return _RendererScope(
-      root: session.root,
-      query: OpenUiQueryState._(
-        isLoading: session.isQueryLoading,
-        errors: session.queryErrors,
-        retry: session.retryQueries,
-      ),
-      queryLoader: widget.queryLoader,
-      child: _RuntimeScope(
-        session: session,
-        builders: widget.builders,
-        emit: (event) => _emit(context, event),
-        child: widget.child ?? const _DefaultContent(),
+    final ambient =
+        context.dependOnInheritedWidgetOfExactType<OpenUiScope>()?.services ??
+        const OpenUiServices();
+    if (!identical(ambient, _ambient) ||
+        !identical(widget.fallbackServices, _fallback)) {
+      _ambient = ambient;
+      _fallback = widget.fallbackServices;
+      _services = ambient.orElse(widget.fallbackServices);
+    }
+    return OpenUiScope(
+      services: _services,
+      child: _RendererScope(
+        root: session.root,
+        query: OpenUiQueryState._(
+          isLoading: session.isQueryLoading,
+          errors: session.queryErrors,
+          retry: session.retryQueries,
+        ),
+        queryLoader: widget.queryLoader,
+        child: _RuntimeScope(
+          session: session,
+          builders: widget.builders,
+          emit: _emit,
+          child: widget.child ?? const _DefaultContent(),
+        ),
       ),
     );
   }

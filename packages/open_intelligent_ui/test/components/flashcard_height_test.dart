@@ -1,6 +1,8 @@
+// ignore_for_file: implementation_imports
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:open_intelligent_ui/src/components/play.dart' show Flashcard;
+import 'package:open_intelligent_ui_core/src/components/play.dart'
+    show Flashcard;
 
 import '../support/pump.dart';
 

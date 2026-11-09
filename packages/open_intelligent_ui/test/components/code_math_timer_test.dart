@@ -1,11 +1,12 @@
+// ignore_for_file: implementation_imports
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_math_fork/flutter_math.dart' as fm;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
-import 'package:open_intelligent_ui/src/components/controls.dart'
+import 'package:open_intelligent_ui_core/src/components/controls.dart'
     show IuiButton;
-import 'package:open_intelligent_ui/src/components/timer.dart' show clock;
+import 'package:open_intelligent_ui_core/src/components/timer.dart' show clock;
 
 import '../support/pump.dart';
 

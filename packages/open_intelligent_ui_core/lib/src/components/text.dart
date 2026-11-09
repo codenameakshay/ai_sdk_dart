@@ -287,7 +287,7 @@ Widget buildBadge(BuildContext context, OpenUiNode node) {
     heightFactor: 1,
     child: Container(
       constraints: const BoxConstraints(minHeight: 26),
-      padding: EdgeInsets.fromLTRB(isLucideIcon(icon) ? 8 : 10, 3, 10, 3),
+      padding: EdgeInsets.fromLTRB(Glyph.has(context, icon) ? 8 : 10, 3, 10, 3),
       decoration: BoxDecoration(
         color: background ?? theme.badgeNeutralSoft,
         borderRadius: BorderRadius.circular(999),
@@ -295,7 +295,7 @@ Widget buildBadge(BuildContext context, OpenUiNode node) {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (isLucideIcon(icon)) ...[
+          if (Glyph.has(context, icon)) ...[
             Glyph(icon, size: 14, color: color),
             const SizedBox(width: 5),
           ],

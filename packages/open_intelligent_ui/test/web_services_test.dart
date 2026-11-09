@@ -3,7 +3,8 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:open_intelligent_ui/src/web_services.dart';
+import 'package:open_intelligent_ui/src/wikimedia.dart';
+import 'package:open_intelligent_ui_maps/open_intelligent_ui_maps.dart';
 
 http.Response _json(Object? body, [int status = 200]) => http.Response(
   jsonEncode(body),

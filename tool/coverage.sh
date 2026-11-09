@@ -62,7 +62,9 @@ if [ ! -f "$MERGED" ]; then
 fi
 
 for p in $FLUTTER_PKGS; do
-  ( cd "$ROOT/packages/$p"; $FLUTTER test --no-pub --reporter=failures-only --coverage )
+  cov_pkg=""
+  if [ "$p" = open_intelligent_ui ]; then cov_pkg='^open_intelligent_ui(_(core|maps|web|math|chat))?$'; fi
+  ( cd "$ROOT/packages/$p"; $FLUTTER test --no-pub --reporter=failures-only --coverage ${cov_pkg:+--coverage-package "$cov_pkg"} )
 done
 
 echo "== Coverage =="

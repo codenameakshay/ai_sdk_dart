@@ -1,0 +1,20 @@
+name: open_intelligent_ui_maps
+description: "Map and MapMarker components for Open Intelligent UI, drawn with flutter_map."
+version: 3.1.0
+homepage: https://github.com/codenameakshay/ai_sdk_dart
+repository: https://github.com/codenameakshay/ai_sdk_dart
+resolution: workspace
+
+environment:
+  sdk: ^3.11.1
+  flutter: ">=3.41.3"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  ai_sdk_openui: ^3.1.0
+  open_intelligent_ui_core: ^3.1.0
+  flutter_map: ^8.2.1
+  http: ^1.6.0
+  latlong2: ^0.9.1
+  path_parsing: ^1.1.0

@@ -1,8 +1,9 @@
+// ignore_for_file: implementation_imports
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
-import 'package:open_intelligent_ui/src/components/html_document.dart';
+import 'package:open_intelligent_ui_web/src/html_document.dart';
 
 void main() {
   group('WikimediaImageSearch requests', () {

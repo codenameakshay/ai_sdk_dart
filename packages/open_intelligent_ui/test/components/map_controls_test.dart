@@ -1,3 +1,4 @@
+// ignore_for_file: implementation_imports
 import 'dart:async';
 
 import 'package:flutter/gestures.dart';
@@ -5,7 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_intelligent_ui/open_intelligent_ui.dart';
-import 'package:open_intelligent_ui/src/components/map.dart' show partialLine;
+import 'package:open_intelligent_ui_maps/src/map.dart' show partialLine;
 import 'package:latlong2/latlong.dart' as ll;
 
 import '../support/pump.dart';

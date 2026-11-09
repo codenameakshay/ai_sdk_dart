@@ -1,5 +1,21 @@
 ## 3.1.0 (unreleased)
 
+- The renderer is split into packages. `open_intelligent_ui` still includes everything: every
+  component, Inter, Lucide icons, links that open in the browser, and `package:open_intelligent_ui/chat.dart`.
+  Nothing changes for apps that use it.
+  For a smaller app, depend on `open_intelligent_ui_core` and add only what you need:
+  `open_intelligent_ui_maps` (Map, MapMarker, OsrmStreetRoute), `open_intelligent_ui_web` (HtmlView, YouTube),
+  `open_intelligent_ui_math` (Math), `package:open_intelligent_ui_core/lucide.dart` (icons) and `open_intelligent_ui_chat` (OpenUiChat).
+  Migrating from `open_intelligent_ui` to the core:
+    builders: intelligentUiBuilders            -> builders = composeBuilders([mapBuilders, ...])
+    OpenUiSession(intelligentUi, ...)           -> OpenUiSession(intelligentUiFor(builders), ...)
+    intelligentUi.systemPrompt(chatPrompt)      -> library.systemPrompt(chatPromptFor(library))
+    (icons)                                     -> OpenUiServices(icons: lucideIconResolver)
+    (links)                                     -> OpenUiServices(openUrl: (u) => launchUrl(u))
+  Without the umbrella, text uses the platform font unless you bundle Inter or set `fontFamily`.
+- `OpenUiServices.icons` replaces the built-in icon set; `OpenUiView.fallbackServices` and
+  `OpenUiServices.orElse` fill services a scope leaves unset. `OpenUiScope` carries into routes.
+- `OpenUiChat` given only `builders` now advertises only the components those builders draw.
 - First release: Flutter renderer for Open Intelligent UI answers (a port of
   thesysdev/open-intelligent-ui at `9df2e64`), with `OpenUiView`, a builder per component,
   `OpenUiTheme` light and dark tokens, injectable `OpenUiServices`, optional Wikimedia and OSRM

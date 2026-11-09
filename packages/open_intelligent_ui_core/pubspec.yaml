@@ -1,0 +1,21 @@
+name: open_intelligent_ui_core
+description: "Core of the Open Intelligent UI Flutter renderer: layout, text, controls, charts and tables, with no map, web view, TeX or chat dependency."
+version: 3.1.0
+homepage: https://github.com/codenameakshay/ai_sdk_dart
+repository: https://github.com/codenameakshay/ai_sdk_dart
+resolution: workspace
+
+environment:
+  sdk: ^3.11.1
+  flutter: ">=3.41.3"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  ai_sdk_openui: ^3.1.0
+  intl: ^0.20.2
+  path_parsing: ^1.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter

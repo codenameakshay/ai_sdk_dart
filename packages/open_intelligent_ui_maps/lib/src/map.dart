@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
-import 'package:ai_sdk_openui/ai_sdk_openui.dart';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
@@ -12,10 +11,7 @@ import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:path_parsing/path_parsing.dart';
 
-import '../services.dart';
-import '../theme.dart';
-import '../view.dart';
-import 'glyph.dart';
+import 'package:open_intelligent_ui_core/open_intelligent_ui_core.dart';
 
 /// Shapes and pins live inside a Map, which draws them; alone they are nothing.
 Widget buildMapMarker(BuildContext context, OpenUiNode node) =>

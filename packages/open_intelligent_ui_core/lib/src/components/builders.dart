@@ -1,13 +1,12 @@
+import 'package:ai_sdk_openui/ai_sdk_openui.dart' show OpenUiLibrary;
 import 'package:ai_sdk_openui/intelligent_ui.dart';
 
 import '../view.dart';
 import 'chart.dart';
-import 'code_math.dart';
+import 'code.dart';
 import 'controls.dart';
 import 'extra.dart';
-import 'html_view.dart';
 import 'layout.dart';
-import 'map.dart';
 import 'markdown.dart';
 import 'media.dart';
 import 'play.dart';
@@ -20,15 +19,40 @@ final Map<String, IuiComponent> _byName = {
   for (final c in IuiComponent.values) c.typeName: c,
 };
 
-/// The Open Intelligent UI builders, one per [IuiComponent]. The switch is
-/// exhaustive, so a component without a builder does not compile.
-OpenUiBuilder? intelligentUiBuilders(String typeName) =>
+/// The core builders: every IuiComponent except optionalIuiComponents.
+OpenUiBuilder? openUiCoreBuilders(String typeName) =>
     switch (_byName[typeName]) {
       null => null,
       final c => builderFor(c),
     };
 
-OpenUiBuilder builderFor(IuiComponent component) => switch (component) {
+/// [base] with [layers] on top; a later layer wins.
+OpenUiBuilderLookup composeBuilders(
+  Iterable<Map<String, OpenUiBuilder>> layers, {
+  OpenUiBuilderLookup base = openUiCoreBuilders,
+}) {
+  final merged = <String, OpenUiBuilder>{for (final l in layers) ...l};
+  return (typeName) => merged[typeName] ?? base(typeName);
+}
+
+/// [intelligentUi] with components [builders] can't build omitted.
+///
+/// [builders] must support the required [intelligentUi] root component.
+OpenUiLibrary intelligentUiFor(OpenUiBuilderLookup builders) {
+  if (builders(intelligentUi.rootName) == null) {
+    throw ArgumentError.value(
+      builders,
+      'builders',
+      'must build the required ${intelligentUi.rootName} root component',
+    );
+  }
+  return intelligentUiWithout({
+    for (final c in IuiComponent.values)
+      if (builders(c.typeName) == null) c,
+  });
+}
+
+OpenUiBuilder? builderFor(IuiComponent component) => switch (component) {
   IuiComponent.col => buildCol,
   IuiComponent.row => buildRow,
   IuiComponent.box => buildBox,
@@ -49,7 +73,6 @@ OpenUiBuilder builderFor(IuiComponent component) => switch (component) {
   IuiComponent.markdown => buildMarkdown,
   IuiComponent.quote => buildQuote,
   IuiComponent.code => buildCode,
-  IuiComponent.math => buildMath,
   IuiComponent.button => buildButton,
   IuiComponent.iconButton => buildIconButton,
   IuiComponent.pressable => buildPressable,
@@ -68,9 +91,6 @@ OpenUiBuilder builderFor(IuiComponent component) => switch (component) {
   IuiComponent.icon => buildIcon,
   IuiComponent.table => buildTable,
   IuiComponent.chart => buildChart,
-  IuiComponent.map => buildMap,
-  IuiComponent.mapMarker => buildMapMarker,
-  IuiComponent.youTube => buildYouTube,
   IuiComponent.flashcard => buildFlashcard,
   IuiComponent.celebration => buildCelebration,
   IuiComponent.svg => buildSvg,
@@ -83,5 +103,9 @@ OpenUiBuilder builderFor(IuiComponent component) => switch (component) {
   IuiComponent.polygon => buildPolygon,
   IuiComponent.g => buildG,
   IuiComponent.svgText => buildSvgText,
-  IuiComponent.htmlView => buildHtmlView,
+  IuiComponent.math ||
+  IuiComponent.map ||
+  IuiComponent.mapMarker ||
+  IuiComponent.youTube ||
+  IuiComponent.htmlView => null,
 };

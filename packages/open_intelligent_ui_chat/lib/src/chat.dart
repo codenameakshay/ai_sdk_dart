@@ -340,8 +340,9 @@ class _OpenUiUserMessageState extends State<OpenUiUserMessage> {
                       children: [
                         Flexible(
                           child: Text(
-                            'Form data (${fields.length} '
-                            '${fields.length == 1 ? 'field' : 'fields'})',
+                            OpenUiLocalizations.of(
+                              context,
+                            ).formData(fields.length),
                             style: small,
                           ),
                         ),
@@ -355,7 +356,7 @@ class _OpenUiUserMessageState extends State<OpenUiUserMessage> {
                 ),
                 if (_open)
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                    padding: const EdgeInsetsDirectional.fromSTEB(12, 0, 12, 8),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [

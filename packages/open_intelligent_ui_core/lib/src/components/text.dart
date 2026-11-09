@@ -69,9 +69,11 @@ TextStyle _textStyle(
 /// level, like the reference's `.flat()`.
 List<InlineSpan> _textSpans(
   BuildContext context,
+  OpenUiNode node,
   Object? value,
   TextStyle style,
   InlineLinks links,
+  List<String> ids,
 ) {
   if (value is String) {
     return inlineSpans(
@@ -84,15 +86,27 @@ List<InlineSpan> _textSpans(
   if (value is! List) return const [];
   final spans = <InlineSpan>[];
   var dropSpace = true;
-  for (final part in value.expand((p) => p is List ? p : [p])) {
+  var k = 0;
+  for (final (index, part)
+      in value.expand((p) => p is List ? p : [p]).indexed) {
     if (part is OpenUiElement) {
+      // Ids are kept per text: the spans callback reruns on hover, and a
+      // second childId call would rename the element to '~2'.
+      if (k == ids.length) {
+        ids.add(node.childId(part, index, slot: 'parts'));
+      }
+      final id = ids[k++];
       dropSpace = false;
       spans.add(
         WidgetSpan(
           alignment: PlaceholderAlignment.middle,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 1),
-            child: OpenUiElementView(element: part),
+            child: OpenUiElementView(
+              key: ValueKey('openui:$id'),
+              element: part,
+              id: id,
+            ),
           ),
         ),
       );
@@ -118,15 +132,19 @@ String _preLine(String text, {required bool dropSpace}) {
 
 Widget _richText(
   BuildContext context,
+  OpenUiNode node,
   Object? value,
   TextStyle style, {
   int? maxLines,
-}) => InlineText(
-  (context, links) => _textSpans(context, value, style, links),
-  style: style,
-  maxLines: maxLines,
-  overflow: maxLines == null ? null : TextOverflow.ellipsis,
-);
+}) {
+  final ids = <String>[];
+  return InlineText(
+    (context, links) => _textSpans(context, node, value, style, links, ids),
+    style: style,
+    maxLines: maxLines,
+    overflow: maxLines == null ? null : TextOverflow.ellipsis,
+  );
+}
 
 int? _lineLimit(Props props) {
   final lines = props.number('maxLines')?.round();
@@ -199,7 +217,7 @@ Widget buildTitle(BuildContext context, OpenUiNode node) {
   return Semantics(
     header: true,
     headingLevel: _headingLevels[name ?? 'md'] ?? 3,
-    child: _richText(context, node.props.string('text') ?? '', style),
+    child: _richText(context, node, node.props.string('text') ?? '', style),
   );
 }
 
@@ -241,7 +259,7 @@ Widget buildText(BuildContext context, OpenUiNode node) {
         : null,
   );
   return _subtitleGap(
-    _richText(context, props['text'], style, maxLines: _lineLimit(props)),
+    _richText(context, node, props['text'], style, maxLines: _lineLimit(props)),
     subtitle,
     slot,
   );
@@ -254,6 +272,7 @@ Widget buildCaption(BuildContext context, OpenUiNode node) {
   return _subtitleGap(
     _richText(
       context,
+      node,
       node.props.string('text') ?? '',
       _textStyle(
         theme,
@@ -298,7 +317,12 @@ Widget buildBadge(BuildContext context, OpenUiNode node) {
       constraints: const BoxConstraints(minHeight: 26),
       padding:
           s.padding ??
-          EdgeInsets.fromLTRB(Glyph.has(context, icon) ? 8 : 10, 3, 10, 3),
+          EdgeInsetsDirectional.fromSTEB(
+            Glyph.has(context, icon) ? 8 : 10,
+            3,
+            10,
+            3,
+          ),
       decoration: BoxDecoration(
         color: s.background ?? background ?? theme.badgeNeutralSoft,
         borderRadius: BorderRadius.circular(s.radius ?? theme.radii.full),
@@ -349,7 +373,7 @@ Widget buildLink(BuildContext context, OpenUiNode node) {
             WidgetSpan(
               alignment: PlaceholderAlignment.middle,
               child: Padding(
-                padding: const EdgeInsets.only(left: 2),
+                padding: const EdgeInsetsDirectional.only(start: 2),
                 child: Glyph(
                   'arrow-up-right',
                   size: (base.fontSize ?? 14) * 0.85,
@@ -489,12 +513,19 @@ Widget buildList(BuildContext context, OpenUiNode node) {
     final custom = customs[k];
     final textMarker = custom != null && !_stepMarker.hasMatch(custom);
     final rich = item is OpenUiElement && _isRich(item);
+    final id = item is OpenUiElement
+        ? node.childId(item, k, slot: 'items')
+        : '';
     final body = item is OpenUiElement
         ? _ListRowScope(
             rich: rich,
-            child: OpenUiElementView(element: item),
+            child: OpenUiElementView(
+              key: ValueKey('openui:$id'),
+              element: item,
+              id: id,
+            ),
           )
-        : _richText(context, jsString(item), const TextStyle());
+        : _richText(context, node, jsString(item), const TextStyle());
 
     Widget? mark;
     if (custom != null) {
@@ -526,7 +557,9 @@ Widget buildList(BuildContext context, OpenUiNode node) {
         : SizedBox(
             height: fontSize * 1.55,
             child: Align(
-              alignment: textMarker ? Alignment.centerLeft : Alignment.center,
+              alignment: textMarker
+                  ? AlignmentDirectional.centerStart
+                  : Alignment.center,
               child: mark,
             ),
           );
@@ -549,13 +582,14 @@ Widget buildList(BuildContext context, OpenUiNode node) {
     );
     rows.add(
       Semantics(
+        key: item is OpenUiElement ? ValueKey(('list-item', id)) : null,
         container: true,
         role: SemanticsRole.listItem,
         child: Stack(
           children: [
             if (connects)
-              Positioned(
-                left: wide ? (compact ? 73 : 83) : 11.5,
+              PositionedDirectional(
+                start: wide ? (compact ? 73 : 83) : 11.5,
                 top: 1.7 * fontSize,
                 bottom: 0.15 * fontSize,
                 width: 1,
@@ -563,8 +597,8 @@ Widget buildList(BuildContext context, OpenUiNode node) {
               ),
             row,
             if (timeline && wide && textMarker)
-              Positioned(
-                left: compact ? 70 : 80,
+              PositionedDirectional(
+                start: compact ? 70 : 80,
                 top: 0.55 * fontSize,
                 child: _ring(theme),
               ),
@@ -603,6 +637,7 @@ Widget buildListItem(BuildContext context, OpenUiNode node) {
     children: [
       _richText(
         context,
+        node,
         props.string('title') ?? '',
         TextStyle(fontWeight: inRich ? theme.typography.medium : null),
       ),
@@ -610,6 +645,7 @@ Widget buildListItem(BuildContext context, OpenUiNode node) {
         const SizedBox(height: 2),
         _richText(
           context,
+          node,
           description,
           _textStyle(
             theme,

@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
+import '../localizations.dart';
 import '../theme.dart';
 import '../view.dart';
 import 'controls.dart' show Press;
@@ -10,7 +11,7 @@ import 'markdown.dart';
 
 /// `Flashcard(front, back, hint?)`: flips between its faces when tapped.
 Widget buildFlashcard(BuildContext context, OpenUiNode node) {
-  Widget face(Object? value, {required bool back}) {
+  Widget face(Object? value, {required bool back, required String slot}) {
     if (value is String) {
       final typography = node.theme.typography;
       final style = back
@@ -35,14 +36,19 @@ Widget buildFlashcard(BuildContext context, OpenUiNode node) {
         textAlign: TextAlign.center,
       );
     }
-    return Column(mainAxisSize: MainAxisSize.min, children: node.render(value));
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: node.render(value, slot: slot),
+    );
   }
 
   final hint = node.props.string('hint');
   return Flashcard(
-    front: face(node.props['front'], back: false),
-    back: face(node.props['back'], back: true),
-    hint: hint == null || hint.isEmpty ? 'Tap to flip' : hint,
+    front: face(node.props['front'], back: false, slot: 'front'),
+    back: face(node.props['back'], back: true, slot: 'back'),
+    hint: hint == null || hint.isEmpty
+        ? OpenUiLocalizations.of(context).tapToFlip
+        : hint,
   );
 }
 
@@ -78,7 +84,7 @@ class _FlashcardState extends State<Flashcard> {
         builder: (hovered, pressed) {
           Widget side(Widget child, {required bool back}) => Container(
             constraints: const BoxConstraints(minHeight: 168),
-            padding: const EdgeInsets.fromLTRB(18, 20, 18, 30),
+            padding: const EdgeInsetsDirectional.fromSTEB(18, 20, 18, 30),
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: back ? theme.surface : theme.canvas,
@@ -147,11 +153,20 @@ class _Faces extends MultiChildRenderObjectWidget {
   const _Faces({required super.children});
 
   @override
-  RenderObject createRenderObject(BuildContext context) => _RenderFaces();
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderFaces(textDirection: Directionality.of(context));
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderFaces renderObject) =>
+      renderObject.textDirection = Directionality.of(context);
 }
 
 class _RenderFaces extends RenderStack {
-  _RenderFaces() : super(alignment: Alignment.topLeft);
+  _RenderFaces({required TextDirection textDirection})
+    : super(
+        alignment: AlignmentDirectional.topStart,
+        textDirection: textDirection,
+      );
 
   @override
   void performLayout() {

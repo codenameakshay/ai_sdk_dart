@@ -71,6 +71,7 @@ class FlexRow extends MultiChildRenderObjectWidget {
     this.justify = FlexJustify.start,
     this.align = FlexAlign.center,
     this.wrap = false,
+    this.childrenPerLine,
     super.children,
   });
   final double gap;
@@ -81,9 +82,19 @@ class FlexRow extends MultiChildRenderObjectWidget {
   /// below; each line grows, shrinks and justifies on its own.
   final bool wrap;
 
+  /// Wraps after this many children regardless of their measured widths.
+  /// Used by grids whose cells have a fixed column count.
+  final int? childrenPerLine;
+
   @override
-  RenderObject createRenderObject(BuildContext context) =>
-      RenderFlexRow(gap: gap, justify: justify, align: align, wrap: wrap);
+  RenderObject createRenderObject(BuildContext context) => RenderFlexRow(
+    gap: gap,
+    justify: justify,
+    align: align,
+    wrap: wrap,
+    childrenPerLine: childrenPerLine,
+    textDirection: Directionality.maybeOf(context) ?? TextDirection.ltr,
+  );
 
   @override
   void updateRenderObject(BuildContext context, RenderFlexRow renderObject) =>
@@ -91,7 +102,9 @@ class FlexRow extends MultiChildRenderObjectWidget {
         ..gap = gap
         ..justify = justify
         ..align = align
-        ..wrap = wrap;
+        ..wrap = wrap
+        ..childrenPerLine = childrenPerLine
+        ..textDirection = Directionality.maybeOf(context) ?? TextDirection.ltr;
 }
 
 class _FlexRowData extends ContainerBoxParentData<RenderBox> {
@@ -112,10 +125,21 @@ class RenderFlexRow extends RenderBox
     required FlexJustify justify,
     required FlexAlign align,
     bool wrap = false,
+    int? childrenPerLine,
+    required TextDirection textDirection,
   }) : _gap = gap,
        _justify = justify,
        _align = align,
-       _wrap = wrap;
+       _wrap = wrap,
+       _childrenPerLine = childrenPerLine,
+       _textDirection = textDirection;
+
+  TextDirection _textDirection;
+  set textDirection(TextDirection v) {
+    if (v == _textDirection) return;
+    _textDirection = v;
+    markNeedsLayout();
+  }
 
   double _gap;
   set gap(double v) {
@@ -142,6 +166,13 @@ class RenderFlexRow extends RenderBox
   set wrap(bool v) {
     if (v == _wrap) return;
     _wrap = v;
+    markNeedsLayout();
+  }
+
+  int? _childrenPerLine;
+  set childrenPerLine(int? v) {
+    if (v == _childrenPerLine) return;
+    _childrenPerLine = v;
     markNeedsLayout();
   }
 
@@ -220,6 +251,20 @@ class RenderFlexRow extends RenderBox
   /// Child indexes per flex line: one line, or with [wrap] as many as it
   /// takes for each line's natural widths and gaps to fit in [available].
   List<List<int>> _lines(List<double> natural, double available) {
+    final count = _childrenPerLine;
+    if (count != null && count > 0) {
+      return [
+        for (var start = 0; start < natural.length; start += count)
+          [
+            for (
+              var i = start;
+              i < math.min(start + count, natural.length);
+              i++
+            )
+              i,
+          ],
+      ];
+    }
     if (!_wrap) {
       return [
         [for (var i = 0; i < natural.length; i++) i],
@@ -299,12 +344,30 @@ class RenderFlexRow extends RenderBox
     size = constraints.constrain(
       Size(available.isFinite ? available : widest, top),
     );
+    if (_textDirection == TextDirection.rtl) {
+      for (final c in children) {
+        final data = _data(c);
+        data.offset = Offset(
+          size.width - data.offset.dx - c.size.width,
+          data.offset.dy,
+        );
+      }
+    }
   }
 
   /// CSS min-content: the children's min-content widths and gaps added up,
   /// or with [wrap] the widest of them.
   @override
   double computeMinIntrinsicWidth(double height) {
+    final count = _childrenPerLine;
+    if (count != null && count > 0) {
+      return _intrinsicLineWidth(
+        count,
+        (c) => _data(c).fixed != null
+            ? _data(c).fixed!(0)
+            : c.getMinIntrinsicWidth(double.infinity),
+      );
+    }
     final widths = [
       for (final c in _children)
         _data(c).spacer
@@ -319,21 +382,70 @@ class RenderFlexRow extends RenderBox
   }
 
   @override
-  double computeMaxIntrinsicWidth(double height) =>
-      _children.fold(0.0, (a, c) => a + c.getMaxIntrinsicWidth(height)) +
-      _gap * math.max(0, childCount - 1);
+  double computeMaxIntrinsicWidth(double height) {
+    final count = _childrenPerLine;
+    if (count != null && count > 0) {
+      return _intrinsicLineWidth(count, (c) => c.getMaxIntrinsicWidth(height));
+    }
+    return _children.fold(0.0, (a, c) => a + c.getMaxIntrinsicWidth(height)) +
+        _gap * math.max(0, childCount - 1);
+  }
+
+  double _intrinsicLineWidth(int count, double Function(RenderBox) widthOf) {
+    final children = _children;
+    var widest = 0.0;
+    for (var start = 0; start < children.length; start += count) {
+      final end = math.min(start + count, children.length);
+      var width = _gap * math.max(0, end - start - 1);
+      for (var i = start; i < end; i++) {
+        width += widthOf(children[i]);
+      }
+      widest = math.max(widest, width);
+    }
+    return widest;
+  }
 
   @override
-  double computeMinIntrinsicHeight(double width) => _children.fold(
-    0.0,
-    (a, c) => math.max(a, c.getMinIntrinsicHeight(double.infinity)),
-  );
+  double computeMinIntrinsicHeight(double width) {
+    if (_childrenPerLine case final count? when count > 0) {
+      return _intrinsicHeight(width, min: true);
+    }
+    return _children.fold(
+      0.0,
+      (a, c) => math.max(a, c.getMinIntrinsicHeight(double.infinity)),
+    );
+  }
 
   @override
-  double computeMaxIntrinsicHeight(double width) => _children.fold(
-    0.0,
-    (a, c) => math.max(a, c.getMaxIntrinsicHeight(double.infinity)),
-  );
+  double computeMaxIntrinsicHeight(double width) {
+    if (_childrenPerLine case final count? when count > 0) {
+      return _intrinsicHeight(width, min: false);
+    }
+    return _children.fold(
+      0.0,
+      (a, c) => math.max(a, c.getMaxIntrinsicHeight(double.infinity)),
+    );
+  }
+
+  double _intrinsicHeight(double width, {required bool min}) {
+    final children = _children;
+    final natural = _natural(children, width, dry: true);
+    var total = 0.0;
+    for (final (lineIndex, line) in _lines(natural, width).indexed) {
+      if (lineIndex > 0) total += _gap;
+      final kids = [for (final i in line) children[i]];
+      final widths = _widths(kids, width, [for (final i in line) natural[i]]);
+      var rowHeight = 0.0;
+      for (final (i, child) in kids.indexed) {
+        final height = min
+            ? child.getMinIntrinsicHeight(widths[i])
+            : child.getMaxIntrinsicHeight(widths[i]);
+        rowHeight = math.max(rowHeight, height);
+      }
+      total += rowHeight;
+    }
+    return total;
+  }
 
   @override
   Size computeDryLayout(BoxConstraints constraints) {

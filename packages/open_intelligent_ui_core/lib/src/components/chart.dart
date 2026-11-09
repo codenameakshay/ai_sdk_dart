@@ -6,6 +6,7 @@ import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/rendering.dart';
 import 'package:intl/intl.dart' show NumberFormat;
 
+import '../localizations.dart';
 import '../theme.dart';
 import '../view.dart';
 
@@ -194,22 +195,35 @@ final class ChartSpec {
 /// `Chart(type, data, x?, series?, format?, currency?, stacked?, height?)`.
 Widget buildChart(BuildContext context, OpenUiNode node) {
   final spec = ChartSpec.from(node.props);
-  if (spec == null) return const SizedBox(height: 240);
+  if (spec == null) {
+    return const Directionality(
+      textDirection: TextDirection.ltr,
+      child: SizedBox(height: 240),
+    );
+  }
+  final l10n = OpenUiLocalizations.of(context);
   final pie = spec.type == 'pie' || spec.type == 'donut';
-  return Semantics(
-    label: pie
-        ? '${spec.type} chart of ${spec.series.firstOrNull ?? 'values'} by ${spec.x}'
-        : '${spec.type} chart of ${spec.series.join(', ')} by ${spec.x}',
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (pie) _PieChart(spec) else _PlotChart(spec),
-        if (!pie && spec.series.length > 1) ...[
-          const SizedBox(height: 10),
-          _Legend(spec.series),
+  return Directionality(
+    textDirection: TextDirection.ltr,
+    child: Semantics(
+      label: l10n.chartLabel(
+        spec.type,
+        pie
+            ? (spec.series.firstOrNull ?? l10n.chartValues)
+            : spec.series.join(', '),
+        spec.x,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (pie) _PieChart(spec) else _PlotChart(spec),
+          if (!pie && spec.series.length > 1) ...[
+            const SizedBox(height: 10),
+            _Legend(spec.series),
+          ],
         ],
-      ],
+      ),
     ),
   );
 }

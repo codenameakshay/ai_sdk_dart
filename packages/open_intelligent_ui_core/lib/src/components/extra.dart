@@ -8,6 +8,7 @@ import 'package:flutter/rendering.dart' show OverflowBoxFit;
 import 'package:flutter/semantics.dart' show SemanticsRole;
 import 'package:flutter/services.dart';
 
+import '../localizations.dart';
 import '../theme.dart';
 import '../view.dart';
 import 'block_slot.dart';
@@ -43,7 +44,7 @@ List<_Slot> _slots(OpenUiNode node, Object? value) {
       return;
     }
     final element = v is OpenUiElement ? v : null;
-    for (final w in node.render(v)) {
+    for (final w in node.render(v, slot: '${out.length}')) {
       out.add((element: element, widget: w));
     }
   }
@@ -123,6 +124,9 @@ final class _CarouselState extends State<_Carousel> {
             children: [
               for (final (i, item) in widget.items.indexed)
                 FlexRowItem(
+                  key: item.widget.key == null
+                      ? null
+                      : ValueKey<Object?>(('carousel-item', item.widget.key)),
                   shrink: false,
                   child: SizedBox(
                     width: itemWidth,
@@ -162,27 +166,27 @@ final class _CarouselState extends State<_Carousel> {
           child: track,
         ),
         if (position != null && position.pixels >= 4)
-          Positioned(
-            left: 8,
+          PositionedDirectional(
+            start: 8,
             top: 0,
             bottom: 0,
             child: Center(
               child: _CarouselArrow(
                 name: 'chevron-left',
-                label: 'Previous',
+                label: OpenUiLocalizations.of(context).previous,
                 onTap: () => _page(-1),
               ),
             ),
           ),
         if (position != null && position.pixels < position.maxScrollExtent - 4)
-          Positioned(
-            right: 8,
+          PositionedDirectional(
+            end: 8,
             top: 0,
             bottom: 0,
             child: Center(
               child: _CarouselArrow(
                 name: 'chevron-right',
-                label: 'Next',
+                label: OpenUiLocalizations.of(context).next,
                 onTap: () => _page(1),
               ),
             ),
@@ -323,7 +327,10 @@ Widget buildPopover(BuildContext context, OpenUiNode node) {
     spacing: 4,
     children: [
       for (final part in parts)
-        for (final widget in node.render(part))
+        for (final widget in node.render(
+          part,
+          slot: 'trigger${parts.indexOf(part)}',
+        ))
           _keepsWidth(part) ? widget : Flexible(child: widget),
     ],
   );
@@ -347,7 +354,7 @@ Widget buildPopover(BuildContext context, OpenUiNode node) {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         spacing: 8,
-        children: node.render(content),
+        children: node.render(content, slot: 'content'),
       ),
     },
   );
@@ -442,6 +449,7 @@ final class _PopoverState extends State<_Popover> {
       controller: _controller,
       overlayChildBuilder: (context) => Stack(
         children: [
+          // Measured global anchor: a physical left, not a text-direction offset.
           Positioned(
             left: _left,
             top: _top,
@@ -525,7 +533,10 @@ Widget buildQuote(BuildContext context, OpenUiNode node) {
   final text = node.props.string('text') ?? '';
   final cite = node.props.string('cite');
   return ClipRRect(
-    borderRadius: const BorderRadius.horizontal(right: Radius.circular(12)),
+    borderRadius: const BorderRadiusDirectional.only(
+      topEnd: Radius.circular(12),
+      bottomEnd: Radius.circular(12),
+    ),
     child: IntrinsicHeight(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,

@@ -16,3 +16,4 @@ export 'src/iui/library.dart'
         optionalIuiComponents;
 
 export 'src/iui/functions/number_format.dart' show formatDecimal;
+export 'src/iui/functions/shared.dart' show Impure;

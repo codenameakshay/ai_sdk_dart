@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:ai_sdk_openui/ai_sdk_openui.dart';
 import 'package:flutter/material.dart';
 
+import '../localizations.dart';
 import '../theme.dart';
 import '../view.dart';
 import 'controls.dart' show IuiButton;
@@ -93,12 +94,13 @@ class _CountdownTimerState extends State<CountdownTimer> {
   @override
   Widget build(BuildContext context) {
     final theme = OpenUiTheme.of(context);
+    final strings = OpenUiLocalizations.of(context);
     final left = _left;
     final done = left == 0 && _startedAt != null;
     final label = widget.label;
     return Semantics(
       container: true,
-      label: label == null || label.isEmpty ? 'Timer' : label,
+      label: label == null || label.isEmpty ? strings.timer : label,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
@@ -146,15 +148,17 @@ class _CountdownTimerState extends State<CountdownTimer> {
                 IuiButton(
                   icon: _running ? 'pause' : 'play',
                   label: _running
-                      ? 'Pause'
-                      : (_startedAt == null || left == 0 ? 'Start' : 'Resume'),
+                      ? strings.pause
+                      : (_startedAt == null || left == 0
+                            ? strings.start
+                            : strings.resume),
                   size: 'sm',
                   onTap: widget.streaming || left == 0 ? null : _toggle,
                 ),
                 const SizedBox(width: 8),
                 IuiButton(
                   icon: 'rotate-ccw',
-                  label: 'Reset',
+                  label: strings.reset,
                   variant: 'ghost',
                   size: 'sm',
                   onTap: widget.streaming || _startedAt == null ? null : _reset,

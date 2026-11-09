@@ -239,10 +239,11 @@ const _anchorZoom = 10.5 + _zoomOffset;
 const _frameMaxZoom = 13 + _zoomOffset;
 const _recenterMaxZoom = 14 + _zoomOffset;
 
-/// map.tsx FRAME_PADDING: room for the controls and the pin labels.
+/// map.tsx FRAME_PADDING: room for the controls and the pin labels. Camera
+/// geometry for the LTR map canvas, so it stays EdgeInsets (flutter_map's type).
 const _framePadding = EdgeInsets.fromLTRB(72, 70, 72, 50);
 
-/// The "Show every place" padding.
+/// The "Show every place" padding (LTR map canvas, as [_framePadding]).
 const _recenterPadding = EdgeInsets.fromLTRB(34, 55, 40, 35);
 
 /// MapLibre's NavigationControl icons (maplibre-gl.css), in a 29px box.
@@ -695,7 +696,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
   }
 
   Widget _filter(OpenUiTheme theme, List<String> categories) => Semantics(
-    label: 'Filter places',
+    label: OpenUiLocalizations.of(context).filterPlaces,
     container: true,
     child: ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 180),
@@ -703,7 +704,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
         child: Stack(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 30, 8),
+              padding: const EdgeInsetsDirectional.fromSTEB(12, 8, 30, 8),
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<String>(
                   value: _group,
@@ -716,10 +717,10 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                   ),
                   dropdownColor: theme.canvas,
                   items: [
-                    const DropdownMenuItem(
+                    DropdownMenuItem(
                       value: 'all',
                       child: Text(
-                        'All places',
+                        OpenUiLocalizations.of(context).allPlaces,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -743,8 +744,8 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                 ),
               ),
             ),
-            Positioned(
-              right: 10,
+            PositionedDirectional(
+              end: 10,
               top: 0,
               bottom: 0,
               child: Center(
@@ -767,6 +768,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
   Widget _surface() {
     final context = this.context;
     final theme = OpenUiTheme.of(context);
+    final strings = OpenUiLocalizations.of(context);
     final services = OpenUiScope.servicesOf(context);
     final tiles = services.mapTiles;
     final tileUrl = tiles == null
@@ -787,16 +789,14 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
         ? 'street'
         : (_routeFailed ? 'overview' : 'loading');
     final routeNote = switch (routeKind) {
-      'street' =>
-        ' The line follows streets; it is an overview, not turn-by-turn directions.',
+      'street' => strings.routeNoteStreets,
       'none' => '',
-      _ =>
-        ' The line joins the places in order. Street routing is loading or unavailable.',
+      _ => strings.routeNoteDirect,
     };
     final routeStatus = switch (routeKind) {
-      'street' => 'Street route loaded.',
-      'overview' => 'Street routing unavailable. Showing direct connections.',
-      'loading' => 'Street route loading.',
+      'street' => strings.streetRouteLoaded,
+      'overview' => strings.streetRouteUnavailable,
+      'loading' => strings.streetRouteLoading,
       _ => '',
     };
     final touch = switch (defaultTargetPlatform) {
@@ -925,17 +925,20 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                         onPointerCancel: _touchUp,
                         child: FocusTraversalOrder(
                           order: const NumericFocusOrder(-1),
-                          child: map,
+                          child: Directionality(
+                            textDirection: TextDirection.ltr,
+                            child: map,
+                          ),
                         ),
                       ),
                     ),
                     if (tiles != null)
-                      Positioned(
-                        left: 0,
-                        right: 50,
+                      PositionedDirectional(
+                        start: 0,
+                        end: 50,
                         bottom: 0,
                         child: Align(
-                          alignment: Alignment.bottomLeft,
+                          alignment: AlignmentDirectional.bottomStart,
                           child: DecoratedBox(
                             decoration: BoxDecoration(
                               color: theme.canvas.withValues(
@@ -971,7 +974,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                             color: Color(0x66000000),
                             child: Center(
                               child: Text(
-                                'Use two fingers to move the map',
+                                strings.twoFingerPan,
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
                                   color: Colors.white,
@@ -982,9 +985,9 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                           ),
                         ),
                       ),
-                    Positioned(
+                    PositionedDirectional(
                       top: 12,
-                      left: 12,
+                      start: 12,
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         spacing: 8,
@@ -1000,7 +1003,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                               dimension: 34,
                               child: _Glass(
                                 circle: true,
-                                tooltip: 'Show every place',
+                                tooltip: strings.showEveryPlace,
                                 onTap: () =>
                                     MediaQuery.disableAnimationsOf(context)
                                     ? _fit(
@@ -1026,7 +1029,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                               dimension: 34,
                               child: _Glass(
                                 circle: true,
-                                tooltip: 'About this map',
+                                tooltip: strings.aboutThisMap,
                                 expanded: _info,
                                 onTap: () => setState(() => _info = !_info),
                                 child: Glyph(
@@ -1041,9 +1044,9 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                         ],
                       ),
                     ),
-                    Positioned(
+                    PositionedDirectional(
                       top: 12,
-                      right: 12,
+                      end: 12,
                       child: FocusTraversalOrder(
                         order: const NumericFocusOrder(3000),
                         child: ConstrainedBox(
@@ -1060,7 +1063,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                               spacing: 6,
                               children: [
                                 Text(
-                                  _expanded ? 'Collapse' : 'Expand',
+                                  _expanded ? strings.collapse : strings.expand,
                                   style: TextStyle(
                                     fontSize: theme.typography.size(12),
                                     height: 1.5,
@@ -1080,8 +1083,8 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                         ),
                       ),
                     ),
-                    Positioned(
-                      right: 10,
+                    PositionedDirectional(
+                      end: 10,
                       bottom: 10,
                       child: AnimatedOpacity(
                         opacity: _mouseOver || _touchOver || _focusWithin
@@ -1116,7 +1119,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                                     FocusTraversalOrder(
                                       order: const NumericFocusOrder(1000),
                                       child: _ZoomButton(
-                                        label: 'Zoom in',
+                                        label: strings.zoomIn,
                                         icon: _zoomInIcon,
                                         divider: false,
                                         enabled: !_atMax,
@@ -1126,7 +1129,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                                     FocusTraversalOrder(
                                       order: const NumericFocusOrder(1001),
                                       child: _ZoomButton(
-                                        label: 'Zoom out',
+                                        label: strings.zoomOut,
                                         icon: _zoomOutIcon,
                                         divider: true,
                                         enabled: !_atMin,
@@ -1142,14 +1145,14 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                       ),
                     ),
                     if (_info)
-                      Positioned(
+                      PositionedDirectional(
                         top: 56,
-                        left: 12,
+                        start: 12,
                         child: ConstrainedBox(
                           constraints: const BoxConstraints(maxWidth: 275),
                           child: _Card(
                             child: Text(
-                              'Drag to explore and use + and − to zoom. Select a place to highlight it.$routeNote',
+                              strings.mapHelp(routeNote),
                               style: TextStyle(
                                 fontSize: theme.typography.size(12),
                                 height: 1.5,
@@ -1160,9 +1163,9 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                         ),
                       ),
                     if (routeKind == 'overview')
-                      Positioned(
+                      PositionedDirectional(
                         bottom: 22,
-                        left: 12,
+                        start: 12,
                         child: DecoratedBox(
                           decoration: BoxDecoration(
                             color: theme.canvas.withValues(alpha: 0.92),
@@ -1174,7 +1177,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                               vertical: 2,
                             ),
                             child: Text(
-                              'Route overview',
+                              strings.routeOverview,
                               style: TextStyle(
                                 fontSize: theme.typography.size(10),
                                 height: 1.6,
@@ -1185,16 +1188,16 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                         ),
                       ),
                     if (tilesFailed)
-                      Positioned(
+                      PositionedDirectional(
                         bottom: 28,
-                        left: 12,
+                        start: 12,
                         child: Semantics(
                           liveRegion: true,
                           child: ConstrainedBox(
                             constraints: const BoxConstraints(maxWidth: 275),
                             child: _Card(
                               child: Text(
-                                'Map tiles are temporarily unavailable. The places are still shown.',
+                                strings.mapTilesUnavailable,
                                 style: TextStyle(
                                   fontSize: theme.typography.size(12),
                                   height: 1.5,
@@ -1205,8 +1208,8 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                           ),
                         ),
                       ),
-                    Positioned(
-                      left: 0,
+                    PositionedDirectional(
+                      start: 0,
                       top: 0,
                       child: Semantics(
                         container: true,
@@ -1235,7 +1238,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
     );
     return Semantics(
       container: true,
-      label: 'Map',
+      label: OpenUiLocalizations.of(context).map,
       child: SizedBox(height: height, child: _expanded ? null : _surface()),
     );
   }
@@ -1260,6 +1263,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
               child: ColoredBox(color: theme.canvas.withValues(alpha: 0.9)),
             ),
           ),
+          // Safe-area insets are physical, so they stay left and right.
           Positioned.fill(
             left: inset + safe.left,
             top: inset + safe.top,
@@ -1276,7 +1280,7 @@ class _StreetMapState extends State<StreetMap> with TickerProviderStateMixin {
                   scopesRoute: true,
                   namesRoute: true,
                   explicitChildNodes: true,
-                  label: 'Map',
+                  label: OpenUiLocalizations.of(page).map,
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(theme.radii.xxl),
@@ -1541,6 +1545,7 @@ class _PinState extends State<_Pin> with SingleTickerProviderStateMixin {
       children: [
         face,
         if (selected)
+          // Pin geometry inside the LTR map canvas.
           Positioned(
             left: -4,
             top: -4,
@@ -1636,6 +1641,7 @@ class _PinState extends State<_Pin> with SingleTickerProviderStateMixin {
                 ),
                 // :focus-visible: 2px at a 3px offset around the 34x52 marker.
                 if (_focused)
+                  // Pin geometry inside the LTR map canvas.
                   Positioned(
                     left: 80 - 17 - 5,
                     top: -5,
@@ -1732,10 +1738,10 @@ class _ZoomButtonState extends State<_ZoomButton> {
             ),
           ),
           button,
-          Positioned(
-            left: -5,
+          PositionedDirectional(
+            start: -5,
             top: -5,
-            right: -5,
+            end: -5,
             bottom: -5,
             child: IgnorePointer(
               child: DecoratedBox(

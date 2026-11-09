@@ -137,7 +137,7 @@ void main() {
               .first,
         );
         final decoration = box.decoration! as BoxDecoration;
-        expect((decoration.border! as Border).left.width, 3);
+        expect((decoration.border! as BorderDirectional).start.width, 3);
         expect(decoration.color, _light.surface);
       },
     );

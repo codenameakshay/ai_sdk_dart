@@ -42,14 +42,14 @@ class _HtmlPageState extends State<HtmlPage> {
   Widget build(BuildContext context) {
     final theme = OpenUiTheme.of(context);
     final title = widget.title == null || widget.title!.isEmpty
-        ? 'Interactive view'
+        ? OpenUiLocalizations.of(context).interactiveView
         : widget.title!;
     final Widget body;
     if (widget.streaming) {
       // A page that is still streaming would reload on every chunk.
       body = Center(
         child: Text(
-          'Preparing the interactive view…',
+          OpenUiLocalizations.of(context).preparingInteractiveView,
           style: TextStyle(
             fontSize: theme.typography.size(13),
             color: theme.muted,
@@ -73,7 +73,7 @@ class _HtmlPageState extends State<HtmlPage> {
       body = _Unsupported(
         icon: 'app-window',
         title: title,
-        note: 'This interactive view runs on Android, iOS, macOS and the web.',
+        note: OpenUiLocalizations.of(context).interactiveViewUnsupported,
       );
     }
     return Semantics(
@@ -147,7 +147,9 @@ Widget buildYouTube(BuildContext context, OpenUiNode node) {
   final id = youTubeId(jsString(node.props['video'] ?? ''));
   if (id == null) return const SizedBox.shrink();
   final title = node.props.string('title');
-  final label = title == null || title.isEmpty ? 'YouTube video' : title;
+  final label = title == null || title.isEmpty
+      ? OpenUiLocalizations.of(context).youTubeVideo
+      : title;
   final Widget body = host.canHostWebPages
       ? host.youTubeHost(
           id: id,
@@ -156,7 +158,7 @@ Widget buildYouTube(BuildContext context, OpenUiNode node) {
         )
       : Semantics(
           button: true,
-          label: 'Play $label',
+          label: OpenUiLocalizations.of(context).playVideo(label),
           excludeSemantics: true,
           child: GestureDetector(
             onTap: () => node.services.openUrl(

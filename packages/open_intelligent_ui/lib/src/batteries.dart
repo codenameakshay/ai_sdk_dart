@@ -35,6 +35,7 @@ class OpenUiView extends core.OpenUiView {
     super.queryLoader,
     super.child,
     super.fallbackServices = batteryServices,
+    super.semanticsIdentifiers,
   });
 
   static core.OpenUiQueryState queryOf(BuildContext context) =>

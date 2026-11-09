@@ -94,4 +94,28 @@ void main() {
     await show(tester, open(program, session.state));
     expect(texts(tester), ['Ann', 'Bob']);
   });
+  for (final (kind, program) in [
+    ('field', 'root = Col([field, field])\nfield = Input("", "Name")'),
+    ('form', 'root = Col([form, form])\nform = Form([Input("", "Name")])'),
+  ]) {
+    testWidgets('repeated $kind statements keep separate restored values', (
+      tester,
+    ) async {
+      final session = open(program);
+      await show(tester, session);
+      await tester.enterText(find.byType(TextField).at(0), 'Ann');
+      await tester.enterText(find.byType(TextField).at(1), 'Bob');
+      await tester.pump();
+      expect(texts(tester), ['Ann', 'Bob']);
+      if (kind == 'form') {
+        expect(session.fieldValue('Name', formName: 'form'), 'Ann');
+        expect(session.fieldValue('Name', formName: 'form~2'), 'Bob');
+      }
+
+      await show(tester, session);
+      expect(texts(tester), ['Ann', 'Bob']);
+      await show(tester, open(program, session.state));
+      expect(texts(tester), ['Ann', 'Bob']);
+    });
+  }
 }

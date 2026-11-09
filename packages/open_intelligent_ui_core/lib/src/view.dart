@@ -591,7 +591,7 @@ final class OpenUiNode {
   FieldState field(String prop, {String? name}) {
     final formName = this.formName;
     final value = props[prop];
-    final owner = element.statementId ?? _nodeId;
+    final owner = _nodeId;
     var key = name ?? owner;
     if (value is! OpenUiBinding) {
       // ponytail: the first element built keeps a shared label; build order is
@@ -634,8 +634,7 @@ final class OpenUiNode {
   bool hasAction(String prop) => props.action(prop) != null;
 
   /// Puts [child] in a Form scope named after this element.
-  Widget form(Widget child) =>
-      _FormHost(name: element.statementId ?? _nodeId, child: child);
+  Widget form(Widget child) => _FormHost(name: _nodeId, child: child);
 
   /// Copies [text] with the host's clipboard.
   Future<void> copy(String text) => services.copyText(text);

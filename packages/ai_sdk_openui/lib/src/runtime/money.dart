@@ -1,17 +1,18 @@
 import 'package:intl/intl.dart';
 import 'package:intl/number_symbols_data.dart' show currencyFractionDigits;
 
+import '../iui/functions/currency_prefixes.dart' show isoCurrencyCodes;
 import '../iui/functions/number_format.dart' show formatMinorUnits;
 import 'locale.dart';
 
-final _code = RegExp(r'^[A-Z]{3}$');
 final _integer = RegExp(r'^-?\d+$');
 final _decimal = RegExp(r'^(-?)(\d+)(?:\.(\d+))?$');
 final _maxBig = BigInt.from(Money.maxMinor);
 
-/// An exact amount in integer minor units of an ISO 4217 [currency]. It never
-/// uses a double: [parse] takes `{minor, currency}` or `{amount, currency}`
-/// with a decimal string, and only what is exact at the currency's scale.
+/// An exact amount in integer minor units of an ISO 4217 [currency] (a code
+/// ICU supports; `XYZ` is rejected). It never uses a double: [parse] takes
+/// `{minor, currency}` or `{amount, currency}` with a decimal string, and only
+/// what is exact at the currency's scale.
 final class Money {
   /// The largest magnitude of [minor] that stays exact on every platform.
   static const maxMinor = 9007199254740991;
@@ -24,7 +25,7 @@ final class Money {
         'Money is limited to ±$maxMinor',
       );
     }
-    if (!_code.hasMatch(currency)) {
+    if (!isoCurrencyCodes.contains(currency)) {
       throw ArgumentError.value(currency, 'currency', 'Not an ISO 4217 code');
     }
   }
@@ -46,7 +47,7 @@ final class Money {
       );
     }
     final currency = json['currency'];
-    if (currency is! String || !_code.hasMatch(currency)) {
+    if (currency is! String || !isoCurrencyCodes.contains(currency)) {
       throw FormatException(
         'Money currency must be an ISO 4217 code such as "USD"',
         currency,
@@ -83,11 +84,17 @@ final class Money {
 
   /// The amount as text: the reference's en-US output with no [locale], or
   /// the intl output for [locale] (`de_DE`, `en-IN`), exact to the minor unit.
-  String format({String? locale}) {
+  /// [trimZeroFraction] drops an all-zero fraction (`₹1,23,456`, not
+  /// `₹1,23,456.00`) and keeps any other one in full (`₹1,23,456.50`).
+  String format({String? locale, bool trimZeroFraction = false}) {
     final name = resolveLocale(locale);
+    final unit = _pow10(scale);
+    final whole = trimZeroFraction && minor % unit == 0;
+    final value = whole ? minor ~/ unit : minor;
+    final digits = whole ? 0 : scale;
     return name == null
-        ? formatMinorUnits(minor, scale, currency)
-        : _localized(name);
+        ? formatMinorUnits(value, digits, currency)
+        : _localized(name, value, digits);
   }
 
   @override
@@ -111,6 +118,14 @@ final class Money {
     return Money(result, currency);
   }
 
+  static int _pow10(int n) {
+    var unit = 1;
+    for (var i = 0; i < n; i++) {
+      unit *= 10;
+    }
+    return unit;
+  }
+
   static int? _exact(String digits) {
     final v = BigInt.parse(digits);
     return v.abs() > _maxBig ? null : v.toInt();
@@ -125,17 +140,14 @@ final class Money {
 
   // The whole units go through intl exactly (an int); the minor digits replace
   // the zeros it writes.
-  String _localized(String locale) {
+  String _localized(String locale, int minor, int scale) {
     final f = NumberFormat.simpleCurrency(
       locale: locale,
       name: currency,
       decimalDigits: scale,
     );
     final s = f.symbols;
-    var unit = 1;
-    for (var i = 0; i < scale; i++) {
-      unit *= 10;
-    }
+    final unit = _pow10(scale);
     final major = minor.abs() ~/ unit;
     // intl has no -0, so -0.05 formats -1 and its digit is zeroed.
     final tiny = minor < 0 && major == 0;

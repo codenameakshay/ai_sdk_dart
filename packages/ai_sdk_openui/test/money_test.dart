@@ -79,6 +79,34 @@ void main() {
     );
   });
 
+  test('trimZeroFraction drops only an all-zero fraction', () {
+    String inr(int minor) =>
+        Money(minor, 'INR').format(locale: 'en_IN', trimZeroFraction: true);
+    expect(inr(12345600), '₹1,23,456');
+    expect(inr(12345678), '₹1,23,456.78');
+    expect(inr(12345650), '₹1,23,456.50');
+    expect(inr(-12345600), '-₹1,23,456');
+    expect(inr(-5), '-₹0.05');
+    expect(inr(0), '₹0');
+    expect(Money(12345600, 'INR').format(locale: 'en_IN'), '₹1,23,456.00');
+    expect(Money(-500, 'USD').format(trimZeroFraction: true), r'-$5');
+    expect(Money(510, 'USD').format(trimZeroFraction: true), r'$5.10');
+    expect(Money(1234, 'JPY').format(trimZeroFraction: true), '¥1,234');
+    expect(
+      Money(1000, 'KWD').format(locale: 'de_DE', trimZeroFraction: true),
+      '1\u00A0din',
+    );
+  });
+
+  test('rejects a currency code that is not in ISO 4217', () {
+    expect(() => Money(100, 'XYZ'), throwsArgumentError);
+    expect(
+      () => Money.parse({'minor': 100, 'currency': 'XYZ'}),
+      throwsFormatException,
+    );
+    expect(Money.tryParse({'amount': '1.00', 'currency': 'XYZ'}), isNull);
+  });
+
   test('an unknown locale is an error', () {
     expect(() => Money(1, 'USD').format(locale: 'xx_YY'), throwsArgumentError);
   });

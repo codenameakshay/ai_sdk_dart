@@ -74,6 +74,59 @@ void main() {
     },
   );
 
+  test(
+    'the publish rewrite restores every pubspec and clears skip-worktree',
+    () async {
+      final scratch = await Directory.systemTemp.createTemp('hosted-deps-');
+      addTearDown(() => scratch.delete(recursive: true));
+      Future<String> run(String command, List<String> args) async {
+        final result = await Process.run(
+          command,
+          args,
+          workingDirectory: scratch.path,
+        );
+        expect(
+          result.exitCode,
+          0,
+          reason: '${result.stdout}\n${result.stderr}',
+        );
+        return '${result.stdout}';
+      }
+
+      for (final MapEntry(key: name, value: pubspec) in _packages.entries) {
+        final file = File('${scratch.path}/packages/$name/pubspec.yaml');
+        await file.parent.create(recursive: true);
+        await file.writeAsString(pubspec);
+      }
+      final script = File('tool/hosted_deps.dart').absolute.path;
+      await run('git', ['init', '-q']);
+      await run('git', ['add', '.']);
+      await run(Platform.resolvedExecutable, [script]);
+      expect(await run('git', ['ls-files', '-v']), contains('S packages/'));
+      expect(
+        File(
+          '${scratch.path}/packages/open_intelligent_ui_core/pubspec.yaml',
+        ).readAsStringSync(),
+        isNot(contains('path: ../')),
+      );
+
+      await run(Platform.resolvedExecutable, [script, '--restore']);
+      for (final MapEntry(key: name, value: pubspec) in _packages.entries) {
+        expect(
+          File(
+            '${scratch.path}/packages/$name/pubspec.yaml',
+          ).readAsStringSync(),
+          pubspec,
+          reason: name,
+        );
+      }
+      expect(
+        await run('git', ['ls-files', '-v']),
+        isNot(contains('S packages/')),
+      );
+    },
+  );
+
   test('hostedPubspec rejects a path dependency that is not a sibling', () {
     expect(
       () => hostedPubspec('dependencies:\n  a:\n    path: ../b\n', {

@@ -131,15 +131,62 @@ final class _Scope {
   /// [signature] with the hidden steps taken out of its step unions; null
   /// when a slot keeps only hidden steps, so the component cannot be written.
   String? signature(String signature) {
-    var out = signature;
-    for (final h in hidden) {
-      out = out
-          .replaceAll(RegExp('@$h\\b\\s*\\|\\s*'), '')
-          .replaceAll(RegExp('\\s*\\|\\s*@$h\\b'), '');
+    String? filter(String text) {
+      text = text.trim();
+      final separators = <int>[];
+      final groups = <(int, int)>[];
+      var depth = 0;
+      var start = 0;
+      var quoted = false;
+      var hiddenStep = false;
+      for (var i = 0; i < text.length; i++) {
+        final c = text[i];
+        if (c == r'\') {
+          i++;
+          continue;
+        }
+        if (c == '"') quoted = !quoted;
+        if (quoted || c == '"') continue;
+        if ('(<[{'.contains(c)) {
+          if (depth++ == 0) start = i;
+        } else if (')>]}'.contains(c)) {
+          if (--depth == 0) groups.add((start, i));
+        } else if (depth == 0) {
+          if (',:|'.contains(c)) separators.add(i);
+          if (c == '@') {
+            final step = _stepCall.matchAsPrefix(text, i);
+            hiddenStep |= step != null && hidden.contains(step[1]);
+          }
+        }
+      }
+      final fields = separators.where((i) => text[i] != '|').toList();
+      final split = fields.isNotEmpty ? fields : separators;
+      if (split.isNotEmpty) {
+        final parts = <String>[];
+        var from = 0;
+        for (final to in [...split, text.length]) {
+          final part = filter(text.substring(from, to));
+          if (part == null && fields.isNotEmpty) return null;
+          if (part != null) parts.add(part);
+          if (fields.isNotEmpty && to < text.length) parts.add('${text[to]} ');
+          from = to + 1;
+        }
+        return parts.isEmpty ? null : parts.join(fields.isEmpty ? ' | ' : '');
+      }
+      if (hiddenStep) return null;
+      final out = StringBuffer();
+      var from = 0;
+      for (final (start, end) in groups) {
+        final body = filter(text.substring(start + 1, end));
+        if (body == null) return null;
+        out.write('${text.substring(from, start + 1)}$body${text[end]}');
+        from = end + 1;
+      }
+      out.write(text.substring(from));
+      return out.toString();
     }
-    return _stepCall.allMatches(out).any((m) => hidden.contains(m[1]))
-        ? null
-        : out;
+
+    return filter(signature);
   }
 
   /// [text] without the sentences and `;` clauses that name what is not offered.
@@ -701,30 +748,33 @@ String _componentSignatures(
     return description.isNotEmpty ? '$signature — $description' : signature;
   }
 
+  final signatures = <String, String>{};
+  for (final e in spec.components.entries) {
+    final line = format(e.value);
+    if (line != null) signatures[e.key] = line;
+  }
   if (spec.groups.isNotEmpty) {
     final grouped = <String>{};
     for (final g in spec.groups) {
-      if (!g.components.any(spec.components.containsKey)) continue;
-      lines.addAll(['', '### ${g.name}']);
-      for (final name in g.components) {
-        final comp = spec.components[name];
-        if (comp == null || !grouped.add(name)) continue;
-        lines.addAll([?format(comp)]);
-      }
+      final members = [
+        for (final name in g.components)
+          if (signatures.containsKey(name) && grouped.add(name))
+            signatures[name]!,
+      ];
+      if (members.isEmpty) continue;
+      lines.addAll(['', '### ${g.name}', ...members]);
       lines.addAll(g.notes.where(scope.offers));
     }
-    final ungrouped = spec.components.keys
+    final ungrouped = signatures.keys
         .where((n) => !grouped.contains(n))
         .toList();
     if (ungrouped.isNotEmpty) {
       lines.addAll(['', '### Other']);
-      for (final n in ungrouped) {
-        lines.addAll([?format(spec.components[n]!)]);
-      }
+      lines.addAll(ungrouped.map((n) => signatures[n]!));
     }
   } else {
     lines.add('');
-    lines.addAll(spec.components.values.map(format).nonNulls);
+    lines.addAll(signatures.values);
   }
   return lines.join('\n');
 }

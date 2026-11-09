@@ -22,6 +22,16 @@ final class _Go implements ComponentSpec {
   Map<String, Schema> get props => {'to': Steps.openUrl};
 }
 
+final class _StepSlots implements ComponentSpec {
+  const _StepSlots(this.props);
+  @override
+  String get typeName => 'StepSlots';
+  @override
+  String get description => '';
+  @override
+  final Map<String, Schema> props;
+}
+
 final _otherSteps = RegExp(r'@(OpenUrl|Run|Set|Reset|CopyToClipboard)\b');
 final _missingCapabilities = RegExp(
   r'\b(tables?|charts?|forms?)\b',
@@ -257,4 +267,70 @@ void main() {
       expect(_otherSteps.allMatches(prompt).map((m) => m[0]), isEmpty);
     },
   );
+  test('step filtering preserves the type of each surviving union member', () {
+    final comp = _StepSlots({
+      'scalar': S.union([Steps.toAssistant, S.list(Steps.openUrl)]),
+      'bound': S.union([Steps.openUrl.boundOnly(), Steps.toAssistant]),
+      'binding': S.union([Steps.openUrl.reactive(), Steps.toAssistant]),
+      'list': S.list(S.union([Steps.openUrl, Steps.toAssistant])),
+      'boundList': S
+          .list(S.union([Steps.openUrl, Steps.toAssistant]))
+          .boundOnly(),
+    });
+    final prompt = OpenUiLibrary(
+      root: IuiComponent.col,
+      components: [IuiComponent.col, comp],
+    ).systemPrompt(const PromptOptions(allowedActions: {'ToAssistant'}));
+    expect(
+      prompt,
+      contains(
+        r'StepSlots(scalar: @ToAssistant, bound: @ToAssistant, binding: @ToAssistant, list: (@ToAssistant)[], boundList: $bound<(@ToAssistant)[]>)',
+      ),
+    );
+  });
+  test('step filtering matches whole names and preserves quoted types', () {
+    final copy = ActionSpec('Copy', description: '', params: {});
+    final copyMore = ActionSpec('CopyMore', description: '', params: {});
+    final comp = _StepSlots({
+      'prefix': S.union([S.actionRef('Copy', {}), S.actionRef('CopyMore', {})]),
+      'literal': S.literal('@Copy | @CopyMore'),
+      'nested': S.union([
+        S.list(S.union([Steps.openUrl, S.actionRef('Copy', {})])),
+        Steps.toAssistant,
+      ]),
+      'wrapped': S.union([Steps.toAssistant, Steps.openUrl]).reactive(),
+    });
+    final prompt =
+        OpenUiLibrary(
+          root: IuiComponent.col,
+          components: [IuiComponent.col, comp],
+          actions: [copy, copyMore],
+        ).systemPrompt(
+          const PromptOptions(allowedActions: {'CopyMore', 'ToAssistant'}),
+        );
+    expect(
+      prompt,
+      contains(
+        r'StepSlots(prefix: @CopyMore, literal: "@Copy | @CopyMore", nested: @ToAssistant, wrapped: $binding<@ToAssistant>)',
+      ),
+    );
+  });
+  test('groups with no offered components have no heading or notes', () {
+    final go = _Go();
+    for (final grouped in [true, false]) {
+      final prompt = OpenUiLibrary(
+        root: IuiComponent.col,
+        components: [IuiComponent.col, go],
+        groups: [
+          const ComponentGroup('Layout', [IuiComponent.col]),
+          if (grouped)
+            ComponentGroup('Navigation', [go], notes: ['Navigation only.']),
+        ],
+      ).systemPrompt(const PromptOptions(allowedActions: {'ToAssistant'}));
+      expect(prompt, contains('### Layout'));
+      expect(prompt, isNot(contains('### Navigation')));
+      expect(prompt, isNot(contains('Navigation only.')));
+      expect(prompt, isNot(contains('### Other')));
+    }
+  });
 }

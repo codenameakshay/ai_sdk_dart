@@ -22,6 +22,7 @@ final class ActionEvent {
     this.humanFriendlyMessage = '',
     this.formState = const {},
     this.formName,
+    this.results = const {},
   });
 
   /// `@ToAssistant`, a Button without an action, or a legacy action object.
@@ -41,6 +42,10 @@ final class ActionEvent {
   /// The enclosing Form's fields, or the whole state outside a Form.
   final Map<String, Object?> formState;
   final String? formName;
+
+  /// The `ActionSuccess.data` of the handled actions that succeeded earlier
+  /// in the same plan, by action name.
+  final Map<String, Object?> results;
 }
 
 /// A prop's action: a step plan, or a legacy `{type, ...}` action object.
@@ -146,7 +151,12 @@ final class FieldState {
   void set(Object? value) => _set(value);
 }
 
-typedef _Run = ({ActionPhase phase, int attempt, String? message});
+typedef _Run = ({
+  ActionPhase phase,
+  int attempt,
+  String? message,
+  Object? data,
+});
 typedef _ActiveAction = ({String base, ActionSpec spec});
 typedef _PlanRun = ({ActionPhase phase, int cursor, String? message});
 typedef _ActivePlan = ({int cursor, ActionPlan plan});
@@ -172,6 +182,7 @@ final class OpenUiSession {
     List<BoundRecord> records = const [],
     String? locale,
     this.actionScope = '',
+    this.resolveAction,
   }) : locale = resolveLocale(locale),
        _tools = {for (final t in tools) t.name: t},
        _initialState = initialState,
@@ -232,7 +243,18 @@ final class OpenUiSession {
   /// Prefixed to every handled action's idempotency key: chat adapters pass the message id.
   final String actionScope;
 
+  /// Settles a run that a restore cut off mid-flight. It gets the run's
+  /// name, params and original idempotency key; until it returns, the run
+  /// is [ActionPhase.unknown] and cannot run again. Without it, such a run
+  /// restores as failed and a retry sends the same key.
+  final Future<ActionResult> Function(ActionInvocation invocation)?
+  resolveAction;
+
   final Map<String, _Run> _actions = {};
+
+  /// The name and params of each pending or unknown run, saved so a
+  /// restore can ask [resolveAction] about it.
+  final Map<String, ({String name, Map<String, Object?> params})> _calls = {};
   final Map<String, _PlanRun> _plans = {};
   final Set<String> _locallyRunActions = {};
   final Set<String> _locallyRunPlans = {};
@@ -383,14 +405,33 @@ final class OpenUiSession {
       }
       final phase = ActionPhase.values.asNameMap()[value['phase']];
       if (phase == null || phase == ActionPhase.idle) continue;
-      final cut = phase == ActionPhase.pending;
+      final cut = phase == ActionPhase.pending || phase == ActionPhase.unknown;
+      final unknown = cut && resolveAction != null;
+      final resolving = _actions['$key']?.phase == ActionPhase.unknown;
       _actions['$key'] = (
-        phase: cut ? ActionPhase.failed : phase,
+        phase: unknown
+            ? ActionPhase.unknown
+            : cut
+            ? ActionPhase.failed
+            : phase,
         attempt: (value['attempt'] as num).toInt(),
         message: cut || value['message'] is! String
             ? null
             : value['message'] as String,
+        data: phase == ActionPhase.done
+            ? Js.normalize(value['data'], json: true)
+            : null,
       );
+      if (unknown && !resolving) {
+        _calls['$key'] = (
+          name: value['name'] is String ? value['name'] as String : '',
+          params: value['params'] is Map
+              ? (Js.normalize(value['params'], json: true)! as Map)
+                    .cast<String, Object?>()
+              : const {},
+        );
+        _resolve('$key');
+      }
     }
     final savedPlans = saved[_actionPlansStateKey];
     if (savedPlans is! Map) return;
@@ -402,10 +443,15 @@ final class OpenUiSession {
       }
       final phase = ActionPhase.values.asNameMap()[value['phase']];
       if (phase == null || phase == ActionPhase.idle) continue;
+      final cut = phase == ActionPhase.pending || phase == ActionPhase.unknown;
       _plans['$key'] = (
-        phase: phase == ActionPhase.pending ? ActionPhase.failed : phase,
+        phase: cut
+            ? resolveAction == null
+                  ? ActionPhase.failed
+                  : ActionPhase.unknown
+            : phase,
         cursor: (value['cursor'] as num).toInt(),
-        message: phase == ActionPhase.pending || value['message'] is! String
+        message: cut || value['message'] is! String
             ? null
             : value['message'] as String,
       );
@@ -443,6 +489,12 @@ final class OpenUiSession {
                 'phase': r.phase.name,
                 'attempt': r.attempt,
                 'message': ?r.message,
+                'data': ?r.data,
+                if (r.phase == ActionPhase.pending ||
+                    r.phase == ActionPhase.unknown) ...{
+                  'name': ?_calls[key]?.name,
+                  'params': ?_calls[key]?.params,
+                },
               },
             if (_plans.isNotEmpty)
               _actionPlansStateKey: {
@@ -757,16 +809,95 @@ final class OpenUiSession {
 
   bool _completedPlanIsDisabled(ActionPlan plan) {
     for (final step in plan.steps) {
-      if (step case CustomStep(:final name, :final params)) {
+      if (step case CustomStep(:final name)) {
         final spec = _handled[name];
         if (spec == null || !spec.disableAfterSuccess) continue;
-        final normalized =
-            Js.normalize(params, json: true)! as Map<String, Object?>;
-        final base = actionBaseKey(actionScope, spec.name, normalized);
-        if (_actions[base]?.phase == ActionPhase.done) return true;
+        if (_actions[_stepBase(step)]?.phase == ActionPhase.done) return true;
       }
     }
     return false;
+  }
+
+  String _stepBase(CustomStep step) => actionBaseKey(
+    actionScope,
+    step.name,
+    Js.normalize(step.params, json: true)! as Map<String, Object?>,
+  );
+
+  bool _isHandled(ActionStep step) =>
+      step is CustomStep && _handled.containsKey(step.name);
+
+  /// The data of the handled steps before [index] that succeeded.
+  Map<String, Object?> _resultsBefore(List<ActionStep> steps, int index) => {
+    for (final step in steps.take(index))
+      if (_isHandled(step))
+        if (_actions[_stepBase(step as CustomStep)] case final r?
+            when r.phase == ActionPhase.done && r.data != null)
+          step.name: r.data,
+  };
+
+  /// The saved state of [plan]; an unknown plan follows its cut-off step
+  /// once [resolveAction] has settled that step.
+  _PlanRun? _planState(ActionPlan plan, String key) {
+    final saved = _plans[key];
+    if (saved == null || saved.phase != ActionPhase.unknown) return saved;
+    final step = saved.cursor < plan.steps.length
+        ? plan.steps[saved.cursor]
+        : null;
+    final run = step != null && _isHandled(step)
+        ? _actions[_stepBase(step as CustomStep)]
+        : null;
+    final next = saved.cursor + 1;
+    return switch (run?.phase) {
+      ActionPhase.unknown => saved,
+      ActionPhase.done => (
+        phase: next == plan.steps.length
+            ? ActionPhase.done
+            : ActionPhase.failed,
+        cursor: next,
+        message: null,
+      ),
+      _ => (
+        phase: ActionPhase.failed,
+        cursor: saved.cursor,
+        message: run?.message,
+      ),
+    };
+  }
+
+  _Run _settled(ActionResult result, int attempt) => switch (result) {
+    ActionFailure(:final message) => (
+      phase: ActionPhase.failed,
+      attempt: attempt,
+      message: message,
+      data: null,
+    ),
+    ActionSuccess(:final data) => (
+      phase: ActionPhase.done,
+      attempt: attempt,
+      message: null,
+      data: Js.normalize(data, json: true),
+    ),
+  };
+
+  Future<void> _resolve(String base) async {
+    final call = _calls[base]!;
+    final attempt = _actions[base]!.attempt;
+    ActionResult result;
+    try {
+      result = await resolveAction!(
+        ActionInvocation(
+          name: call.name,
+          params: call.params,
+          idempotencyKey: '$base-$attempt',
+          attempt: attempt,
+        ),
+      );
+    } catch (e) {
+      result = ActionFailure(errorMessage(e));
+    }
+    if (_disposed || _actions[base]?.phase != ActionPhase.unknown) return;
+    _setRun(base, _settled(result, attempt));
   }
 
   /// Runs a click. A plan runs its steps in order: `@Set` evaluates at click
@@ -783,6 +914,7 @@ final class OpenUiSession {
     String nodeId = '',
   }) async {
     if (_disposed || _bundleBlocked) return;
+    var results = const <String, Object?>{};
     ActionEvent event(
       String type,
       Map<String, Object?> params, [
@@ -793,6 +925,7 @@ final class OpenUiSession {
       humanFriendlyMessage: message,
       formState: _formPayload(formName),
       formName: formName,
+      results: results,
     );
     final legacy = action?._legacy;
     if (legacy != null) {
@@ -821,11 +954,17 @@ final class OpenUiSession {
         )) {
       return;
     }
-    final guarded = plan.steps.any(
-      (s) => s is CustomStep && _handled.containsKey(s.name),
-    );
+    final guarded = plan.steps.any(_isHandled);
+    // A write the host is still checking never runs again meanwhile.
+    if (plan.steps.any(
+      (s) =>
+          _isHandled(s) &&
+          _actions[_stepBase(s as CustomStep)]?.phase == ActionPhase.unknown,
+    )) {
+      return;
+    }
     final planKey = guarded ? _planKey(plan) : null;
-    final savedPlan = planKey == null ? null : _plans[planKey];
+    final savedPlan = planKey == null ? null : _planState(plan, planKey);
     if (savedPlan?.phase == ActionPhase.done &&
         _completedPlanIsDisabled(plan)) {
       return;
@@ -851,6 +990,7 @@ final class OpenUiSession {
       for (var index = start; index < plan.steps.length; index++) {
         if (_disposed) return;
         final step = plan.steps[index];
+        results = _resultsBefore(plan.steps, index);
         if (guarded) {
           _activePlans[nodeId] = (cursor: index, plan: plan);
         }
@@ -905,6 +1045,7 @@ final class OpenUiSession {
               Js.normalize(params, json: true)! as Map<String, Object?>,
               formName,
               nodeId,
+              results: results,
               planKey: guarded ? planKey : null,
               cursor: index,
               nextCursor: index + 1,
@@ -980,6 +1121,7 @@ final class OpenUiSession {
     Map<String, Object?> params,
     String? formName,
     String nodeId, {
+    Map<String, Object?> results = const {},
     String? planKey,
     int cursor = 0,
     int nextCursor = 0,
@@ -993,9 +1135,10 @@ final class OpenUiSession {
     }
     final attempt = _nextAttempt(last);
     _activeActions[nodeId] = (base: base, spec: spec);
+    _calls[base] = (name: spec.name, params: params);
     _setRun(
       base,
-      (phase: ActionPhase.pending, attempt: attempt, message: null),
+      (phase: ActionPhase.pending, attempt: attempt, message: null, data: null),
       planKey: planKey,
       planRun: planKey == null
           ? null
@@ -1011,6 +1154,7 @@ final class OpenUiSession {
           attempt: attempt,
           formState: _formPayload(formName),
           formName: formName,
+          results: results,
         ),
       );
     } catch (e) {
@@ -1020,18 +1164,7 @@ final class OpenUiSession {
     final success = result is ActionSuccess;
     _setRun(
       base,
-      switch (result) {
-        ActionFailure(:final message) => (
-          phase: ActionPhase.failed,
-          attempt: attempt,
-          message: message,
-        ),
-        ActionSuccess() => (
-          phase: ActionPhase.done,
-          attempt: attempt,
-          message: null,
-        ),
-      },
+      _settled(result, attempt),
       planKey: planKey,
       planRun: planKey == null
           ? null
@@ -1065,7 +1198,7 @@ final class OpenUiSession {
     if (handled.isEmpty) return null;
     final activePlan = _activePlans[nodeId];
     final planState = activePlan == null
-        ? _plans[_planKey(plan!)]
+        ? _planState(plan!, _planKey(plan))
         : (
             phase: ActionPhase.pending,
             cursor: activePlan.cursor,
@@ -1077,7 +1210,6 @@ final class OpenUiSession {
         _handledStepAtOrAfter(activeSteps, cursor) ??
         _handledStepAtOrAfter(activeSteps, 0)!;
     var spec = _handled[statusStep.name]!;
-    final params = statusStep.params;
     final isActiveHandledStep =
         activePlan != null &&
         cursor < activeSteps.length &&
@@ -1087,13 +1219,7 @@ final class OpenUiSession {
     if (active != null) {
       spec = active.spec;
     }
-    final base =
-        active?.base ??
-        actionBaseKey(
-          actionScope,
-          spec.name,
-          Js.normalize(params, json: true)! as Map<String, Object?>,
-        );
+    final base = active?.base ?? _stepBase(statusStep);
     final r = _actions[base];
     final phase = planState?.phase ?? r?.phase ?? ActionPhase.idle;
     final disableAfterSuccess =
@@ -1107,6 +1233,7 @@ final class OpenUiSession {
       ].firstOrNull,
       disabled:
           phase == ActionPhase.pending ||
+          phase == ActionPhase.unknown ||
           disableAfterSuccess ||
           (planState == null &&
               phase == ActionPhase.done &&

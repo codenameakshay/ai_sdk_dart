@@ -300,4 +300,39 @@ void main() {
     await tapText(tester, 'Pay');
     expect(calls, hasLength(1));
   });
+
+  testWidgets('a write cut off by a restore shows checking until resolved', (
+    tester,
+  ) async {
+    const program = 'root = Col([Button("Pay", @Pay("o-1"))])';
+    final first = await pumpProgram(tester, program, library: library());
+    await tapText(tester, 'Pay');
+    final saved = first.session.state;
+
+    final resolved = Completer<ActionResult>();
+    final session = OpenUiSession(
+      library(),
+      initialState: saved,
+      resolveAction: (_) => resolved.future,
+    )..update(program, streaming: false);
+    addTearDown(session.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: OpenUiView(session: session, builders: intelligentUiBuilders),
+        ),
+      ),
+    );
+    final text = const OpenUiLocalizations();
+    expect(find.text(text.checkingAction), findsOneWidget);
+    expect(find.text(text.actionFailed), findsNothing);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    await tapText(tester, 'Pay');
+    expect(calls, hasLength(1));
+
+    resolved.complete(const ActionSuccess());
+    await tester.pump();
+    expect(find.text(text.checkingAction), findsNothing);
+    expect(glyph('check'), findsOneWidget);
+  });
 }

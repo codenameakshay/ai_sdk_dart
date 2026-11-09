@@ -21,8 +21,9 @@ typedef ActionGateBuilder =
 
 /// Wires a tappable control to its action's status. A handled action (one
 /// with a handler) asks first when it has a `confirm`, shows its failure
-/// below the control, and takes no tap while pending or after success with
-/// `disableAfterSuccess`. Any other action runs as before, with no wrapper.
+/// (or, while the host checks a write cut off by a restore, "Checking…")
+/// below the control, and takes no tap while pending, unknown, or after
+/// success with `disableAfterSuccess`. Any other action runs as before, with no wrapper.
 class ActionGate extends StatefulWidget {
   const ActionGate({
     super.key,
@@ -112,7 +113,8 @@ class _ActionGateState extends State<ActionGate> {
     final confirm = status.confirm;
     final asking = _askingFor == identity && identity != null;
     final failed = status.phase == ActionPhase.failed;
-    if (!asking && !failed) return control;
+    final checking = status.phase == ActionPhase.unknown;
+    if (!asking && !failed && !checking) return control;
     final theme = widget.node.theme;
     final text = OpenUiLocalizations.of(context);
     return Column(
@@ -151,20 +153,24 @@ class _ActionGateState extends State<ActionGate> {
               ],
             ),
           ),
-        if (failed)
+        if (failed || checking)
           Padding(
             padding: EdgeInsets.only(top: theme.spacing.tight),
             child: Semantics(
               liveRegion: true,
               child: Text(
-                status.message == null || status.message!.isEmpty
+                checking
+                    ? text.checkingAction
+                    : status.message == null || status.message!.isEmpty
                     ? text.actionFailed
                     : status.message!,
                 style: TextStyle(
                   fontFamily: theme.fontFamily,
                   fontSize: theme.typography.size(13),
                   height: 1.4,
-                  color: theme.status['danger'] ?? theme.ink,
+                  color: checking
+                      ? theme.muted
+                      : theme.status['danger'] ?? theme.ink,
                 ),
               ),
             ),

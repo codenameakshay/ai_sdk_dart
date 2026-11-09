@@ -5,6 +5,8 @@
 - Button, IconButton and Pressable show a handled action's pending, done and failed states, ask for an inline
   confirmation when the action has `confirm`, and stay disabled after success with `disableAfterSuccess`.
   `OpenUiNode` gains `actionStatus(prop)` and `run(confirmed:)`.
+- A handled action in the unknown phase (cut off by a restore, being checked by the host) shows a spinner and a
+  "Checking…" note (`OpenUiLocalizations.checkingAction`), and takes no tap: it reads as neither failed nor retryable.
 - Every rendered element has a stable key from its statement id (inline elements: parent id and
   position). `OpenUiView(semanticsIdentifiers: true)` also sets Semantics identifiers for UI tests.
 - An unnamed field or Form is named after that element id, not a process-wide `field-N` counter, so what

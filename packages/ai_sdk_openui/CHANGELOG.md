@@ -12,6 +12,12 @@
 - A handled action's idempotency key and status come from the message scope, the action name and its resolved
   params, never from the control's position: an `@Each` row keeps its key, and a `disableAfterSuccess` row stays
   disabled, when a restore adds rows around it. Two controls with the same action and params share one key.
+- `OpenUiSession(resolveAction:)` settles a handled run that a restore cut off mid-flight: it gets the run's name,
+  params and original idempotency key, and the run reads as the new `ActionPhase.unknown` (disabled, never
+  retried) until it returns done or failed. Without it, such a run still restores as failed.
+- `ActionSuccess(data)` carries the host's JSON receipt, such as the id of the record it wrote. It is saved with
+  the session state, and later steps of the same plan read it from `ActionInvocation.results` and
+  `ActionEvent.results`, keyed by action name, also after a restore.
 - `Impure` (the clock and random seams that `@Today`, `@Now` and `@Random` use) is public, so hosts and tests can pin time and randomness.
 - `intelligentUiWithout(optionalIuiComponents)` gives a library without Math, Map, MapMarker, YouTube and HtmlView, and `chatPromptFor(library)` / `dashboardPrompt(library:)` drop the medium-rule clauses for components the library lacks. `intelligentUi` and `chatPrompt` are unchanged.
 - `library.validate(program, policy: ValidationPolicy(...))` and `validateProgram` (from a spec's JSON Schema

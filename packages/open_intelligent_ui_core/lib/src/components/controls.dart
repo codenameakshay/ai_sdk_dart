@@ -254,7 +254,8 @@ class IuiButton extends StatelessWidget {
   /// `sm`, `md` or `lg`.
   final String size;
 
-  /// A handled action's phase: a spinner while pending, a check when done.
+  /// A handled action's phase: a spinner while pending or unknown, a check
+  /// when done.
   final ActionPhase? phase;
 
   /// Null shows the button disabled.
@@ -352,7 +353,8 @@ class IuiButton extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    if (phase == ActionPhase.pending) ...[
+                    if (phase == ActionPhase.pending ||
+                        phase == ActionPhase.unknown) ...[
                       _Spinner(size: size == 'sm' ? 14 : 16, color: color),
                       const SizedBox(width: 7),
                     ] else if (phase == ActionPhase.done) ...[
@@ -483,7 +485,8 @@ Widget buildIconButton(BuildContext context, OpenUiNode node) {
                   border: Border.all(color: border),
                 ),
                 child: switch (phase) {
-                  ActionPhase.pending => _Spinner(size: 16, color: foreground),
+                  ActionPhase.pending ||
+                  ActionPhase.unknown => _Spinner(size: 16, color: foreground),
                   ActionPhase.done => Glyph(
                     'check',
                     size: 16,
@@ -589,7 +592,9 @@ Widget buildPressable(BuildContext context, OpenUiNode node) {
               : hovered
               ? 0.05
               : (ring ? 0.06 : 0.0);
-          final pending = status?.phase == ActionPhase.pending;
+          final pending =
+              status?.phase == ActionPhase.pending ||
+              status?.phase == ActionPhase.unknown;
           return Opacity(
             opacity: pending ? 0.6 : 1,
             child: AnimatedScale(

@@ -2,6 +2,15 @@
 
 - `Impure` (the clock and random seams that `@Today`, `@Now` and `@Random` use) is public, so hosts and tests can pin time and randomness.
 - `intelligentUiWithout(optionalIuiComponents)` gives a library without Math, Map, MapMarker, YouTube and HtmlView, and `chatPromptFor(library)` / `dashboardPrompt(library:)` drop the medium-rule clauses for components the library lacks. `intelligentUi` and `chatPrompt` are unchanged.
+- Host-bound records: `OpenUiSession(records: [BoundRecord('order', json)])` gives a program a read-only
+  `$order`. Props, action params and function params marked `.boundOnly()` take only a path into a record
+  (`$order.total`, `$orders[0]`, an `@Each` item); a literal is rejected with the new `bound-only` error
+  (also checked by `library.parse(program, bound: {...})`). The JSON Schema marks them `"x-openui-bound": true`,
+  which lang-core ignores.
+- `PromptOptions.records` adds a "Bound Data" section and `PromptOptions.state` a "Current State" section for
+  seeded `$variables`; `describeBoundRecords` returns the first for per-turn use. Default prompts are unchanged.
+- Migration: `ValidationCode` and `OpenUiErrorCode` gain `boundOnly`. An exhaustive `switch` over either enum
+  needs a case for it.
 - First release: OpenUI Lang 1.0 (a port of `@openuidev/lang-core` and the state, query and
   action handling of `@openuidev/react-lang` 1.0.0) and the Open Intelligent UI library spec
   (a port of thesysdev/open-intelligent-ui at `9df2e64`), with `OpenUiSession`,

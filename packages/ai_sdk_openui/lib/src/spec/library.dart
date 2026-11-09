@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../lang/parser.dart';
+import 'bound.dart';
 import 'prompt.dart';
 import 'schema.dart';
 
@@ -90,6 +91,8 @@ final class PromptOptions {
     this.additionalRules = const [],
     this.editMode = false,
     this.inlineMode = false,
+    this.records = const [],
+    this.state = const {},
   });
   final String? preamble;
   final bool? bindings;
@@ -104,6 +107,12 @@ final class PromptOptions {
   final List<String> additionalRules;
   final bool editMode;
   final bool inlineMode;
+
+  /// Host-bound read-only `$variables`, listed in a "Bound Data" section.
+  final List<BoundRecord> records;
+
+  /// Seeded `$variables` with their values, listed in a "Current State" section.
+  final Map<String, Object?> state;
 }
 
 const _actionExpression = 'ActionExpression';
@@ -331,12 +340,16 @@ final class OpenUiLibrary {
           additionalRules: options.additionalRules,
           editMode: options.editMode,
           inlineMode: options.inlineMode,
+          records: options.records,
+          state: options.state,
         ),
       );
 
   /// Parses a complete program without running it: a server-side check.
-  ParseReport parse(String program) =>
-      ParseReport._(parseProgram(program, compiled, rootName: rootName));
+  ParseReport parse(String program, {Set<String> bound = const {}}) =>
+      ParseReport._(
+        parseProgram(program, compiled, rootName: rootName, boundNames: bound),
+      );
 }
 
 /// lang-core `generateSystemPrompt` for a library: [OpenUiLibrary.systemPrompt].

@@ -1,3 +1,6 @@
+/// The JSON Schema keyword that marks a bound-only prop. lang-core ignores it.
+const boundKeyword = 'x-openui-bound';
+
 /// A Zod-shaped schema DSL. One schema node yields both the JSON Schema the
 /// parser validates against and the type annotation the prompt prints.
 sealed class Schema {
@@ -6,6 +9,7 @@ sealed class Schema {
     this.isReactive = false,
     this.tagName,
     this.isNullable = false,
+    this.isBoundOnly = false,
   });
 
   final bool isOptional;
@@ -20,21 +24,28 @@ sealed class Schema {
   /// The prompt-only type name (`Color`, `Node`, `Length`), like `tagSchemaId`.
   final String? tagName;
 
+  /// Takes only a path into a host-bound `$variable` (see `BoundRecord`); the
+  /// prompt prints `$bound<T>`.
+  final bool isBoundOnly;
+
   Schema _copy({
     bool? isOptional,
     bool? isReactive,
     String? tagName,
     bool? isNullable,
+    bool? isBoundOnly,
   });
 
   Schema optional() => _copy(isOptional: true);
   Schema nullable() => _copy(isNullable: true);
   Schema reactive() => _copy(isReactive: true);
   Schema tag(String name) => _copy(tagName: name);
+  Schema boundOnly() => _copy(isBoundOnly: true);
 
   /// Zod `.default(value)`: an omitted or null arg takes [value]. The JSON
   /// Schema still requires it (Zod's output side); the prompt marks it optional.
-  Schema withDefault(Object value) => _Default(this, value);
+  Schema withDefault(Object value) =>
+      _Default(this, value, isBoundOnly: isBoundOnly);
 }
 
 /// Zod's optional marker in a prompt: `.optional()`, `.nullable()` or `.default()`.
@@ -80,6 +91,7 @@ final class _Prim extends Schema {
     super.isReactive,
     super.tagName,
     super.isNullable,
+    super.isBoundOnly,
   });
   final String type;
   @override
@@ -88,12 +100,14 @@ final class _Prim extends Schema {
     bool? isReactive,
     String? tagName,
     bool? isNullable,
+    bool? isBoundOnly,
   }) => _Prim(
     type,
     isOptional: isOptional ?? this.isOptional,
     isReactive: isReactive ?? this.isReactive,
     tagName: tagName ?? this.tagName,
     isNullable: isNullable ?? this.isNullable,
+    isBoundOnly: isBoundOnly ?? this.isBoundOnly,
   );
 }
 
@@ -103,6 +117,7 @@ final class _Any extends Schema {
     super.isReactive,
     super.tagName,
     super.isNullable,
+    super.isBoundOnly,
   });
   @override
   Schema _copy({
@@ -110,11 +125,13 @@ final class _Any extends Schema {
     bool? isReactive,
     String? tagName,
     bool? isNullable,
+    bool? isBoundOnly,
   }) => _Any(
     isOptional: isOptional ?? this.isOptional,
     isReactive: isReactive ?? this.isReactive,
     tagName: tagName ?? this.tagName,
     isNullable: isNullable ?? this.isNullable,
+    isBoundOnly: isBoundOnly ?? this.isBoundOnly,
   );
 }
 
@@ -125,6 +142,7 @@ final class _Literal extends Schema {
     super.isReactive,
     super.tagName,
     super.isNullable,
+    super.isBoundOnly,
   });
   final String value;
   @override
@@ -133,12 +151,14 @@ final class _Literal extends Schema {
     bool? isReactive,
     String? tagName,
     bool? isNullable,
+    bool? isBoundOnly,
   }) => _Literal(
     value,
     isOptional: isOptional ?? this.isOptional,
     isReactive: isReactive ?? this.isReactive,
     tagName: tagName ?? this.tagName,
     isNullable: isNullable ?? this.isNullable,
+    isBoundOnly: isBoundOnly ?? this.isBoundOnly,
   );
 }
 
@@ -149,6 +169,7 @@ final class _Enum extends Schema {
     super.isReactive,
     super.tagName,
     super.isNullable,
+    super.isBoundOnly,
   });
   final List<String> values;
   @override
@@ -157,12 +178,14 @@ final class _Enum extends Schema {
     bool? isReactive,
     String? tagName,
     bool? isNullable,
+    bool? isBoundOnly,
   }) => _Enum(
     values,
     isOptional: isOptional ?? this.isOptional,
     isReactive: isReactive ?? this.isReactive,
     tagName: tagName ?? this.tagName,
     isNullable: isNullable ?? this.isNullable,
+    isBoundOnly: isBoundOnly ?? this.isBoundOnly,
   );
 }
 
@@ -173,6 +196,7 @@ final class _List extends Schema {
     super.isReactive,
     super.tagName,
     super.isNullable,
+    super.isBoundOnly,
   });
   final Schema item;
   @override
@@ -181,12 +205,14 @@ final class _List extends Schema {
     bool? isReactive,
     String? tagName,
     bool? isNullable,
+    bool? isBoundOnly,
   }) => _List(
     item,
     isOptional: isOptional ?? this.isOptional,
     isReactive: isReactive ?? this.isReactive,
     tagName: tagName ?? this.tagName,
     isNullable: isNullable ?? this.isNullable,
+    isBoundOnly: isBoundOnly ?? this.isBoundOnly,
   );
 }
 
@@ -197,6 +223,7 @@ final class _Union extends Schema {
     super.isReactive,
     super.tagName,
     super.isNullable,
+    super.isBoundOnly,
   });
   final List<Schema> options;
   @override
@@ -205,12 +232,14 @@ final class _Union extends Schema {
     bool? isReactive,
     String? tagName,
     bool? isNullable,
+    bool? isBoundOnly,
   }) => _Union(
     options,
     isOptional: isOptional ?? this.isOptional,
     isReactive: isReactive ?? this.isReactive,
     tagName: tagName ?? this.tagName,
     isNullable: isNullable ?? this.isNullable,
+    isBoundOnly: isBoundOnly ?? this.isBoundOnly,
   );
 }
 
@@ -221,6 +250,7 @@ final class _Object extends Schema {
     super.isReactive,
     super.tagName,
     super.isNullable,
+    super.isBoundOnly,
   });
   final Map<String, Schema> shape;
   @override
@@ -229,12 +259,14 @@ final class _Object extends Schema {
     bool? isReactive,
     String? tagName,
     bool? isNullable,
+    bool? isBoundOnly,
   }) => _Object(
     shape,
     isOptional: isOptional ?? this.isOptional,
     isReactive: isReactive ?? this.isReactive,
     tagName: tagName ?? this.tagName,
     isNullable: isNullable ?? this.isNullable,
+    isBoundOnly: isBoundOnly ?? this.isBoundOnly,
   );
 }
 
@@ -246,6 +278,7 @@ final class _Record extends Schema {
     super.isReactive,
     super.tagName,
     super.isNullable,
+    super.isBoundOnly,
   });
   final Schema key;
   final Schema value;
@@ -255,6 +288,7 @@ final class _Record extends Schema {
     bool? isReactive,
     String? tagName,
     bool? isNullable,
+    bool? isBoundOnly,
   }) => _Record(
     key,
     value,
@@ -262,6 +296,7 @@ final class _Record extends Schema {
     isReactive: isReactive ?? this.isReactive,
     tagName: tagName ?? this.tagName,
     isNullable: isNullable ?? this.isNullable,
+    isBoundOnly: isBoundOnly ?? this.isBoundOnly,
   );
 }
 
@@ -272,6 +307,7 @@ final class _Ref extends Schema {
     super.isReactive,
     super.tagName,
     super.isNullable,
+    super.isBoundOnly,
   });
   final String name;
   @override
@@ -280,12 +316,14 @@ final class _Ref extends Schema {
     bool? isReactive,
     String? tagName,
     bool? isNullable,
+    bool? isBoundOnly,
   }) => _Ref(
     name,
     isOptional: isOptional ?? this.isOptional,
     isReactive: isReactive ?? this.isReactive,
     tagName: tagName ?? this.tagName,
     isNullable: isNullable ?? this.isNullable,
+    isBoundOnly: isBoundOnly ?? this.isBoundOnly,
   );
 }
 
@@ -297,6 +335,7 @@ final class _StepRef extends Schema {
     super.isReactive,
     super.tagName,
     super.isNullable,
+    super.isBoundOnly,
   });
   final String name;
   final Map<String, Schema> shape;
@@ -306,6 +345,7 @@ final class _StepRef extends Schema {
     bool? isReactive,
     String? tagName,
     bool? isNullable,
+    bool? isBoundOnly,
   }) => _StepRef(
     name,
     shape,
@@ -313,6 +353,7 @@ final class _StepRef extends Schema {
     isReactive: isReactive ?? this.isReactive,
     tagName: tagName ?? this.tagName,
     isNullable: isNullable ?? this.isNullable,
+    isBoundOnly: isBoundOnly ?? this.isBoundOnly,
   );
 }
 
@@ -324,6 +365,7 @@ final class _Default extends Schema {
     super.isReactive,
     super.tagName,
     super.isNullable,
+    super.isBoundOnly,
   });
   final Schema inner;
   final Object value;
@@ -333,6 +375,7 @@ final class _Default extends Schema {
     bool? isReactive,
     String? tagName,
     bool? isNullable,
+    bool? isBoundOnly,
   }) => _Default(
     inner,
     value,
@@ -340,6 +383,7 @@ final class _Default extends Schema {
     isReactive: isReactive ?? this.isReactive,
     tagName: tagName ?? this.tagName,
     isNullable: isNullable ?? this.isNullable,
+    isBoundOnly: isBoundOnly ?? this.isBoundOnly,
   );
 }
 
@@ -351,6 +395,11 @@ final class JsonSchemaEmitter {
   final Map<String, Object?> defs = {};
 
   Map<String, Object?> emit(Schema s) {
+    final body = _emitNullable(s);
+    return s.isBoundOnly ? {...body, boundKeyword: true} : body;
+  }
+
+  Map<String, Object?> _emitNullable(Schema s) {
     final body = _emit(s);
     if (!s.isNullable) return body;
     if (body.length == 1 && body['type'] is String) {
@@ -430,6 +479,7 @@ final class JsonSchemaEmitter {
 /// lang-core `resolveTypeAnnotation`: the type a prompt signature prints.
 String typeAnnotation(Schema s) {
   final base = _baseType(s);
+  if (s.isBoundOnly) return '\$bound<$base>';
   return s.isReactive ? '\$binding<$base>' : base;
 }
 
@@ -560,4 +610,5 @@ Schema _withFlags(Schema built, Schema from) => built._copy(
   isReactive: from.isReactive,
   tagName: from.tagName,
   isNullable: from.isNullable,
+  isBoundOnly: from.isBoundOnly,
 );

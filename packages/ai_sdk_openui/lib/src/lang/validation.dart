@@ -26,7 +26,8 @@ enum ValidationCode {
   excessArgs('excess-args'),
   typeMismatch('type-mismatch'),
   unknownFunction('unknown-function'),
-  noRoot('no-root');
+  noRoot('no-root'),
+  boundOnly('bound-only');
 
   const ValidationCode(this.wire);
   final String wire;
@@ -196,9 +197,15 @@ final class NoRoot extends Issue {
   final NoRootReason reason;
 }
 
+final class BoundOnly extends Issue {
+  const BoundOnly() : super(ValidationCode.boundOnly);
+}
+
 String _message(String component, String path, Issue issue) => switch (issue) {
   TypeMismatch(:final expected, :final actual) =>
     'field "$path" expects $expected but got $actual',
+  BoundOnly() =>
+    'field "$path" accepts only a path into a host-bound \$variable, such as \$order.total',
   Missing(:final code, :final signature) =>
     '${code == ValidationCode.nullRequired ? 'required field "$path" cannot be null' : 'missing required field "$path"'}'
         '${signature != null ? ' — signature: $signature' : ''}',

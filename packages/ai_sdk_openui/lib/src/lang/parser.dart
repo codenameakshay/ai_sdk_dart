@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../runtime/builtins.dart';
+import '../spec/schema.dart' show boundKeyword;
 import 'ast.dart';
 import 'js.dart';
 import 'lexer.dart';
@@ -109,7 +110,12 @@ Object? _inlineRefs(Object? node, Map<String, Object?> defs) {
   if (node is Map) {
     final ref = node[r'$ref'];
     if (ref is String) {
-      return defs.containsKey(ref) ? _inlineRefs(defs[ref], defs) : node;
+      if (!defs.containsKey(ref)) return node;
+      final resolved = _inlineRefs(defs[ref], defs);
+      if (node[boundKeyword] == true && resolved is Map) {
+        return {...resolved, boundKeyword: true};
+      }
+      return resolved;
     }
     return {
       for (final MapEntry(:key, :value) in node.entries)
@@ -298,12 +304,42 @@ final class _Ctx extends ValidationContext {
     required this.schema,
     required super.partial,
     required this.unreached,
+    required this.boundNames,
   }) : super(componentNames: schema.components.keys.toSet());
   final Map<String, Ast> syms;
   final CompiledSchema schema;
   final List<String> unresolved = [];
   final Set<String> visited = {};
   final Set<String> unreached;
+  final Set<String> boundNames;
+  final Set<String> boundLoopVars = {};
+  int syntheticValueDepth = 0;
+}
+
+bool _isBoundOnly(ParamDef p) =>
+    p.schema is Map && (p.schema as Map)[boundKeyword] == true;
+
+/// A path into a bound record: `$name`, then `.field` or `[index]`, or a loop variable over one.
+bool _isBoundPath(Object? v, _Ctx ctx) => switch (v) {
+  StateRefNode(:final name) =>
+    !(ctx.syntheticValueDepth > 0 && name == r'$value') &&
+        ctx.boundNames.contains(name),
+  RefNode(:final name) => ctx.boundLoopVars.contains(name),
+  MemberNode(:final object) ||
+  IndexNode(:final object) => _isBoundPath(object, ctx),
+  _ => false,
+};
+
+/// Reports and returns true when [arg] sits in a bound-only [param] but is not a bound path.
+bool _violatesBound(ParamDef param, Object? arg, String name, _Ctx ctx) {
+  if (arg == null ||
+      arg is NullNode ||
+      !_isBoundOnly(param) ||
+      _isBoundPath(arg, ctx)) {
+    return false;
+  }
+  pushIssue(ctx, name, '/${param.name}', const BoundOnly());
+  return true;
 }
 
 bool _isRuntimeCall(String name, _Ctx ctx) =>
@@ -358,6 +394,10 @@ Map<String, Ast>? _mapCallArgs(
   final errorsBefore = ctx.errors.length;
   for (final p in params) {
     final arg = mapped[p.name];
+    if (_violatesBound(p, arg, name, ctx)) {
+      isInvalid = true;
+      continue;
+    }
     final lit = arg != null ? literalValue(arg) : (found: true, value: null);
     if (!lit.found) continue;
     if (lit.value == null) {
@@ -415,21 +455,90 @@ Ast _materializeCall(
       : const NullNode();
 }
 
-void _nameRawCallArgs(List<Ast> args, _Ctx ctx, String statementId) {
+List<Ast> _nameRawCallArgs(List<Ast> args, _Ctx ctx, String statementId) {
   final previous = ctx.currentStatementId;
   ctx.currentStatementId = statementId;
-  final seen = Set<CompNode>.identity();
-  for (final arg in args) {
-    walkAst(arg, (node) {
-      if (node is! CompNode || !seen.add(node)) return;
-      final def = ctx.schema.calls[node.name];
-      if (def == null || def.lazy) return;
-      node.mappedProps =
-          (def.builtin ? null : _mapCallArgs(node.name, node.args, def, ctx)) ??
-          _nameArgs(node.args, def.params);
-    });
+  try {
+    return [for (final arg in args) _nameRawCalls(arg, ctx)];
+  } finally {
+    ctx.currentStatementId = previous;
   }
-  ctx.currentStatementId = previous;
+}
+
+Ast _nameRawCalls(Ast node, _Ctx ctx) {
+  Ast map(Ast child) => _nameRawCalls(child, ctx);
+  switch (node) {
+    case CompNode():
+      final def = ctx.schema.calls[node.name];
+      final mappedArgs = <Ast>[];
+      if (def?.lazy == true && node.name == 'Each' && node.args.length >= 3) {
+        mappedArgs.add(map(node.args[0]));
+        mappedArgs.add(map(node.args[1]));
+        final name = loopVarName(node.args[1]);
+        final wasBound = name != null && ctx.boundLoopVars.contains(name);
+        if (name != null) {
+          if (_isBoundPath(node.args[0], ctx)) {
+            ctx.boundLoopVars.add(name);
+          } else {
+            ctx.boundLoopVars.remove(name);
+          }
+        }
+        try {
+          for (var i = 2; i < node.args.length; i++) {
+            mappedArgs.add(map(node.args[i]));
+          }
+        } finally {
+          if (name != null) {
+            if (wasBound) {
+              ctx.boundLoopVars.add(name);
+            } else {
+              ctx.boundLoopVars.remove(name);
+            }
+          }
+        }
+      } else {
+        mappedArgs.addAll(node.args.map(map));
+      }
+      if (def == null || def.lazy) return node.copyWith(args: mappedArgs);
+      final errorsBefore = ctx.errors.length;
+      final mapped = def.builtin
+          ? _nameArgs(mappedArgs, def.params)
+          : _mapCallArgs(node.name, mappedArgs, def, ctx);
+      if (mapped != null) {
+        return node.copyWith(args: mappedArgs, mappedProps: mapped);
+      }
+      final hasBoundOnlyError = ctx.errors
+          .skip(errorsBefore)
+          .any((error) => error.code == ValidationCode.boundOnly);
+      if (hasBoundOnlyError) return const NullNode();
+      return node.copyWith(
+        args: mappedArgs,
+        mappedProps: _nameArgs(mappedArgs, def.params),
+      );
+    case AssignNode(:final target, :final value):
+      ctx.syntheticValueDepth++;
+      try {
+        return AssignNode(target, map(value));
+      } finally {
+        ctx.syntheticValueDepth--;
+      }
+    case ArrNode(:final elements):
+      return ArrNode(elements.map(map).toList());
+    case ObjNode(:final entries):
+      return ObjNode([for (final (key, value) in entries) (key, map(value))]);
+    case BinOpNode(:final op, :final left, :final right):
+      return BinOpNode(op, map(left), map(right));
+    case UnaryOpNode(:final op, :final operand):
+      return UnaryOpNode(op, map(operand));
+    case TernaryNode(:final condition, :final then, :final otherwise):
+      return TernaryNode(map(condition), map(then), map(otherwise));
+    case MemberNode(:final object, :final field):
+      return MemberNode(map(object), field);
+    case IndexNode(:final object, :final index):
+      return IndexNode(map(object), map(index));
+    default:
+      return node;
+  }
 }
 
 String? loopVarName(Ast arg) => switch (arg) {
@@ -446,12 +555,29 @@ Ast? _materializeLazyBuiltin(CompNode node, _Ctx ctx, Set<String> scoped) {
   final varName = loopVarName(node.args[1]);
   if (varName == null) return null;
   final nextScoped = {...scoped, varName};
-  return node.copyWith(
-    args: [
-      for (var i = 0; i < node.args.length; i++)
-        i == 1 ? node.args[i] : _materializeExpr(node.args[i], ctx, nextScoped),
-    ],
-  );
+  final list = _materializeExpr(node.args[0], ctx, nextScoped);
+  final wasBound = ctx.boundLoopVars.contains(varName);
+  if (_isBoundPath(list, ctx)) {
+    ctx.boundLoopVars.add(varName);
+  } else {
+    ctx.boundLoopVars.remove(varName);
+  }
+  try {
+    return node.copyWith(
+      args: [
+        list,
+        node.args[1],
+        for (var i = 2; i < node.args.length; i++)
+          _materializeExpr(node.args[i], ctx, nextScoped),
+      ],
+    );
+  } finally {
+    if (wasBound) {
+      ctx.boundLoopVars.add(varName);
+    } else {
+      ctx.boundLoopVars.remove(varName);
+    }
+  }
 }
 
 Ast _materializeExpr(Ast node, _Ctx ctx, Set<String> scoped) {
@@ -474,7 +600,17 @@ Ast _materializeExpr(Ast node, _Ctx ctx, Set<String> scoped) {
       final args = node.args.map(m).toList();
       final params = ctx.schema.components[node.name];
       if (params != null) {
-        return node.copyWith(args: args, mappedProps: _nameArgs(args, params));
+        final checked = [
+          for (var i = 0; i < args.length; i++)
+            i < params.length &&
+                    _violatesBound(params[i], args[i], node.name, ctx)
+                ? const NullNode()
+                : args[i],
+        ];
+        return node.copyWith(
+          args: checked,
+          mappedProps: _nameArgs(checked, params),
+        );
       }
       pushIssue(
         ctx,
@@ -498,7 +634,12 @@ Ast _materializeExpr(Ast node, _Ctx ctx, Set<String> scoped) {
     case IndexNode(:final object, :final index):
       return IndexNode(m(object), m(index));
     case AssignNode(:final target, :final value):
-      return AssignNode(target, m(value));
+      ctx.syntheticValueDepth++;
+      try {
+        return AssignNode(target, m(value));
+      } finally {
+        ctx.syntheticValueDepth--;
+      }
     default:
       return node;
   }
@@ -572,13 +713,15 @@ Object? _materializeValue(Ast node, _Ctx ctx) {
         final value = _materializeValue(args[i], ctx);
         props[param.name] = value;
         if (param.schema == null) continue;
-        var next = validateSchemaValue(
-          value,
-          param.schema,
-          name,
-          '/${param.name}',
-          ctx,
-        );
+        var next = _violatesBound(param, value, name, ctx)
+            ? invalid
+            : validateSchemaValue(
+                value,
+                param.schema,
+                name,
+                '/${param.name}',
+                ctx,
+              );
         if (identical(next, invalid)) {
           next = resolveInvalidValue(param.required, param.defaultValue);
           if (identical(next, invalid)) {
@@ -676,6 +819,7 @@ ParseResult _buildResult(
   CompiledSchema schema,
   String? rootName, {
   ({String name, Set<Statement> stmts})? partialRef,
+  Set<String> boundNames = const {},
 }) {
   final entry = _pickEntry(stmtMap, rootName);
   final syms = <String, Ast>{
@@ -696,6 +840,7 @@ ParseResult _buildResult(
     schema: schema,
     partial: wasIncomplete,
     unreached: unreached,
+    boundNames: boundNames,
   )..currentStatementId = entry?.id;
   ElementNode? root;
   Ast? rootExpression;
@@ -717,24 +862,24 @@ ParseResult _buildResult(
       case StateStatement(:final id, :final init):
         stateDeclarations[id] = _materializeValue(init, ctx);
       case QueryStatement(:final id, :final expr, :final deps):
-        _nameRawCallArgs(expr.args, ctx, id);
+        final args = _nameRawCallArgs(expr.args, ctx, id);
         queries.add(
           QueryStatementInfo(
             statementId: id,
-            toolAst: arg(expr.args, 0),
-            argsAst: arg(expr.args, 1),
-            defaultsAst: arg(expr.args, 2),
-            refreshAst: arg(expr.args, 3),
+            toolAst: arg(args, 0),
+            argsAst: arg(args, 1),
+            defaultsAst: arg(args, 2),
+            refreshAst: arg(args, 3),
             deps: deps,
           ),
         );
       case MutationStatement(:final id, :final expr):
-        _nameRawCallArgs(expr.args, ctx, id);
+        final args = _nameRawCallArgs(expr.args, ctx, id);
         mutations.add(
           MutationStatementInfo(
             statementId: id,
-            toolAst: arg(expr.args, 0),
-            argsAst: arg(expr.args, 1),
+            toolAst: arg(args, 0),
+            argsAst: arg(args, 1),
           ),
         );
       case ValueStatement():
@@ -802,6 +947,7 @@ ParseResult parseProgram(
   String input,
   CompiledSchema schema, {
   String? rootName,
+  Set<String> boundNames = const {},
 }) {
   final trimmed = preprocess(input);
   if (trimmed.isEmpty) return ParseResult.empty();
@@ -814,15 +960,19 @@ ParseResult parseProgram(
     stmts.length,
     schema,
     rootName,
+    boundNames: boundNames,
   );
 }
 
 /// lang-core's streaming parser: caches completed statements and re-parses
 /// only the pending tail on each update.
 final class StreamParser {
-  StreamParser(this.schema, {this.rootName});
+  StreamParser(this.schema, {this.rootName, this.boundNames = const {}});
   final CompiledSchema schema;
   final String? rootName;
+
+  /// Host-bound `$names` (with the `$`): paths into them pass bound-only props.
+  final Set<String> boundNames;
 
   String _buf = '';
   String _cleaned = '';
@@ -933,6 +1083,7 @@ final class StreamParser {
         _completedCount,
         schema,
         rootName,
+        boundNames: boundNames,
       );
     }
     final all = {..._completed};
@@ -961,6 +1112,7 @@ final class StreamParser {
       schema,
       rootName,
       partialRef: tailName == null ? null : (name: tailName, stmts: pending),
+      boundNames: boundNames,
     );
   }
 }

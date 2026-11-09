@@ -492,6 +492,17 @@ Ast substituteRef(Ast node, String varName, Object? value) {
     case ObjNode(:final entries):
       return ObjNode([for (final (k, v) in entries) (k, sub(v))]);
     case CompNode(:final args, :final mappedProps):
+      if (node.name == 'Each' && args.length >= 3) {
+        final innerVar = loopVarName(args[1]);
+        if (innerVar == varName) {
+          // The list is evaluated in the enclosing scope, but this Each's
+          // declaration shadows the enclosing loop inside its template.
+          return node.copyWith(
+            args: [sub(args[0]), ...args.skip(1)],
+            mappedProps: mappedProps,
+          );
+        }
+      }
       return node.copyWith(
         args: args.map(sub).toList(),
         mappedProps: mappedProps?.map((k, v) => MapEntry(k, sub(v))),

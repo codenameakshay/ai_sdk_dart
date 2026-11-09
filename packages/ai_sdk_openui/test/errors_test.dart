@@ -48,6 +48,7 @@ void main() {
       'tool-error',
       'mcp-error',
       'unknown-bound-path',
+      'too-many-nodes',
     ]);
   });
 

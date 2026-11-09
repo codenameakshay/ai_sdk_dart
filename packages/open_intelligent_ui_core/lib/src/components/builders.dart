@@ -1,4 +1,5 @@
-import 'package:ai_sdk_openui/ai_sdk_openui.dart' show OpenUiLibrary;
+import 'package:ai_sdk_openui/ai_sdk_openui.dart'
+    show LibraryExtension, OpenUiLibrary, OpenUiLibraryExtend;
 import 'package:ai_sdk_openui/intelligent_ui.dart';
 
 import '../view.dart';
@@ -35,21 +36,52 @@ OpenUiBuilderLookup composeBuilders(
   return (typeName) => merged[typeName] ?? base(typeName);
 }
 
-/// [intelligentUi] with components [builders] can't build omitted.
+/// [library] (default [intelligentUi]) with the [IuiComponent]s [builders]
+/// can't build omitted; Map and MapMarker go together. With nothing to omit
+/// this is [library] itself.
 ///
-/// [builders] must support the required [intelligentUi] root component.
-OpenUiLibrary intelligentUiFor(OpenUiBuilderLookup builders) {
-  if (builders(intelligentUi.rootName) == null) {
+/// [builders] must build [library]'s root and every component it has that is
+/// not an [IuiComponent], such as one a host added; otherwise this throws an
+/// [ArgumentError].
+OpenUiLibrary intelligentUiFor(
+  OpenUiBuilderLookup builders, {
+  OpenUiLibrary? library,
+}) {
+  final base = library ?? intelligentUi;
+  if (builders(base.rootName) == null) {
     throw ArgumentError.value(
       builders,
       'builders',
-      'must build the required ${intelligentUi.rootName} root component',
+      'must build the required ${base.rootName} root component',
     );
   }
-  return intelligentUiWithout({
+  final unbuildable = [
+    for (final name in base.components.keys)
+      if (!_byName.containsKey(name) && builders(name) == null) name,
+  ];
+  if (unbuildable.isNotEmpty) {
+    throw ArgumentError.value(
+      builders,
+      'builders',
+      'has no builder for ${unbuildable.join(', ')}',
+    );
+  }
+  final omit = {
     for (final c in IuiComponent.values)
       if (builders(c.typeName) == null) c,
-  });
+  };
+  if (omit.contains(IuiComponent.map) ||
+      omit.contains(IuiComponent.mapMarker)) {
+    omit.addAll([IuiComponent.map, IuiComponent.mapMarker]);
+  }
+  final remove = [
+    for (final c in IuiComponent.values)
+      if (omit.contains(c) && base.components.containsKey(c.typeName))
+        c.typeName,
+  ];
+  return remove.isEmpty
+      ? base
+      : base.extend(LibraryExtension(removeComponents: remove));
 }
 
 OpenUiBuilder? builderFor(IuiComponent component) => switch (component) {

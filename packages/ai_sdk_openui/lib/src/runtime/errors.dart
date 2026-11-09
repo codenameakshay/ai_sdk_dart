@@ -24,7 +24,10 @@ enum OpenUiErrorCode {
   mcpError('mcp-error'),
 
   /// A bound path the record's schema does not have.
-  unknownBoundPath('unknown-bound-path');
+  unknownBoundPath('unknown-bound-path'),
+
+  /// The evaluated answer has more components than `ValidationPolicy.maxNodes`.
+  tooManyNodes('too-many-nodes');
 
   const OpenUiErrorCode(this.wire);
   final String wire;

@@ -17,6 +17,11 @@ String formatDecimal(
 
 /// `style: "currency"`: the en-US symbol (`$`, `CA$`, `€`) or the code and a
 /// no-break space for currencies without one.
+///
+/// This is `@Format(x, "currency")`, kept for the reference's output. It is not
+/// money-safe: [value] is a double the model may have written, and any code
+/// passes. For amounts, use `Money.format` or `@FormatMoney` (`formatMoneyWith(
+/// boundOnly: true)` takes only host-bound amounts).
 String formatCurrency(
   num value,
   String code, {

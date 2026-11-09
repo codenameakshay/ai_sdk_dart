@@ -62,8 +62,10 @@ TextStyle chartCategoryStyle(OpenUiTheme theme) => TextStyle(
 );
 
 /// The reference's `makeFormat`: compact axis ticks ("$2B"), two-decimal
-/// tooltips ("$1.24B"), percent values like 45.
-ChartFormat chartFormat(String? kind, String? currency) {
+/// tooltips ("$1.24B"), percent values like 45. An intl [locale] (`en_IN`)
+/// sets the symbols, grouping and compact units (₹12.35L); null is en-US.
+ChartFormat chartFormat(String? kind, String? currency, {String? locale}) {
+  final loc = locale ?? 'en_US';
   final code = currency != null && RegExp(r'^[A-Za-z]{3}$').hasMatch(currency)
       ? currency.toUpperCase()
       : 'USD';
@@ -76,16 +78,16 @@ ChartFormat chartFormat(String? kind, String? currency) {
     final NumberFormat f;
     if (kind == 'currency') {
       final symbol = NumberFormat.simpleCurrency(
-        locale: 'en_US',
+        locale: loc,
         name: code,
       ).currencySymbol;
       f = big
-          ? NumberFormat.compactCurrency(locale: 'en_US', symbol: symbol)
-          : NumberFormat.currency(locale: 'en_US', symbol: symbol);
+          ? NumberFormat.compactCurrency(locale: loc, symbol: symbol)
+          : NumberFormat.currency(locale: loc, symbol: symbol);
     } else {
       f = big
-          ? NumberFormat.compact(locale: 'en_US')
-          : NumberFormat.decimalPattern('en_US');
+          ? NumberFormat.compact(locale: loc)
+          : NumberFormat.decimalPattern(loc);
     }
     f
       ..minimumFractionDigits = 0
@@ -142,6 +144,7 @@ final class ChartSpec {
     this.stacked,
     this.height,
     this.format,
+    this.locale,
   );
   final String type;
   final List<ChartRow> rows;
@@ -151,7 +154,11 @@ final class ChartSpec {
   final double height;
   final ChartFormat format;
 
-  static ChartSpec? from(Props props) {
+  /// The intl locale numbers are written in.
+  final String locale;
+
+  /// [locale] is the session's intl locale; null keeps en-US.
+  static ChartSpec? from(Props props, {String? locale}) {
     final rows = [
       for (final r in props.list('data'))
         if (r is Map) r.cast<String, Object?>(),
@@ -187,14 +194,19 @@ final class ChartSpec {
       series,
       props.boolean('stacked') ?? false,
       (props.number('height')?.toDouble() ?? 240).clamp(140, 480).toDouble(),
-      chartFormat(props.string('format'), props.string('currency')),
+      chartFormat(
+        props.string('format'),
+        props.string('currency'),
+        locale: locale,
+      ),
+      locale ?? 'en_US',
     );
   }
 }
 
 /// `Chart(type, data, x?, series?, format?, currency?, stacked?, height?)`.
 Widget buildChart(BuildContext context, OpenUiNode node) {
-  final spec = ChartSpec.from(node.props);
+  final spec = ChartSpec.from(node.props, locale: node.locale);
   if (spec == null) {
     return const Directionality(
       textDirection: TextDirection.ltr,
@@ -627,7 +639,7 @@ final class _ScatterGeometry extends _Geometry {
   _Tip tooltip(({int i, int si}) hover, OpenUiTheme theme) {
     final row = spec.rows[hover.i];
     final s = spec.series[hover.si];
-    final xValue = NumberFormat.decimalPattern('en_US')
+    final xValue = NumberFormat.decimalPattern(spec.locale)
       ..maximumFractionDigits = 2;
     return (
       anchor: Offset(
@@ -767,8 +779,8 @@ class _PlotPainter extends CustomPainter {
           if (k % s.every != 0) continue;
           final value = num.parse(t.toStringAsFixed(6));
           final f = value.abs() >= 1e4
-              ? NumberFormat.compact(locale: 'en_US')
-              : NumberFormat.decimalPattern('en_US');
+              ? NumberFormat.compact(locale: spec.locale)
+              : NumberFormat.decimalPattern(spec.locale);
           _text(
             canvas,
             f.format(value),

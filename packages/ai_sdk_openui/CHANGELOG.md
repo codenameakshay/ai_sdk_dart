@@ -60,6 +60,10 @@
 - `Money`: an exact amount in integer minor units with an ISO 4217 code (scale from CLDR), parsed from
   `{minor, currency}` or `{amount: "12.34", currency}`, with `+`, `-` and `format({locale})`. It never uses a
   double. `formatMoney` adds `@FormatMoney` to a library through `extend`.
+- `Money.format(trimZeroFraction: true)` writes whole amounts without the zero fraction (`₹1,23,456` in en-IN;
+  `₹1,23,456.50` keeps it). `formatMoneyWith(boundOnly: true, trimZeroFraction: true)` builds an `@FormatMoney`
+  that takes only host-bound amounts and/or trims. `Money` rejects codes outside ISO 4217 (`XYZ`).
+  `@Format(x, "currency")` stays double-based for the reference and is documented as not money-safe.
 - `OpenUiSession(locale: 'de-DE')` formats `@Format`, `@Plural` and `@FormatDate` for that locale
   (en-IN groups 12,34,567.00; de-DE writes 1.234,56 €). No locale, or en-US, keeps the reference's output.
   `FunctionSpec.localized` lets a library function do the same.

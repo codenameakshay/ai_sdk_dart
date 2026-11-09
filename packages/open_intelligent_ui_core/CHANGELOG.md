@@ -25,6 +25,8 @@
   Two controls with the same label in one form keep separate values: the later one is named `<label>~<id>`.
 - Elements are keyed by statement id, so a statement that is renamed or moved inline mounts a new
   widget and drops its local widget state (an expanded map, a scroll position).
+- Chart values, tooltips and axis ticks follow the session's locale: `OpenUiSession(locale: 'en_IN')` writes
+  `₹2,34,567` and compacts to `₹12.35L`. With no locale they stay en-US. `OpenUiNode.locale` exposes it.
 - All user-visible text comes from `OpenUiLocalizations` (English by default). Register
   `OpenUiLocalizationsDelegate({'fr': MyFrenchStrings()})` in `localizationsDelegates` to translate.
 - Right-to-left: layout, padding and positioned controls follow `Directionality`. Charts, drawings

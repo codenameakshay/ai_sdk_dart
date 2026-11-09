@@ -68,6 +68,35 @@ final class OpenUiServices {
   Future<void> copyText(String text) =>
       _copyText?.call(text) ?? Clipboard.setData(ClipboardData(text: text));
 
+  /// Equal when every member is equal. Function members compare as Dart
+  /// functions do: the same top-level, static or bound-method tear-off is
+  /// equal, a closure written inline in `build` is not.
+  @override
+  bool operator ==(Object other) =>
+      other is OpenUiServices &&
+      other._openUrl == _openUrl &&
+      other._copyText == _copyText &&
+      other.searchImages == searchImages &&
+      other.streetRoute == streetRoute &&
+      other.mapTiles == mapTiles &&
+      other.imageLoader == imageLoader &&
+      other.embedReferrer == embedReferrer &&
+      other.icons == icons &&
+      other.fontFamily == fontFamily;
+
+  @override
+  int get hashCode => Object.hash(
+    _openUrl,
+    _copyText,
+    searchImages,
+    streetRoute,
+    mapTiles,
+    imageLoader,
+    embedReferrer,
+    icons,
+    fontFamily,
+  );
+
   /// These services, with [fallback]'s openUrl, copyText, searchImages,
   /// streetRoute, imageLoader, embedReferrer, icons and fontFamily wherever
   /// this sets none.
@@ -104,14 +133,21 @@ ImageProvider? networkImages(Uri url) => _httpImage(url);
 /// blocked. Host names are case-insensitive. Redirects are rejected so an
 /// allowed server cannot load an image from a different host. Only HTTP and
 /// HTTPS URLs are accepted. On web, the image server must allow the app's
-/// origin with CORS; otherwise the image fails closed.
-OpenUiImageLoader allowImageHosts(Iterable<String> hosts) {
+/// origin with CORS; otherwise the image fails closed. An image larger than
+/// [maxBytes], or whose fetch takes longer than [timeout], fails.
+OpenUiImageLoader allowImageHosts(
+  Iterable<String> hosts, {
+  int maxBytes = defaultImageMaxBytes,
+  Duration timeout = defaultImageTimeout,
+}) {
   final allowed = {for (final h in hosts) h.toLowerCase()};
   return (url) {
     if (url.scheme != 'http' && url.scheme != 'https') return null;
     final host = url.host.toLowerCase();
     final ok = allowed.any((h) => host == h || host.endsWith('.$h'));
-    return ok ? AllowlistedImageProvider(url) : null;
+    return ok
+        ? AllowlistedImageProvider(url, maxBytes: maxBytes, timeout: timeout)
+        : null;
   };
 }
 
@@ -131,6 +167,16 @@ final class MapTiles {
   final String light;
   final String dark;
   final String attribution;
+
+  @override
+  bool operator ==(Object other) =>
+      other is MapTiles &&
+      other.light == light &&
+      other.dark == dark &&
+      other.attribution == attribution;
+
+  @override
+  int get hashCode => Object.hash(light, dark, attribution);
 }
 
 /// The reference's raster basemap (Esri World Street Map and Dark Gray).

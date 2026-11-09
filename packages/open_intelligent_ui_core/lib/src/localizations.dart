@@ -1,10 +1,12 @@
+import 'package:ai_sdk_openui/ai_sdk_openui.dart' show ValidationMessages;
 import 'package:flutter/foundation.dart' show SynchronousFuture;
 import 'package:flutter/widgets.dart';
 
-/// Every user-visible string of the Open Intelligent UI packages, in English.
-/// Subclass it and override the getters to translate, then register an
-/// [OpenUiLocalizationsDelegate] in `localizationsDelegates`.
-class OpenUiLocalizations {
+/// Every user-visible string of the Open Intelligent UI packages, in English,
+/// including the form validation messages it inherits from
+/// [ValidationMessages]. Subclass it and override the getters to translate,
+/// then register an [OpenUiLocalizationsDelegate] in `localizationsDelegates`.
+class OpenUiLocalizations extends ValidationMessages {
   const OpenUiLocalizations();
 
   static OpenUiLocalizations of(BuildContext context) =>

@@ -443,11 +443,14 @@ class _FormHostState extends State<_FormHost> {
   }
 
   @override
-  Widget build(BuildContext context) => _FormScope(
-    name: widget.name,
-    validation: _validation,
-    child: widget.child,
-  );
+  Widget build(BuildContext context) {
+    _validation.messages = OpenUiLocalizations.of(context);
+    return _FormScope(
+      name: widget.name,
+      validation: _validation,
+      child: widget.child,
+    );
+  }
 }
 
 /// Per session: which element owns each field name, by `<form>\0<name>`.

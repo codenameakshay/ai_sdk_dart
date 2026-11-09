@@ -1,6 +1,30 @@
 import 'package:ai_sdk_openui/src/runtime/form_validation.dart';
 import 'package:test/test.dart';
 
+final class _Upper extends ValidationMessages {
+  const _Upper();
+  @override
+  String get fieldRequired => 'REQUIRED';
+  @override
+  String get optionRequired => 'PICK ONE';
+  @override
+  String get invalidEmail => 'EMAIL';
+  @override
+  String get invalidUrl => 'URL';
+  @override
+  String get notANumber => 'NUMBER';
+  @override
+  String atLeast(String limit) => '>= $limit';
+  @override
+  String atMost(String limit) => '<= $limit';
+  @override
+  String atLeastCharacters(String limit) => 'LEN >= $limit';
+  @override
+  String atMostCharacters(String limit) => 'LEN <= $limit';
+  @override
+  String get invalidFormat => 'FORMAT';
+}
+
 void main() {
   group('parseRules', () {
     test('keeps numeric arguments as numbers and skips non-string entries', () {
@@ -250,6 +274,139 @@ void main() {
     test('ignores a pattern argument that is not text', () {
       expect(validate('abc', [const ParsedRule('pattern', 3)]), isNull);
     });
+
+    test('ignores a nested-quantifier pattern instead of backtracking', () {
+      final watch = Stopwatch()..start();
+      final error = validate('${'a' * 27}!', [
+        const ParsedRule('pattern', r'^(a+)+$'),
+      ]);
+
+      expect(watch.elapsedMilliseconds, lessThan(500));
+      expect(error, isNull);
+    });
+
+    test('ignores every quantified group that holds a quantifier', () {
+      for (final pattern in [
+        r'^(a*)*$',
+        r'^(a?){25}a{25}$',
+        r'^(?:a?)+$',
+        r'(?:a+){2,}',
+        r'((a+)b)+',
+        r'(a{1,3})+',
+        r'([a-z]+\d)*',
+      ]) {
+        expect(
+          validate('!', [ParsedRule('pattern', pattern)]),
+          isNull,
+          reason: pattern,
+        );
+      }
+    });
+
+    test('ignores a repeated group whose alternatives can overlap', () {
+      final watch = Stopwatch()..start();
+      for (final pattern in [
+        r'^(a|aa)+$',
+        r'^(a|a)*$',
+        r'^(?:ab|a)+$',
+        r'^([a-z]|\d)+$',
+        r'^((a|b)c|d)+$',
+      ]) {
+        expect(
+          validate('${'a' * 40}!', [ParsedRule('pattern', pattern)]),
+          isNull,
+          reason: pattern,
+        );
+      }
+      expect(watch.elapsedMilliseconds, lessThan(500));
+    });
+
+    test('ignores choices that repeat the same escaped literal', () {
+      for (final pattern in [r'^(-|\-)+$', r'^(,|\,)+?$']) {
+        expect(
+          validate('---!', [ParsedRule('pattern', pattern)]),
+          isNull,
+          reason: pattern,
+        );
+      }
+    });
+
+    test('checks literal pipes and parentheses inside repeated groups', () {
+      for (final pattern in [
+        r'^([|])+$',
+        r'^(a\|b)+$',
+        r'^(\(|a)+$',
+        r'^([()|])+$',
+        r'^(\||a)+$',
+      ]) {
+        expect(
+          validate('!', [ParsedRule('pattern', pattern)]),
+          'Invalid format',
+          reason: pattern,
+        );
+      }
+    });
+
+    test(
+      'ignores overlapping choices through nested groups and assertions',
+      () {
+        for (final pattern in [
+          r'^((a|aa))+$',
+          r'^(?:(a|aa))+$',
+          r'^(?=(a|aa)+$)a+$',
+          r'^(?!(a|aa)+$)a+$',
+          r'^(a|aa)+?$',
+          r'^((a+?))+$',
+        ]) {
+          expect(
+            validate('aaaa!', [ParsedRule('pattern', pattern)]),
+            isNull,
+            reason: pattern,
+          );
+        }
+      },
+    );
+
+    test('ignores unbalanced groups without throwing', () {
+      for (final pattern in [
+        '(',
+        ')',
+        '(()',
+        '())',
+        '(?=',
+        '([|])(',
+        r'(a\',
+        '[',
+      ]) {
+        expect(
+          validate('!', [ParsedRule('pattern', pattern)]),
+          isNull,
+          reason: pattern,
+        );
+      }
+    });
+
+    test('still checks patterns without a nested quantifier', () {
+      for (final pattern in [
+        r'^(ab)+$',
+        r'^(?:ab)+$',
+        r'^\?+$',
+        r'^[?]+$',
+        r'^(a+)?$',
+        r'^\(a+\)+$',
+        r'^[(a+)]+$',
+        r'^[\](+]+$',
+        r'^(a|b)*$',
+        r'^(?:-|\.)+$',
+        r'^(ab|cd)$',
+      ]) {
+        expect(
+          validate('!', [ParsedRule('pattern', pattern)]),
+          'Invalid format',
+          reason: pattern,
+        );
+      }
+    });
   });
 
   group('validate', () {
@@ -275,6 +432,68 @@ void main() {
           {'required': (_, _) => 'custom says no'},
         ),
         'custom says no',
+      );
+    });
+
+    test('built-in rules speak the given messages', () {
+      String? check(Object? value, String rule) =>
+          validate(value, parseRules([rule]), null, const _Upper());
+
+      expect(check('', 'required'), 'REQUIRED');
+      expect(check({'a': false}, 'required'), 'PICK ONE');
+      expect(check('x', 'email'), 'EMAIL');
+      expect(check('x', 'url'), 'URL');
+      expect(check('x', 'numeric'), 'NUMBER');
+      expect(check('1', 'min:2'), '>= 2');
+      expect(check('3', 'max:2'), '<= 2');
+      expect(check('a', 'minLength:2'), 'LEN >= 2');
+      expect(check('abc', 'maxLength:2'), 'LEN <= 2');
+      expect(check('A', r'pattern:^[a-z]$'), 'FORMAT');
+    });
+
+    test('the default messages are English', () {
+      const english = ValidationMessages();
+      for (final (value, rule) in [
+        ('', 'required'),
+        ({'a': false}, 'required'),
+        ('x', 'email'),
+        ('x', 'url'),
+        ('x', 'numeric'),
+        ('1', 'min:2'),
+        ('3', 'max:2'),
+        ('a', 'minLength:2'),
+        ('abc', 'maxLength:2'),
+        ('A', r'pattern:^[a-z]$'),
+      ]) {
+        final rules = parseRules([rule]);
+        expect(
+          validate(value, rules, null, english),
+          validate(value, rules),
+          reason: rule,
+        );
+      }
+    });
+
+    test('a custom validator wins over the given messages', () {
+      expect(
+        validate(
+          '',
+          [const ParsedRule('required')],
+          {'required': (_, _) => 'custom'},
+          const _Upper(),
+        ),
+        'custom',
+      );
+    });
+
+    test('a host-added validator still runs with messages', () {
+      builtInValidators['even'] = (value, _) =>
+          value is int && value.isEven ? null : 'odd';
+      addTearDown(() => builtInValidators.remove('even'));
+
+      expect(
+        validate(3, [const ParsedRule('even')], null, const _Upper()),
+        'odd',
       );
     });
 

@@ -39,6 +39,79 @@ void main() {
     expect(canceled, 1);
   });
 
+  test('a transport error goes to onError with its message id and cancels '
+      'the stream', () async {
+    final answers = OpenUiAnswers(library: _library);
+    addTearDown(answers.dispose);
+    var canceled = 0;
+    final controller = StreamController<OpenUiMessageEvent>(
+      onCancel: () => canceled++,
+    );
+    addTearDown(controller.close);
+    final errors = <(String?, Object)>[];
+    answers.listen(
+      controller.stream,
+      onError: (id, error, _) => errors.add((id, error)),
+    );
+
+    controller
+      ..add(const OpenUiTextDelta('m1', 'root = Out('))
+      ..addError(StateError('socket closed'));
+    await settle();
+
+    expect(errors, hasLength(1));
+    expect(errors.single.$1, 'm1');
+    expect(errors.single.$2, isA<StateError>());
+    expect(canceled, 1);
+    expect(controller.hasListener, isFalse);
+    expect(answers.isStreaming('m1'), isTrue);
+    expect(answers.textOf('m1'), 'root = Out(');
+  });
+
+  test('a stream that ends leaves its finished messages in place', () async {
+    final answers = OpenUiAnswers(library: _library);
+    addTearDown(answers.dispose);
+    final errors = <Object>[];
+    answers.listen(
+      Stream.fromIterable(const [
+        OpenUiTextDelta('m1', 'root = Out(1)'),
+        OpenUiMessageDone('m1'),
+      ]),
+      onError: (_, error, _) => errors.add(error),
+    );
+    await settle();
+
+    expect(errors, isEmpty);
+    expect(answers.isStreaming('m1'), isFalse);
+    expect(answers.textOf('m1'), 'root = Out(1)');
+  });
+
+  test('a transport error before any message reports no id', () async {
+    final answers = OpenUiAnswers(library: _library);
+    addTearDown(answers.dispose);
+    final ids = <String?>[];
+    answers.listen(
+      Stream<OpenUiMessageEvent>.error(const FormatException('bad frame')),
+      onError: (id, _, _) => ids.add(id),
+    );
+    await settle();
+
+    expect(ids, [null]);
+  });
+
+  test('a transport error without onError is not an uncaught error', () async {
+    final answers = OpenUiAnswers(library: _library);
+    addTearDown(answers.dispose);
+    final controller = StreamController<OpenUiMessageEvent>();
+    addTearDown(controller.close);
+    answers.listen(controller.stream);
+
+    controller.addError(StateError('socket closed'));
+    await settle();
+
+    expect(controller.hasListener, isFalse);
+  });
+
   test('listen after dispose throws synchronously', () {
     final answers = OpenUiAnswers(library: _library)..dispose();
 

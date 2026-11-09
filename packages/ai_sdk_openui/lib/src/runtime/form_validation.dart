@@ -41,8 +41,31 @@ List<ParsedRule> parseStructuredRules(Object? rules) {
   ];
 }
 
-/// required, email, url, numeric, min, max, minLength, maxLength, pattern.
-final Map<String, ValidatorFn> builtInValidators = {
+/// The error messages of the built-in rules, in English. Subclass it and
+/// override the members to translate.
+class ValidationMessages {
+  const ValidationMessages();
+
+  String get fieldRequired => 'This field is required';
+  String get optionRequired => 'At least one option is required';
+  String get invalidEmail => 'Please enter a valid email';
+  String get invalidUrl => 'Please enter a valid URL';
+  String get notANumber => 'Must be a number';
+  String atLeast(String limit) => 'Must be at least $limit';
+  String atMost(String limit) => 'Must be no more than $limit';
+  String atLeastCharacters(String limit) =>
+      'Must be at least $limit characters';
+  String atMostCharacters(String limit) =>
+      'Must be no more than $limit characters';
+  String get invalidFormat => 'Invalid format';
+}
+
+typedef _Rule =
+    String? Function(Object? value, Object? arg, ValidationMessages messages);
+
+const _english = ValidationMessages();
+
+final Map<String, _Rule> _rules = {
   'required': _required,
   'email': _email,
   'url': _url,
@@ -54,18 +77,29 @@ final Map<String, ValidatorFn> builtInValidators = {
   'pattern': _pattern,
 };
 
+/// required, email, url, numeric, min, max, minLength, maxLength, pattern.
+final Map<String, ValidatorFn> builtInValidators = {
+  for (final MapEntry(:key, value: rule) in _rules.entries)
+    key: (value, arg) => rule(value, arg, _english),
+};
+
 /// Runs [rules] in order and returns the first error. A custom validator with the same type wins
-/// over the built-in one. An unknown rule type is skipped.
+/// over the built-in one. An unknown rule type is skipped. With [messages], the built-in rules
+/// report in those words; without it they use [builtInValidators].
 String? validate(
   Object? value,
   List<ParsedRule> rules, [
   Map<String, ValidatorFn>? customValidators,
+  ValidationMessages? messages,
 ]) {
   for (final rule in rules) {
-    final validator =
-        customValidators?[rule.type] ?? builtInValidators[rule.type];
-    if (validator == null) continue;
-    final error = validator(value, rule.arg);
+    final custom = customValidators?[rule.type];
+    final builtIn = _rules[rule.type];
+    final error = custom != null
+        ? custom(value, rule.arg)
+        : messages != null && builtIn != null
+        ? builtIn(value, rule.arg, messages)
+        : builtInValidators[rule.type]?.call(value, rule.arg);
     if (error != null && error.isNotEmpty) return error;
   }
   return null;
@@ -122,32 +156,32 @@ bool _isUrl(String s) {
       (uri.host.isNotEmpty && !uri.host.contains('%'));
 }
 
-String? _required(Object? value, Object? arg) {
-  if (_isEmpty(value)) return 'This field is required';
+String? _required(Object? value, Object? arg, ValidationMessages m) {
+  if (_isEmpty(value)) return m.fieldRequired;
   if (value is Map && value.isNotEmpty) {
     final values = value.values;
     if (values.every((v) => v is bool) && !values.any((v) => v == true)) {
-      return 'At least one option is required';
+      return m.optionRequired;
     }
   }
   return null;
 }
 
-String? _email(Object? value, Object? arg) {
+String? _email(Object? value, Object? arg, ValidationMessages m) {
   if (_isEmpty(value)) return null;
   if (value is! String || !_emailPattern.hasMatch(value)) {
-    return 'Please enter a valid email';
+    return m.invalidEmail;
   }
   return null;
 }
 
-String? _url(Object? value, Object? arg) {
+String? _url(Object? value, Object? arg, ValidationMessages m) {
   if (_isEmpty(value)) return null;
-  if (value is! String || !_isUrl(value)) return 'Please enter a valid URL';
+  if (value is! String || !_isUrl(value)) return m.invalidUrl;
   return null;
 }
 
-String? _numeric(Object? value, Object? arg) {
+String? _numeric(Object? value, Object? arg, ValidationMessages m) {
   if (_isEmpty(value)) return null;
   if (value is num && !value.isNaN) return null;
   if (value is String &&
@@ -155,46 +189,124 @@ String? _numeric(Object? value, Object? arg) {
       Js.trim(value).isNotEmpty) {
     return null;
   }
-  return 'Must be a number';
+  return m.notANumber;
 }
 
-String? _min(Object? value, Object? arg) {
+String? _min(Object? value, Object? arg, ValidationMessages m) {
   if (_isEmpty(value)) return null;
   final n = _toNum(value);
   if (n.isNaN) return null;
   final limit = _argNumber(arg);
-  return n >= limit ? null : 'Must be at least ${Js.numberToString(limit)}';
+  return n >= limit ? null : m.atLeast(Js.numberToString(limit));
 }
 
-String? _max(Object? value, Object? arg) {
+String? _max(Object? value, Object? arg, ValidationMessages m) {
   if (_isEmpty(value)) return null;
   final n = _toNum(value);
   if (n.isNaN) return null;
   final limit = _argNumber(arg);
-  return n <= limit ? null : 'Must be no more than ${Js.numberToString(limit)}';
+  return n <= limit ? null : m.atMost(Js.numberToString(limit));
 }
 
-String? _minLength(Object? value, Object? arg) {
+String? _minLength(Object? value, Object? arg, ValidationMessages m) {
   if (_isEmpty(value) || value is! String) return null;
   final limit = _argNumber(arg);
   return value.length >= limit
       ? null
-      : 'Must be at least ${Js.numberToString(limit)} characters';
+      : m.atLeastCharacters(Js.numberToString(limit));
 }
 
-String? _maxLength(Object? value, Object? arg) {
+String? _maxLength(Object? value, Object? arg, ValidationMessages m) {
   if (_isEmpty(value) || value is! String) return null;
   final limit = _argNumber(arg);
   return value.length <= limit
       ? null
-      : 'Must be no more than ${Js.numberToString(limit)} characters';
+      : m.atMostCharacters(Js.numberToString(limit));
 }
 
-String? _pattern(Object? value, Object? arg) {
+String? _pattern(Object? value, Object? arg, ValidationMessages m) {
   if (_isEmpty(value) || value is! String || arg is! String) return null;
+  if (_hasNestedQuantifier(arg)) return null;
   try {
-    return RegExp(arg).hasMatch(value) ? null : 'Invalid format';
+    return RegExp(arg).hasMatch(value) ? null : m.invalidFormat;
   } on FormatException {
     return null;
   }
+}
+
+/// Whether [pattern] repeats a group that itself repeats, such as `(a+)+` or
+/// `(?:a*){2,}`, or a group whose alternatives can overlap, such as
+/// `(a|aa)+`: the shapes that backtrack exponentially. Such a pattern is
+/// ignored like one that does not compile. A repeated choice of distinct
+/// single characters, such as `(a|b)*`, is kept.
+bool _hasNestedQuantifier(String pattern) {
+  final groups = <bool>[];
+  final starts = <int>[];
+  var repeats = false;
+  for (var i = 0; i < pattern.length; i++) {
+    switch (pattern[i]) {
+      case r'\':
+        i++;
+      case '[':
+        i++;
+        while (i < pattern.length && pattern[i] != ']') {
+          if (pattern[i] == r'\') i++;
+          i++;
+        }
+      case '(':
+        groups.add(repeats);
+        starts.add(i + 1);
+        repeats = false;
+      case ')' when groups.isNotEmpty:
+        final inner = repeats;
+        final body = pattern.substring(starts.removeLast(), i);
+        repeats = groups.removeLast() || inner;
+        final repeated =
+            i + 1 < pattern.length && '*+{'.contains(pattern[i + 1]);
+        if (repeated && (inner || _overlappingChoice(body))) return true;
+      case '?' when i > 0 && pattern[i - 1] != '(':
+        repeats = true;
+      case '*' || '+' || '{':
+        repeats = true;
+    }
+  }
+  return false;
+}
+
+/// Whether the group [body] is a choice (`a|b`) that is not just distinct
+/// single literal characters, so a repeat of it can match one input many ways.
+bool _overlappingChoice(String body) {
+  final choice = body.startsWith('?')
+      ? body.replaceFirst(RegExp(r'^\?[:=!]'), '')
+      : body;
+  final alternatives = <String>[];
+  var start = 0;
+  var hasGroup = false;
+  for (var i = 0; i < choice.length; i++) {
+    switch (choice[i]) {
+      case r'\':
+        i++;
+      case '[':
+        i++;
+        while (i < choice.length && choice[i] != ']') {
+          if (choice[i] == r'\') i++;
+          i++;
+        }
+      case '(':
+        hasGroup = true;
+      case '|':
+        alternatives.add(choice.substring(start, i));
+        start = i + 1;
+    }
+  }
+  if (alternatives.isEmpty) return false;
+  if (hasGroup) return true;
+  alternatives.add(choice.substring(start));
+  final single = RegExp(r'^(?:[^\\.\[\]^$*+?{}()|]|\\[^\w])$');
+  return !alternatives.every(single.hasMatch) ||
+      alternatives
+              .map((s) => s.startsWith(r'\') ? s.substring(1) : s)
+              .toSet()
+              .length !=
+          alternatives.length;
 }

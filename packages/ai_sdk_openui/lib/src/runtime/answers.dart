@@ -141,6 +141,9 @@ final class OpenUiAnswers {
   /// Sets the full text of message [id].
   OpenUiSession update(String id, String text, {required bool streaming}) {
     if (_disposed) throw StateError('OpenUiAnswers is disposed');
+    final restored = messageState(
+      parseMessage(text, streaming: streaming).context,
+    );
     final session = _sessions.putIfAbsent(
       id,
       () => OpenUiSession(
@@ -152,9 +155,7 @@ final class OpenUiAnswers {
         clock: clock,
         random: random,
         timeZone: timeZone,
-        initialState: messageState(
-          parseMessage(text, streaming: streaming).context,
-        ),
+        initialState: restored,
         onStateUpdate: (_) => _save(id),
       ),
     );
@@ -162,13 +163,7 @@ final class OpenUiAnswers {
     _texts[id] = text;
     _streaming[id] = streaming;
     if (!streaming) _finished[id] = text;
-    session.update(
-      text,
-      streaming: streaming,
-      restoredState: messageState(
-        parseMessage(text, streaming: streaming).context,
-      ),
-    );
+    session.update(text, streaming: streaming, restoredState: restored);
     if (_hasLocalState.contains(id)) {
       _texts[id] = messageWithState(text, session.state);
     }
@@ -198,23 +193,39 @@ final class OpenUiAnswers {
       update(id, _rawTexts[id] ?? '', streaming: false);
 
   /// Applies each event of [events] to its message until the stream ends.
+  ///
+  /// An error on [events] cancels the subscription and goes to [onError] with
+  /// the id of the last message the stream fed (null before any event); that
+  /// message keeps its text and stays unfinished. Without [onError] the error
+  /// is dropped.
   StreamSubscription<OpenUiMessageEvent> listen(
-    Stream<OpenUiMessageEvent> events,
-  ) {
+    Stream<OpenUiMessageEvent> events, {
+    void Function(String? id, Object error, StackTrace stackTrace)? onError,
+  }) {
     if (_disposed) throw StateError('OpenUiAnswers is disposed');
     late final StreamSubscription<OpenUiMessageEvent> subscription;
-    subscription = events.listen((event) {
-      switch (event) {
-        case OpenUiTextDelta(:final id, :final delta):
-          append(id, delta);
-        case OpenUiTextSnapshot(:final id, :final text, :final streaming):
-          update(id, text, streaming: streaming);
-        case OpenUiPatch(:final id, :final patch, :final streaming):
-          this.patch(id, patch, streaming: streaming);
-        case OpenUiMessageDone(:final id):
-          finish(id);
-      }
-    }, onDone: () => _subscriptions.remove(subscription));
+    String? lastId;
+    subscription = events.listen(
+      (event) {
+        lastId = event.id;
+        switch (event) {
+          case OpenUiTextDelta(:final id, :final delta):
+            append(id, delta);
+          case OpenUiTextSnapshot(:final id, :final text, :final streaming):
+            update(id, text, streaming: streaming);
+          case OpenUiPatch(:final id, :final patch, :final streaming):
+            this.patch(id, patch, streaming: streaming);
+          case OpenUiMessageDone(:final id):
+            finish(id);
+        }
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        _subscriptions.remove(subscription);
+        onError?.call(lastId, error, stackTrace);
+      },
+      onDone: () => _subscriptions.remove(subscription),
+      cancelOnError: true,
+    );
     _subscriptions.add(subscription);
     return subscription;
   }

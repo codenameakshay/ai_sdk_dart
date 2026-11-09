@@ -83,8 +83,8 @@
   seeded `$variables`; `describeBoundRecords` returns the first for per-turn use. Default prompts are unchanged.
 - Migration: `ValidationCode` and `OpenUiErrorCode` gain `boundOnly`. An exhaustive `switch` over either enum
   needs a case for it.
-- A `pattern` validation rule that repeats a repeating group, such as `^(a+)+$`, is ignored like a pattern that
-  does not compile, so model-written input cannot freeze the UI thread with catastrophic backtracking.
+- A `pattern` validation rule that repeats a repeating group, such as `^(a+)+$`, or a choice whose alternatives
+  can overlap, such as `^(a|aa)+$`, is ignored like a pattern that does not compile, so model-written input cannot freeze the UI thread with catastrophic backtracking.
 - `OpenUiAnswers.listen(events, onError:)`: an error on the event stream cancels it and goes to `onError` with the
   id of the message it was feeding, which stays unfinished, instead of becoming an uncaught zone error.
 - Streaming is cheaper per delta: an unframed answer is no longer split into message sections twice per update, the

@@ -303,6 +303,24 @@ void main() {
       }
     });
 
+    test('ignores a repeated group whose alternatives can overlap', () {
+      final watch = Stopwatch()..start();
+      for (final pattern in [
+        r'^(a|aa)+$',
+        r'^(a|a)*$',
+        r'^(?:ab|a)+$',
+        r'^([a-z]|\d)+$',
+        r'^((a|b)c|d)+$',
+      ]) {
+        expect(
+          validate('${'a' * 40}!', [ParsedRule('pattern', pattern)]),
+          isNull,
+          reason: pattern,
+        );
+      }
+      expect(watch.elapsedMilliseconds, lessThan(500));
+    });
+
     test('still checks patterns without a nested quantifier', () {
       for (final pattern in [
         r'^(ab)+$',
@@ -314,6 +332,8 @@ void main() {
         r'^[(a+)]+$',
         r'^[\](+]+$',
         r'^(a|b)*$',
+        r'^(?:-|\.)+$',
+        r'^(ab|cd)$',
       ]) {
         expect(
           validate('!', [ParsedRule('pattern', pattern)]),

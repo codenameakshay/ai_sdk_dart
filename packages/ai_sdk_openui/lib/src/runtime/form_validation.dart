@@ -235,12 +235,13 @@ String? _pattern(Object? value, Object? arg, ValidationMessages m) {
 }
 
 /// Whether [pattern] repeats a group that itself repeats, such as `(a+)+` or
-/// `(?:a*){2,}`: the shape that backtracks exponentially. Such a pattern is
-/// ignored like one that does not compile.
-// ponytail: catches nested quantifiers only; overlapping alternation such as
-// `(a|a)*` can still backtrack. Run patterns in an isolate if that matters.
+/// `(?:a*){2,}`, or a group whose alternatives can overlap, such as
+/// `(a|aa)+`: the shapes that backtrack exponentially. Such a pattern is
+/// ignored like one that does not compile. A repeated choice of distinct
+/// single characters, such as `(a|b)*`, is kept.
 bool _hasNestedQuantifier(String pattern) {
   final groups = <bool>[];
+  final starts = <int>[];
   var repeats = false;
   for (var i = 0; i < pattern.length; i++) {
     switch (pattern[i]) {
@@ -254,13 +255,15 @@ bool _hasNestedQuantifier(String pattern) {
         }
       case '(':
         groups.add(repeats);
+        starts.add(i + 1);
         repeats = false;
       case ')' when groups.isNotEmpty:
         final inner = repeats;
+        final body = pattern.substring(starts.removeLast(), i);
         repeats = groups.removeLast() || inner;
-        if (inner && i + 1 < pattern.length && '*+{'.contains(pattern[i + 1])) {
-          return true;
-        }
+        final repeated =
+            i + 1 < pattern.length && '*+{'.contains(pattern[i + 1]);
+        if (repeated && (inner || _overlappingChoice(body))) return true;
       case '?' when i > 0 && pattern[i - 1] != '(':
         repeats = true;
       case '*' || '+' || '{':
@@ -268,4 +271,18 @@ bool _hasNestedQuantifier(String pattern) {
     }
   }
   return false;
+}
+
+/// Whether the group [body] is a choice (`a|b`) that is not just distinct
+/// single literal characters, so a repeat of it can match one input many ways.
+bool _overlappingChoice(String body) {
+  final choice = body.startsWith('?')
+      ? body.replaceFirst(RegExp(r'^\?[:=!]'), '')
+      : body;
+  if (!choice.contains('|')) return false;
+  if (choice.contains('(')) return true;
+  final alternatives = choice.split('|');
+  final single = RegExp(r'^(?:[^\\.\[\]^$*+?{}()|]|\\[^\w])$');
+  return !alternatives.every(single.hasMatch) ||
+      alternatives.toSet().length != alternatives.length;
 }

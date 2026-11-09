@@ -26,9 +26,10 @@ Future<Pumped> pumpProgram(
   OpenUiTheme? theme,
   TextDirection textDirection = TextDirection.ltr,
   bool semanticsIdentifiers = false,
+  OpenUiLibrary? library,
 }) async {
   final session = OpenUiSession(
-    intelligentUi,
+    library ?? intelligentUi,
     tools: tools,
     initialState: initialState,
   )..update(program, streaming: streaming);

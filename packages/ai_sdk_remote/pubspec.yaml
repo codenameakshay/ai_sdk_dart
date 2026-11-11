@@ -1,6 +1,6 @@
 name: ai_sdk_remote
 description: Optional Vercel AI UI-message stream transport for AI SDK Dart.
-version: 3.0.0
+version: 3.1.0
 homepage: https://github.com/codenameakshay/ai_sdk_dart
 repository: https://github.com/codenameakshay/ai_sdk_dart
 resolution: workspace
@@ -9,7 +9,7 @@ environment:
   sdk: ^3.11.1
 
 dependencies:
-  ai_sdk_conversation: ^3.0.0
+  ai_sdk_conversation: ^3.1.0
   http: ^1.6.0
 
 dev_dependencies:

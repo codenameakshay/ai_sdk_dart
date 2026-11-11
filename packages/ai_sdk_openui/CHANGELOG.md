@@ -1,4 +1,4 @@
-## 3.1.0 (unreleased)
+## 3.1.0
 
 - `OpenUiSession(policy: ValidationPolicy(...))` applies the validator's policy at runtime. With
   `unknownComponents: UnknownComponentPolicy.fail`, a program that names a component the library lacks has no

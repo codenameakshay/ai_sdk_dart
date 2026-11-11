@@ -1,4 +1,4 @@
-## 3.1.0 (unreleased)
+## 3.1.0
 
 - Markdown code fences can draw host widgets through `OpenUiServices.markdownFences`, in answers and in the
   chat's prose fallback, which now renders as Markdown. See the core package's changelog.

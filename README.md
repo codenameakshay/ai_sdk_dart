@@ -272,6 +272,13 @@ above.
 | [`ai_sdk_conversation`](https://pub.dev/packages/ai_sdk_conversation) | `dart pub add ai_sdk_conversation` | Immutable typed conversation snapshots and a versioned persistence codec; no model or tool execution |
 | [`ai_sdk_remote`](https://pub.dev/packages/ai_sdk_remote) | `dart pub add ai_sdk_remote` | Optional transport for a trusted backend's Vercel UI-message stream, with cancellation and conversation reduction |
 | [`ai_sdk_telemetry`](https://pub.dev/packages/ai_sdk_telemetry) | `dart pub add ai_sdk_telemetry` | Optional native Dart OTLP/HTTP metrics exporter; no browser transport — in qualification |
+| [`ai_sdk_openui`](https://pub.dev/packages/ai_sdk_openui) | `dart pub add ai_sdk_openui` | OpenUI Lang 1.0 in pure Dart: parser, evaluator, state, queries, prompt generator, and the Open Intelligent UI component library spec |
+| [`open_intelligent_ui`](https://pub.dev/packages/open_intelligent_ui) | `flutter pub add open_intelligent_ui` | Flutter renderer for Open Intelligent UI answers; bundles the core, chat, maps, math and web packages below |
+| [`open_intelligent_ui_core`](https://pub.dev/packages/open_intelligent_ui_core) | `flutter pub add open_intelligent_ui_core` | Renderer core: layout, text, controls, charts and tables, with no map, web view, TeX or chat dependency |
+| [`open_intelligent_ui_chat`](https://pub.dev/packages/open_intelligent_ui_chat) | `flutter pub add open_intelligent_ui_chat` | `OpenUiChat` and `OpenUiUserMessage`: Open Intelligent UI answers in an `ai_sdk_flutter_ui` chat |
+| [`open_intelligent_ui_maps`](https://pub.dev/packages/open_intelligent_ui_maps) | `flutter pub add open_intelligent_ui_maps` | `Map` and `MapMarker` components, drawn with `flutter_map` |
+| [`open_intelligent_ui_math`](https://pub.dev/packages/open_intelligent_ui_math) | `flutter pub add open_intelligent_ui_math` | `Math` component: LaTeX formulas drawn with `flutter_math_fork` |
+| [`open_intelligent_ui_web`](https://pub.dev/packages/open_intelligent_ui_web) | `flutter pub add open_intelligent_ui_web` | `HtmlView` and `YouTube` components, drawn in a web view |
 | [`ai_sdk_realtime`](packages/ai_sdk_realtime) | Unpublished preview | Realtime session and event transport; protocol and device qualification remain in progress |
 
 > `ai_sdk_provider` and `ai_sdk_openai_compatible` are transitive dependencies — you **do not** need to add them directly.

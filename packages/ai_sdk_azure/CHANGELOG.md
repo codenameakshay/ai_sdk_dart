@@ -1,3 +1,10 @@
+## 3.1.0
+
+- No changes. Released with the other AI SDK Dart packages at 3.1.0; sibling
+  constraints now require `^3.1.0`.
+
+---
+
 ## 3.0.0
 
 - Added Azure's v1 Responses API endpoint alongside Chat Completions, using deployment IDs as

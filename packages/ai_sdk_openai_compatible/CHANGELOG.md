@@ -1,7 +1,9 @@
-## Unreleased
+## 3.1.0
 
 - Added `OpenAICompatibleConfig.warnings`, which the chat model adds ahead of
   provider-returned warnings on every result.
+
+---
 
 ## 3.0.0
 

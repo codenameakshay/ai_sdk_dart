@@ -1,4 +1,4 @@
-## 3.1.0 (unreleased)
+## 3.1.0
 
 - Markdown code fences can draw host widgets. The first word of a fence's info string is its tag;
   `OpenUiServices(markdownFences: {'chart': ...})` maps tags to a `MarkdownFenceBuilder`, which gets a

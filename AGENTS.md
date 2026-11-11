@@ -2,7 +2,7 @@
 
 ## Repository instructions
 
-This is a Dart/Flutter monorepo (AI SDK Dart) with 18 library packages,
+This is a Dart/Flutter monorepo (AI SDK Dart) with 25 library packages (24 published, plus the `ai_sdk_realtime` preview),
 3 example apps, and a remote-backend example. No Docker or database is
 required. Protocol interoperability tests use local Node.js fixtures with
 pinned JavaScript SDK dependencies; ordinary unit tests use fake providers.

@@ -1,7 +1,9 @@
-## Unreleased
+## 3.1.0
 
 - Chat Completions models for `gpt-6*` IDs now add a `compatibility` warning
   that points to `openai.responses(modelId)`.
+
+---
 
 ## 3.0.0
 

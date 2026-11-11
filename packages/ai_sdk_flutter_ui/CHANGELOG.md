@@ -1,4 +1,4 @@
-## 3.1.0 (unreleased)
+## 3.1.0
 
 - Added `ChatController.streamingMessageId` (the id the in-flight answer commits under),
   `ChatController.updateMessage`, and a `chatMessageBuilder` on `ChatMessageList` and

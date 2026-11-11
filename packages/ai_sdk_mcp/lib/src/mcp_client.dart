@@ -42,6 +42,10 @@ class _MCPModernProtocolException extends MCPException {
   const _MCPModernProtocolException(super.message);
 }
 
+/// Sent as MCP `clientInfo`. Keep `version` equal to this package's pubspec
+/// version; tool/release_versions_test.dart checks it.
+const _clientInfo = {'name': 'ai_sdk_dart', 'version': '3.1.0'};
+
 const _definiteToolRejectionStatusCodes = {
   400,
   401,
@@ -521,7 +525,7 @@ class MCPClient {
         params: {
           'protocolVersion': legacyProtocolVersion,
           'capabilities': <String, dynamic>{},
-          'clientInfo': {'name': 'ai_sdk_dart', 'version': '3.0.0'},
+          'clientInfo': _clientInfo,
         },
       ),
     );
@@ -601,10 +605,7 @@ class MCPClient {
       ...?existing,
       'io.modelcontextprotocol/protocolVersion': modernProtocolVersion,
       'io.modelcontextprotocol/clientCapabilities': <String, dynamic>{},
-      'io.modelcontextprotocol/clientInfo': {
-        'name': 'ai_sdk_dart',
-        'version': '3.0.0',
-      },
+      'io.modelcontextprotocol/clientInfo': _clientInfo,
     },
   };
 

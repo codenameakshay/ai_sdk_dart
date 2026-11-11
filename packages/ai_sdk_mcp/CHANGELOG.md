@@ -1,3 +1,10 @@
+## 3.1.0
+
+- No changes. Released with the other AI SDK Dart packages at 3.1.0; sibling
+  constraints now require `^3.1.0`.
+
+---
+
 ## 3.0.0
 
 - Bound and cancel HTTP request lifetimes; validate modern subscription acknowledgements and

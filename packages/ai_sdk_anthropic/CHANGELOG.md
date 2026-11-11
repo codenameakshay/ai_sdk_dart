@@ -1,4 +1,4 @@
-## Unreleased
+## 3.1.0
 
 - Keep signed thinking blocks that have empty text, as adaptive thinking on
   current Claude models returns them. They now appear as reasoning parts with
@@ -11,6 +11,8 @@
 - Streams no longer emit an empty reasoning part for a thinking block that has
   no text and no signature, or a redacted block with no data. This matches
   generate.
+
+---
 
 ## 3.0.0
 

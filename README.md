@@ -18,6 +18,8 @@
 [![ai_sdk_remote pub.dev](https://img.shields.io/pub/v/ai_sdk_remote.svg?label=ai_sdk_remote)](https://pub.dev/packages/ai_sdk_remote)
 [![ai_sdk_json_schema pub.dev](https://img.shields.io/pub/v/ai_sdk_json_schema.svg?label=ai_sdk_json_schema)](https://pub.dev/packages/ai_sdk_json_schema)
 [![ai_sdk_telemetry pub.dev](https://img.shields.io/pub/v/ai_sdk_telemetry.svg?label=ai_sdk_telemetry)](https://pub.dev/packages/ai_sdk_telemetry)
+[![ai_sdk_openui pub.dev](https://img.shields.io/pub/v/ai_sdk_openui.svg?label=ai_sdk_openui)](https://pub.dev/packages/ai_sdk_openui)
+[![open_intelligent_ui pub.dev](https://img.shields.io/pub/v/open_intelligent_ui.svg?label=open_intelligent_ui)](https://pub.dev/packages/open_intelligent_ui)
 [![CI](https://github.com/codenameakshay/ai_sdk_dart/actions/workflows/ci.yml/badge.svg)](https://github.com/codenameakshay/ai_sdk_dart/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Dart SDK](https://img.shields.io/badge/dart-%3E%3D3.11-blue?logo=dart)](https://dart.dev)
@@ -29,6 +31,41 @@
 AI SDK Dart brings Vercel AI SDK concepts to Dart and Flutter with Dart types,
 streams, and lifecycle primitives. Core workflows share a provider-neutral API;
 provider-specific capabilities remain explicit.
+
+## What's new in 3.1
+
+Version 3.1 adds generative UI and fixes streaming bugs. Packages that existed in 3.0 need no
+code changes. Move every `ai_sdk` constraint to `^3.1.0` together.
+
+- **Open Intelligent UI (new)** — a model writes its answer in
+  [OpenUI Lang](packages/ai_sdk_openui) and Flutter renders it as real widgets: layout, text,
+  forms, charts, tables, maps, math and web views. `ai_sdk_openui` is the pure-Dart parser,
+  evaluator, validator and prompt generator. `open_intelligent_ui` is the full Flutter renderer;
+  for a smaller app, depend on `open_intelligent_ui_core` and add only `_maps`, `_math`, `_web`
+  or `_chat`.
+- **Safe by default** — `ValidationPolicy` limits nodes, depth, unknown components and allowed
+  actions at runtime. Maps and images load nothing from the network until the host allows it.
+- **Host actions** — `ActionSpec(handler:)` runs an action in the app with idempotency keys,
+  confirmation, pending/done/failed states, and results that survive a restore.
+- **Theme, locale and time** — `OpenUiTheme` tokens (or `fromColorScheme`), localized text,
+  right-to-left layout, locale-aware chart numbers, and a clock, random source and time zone for
+  each session.
+- **Chat UI** — `OpenUiChat` renders answers in an `ai_sdk_flutter_ui` chat over any transport.
+  Plain prose answers render as Markdown, and `OpenUiServices.markdownFences` draws host widgets
+  for tagged code fences.
+- **`ai_sdk_flutter_ui`** — `ChatController.chatMessages` gives each message a stable id, its
+  model and finish reason, and an `interrupted` flag. Also new: `streamingMessageId`,
+  `updateMessage`, `chatMessageBuilder`, and `errorPartialContent`, which keeps text that
+  streamed before an error.
+- **`ai_sdk_dart`** — `ModelMessage.text`. `extractReasoningMiddleware` fixes for
+  interleaved IDs and whole `<think>` blocks in one delta, and streamed text now keeps the
+  order its deltas arrived in.
+- **Providers** — Anthropic keeps signed thinking blocks with empty text and sends streamed
+  `redacted_thinking` back. OpenAI Chat Completions warns when a `gpt-6*` ID should use
+  `openai.responses(id)`.
+- **MCP** — `clientInfo` now reports the SDK's real version.
+
+Each package's `CHANGELOG.md` lists the full changes.
 
 ## What's new in 3.0
 
@@ -272,6 +309,13 @@ above.
 | [`ai_sdk_conversation`](https://pub.dev/packages/ai_sdk_conversation) | `dart pub add ai_sdk_conversation` | Immutable typed conversation snapshots and a versioned persistence codec; no model or tool execution |
 | [`ai_sdk_remote`](https://pub.dev/packages/ai_sdk_remote) | `dart pub add ai_sdk_remote` | Optional transport for a trusted backend's Vercel UI-message stream, with cancellation and conversation reduction |
 | [`ai_sdk_telemetry`](https://pub.dev/packages/ai_sdk_telemetry) | `dart pub add ai_sdk_telemetry` | Optional native Dart OTLP/HTTP metrics exporter; no browser transport — in qualification |
+| [`ai_sdk_openui`](https://pub.dev/packages/ai_sdk_openui) | `dart pub add ai_sdk_openui` | OpenUI Lang 1.0 in pure Dart: parser, evaluator, state, queries, prompt generator, and the Open Intelligent UI component library spec |
+| [`open_intelligent_ui`](https://pub.dev/packages/open_intelligent_ui) | `flutter pub add open_intelligent_ui` | Flutter renderer for Open Intelligent UI answers; bundles the core, chat, maps, math and web packages below |
+| [`open_intelligent_ui_core`](https://pub.dev/packages/open_intelligent_ui_core) | `flutter pub add open_intelligent_ui_core` | Renderer core: layout, text, controls, charts and tables, with no map, web view, TeX or chat dependency |
+| [`open_intelligent_ui_chat`](https://pub.dev/packages/open_intelligent_ui_chat) | `flutter pub add open_intelligent_ui_chat` | `OpenUiChat` and `OpenUiUserMessage`: Open Intelligent UI answers in an `ai_sdk_flutter_ui` chat |
+| [`open_intelligent_ui_maps`](https://pub.dev/packages/open_intelligent_ui_maps) | `flutter pub add open_intelligent_ui_maps` | `Map` and `MapMarker` components, drawn with `flutter_map` |
+| [`open_intelligent_ui_math`](https://pub.dev/packages/open_intelligent_ui_math) | `flutter pub add open_intelligent_ui_math` | `Math` component: LaTeX formulas drawn with `flutter_math_fork` |
+| [`open_intelligent_ui_web`](https://pub.dev/packages/open_intelligent_ui_web) | `flutter pub add open_intelligent_ui_web` | `HtmlView` and `YouTube` components, drawn in a web view |
 | [`ai_sdk_realtime`](packages/ai_sdk_realtime) | Unpublished preview | Realtime session and event transport; protocol and device qualification remain in progress |
 
 > `ai_sdk_provider` and `ai_sdk_openai_compatible` are transitive dependencies — you **do not** need to add them directly.
@@ -666,6 +710,7 @@ results.
 - ✅ Typed provider API errors (`AiApiCallError` with status / type / code / body) across all providers
 - ✅ OpenAI (with reasoning options), Anthropic (with thinking options), Google providers
 - ✅ Cohere, Mistral, Groq, Ollama, Azure OpenAI providers — all with tools + multimodal
+- ✅ Generative UI: OpenUI Lang in Dart (`ai_sdk_openui`) and a Flutter renderer (`open_intelligent_ui`)
 - ✅ Comprehensive tests with a 99% line-coverage gate for published package libraries
 
 ### 🔜 Planned

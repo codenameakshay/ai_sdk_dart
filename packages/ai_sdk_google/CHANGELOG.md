@@ -1,3 +1,10 @@
+## 3.1.0
+
+- No changes. Released with the other AI SDK Dart packages at 3.1.0; sibling
+  constraints now require `^3.1.0`.
+
+---
+
 ## 3.0.0
 
 - Preserved signed answer text across replay, kept distinct streamed function-call identities, and counted thinking tokens in output usage.

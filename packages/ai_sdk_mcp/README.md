@@ -6,8 +6,8 @@
 
 ```yaml
 dependencies:
-  ai_sdk_dart: ^3.0.0
-  ai_sdk_mcp: ^3.0.0
+  ai_sdk_dart: ^3.1.0
+  ai_sdk_mcp: ^3.1.0
 ```
 
 ## Usage

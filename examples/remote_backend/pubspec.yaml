@@ -6,8 +6,8 @@ environment:
   sdk: ^3.11.1
 
 dependencies:
-  ai_sdk_conversation: ^3.0.0
-  ai_sdk_remote: ^3.0.0
+  ai_sdk_conversation: ^3.1.0
+  ai_sdk_remote: ^3.1.0
 
 dev_dependencies:
   test: ^1.25.0

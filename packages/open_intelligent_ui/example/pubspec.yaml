@@ -13,7 +13,7 @@ dependencies:
     sdk: flutter
   ai_sdk_dart: ^3.1.0
   ai_sdk_flutter_ui: ^3.1.0
-  ai_sdk_provider: ^3.0.0
+  ai_sdk_provider: ^3.1.0
   open_intelligent_ui: ^3.1.0
 
 dev_dependencies:

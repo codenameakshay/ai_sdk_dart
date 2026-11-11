@@ -36,7 +36,7 @@ dependencies:
 dev_dependencies:
   ai_sdk_dart: ^3.1.0
   ai_sdk_flutter_ui: ^3.1.0
-  ai_sdk_provider: ^3.0.0
+  ai_sdk_provider: ^3.1.0
   flutter_map: ^8.2.1
   flutter_math_fork: ^0.7.4
   flutter_test:

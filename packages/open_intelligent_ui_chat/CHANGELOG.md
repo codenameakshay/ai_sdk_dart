@@ -1,4 +1,4 @@
-## 3.1.0 (unreleased)
+## 3.1.0
 
 - An answer that is not a program renders as Markdown (`MarkdownBlocks`) inside the answer's `OpenUiView`, not
   as plain text, so it takes the view's theme, font and services. Fences registered in

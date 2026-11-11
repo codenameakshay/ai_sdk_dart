@@ -1,4 +1,4 @@
-## 3.1.0 (unreleased)
+## 3.1.0
 
 - Isolated `extractReasoningMiddleware` parser buffers and reasoning lifecycles per text ID.
   Interleaved IDs can no longer combine tag fragments or steal one another's text/reasoning.

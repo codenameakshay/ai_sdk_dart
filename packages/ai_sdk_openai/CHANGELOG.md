@@ -2,6 +2,8 @@
 
 - Chat Completions models for `gpt-6*` IDs now add a `compatibility` warning
   that points to `openai.responses(modelId)`.
+- Preserve that compatibility warning when a streamed response also contains
+  provider warnings.
 
 ---
 

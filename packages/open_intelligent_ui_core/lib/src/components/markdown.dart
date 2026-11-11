@@ -302,9 +302,10 @@ final class _TableBlock extends _Block {
 }
 
 final _listItem = RegExp(r'^\s{0,3}([-*+]|(\d+)[.)])\s+(.*)$');
-// dotAll so a line holding U+2028 still matches, as `^\s*```` alone did.
+// dotAll so a line holding U+2028 or U+2029 still matches: _paragraphStop
+// ends a paragraph there, so the block it starts must take the line.
 final _fence = RegExp(r'^\s*```(.*)$', dotAll: true);
-final _heading = RegExp(r'^(#{1,4})\s+(.*)$');
+final _heading = RegExp(r'^(#{1,4})\s+(.*)$', dotAll: true);
 final _rule = RegExp(r'^\s*([-*_])(\s*\1){2,}\s*$');
 final _tableRule = RegExp(r'^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$');
 final _quote = RegExp(r'^\s*>');

@@ -5,6 +5,7 @@
   `MarkdownFence` (`tag`, `info`, `body`, `isComplete`). A fence that is still streaming reaches its builder with
   `isComplete` false; returning null, or a tag with no builder, keeps the plain code block. `MarkdownBlocks` is
   now exported from `components.dart` and takes `fences:`, which win over the scope's.
+- A Markdown heading that holds U+2028 or U+2029 no longer hangs the renderer.
 - An app can depend on `ai_sdk_openui` and this package from git at one commit, with no
   `dependency_overrides`: unreleased siblings are path dependencies (see `docs/git-dependencies.md`).
 - A component with no builder reports a `render-error` to the session's `onError` instead of rendering

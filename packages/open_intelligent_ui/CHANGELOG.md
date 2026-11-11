@@ -1,5 +1,7 @@
 ## 3.1.0 (unreleased)
 
+- Markdown code fences can draw host widgets through `OpenUiServices.markdownFences`, in answers and in the
+  chat's prose fallback, which now renders as Markdown. See the core package's changelog.
 - `OpenUiView` passes `fallback:` through to the core view.
 - Views keep the bundled Inter font by default through `OpenUiServices.fontFamily`, now that the core
   theme's default font is the platform font. A theme that sets `fontFamily` still wins.

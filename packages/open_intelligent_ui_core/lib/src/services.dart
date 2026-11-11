@@ -14,6 +14,41 @@ typedef OpenUiIconResolver =
 /// Returns the image for [url], or null to block it.
 typedef OpenUiImageLoader = ImageProvider? Function(Uri url);
 
+/// A fenced code block in Markdown: ```<info>\n<body>\n```.
+@immutable
+final class MarkdownFence {
+  const MarkdownFence({
+    required this.info,
+    required this.body,
+    required this.isComplete,
+  });
+
+  /// Everything after the opening backticks, trimmed: "chart" or
+  /// "dart title=main.dart".
+  final String info;
+
+  final String body;
+
+  /// Whether the closing fence has arrived. False while a fence is still
+  /// streaming: its builder still runs, so it can show a skeleton or a partial
+  /// render, or return null to keep the plain block until the fence closes.
+  final bool isComplete;
+
+  /// The first word of [info], the key builders are registered under; empty
+  /// when the fence has no info string.
+  String get tag {
+    final end = info.indexOf(RegExp(r'\s'));
+    return end < 0 ? info : info.substring(0, end);
+  }
+}
+
+/// Draws [fence], or returns null to show the plain code block. It also runs
+/// for a fence that is still streaming ([MarkdownFence.isComplete] false);
+/// returning null there, or for a body that fails to parse, keeps the plain
+/// block.
+typedef MarkdownFenceBuilder =
+    Widget? Function(BuildContext context, MarkdownFence fence);
+
 /// What components need from the host app. Nothing here calls a server the
 /// host did not choose: by default there are no map tiles and no images.
 @immutable
@@ -28,6 +63,7 @@ final class OpenUiServices {
     this.embedReferrer,
     this.icons,
     this.fontFamily,
+    this.markdownFences,
   }) : _openUrl = openUrl,
        _copyText = copyText;
 
@@ -61,6 +97,11 @@ final class OpenUiServices {
   /// resource: the open_intelligent_ui package supplies its Inter here.
   final String? fontFamily;
 
+  /// Builders by fence tag for every Markdown block below the scope, the
+  /// chat's prose fallback included. Compared by identity like the function
+  /// members, so pass a const or long-lived map.
+  final Map<String, MarkdownFenceBuilder>? markdownFences;
+
   /// Opens an http(s) URL; without an openUrl it does nothing.
   Future<void> openUrl(Uri url) => _openUrl?.call(url) ?? Future<void>.value();
 
@@ -82,7 +123,8 @@ final class OpenUiServices {
       other.imageLoader == imageLoader &&
       other.embedReferrer == embedReferrer &&
       other.icons == icons &&
-      other.fontFamily == fontFamily;
+      other.fontFamily == fontFamily &&
+      other.markdownFences == markdownFences;
 
   @override
   int get hashCode => Object.hash(
@@ -95,11 +137,12 @@ final class OpenUiServices {
     embedReferrer,
     icons,
     fontFamily,
+    markdownFences,
   );
 
   /// These services, with [fallback]'s openUrl, copyText, searchImages,
-  /// streetRoute, imageLoader, embedReferrer, icons and fontFamily wherever
-  /// this sets none.
+  /// streetRoute, imageLoader, embedReferrer, icons, fontFamily and
+  /// markdownFences wherever this sets none.
   /// mapTiles is always this one's. Returns this when [fallback] fills nothing.
   OpenUiServices orElse(OpenUiServices fallback) {
     final fills =
@@ -110,7 +153,8 @@ final class OpenUiServices {
         (imageLoader == null && fallback.imageLoader != null) ||
         (embedReferrer == null && fallback.embedReferrer != null) ||
         (icons == null && fallback.icons != null) ||
-        (fontFamily == null && fallback.fontFamily != null);
+        (fontFamily == null && fallback.fontFamily != null) ||
+        (markdownFences == null && fallback.markdownFences != null);
     if (!fills) return this;
     return OpenUiServices(
       openUrl: _openUrl ?? fallback._openUrl,
@@ -122,6 +166,7 @@ final class OpenUiServices {
       embedReferrer: embedReferrer ?? fallback.embedReferrer,
       icons: icons ?? fallback.icons,
       fontFamily: fontFamily ?? fallback.fontFamily,
+      markdownFences: markdownFences ?? fallback.markdownFences,
     );
   }
 }

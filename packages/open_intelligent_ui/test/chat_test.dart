@@ -839,6 +839,36 @@ void main() {
     expect(find.text('Plain response'), findsOneWidget);
   });
 
+  testWidgets('OpenUiAnswerView draws prose fences with its fallback '
+      'services', (tester) async {
+    final answers = OpenUiAnswers(library: intelligentUi);
+    addTearDown(answers.dispose);
+    answers.update(
+      'm1',
+      'Here is **the** chart:\n\n```chart\n{"a":1}\n```',
+      streaming: false,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: OpenUiAnswerView(
+            answers: answers,
+            id: 'm1',
+            fallbackServices: core.OpenUiServices(
+              markdownFences: {
+                'chart': (context, fence) => Text('chart:${fence.body}'),
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Here is the chart:'), findsOneWidget);
+    expect(find.text('chart:{"a":1}'), findsOneWidget);
+    expect(find.text('{"a":1}'), findsNothing);
+  });
+
   testWidgets('OpenUiAnswerView switches a program to prose reactively', (
     tester,
   ) async {

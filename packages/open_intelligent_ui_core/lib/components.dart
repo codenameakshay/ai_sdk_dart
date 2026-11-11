@@ -28,7 +28,7 @@ export 'src/components/layout.dart'
         buildGrid,
         buildRow,
         buildSpacer;
-export 'src/components/markdown.dart' show buildMarkdown;
+export 'src/components/markdown.dart' show MarkdownBlocks, buildMarkdown;
 export 'src/components/media.dart'
     show Photo, buildIcon, buildImage, buildSearchImage;
 export 'src/components/play.dart' show buildCelebration, buildFlashcard;

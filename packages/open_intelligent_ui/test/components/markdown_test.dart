@@ -54,6 +54,19 @@ void main() {
       },
     );
 
+    for (final separator in [' ', ' ']) {
+      testWidgets(
+        'a heading holding U+${separator.codeUnitAt(0).toRadixString(16)} '
+        'renders as a heading',
+        (tester) async {
+          await tester.pumpWidget(
+            MaterialApp(home: MarkdownBlocks('# before${separator}after')),
+          );
+          expect(_style(tester, 'before${separator}after')!.fontSize, 22);
+        },
+      );
+    }
+
     testWidgets(
       'headings h1 to h4 get decreasing sizes and are announced as headers',
       (tester) async {

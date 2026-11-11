@@ -77,8 +77,27 @@ Each answer keeps one session from its first token to the committed message. A `
 click sends the next user turn in the reference's `]]>openui:` format, with the form values,
 and the user row shows the message with the values folded under it. Edits are saved into the
 answer's context, so the model sees them on the next turn and a restored transcript starts
-from them. An answer that is not a program shows as text. Call `chat.dispose()` with the
+from them. An answer that is not a program shows as Markdown. Call `chat.dispose()` with the
 controller.
+
+## Markdown code fences
+
+A fence's tag, the first word after its opening backticks, can pick a widget. Register builders
+by tag in `OpenUiServices.markdownFences`, and `Markdown` in answers and the chat's prose
+fallback both use them. A fence with no builder stays a plain code block. The view still fills
+the services the scope leaves unset with the umbrella's defaults:
+
+```dart
+OpenUiScope(
+  services: const OpenUiServices(markdownFences: {'chart': chartFence}),
+  child: OpenUiView(session: session, builders: intelligentUiBuilders),
+);
+```
+
+`chartFence` gets a `MarkdownFence` with `tag`, `info`, `body` and `isComplete`, and returns a
+widget or null for the plain block. A fence that is still streaming reaches it with `isComplete`
+false. The [core README](../open_intelligent_ui_core/README.md#markdown-code-fences) has a full
+```` ```chart ```` example that draws the `Chart` component.
 
 ## Packages
 

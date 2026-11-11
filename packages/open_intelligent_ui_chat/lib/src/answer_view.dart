@@ -1,11 +1,13 @@
 import 'package:ai_sdk_dart/ai_sdk_dart.dart';
 import 'package:ai_sdk_flutter_ui/ai_sdk_flutter_ui.dart';
+import 'package:flutter/material.dart' show SelectionArea;
 import 'package:flutter/widgets.dart';
 
+import 'package:open_intelligent_ui_core/components.dart' show MarkdownBlocks;
 import 'package:open_intelligent_ui_core/open_intelligent_ui_core.dart';
 
 /// Renders one answer of an [OpenUiAnswers] by its message [id]: its program,
-/// or its text as prose when a finished message is not a program.
+/// or its text as Markdown prose when a finished message is not a program.
 ///
 /// Build it after the first `update` for [id]; the view follows the session
 /// from then on, switching between program and prose as its text changes.
@@ -83,22 +85,28 @@ class _OpenUiAnswerViewState extends State<OpenUiAnswerView> {
     final text = answers.textOf(widget.id);
     if (session == null || text == null) return const SizedBox.shrink();
     final content = parseMessage(text).content;
-    if (!answers.isStreaming(widget.id) &&
+    final prose =
+        !answers.isStreaming(widget.id) &&
         session.root == null &&
-        content.trim().isNotEmpty) {
-      return AssistantMessageView(
-        message: ModelMessage(
-          role: ModelMessageRole.assistant,
-          content: content,
-        ),
-      );
-    }
+        content.trim().isNotEmpty;
     return OpenUiView(
       session: session,
       builders: widget.builders ?? openUiCoreBuilders,
       onToAssistant: widget.onToAssistant,
       onAction: widget.onAction,
       fallbackServices: widget.fallbackServices,
+      child: prose
+          ? AssistantMessageView(
+              message: ModelMessage(
+                role: ModelMessageRole.assistant,
+                content: content,
+              ),
+              textBuilder: _markdown,
+            )
+          : null,
     );
   }
 }
+
+Widget _markdown(BuildContext context, String text) =>
+    SelectionArea(child: MarkdownBlocks(text));

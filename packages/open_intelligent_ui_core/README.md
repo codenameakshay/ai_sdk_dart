@@ -73,11 +73,69 @@ a place that can, and how to turn it on.
 ## Services and fallbacks
 
 - `OpenUiServices` carries host hooks: `openUrl`, `copyText`, `searchImages`, `streetRoute`, `mapTiles`,
-  `imageLoader`, `embedReferrer` and `icons`.
+  `imageLoader`, `embedReferrer`, `icons`, `fontFamily` and `markdownFences`.
 - `openUrl` does nothing without a host function. Pass one, such as `url_launcher`, to open links.
 - `OpenUiScope` gives services to a subtree. `OpenUiView.fallbackServices` fills whatever the nearest
   scope leaves unset. `OpenUiServices.orElse(fallback)` merges two sets the same way.
   `OpenUiScope` is an `InheritedTheme`, so routes and the expanded map keep the services.
+
+## Markdown code fences
+
+The first word after a fence's opening backticks is its tag. Register a builder for a tag, and
+every Markdown block below the scope draws that fence with your widget. This includes `Markdown`
+in an answer and the chat's prose fallback. A fence with no builder stays a plain code block.
+
+This example draws a ```` ```chart ```` fence whose body is a list of rows with the `Chart` component:
+
+```dart
+const fences = <String, MarkdownFenceBuilder>{'chart': chartFence};
+
+Widget? chartFence(BuildContext context, MarkdownFence fence) =>
+    fence.isComplete ? ChartFence(fence.body) : null;
+
+class ChartFence extends StatefulWidget {
+  const ChartFence(this.rows, {super.key});
+  final String rows;
+
+  @override
+  State<ChartFence> createState() => _ChartFenceState();
+}
+
+class _ChartFenceState extends State<ChartFence> {
+  late final session = OpenUiSession(intelligentUiFor(openUiCoreBuilders))
+    ..update('root = Chart("bar", ${widget.rows})', streaming: false);
+
+  @override
+  void dispose() {
+    session.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      OpenUiView(session: session, builders: openUiCoreBuilders);
+}
+
+OpenUiScope(
+  services: const OpenUiServices(markdownFences: fences),
+  child: OpenUiView(session: session, builders: openUiCoreBuilders),
+);
+```
+
+With that scope, this answer text draws a bar chart:
+
+````markdown
+```chart
+[{"month": "Jan", "sales": 3}, {"month": "Feb", "sales": 5}]
+```
+````
+
+A builder gets the fence's `tag`, its full `info` string, its `body` and `isComplete`. A fence
+that is still streaming reaches its builder with `isComplete` false and the body so far, so a
+builder can draw a placeholder or a partial result. Return null to show the plain code block
+instead, as the example does until the fence closes, or when a body does not parse. Tags match
+exactly. `MarkdownBlocks(text, fences: ...)` takes builders that win over the scope's for one
+block. The map is compared by identity, so pass a const or long-lived map.
 
 ## Theming
 

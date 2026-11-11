@@ -14,6 +14,7 @@ import 'table.dart';
 // A port of the reference's small Markdown renderer. It never interprets HTML.
 // Inline: **bold**, *italic*, ~~strike~~, `code`, [text](https://...).
 // Blocks: paragraphs, # headings, - and 1. lists, > quotes, ``` code, ---, | tables |.
+// A fence's info string routes it to a MarkdownFenceBuilder by its first word.
 
 final _inline = RegExp(
   r'(`[^`\n]+`)|(\*\*[^*\n]+?\*\*|__[^_\n]+?__)|(~~[^~\n]+?~~)|(\*[^*\s][^*\n]*?\*|_[^_\s][^_\n]*?_)|(\[[^\]\n]+\]\([^)\s]+\))',
@@ -286,8 +287,8 @@ final class _ListBlock extends _Block {
 }
 
 final class _CodeBlock extends _Block {
-  const _CodeBlock(this.text);
-  final String text;
+  const _CodeBlock(this.fence);
+  final MarkdownFence fence;
 }
 
 final class _Rule extends _Block {
@@ -301,7 +302,8 @@ final class _TableBlock extends _Block {
 }
 
 final _listItem = RegExp(r'^\s{0,3}([-*+]|(\d+)[.)])\s+(.*)$');
-final _fence = RegExp(r'^\s*```');
+// dotAll so a line holding U+2028 still matches, as `^\s*```` alone did.
+final _fence = RegExp(r'^\s*```(.*)$', dotAll: true);
 final _heading = RegExp(r'^(#{1,4})\s+(.*)$');
 final _rule = RegExp(r'^\s*([-*_])(\s*\1){2,}\s*$');
 final _tableRule = RegExp(r'^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$');
@@ -342,12 +344,21 @@ List<_Block> _blocks(String source) {
       i++;
       continue;
     }
-    if (_fence.hasMatch(line)) {
+    final open = _fence.firstMatch(line);
+    if (open != null) {
       final body = <String>[];
       for (i++; i < lines.length && !_fence.hasMatch(lines[i]); i++) {
         body.add(lines[i]);
       }
-      out.add(_CodeBlock(body.join('\n')));
+      out.add(
+        _CodeBlock(
+          MarkdownFence(
+            info: open[1]!.trim(),
+            body: body.join('\n'),
+            isComplete: i < lines.length,
+          ),
+        ),
+      );
       i++;
       continue;
     }
@@ -438,8 +449,12 @@ double _gap(_Block previous, _Block block) {
 
 /// Markdown prose as a column of blocks, spaced and styled as the reference's `.iui-markdown`.
 class MarkdownBlocks extends StatelessWidget {
-  const MarkdownBlocks(this.text, {super.key});
+  const MarkdownBlocks(this.text, {super.key, this.fences});
   final String text;
+
+  /// Builders by fence tag that take precedence over
+  /// [OpenUiServices.markdownFences].
+  final Map<String, MarkdownFenceBuilder>? fences;
 
   @override
   Widget build(BuildContext context) {
@@ -527,7 +542,14 @@ class MarkdownBlocks extends StatelessWidget {
           headingLevel: level + 1,
           child: rich(text, style),
         );
-      case _CodeBlock(:final text):
+      case _CodeBlock(:final fence):
+        final tag = fence.tag;
+        final builder = tag.isEmpty
+            ? null
+            : fences?[tag] ??
+                  OpenUiScope.servicesOf(context).markdownFences?[tag];
+        final custom = builder?.call(context, fence);
+        if (custom != null) return custom;
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: BoxDecoration(
@@ -537,7 +559,7 @@ class MarkdownBlocks extends StatelessWidget {
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Text(
-              text,
+              fence.body,
               style: base.copyWith(
                 fontFamily: theme.monoFontFamily,
                 fontSize: theme.fontSizeOf('Markdown.code', 13),

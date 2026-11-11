@@ -16,6 +16,8 @@ export 'src/services.dart'
     show
         LatLng,
         MapTiles,
+        MarkdownFence,
+        MarkdownFenceBuilder,
         OpenUiIconResolver,
         OpenUiImageLoader,
         OpenUiScope,

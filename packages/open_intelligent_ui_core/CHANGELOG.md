@@ -1,5 +1,10 @@
 ## 3.1.0 (unreleased)
 
+- Markdown code fences can draw host widgets. The first word of a fence's info string is its tag;
+  `OpenUiServices(markdownFences: {'chart': ...})` maps tags to a `MarkdownFenceBuilder`, which gets a
+  `MarkdownFence` (`tag`, `info`, `body`, `isComplete`). A fence that is still streaming reaches its builder with
+  `isComplete` false; returning null, or a tag with no builder, keeps the plain code block. `MarkdownBlocks` is
+  now exported from `components.dart` and takes `fences:`, which win over the scope's.
 - An app can depend on `ai_sdk_openui` and this package from git at one commit, with no
   `dependency_overrides`: unreleased siblings are path dependencies (see `docs/git-dependencies.md`).
 - A component with no builder reports a `render-error` to the session's `onError` instead of rendering

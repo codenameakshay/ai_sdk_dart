@@ -91,7 +91,7 @@ This example draws a ```` ```chart ```` fence whose body is a list of rows with 
 const fences = <String, MarkdownFenceBuilder>{'chart': chartFence};
 
 Widget? chartFence(BuildContext context, MarkdownFence fence) =>
-    fence.isComplete ? ChartFence(fence.body) : null;
+    fence.isComplete ? ChartFence(fence.body, key: ValueKey(fence.body)) : null;
 
 class ChartFence extends StatefulWidget {
   const ChartFence(this.rows, {super.key});

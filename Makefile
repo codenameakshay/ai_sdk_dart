@@ -37,10 +37,11 @@ DART_PKGS    := ai_sdk_telemetry ai_sdk_remote ai_sdk_realtime ai_sdk_conversati
                 ai_sdk_anthropic ai_sdk_google ai_sdk_azure ai_sdk_cohere ai_sdk_groq \
                 ai_sdk_mistral ai_sdk_ollama ai_sdk_mcp ai_sdk_openui
 FLUTTER_PKGS := ai_sdk_flutter_ui open_intelligent_ui
-OIU_PUBLISH := open_intelligent_ui_core open_intelligent_ui_maps open_intelligent_ui_web open_intelligent_ui_math open_intelligent_ui_chat
+FLUTTER_PUBLISH := ai_sdk_flutter_ui open_intelligent_ui_core open_intelligent_ui_maps open_intelligent_ui_web \
+                   open_intelligent_ui_math open_intelligent_ui_chat open_intelligent_ui
 PUBLISH_PKGS := ai_sdk_provider ai_sdk_openai_compatible ai_sdk_openai ai_sdk_anthropic \
                 ai_sdk_google ai_sdk_azure ai_sdk_cohere ai_sdk_groq ai_sdk_mistral \
-                ai_sdk_ollama ai_sdk_dart ai_sdk_json_schema ai_sdk_conversation ai_sdk_remote ai_sdk_mcp ai_sdk_telemetry
+                ai_sdk_ollama ai_sdk_dart ai_sdk_json_schema ai_sdk_conversation ai_sdk_remote ai_sdk_mcp ai_sdk_telemetry ai_sdk_openui
 
 # Build --dart-define flags from env vars (only included when the var is set)
 DART_DEFINES :=
@@ -185,16 +186,14 @@ format-check:
 dry-run:
 	$(DART) run tool/hosted_deps.dart
 	$(foreach p,$(PUBLISH_PKGS),$(DART) pub publish --dry-run -C packages/$(p) &&) \
-	$(foreach p,$(OIU_PUBLISH),$(FLUTTER) pub publish --dry-run -C packages/$(p) &&) \
-	$(foreach p,$(FLUTTER_PKGS),$(FLUTTER) pub publish --dry-run -C packages/$(p) &&) true; \
+	$(foreach p,$(FLUTTER_PUBLISH),$(FLUTTER) pub publish --dry-run -C packages/$(p) &&) true; \
 	status=$$?; $(DART) run tool/hosted_deps.dart --restore; exit $$status
 
 ## Publish all packages to pub.dev (run dry-run first to verify)
 publish:
 	$(DART) run tool/hosted_deps.dart
 	$(foreach p,$(PUBLISH_PKGS),$(DART) pub publish -C packages/$(p) &&) \
-	$(foreach p,$(OIU_PUBLISH),$(FLUTTER) pub publish -C packages/$(p) &&) \
-	$(foreach p,$(FLUTTER_PKGS),$(FLUTTER) pub publish -C packages/$(p) &&) true; \
+	$(foreach p,$(FLUTTER_PUBLISH),$(FLUTTER) pub publish -C packages/$(p) &&) true; \
 	status=$$?; $(DART) run tool/hosted_deps.dart --restore; exit $$status
 
 # ── Help ──────────────────────────────────────────────────────────────────────
